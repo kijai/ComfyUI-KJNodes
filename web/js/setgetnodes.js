@@ -26,6 +26,7 @@ app.registerExtension({
 					'', 
 					(s, t, u, v, x) => {
 						node.validateName(node.graph);
+						this.title = "Set_" + this.widgets[0].value;
 						this.update();
 						this.properties.previousName = this.widgets[0].value;
 					}, 
@@ -35,6 +36,7 @@ app.registerExtension({
 				this.addInput("*", "*");
 				this.addOutput("*", '*');
 
+				
 
 				this.onConnectionsChange = function(
 					slotType,	//1 = input, 2 = output
@@ -58,7 +60,10 @@ app.registerExtension({
 						
 						const fromNode = node.graph._nodes.find((otherNode) => otherNode.id == link_info.origin_id);
 						const type = fromNode.outputs[link_info.origin_slot].type;
-						this.title = "Set_" + type;
+						
+						if (this.title == "Set"){
+							this.title = "Set_" + type;	
+						}
 						if (this.widgets[0].value == ''){
 							this.widgets[0].value = type	
 						}
@@ -262,25 +267,19 @@ app.registerExtension({
 
 				
 				this.setName = function(name) {
-					console.log("renaming getter: ");
-					console.log(node.widgets[0].value + " -> " + name);
 					node.widgets[0].value = name;
 					node.onRename();
 					node.serialize();
-					
 				}
 				
 
 				this.onRename = function() {
-					console.log("onRename");
-					
 					const setter = this.findSetter(node.graph);
 					if (setter) {
 						let linkType = (setter.inputs[0].type);
 						
 						this.setType(linkType);
-						this.title = "Get_" + setter.inputs[0].type;
-						
+						this.title = "Get_" + setter.widgets[0].value;
 						switch (linkType) {
 							case "MODEL":
 								this.color = LGraphCanvas.node_colors.blue.color;
@@ -373,7 +372,9 @@ app.registerExtension({
 				} else {
                     console.log(this.widgets[0]);
                     console.log(this.widgets[0].value);
+					alert("No SetNode found for " + this.widgets[0].value + "(" + this.type + ")");
 					throw new Error("No SetNode found for " + this.widgets[0].value + "(" + this.type + ")");
+					
 				}
 
 			}
