@@ -1,0 +1,6 @@
+__pycache__
+/venv
+.vscode
+*.ckpt
+*.safetensors
+*.pth
