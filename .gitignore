@@ -4,3 +4,4 @@ __pycache__
 *.ckpt
 *.safetensors
 *.pth
+types

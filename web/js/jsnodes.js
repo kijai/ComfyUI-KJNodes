@@ -5,6 +5,9 @@ app.registerExtension({
 	async beforeRegisterNodeDef(nodeType, nodeData, app) {
 		switch (nodeData.name) {
 			case "ConditioningMultiCombine":
+				nodeType.prototype.onNodeMoved = function () {
+					console.log(this.pos[0])
+				}
 				nodeType.prototype.onNodeCreated = function () {
 				this.inputs_offset = nodeData.name.includes("selective")?1:0
 				this.cond_type = "CONDITIONING"

@@ -26,7 +26,9 @@ app.registerExtension({
 					'', 
 					(s, t, u, v, x) => {
 						node.validateName(node.graph);
-						this.title = "Set_" + this.widgets[0].value;
+						if(this.widgets[0].value !== ''){
+							this.title = "Set_" + this.widgets[0].value;
+						}
 						this.update();
 						this.properties.previousName = this.widgets[0].value;
 					}, 
@@ -47,9 +49,11 @@ app.registerExtension({
 				) {
 					//On Disconnect
 					if (slotType == 1 && !isChangeConnect) {
-						this.inputs[slot].type = '*';
-						this.inputs[slot].name = '*';
-						this.title = "Set"
+						if(this.inputs[slot].name === ''){
+							this.inputs[slot].type = '*';
+							this.inputs[slot].name = '*';
+							this.title = "Set"
+						}
 					}
 					if (slotType == 2 && !isChangeConnect) {
 						this.outputs[slot].type = '*';
@@ -61,10 +65,12 @@ app.registerExtension({
 						const fromNode = node.graph._nodes.find((otherNode) => otherNode.id == link_info.origin_id);
 						const type = fromNode.outputs[link_info.origin_slot].type;
 						
-						if (this.title == "Set"){
+						if (this.title === "Set"){
+							console.log("setting title to Set_" + type);
 							this.title = "Set_" + type;	
 						}
-						if (this.widgets[0].value == ''){
+						if (this.widgets[0].value === '*'){
+							console.log("setting default value to " + type);
 							this.widgets[0].value = type	
 						}
 						
@@ -162,6 +168,7 @@ app.registerExtension({
 				this.update = function() {
 					if (node.graph) {
 						this.findGetters(node.graph).forEach((getter) => {
+							
 							getter.setType(this.inputs[0].type);
 						});
 						if (this.widgets[0].value) {
