@@ -150,7 +150,6 @@ app.registerExtension({
 				}
 
 				this.clone = function () {
-					console.log("CLONE");
 					const cloned = SetNode.prototype.clone.apply(this);
 					cloned.inputs[0].name = '*';
 					cloned.inputs[0].type = '*';
@@ -203,9 +202,9 @@ app.registerExtension({
 			}
 
 			onRemoved() {
-				console.log("onRemove");
-				console.log(this);
-				console.log(this.flags);
+				// console.log("onRemove");
+				// console.log(this);
+				// console.log(this.flags);
 				const allGetters = this.graph._nodes.filter((otherNode) => otherNode.type == "GetNode");
 				allGetters.forEach((otherNode) => {
 					if (otherNode.setComboValues) {
@@ -330,13 +329,13 @@ app.registerExtension({
 				};
 
 				this.validateLinks = function() {
-					console.log("validating links");
+					//console.log("validating links");
 					if (this.outputs[0].type != '*' && this.outputs[0].links) {
-						console.log("in");
+						//console.log("in");
 						this.outputs[0].links.forEach((linkId) => {
 							const link = node.graph.links[linkId];
 							if (link && link.type != this.outputs[0].type && link.type != '*') {
-								console.log("removing link");
+								//console.log("removing link");
 								node.graph.removeLink(linkId)
 							}
 						})
@@ -369,16 +368,16 @@ app.registerExtension({
                 
 				if (setter) {
 					const slot_info = setter.inputs[slot];
-                    console.log("slot info");
-                    console.log(slot_info);
-                    console.log(this.graph.links);
+                    //console.log("slot info");
+                    //console.log(slot_info);
+                    //console.log(this.graph.links);
                     const link = this.graph.links[ slot_info.link ];
-                    console.log("link:");
-                    console.log(link);
+                    //console.log("link:");
+                    //console.log(link);
                     return link;
 				} else {
-                    console.log(this.widgets[0]);
-                    console.log(this.widgets[0].value);
+                    //console.log(this.widgets[0]);
+                    //console.log(this.widgets[0].value);
 					alert("No SetNode found for " + this.widgets[0].value + "(" + this.type + ")");
 					throw new Error("No SetNode found for " + this.widgets[0].value + "(" + this.type + ")");
 					

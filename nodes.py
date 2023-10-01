@@ -112,22 +112,27 @@ class PlotNode:
 class ConditioningMultiCombine:
     @classmethod
     def INPUT_TYPES(s):
-        return {"required": {
-            "conditioning_1": ("CONDITIONING", ),
-            "conditioning_2": ("CONDITIONING", ),
-        }}
+        return {
+            "required": {
+                "inputcount": ("INT", {"default": 2, "min": 2, "max": 20, "step": 1}),
+                "conditioning_1": ("CONDITIONING", ),
+                "conditioning_2": ("CONDITIONING", ),
+            },
+        
+    }
 
-    RETURN_TYPES = ("CONDITIONING",)
+    RETURN_TYPES = ("CONDITIONING", "INT")
+    RETURN_NAMES = ("combined", "inputcount")
     FUNCTION = "combine"
     CATEGORY = "KJNodes"
 
-    def combine(self, combine, **kwargs):
+    def combine(self, inputcount, **kwargs):
         cond_combine_node = nodes.ConditioningCombine()
-        cond = kwargs["c1"]
-        for c in range(1, combine):
-            new_cond = kwargs[f"c{c + 1}"]
+        cond = kwargs["conditioning_1"]
+        for c in range(1, inputcount):
+            new_cond = kwargs[f"conditioning_{c + 1}"]
             cond = cond_combine_node.combine(new_cond, cond)[0]
-        return (cond,)
+        return (cond, inputcount,)
   
 class ConditioningSetMaskAndCombine:
     @classmethod
