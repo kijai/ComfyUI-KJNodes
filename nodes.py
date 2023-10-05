@@ -4,7 +4,6 @@ import torch.nn.functional as F
 import scipy.ndimage
 import numpy as np
 from PIL import ImageColor, Image
-from colorama import Fore, Back, Style
 
 from nodes import MAX_RESOLUTION
 
