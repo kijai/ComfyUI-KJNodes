@@ -3,10 +3,12 @@ import torch
 import torch.nn.functional as F
 import scipy.ndimage
 import numpy as np
-from PIL import ImageColor, Image
+from PIL import ImageColor, Image, ImageDraw, ImageFont
+import os
 
 from nodes import MAX_RESOLUTION
 
+script_dir = os.path.dirname(os.path.abspath(__file__))
 class INTConstant:
     @classmethod
     def INPUT_TYPES(s):
@@ -50,7 +52,6 @@ class CreateGradientMask:
     def createmask(self, frames, width, height, invert):
         # Define the number of images in the batch
         batch_size = frames
-
         out = []
         # Create an empty array to store the image batch
         image_batch = np.zeros((batch_size, height, width), dtype=np.float32)
@@ -62,6 +63,59 @@ class CreateGradientMask:
             offset_gradient = gradient - time  # Offset the gradient values based on time
             image_batch[i] = offset_gradient.reshape(1, -1)
         output = torch.from_numpy(image_batch)
+        out.append(output)
+        if invert:
+            return (1.0 - torch.stack(out, dim=0),)
+        return (torch.stack(out, dim=0),)
+
+class CreateTextMask:
+    
+    RETURN_TYPES = ("MASK",)
+    FUNCTION = "createtextmask"
+    CATEGORY = "KJNodes"
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                 "invert": ("BOOLEAN", {"default": False}),
+                 "frames": ("INT", {"default": 1,"min": 1, "max": 4096, "step": 1}),
+                 "text_x": ("INT", {"default": 0,"min": 0, "max": 4096, "step": 1}),
+                 "text_y": ("INT", {"default": 0,"min": 0, "max": 4096, "step": 1}),
+                 "font_size": ("INT", {"default": 32,"min": 8, "max": 4096, "step": 1}),
+                 "text": ("STRING", {"default": "HELLO!"}),
+                 "font_path": ("STRING", {"default": "fonts\\TTNorms-Black.otf"}),
+                 "width": ("INT", {"default": 256,"min": 16, "max": 4096, "step": 1}),
+                 "height": ("INT", {"default": 256,"min": 16, "max": 4096, "step": 1}),
+                 "start_rotation": ("INT", {"default": 0,"min": 0, "max": 359, "step": 1}),
+                 "end_rotation": ("INT", {"default": 359,"min": 0, "max": 359, "step": 1}),
+        },
+    } 
+
+    def createtextmask(self, frames, width, height, invert, text_x, text_y, text, font_size, font_path, start_rotation, end_rotation):
+        # Define the number of images in the batch
+        batch_size = frames
+        out = []
+        rotation = start_rotation
+        rotation_increment = (end_rotation - start_rotation) / (batch_size - 1)
+        # Create an empty array to store the image batch
+        image_batch = np.zeros((batch_size, height, width), dtype=np.float32)
+        if font_path == "fonts\\TTNorms-Black.otf": #I don't know why relative path won't work otherwise...
+            font_path = os.path.join(script_dir, font_path)
+        # Generate the text
+        for i in range(batch_size):
+           image = Image.new("RGB", (width, height), "black")
+           draw = ImageDraw.Draw(image)
+           font = ImageFont.truetype(font_path, font_size)
+           text_width, text_height = draw.textsize(text, font=font)
+           text_center_x = text_x + text_width / 2
+           text_center_y = text_y + text_height / 2
+           draw.text((text_x, text_y), text, font=font, fill="white")
+           image = image.rotate(rotation, center=(text_center_x, text_center_y))
+           rotation += rotation_increment
+           image_batch[i] = np.array(image.convert("L"))
+        output = torch.from_numpy(image_batch)
+        rotation += 10
         out.append(output)
         if invert:
             return (1.0 - torch.stack(out, dim=0),)
@@ -293,6 +347,7 @@ NODE_CLASS_MAPPINGS = {
     "GrowMaskWithBlur": GrowMaskWithBlur,
     "ColorToMask": ColorToMask,
     "CreateGradientMask": CreateGradientMask,
+    "CreateTextMask": CreateTextMask,
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "INTConstant": "INT Constant",
@@ -301,4 +356,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "GrowMaskWithBlur": "GrowMaskWithBlur",
     "ColorToMask": "ColorToMask",
     "CreateGradientMask": "CreateGradientMask",
+    "CreateTextMask" : "CreateTextMask",
 }
