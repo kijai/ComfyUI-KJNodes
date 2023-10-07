@@ -30,6 +30,43 @@ def gaussian_kernel(kernel_size: int, sigma: float, device=None):
         g = torch.exp(-(d * d) / (2.0 * sigma * sigma))
         return g / g.sum()
 
+class CreateGradientMask:
+    
+    RETURN_TYPES = ("MASK",)
+    FUNCTION = "createmask"
+    CATEGORY = "KJNodes"
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                 "invert": ("BOOLEAN", {"default": False}),
+                 "frames": ("INT", {"default": 0,"min": 0, "max": 255, "step": 1}),
+                 "width": ("INT", {"default": 256,"min": 16, "max": 4096, "step": 1}),
+                 "height": ("INT", {"default": 256,"min": 16, "max": 4096, "step": 1}),
+        },
+    } 
+
+    def createmask(self, frames, width, height, invert):
+        # Define the number of images in the batch
+        batch_size = frames
+
+        out = []
+        # Create an empty array to store the image batch
+        image_batch = np.zeros((batch_size, height, width), dtype=np.float32)
+
+        # Generate the black to white gradient for each image
+        for i in range(batch_size):
+            gradient = np.linspace(1.0, 0.0, width, dtype=np.float32)
+            time = i / frames  # Calculate the time variable
+            offset_gradient = gradient - time  # Offset the gradient values based on time
+            image_batch[i] = offset_gradient.reshape(1, -1)
+        output = torch.from_numpy(image_batch)
+        out.append(output)
+        if invert:
+            return (1.0 - torch.stack(out, dim=0),)
+        return (torch.stack(out, dim=0),)
+    
 class GrowMaskWithBlur:
     @classmethod
     def INPUT_TYPES(cls):
@@ -37,11 +74,12 @@ class GrowMaskWithBlur:
             "required": {
                 "mask": ("MASK",),
                 "expand": ("INT", {"default": 0, "min": -MAX_RESOLUTION, "max": MAX_RESOLUTION, "step": 1}),
+                "incremental_expandrate": ("INT", {"default": 0, "min": 0, "max": 100, "step": 1}),
                 "tapered_corners": ("BOOLEAN", {"default": True}),
                 "flip_input": ("BOOLEAN", {"default": False}),
                 "blur_radius": ("INT", {
-                    "default": 1,
-                    "min": 1,
+                    "default": 0,
+                    "min": 0,
                     "max": 31,
                     "step": 1
                 }),
@@ -60,7 +98,7 @@ class GrowMaskWithBlur:
     RETURN_NAMES = ("mask", "mask_inverted",)
     FUNCTION = "expand_mask"
     
-    def expand_mask(self, mask, expand, tapered_corners, flip_input, blur_radius, sigma):
+    def expand_mask(self, mask, expand, tapered_corners, flip_input, blur_radius, sigma, incremental_expandrate):
         if( flip_input ):
             mask = 1.0 - mask
         c = 0 if tapered_corners else 1
@@ -76,6 +114,10 @@ class GrowMaskWithBlur:
                     output = scipy.ndimage.grey_erosion(output, footprint=kernel)
                 else:
                     output = scipy.ndimage.grey_dilation(output, footprint=kernel)
+            if expand < 0:
+                expand -= abs(incremental_expandrate)  # Use abs(growrate) to ensure positive change
+            else:
+                expand += abs(incremental_expandrate)  # Use abs(growrate) to ensure positive change
             output = torch.from_numpy(output)
             out.append(output)
         
@@ -89,8 +131,8 @@ class GrowMaskWithBlur:
             blurred = F.conv2d(padded_image, blurkernel, padding=blurkernel_size // 2, groups=channels)[:,:,blur_radius:-blur_radius, blur_radius:-blur_radius]
             blurred = blurred.permute(0, 2, 3, 1)
             blurred = blurred[:, :, :, 0]        
-        
-        return (blurred, 1.0 - blurred,)
+            return (blurred, 1.0 - blurred,)
+        return (torch.stack(out, dim=0), 1.0 -torch.stack(out, dim=0),)
            
         
         
@@ -250,6 +292,7 @@ NODE_CLASS_MAPPINGS = {
     "ConditioningSetMaskAndCombine": ConditioningSetMaskAndCombine,
     "GrowMaskWithBlur": GrowMaskWithBlur,
     "ColorToMask": ColorToMask,
+    "CreateGradientMask": CreateGradientMask,
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "INTConstant": "INT Constant",
@@ -257,4 +300,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "ConditioningSetMaskAndCombine": "ConditioningSetMaskAndCombine",
     "GrowMaskWithBlur": "GrowMaskWithBlur",
     "ColorToMask": "ColorToMask",
+    "CreateGradientMask": "CreateGradientMask",
 }
