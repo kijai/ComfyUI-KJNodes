@@ -91,7 +91,7 @@ class CreateTextMask:
                  "width": ("INT", {"default": 256,"min": 16, "max": 4096, "step": 1}),
                  "height": ("INT", {"default": 256,"min": 16, "max": 4096, "step": 1}),
                  "start_rotation": ("INT", {"default": 0,"min": 0, "max": 359, "step": 1}),
-                 "end_rotation": ("INT", {"default": 359,"min": 0, "max": 359, "step": 1}),
+                 "end_rotation": ("INT", {"default": 359,"min": -359, "max": 359, "step": 1}),
         },
     } 
 
