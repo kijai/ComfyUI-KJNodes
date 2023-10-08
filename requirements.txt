@@ -1,0 +1,4 @@
+librosa
+numpy
+Pillow
+scipy
