@@ -136,13 +136,12 @@ class CreateFadeMask:
                  "width": ("INT", {"default": 256,"min": 16, "max": 4096, "step": 1}),
                  "height": ("INT", {"default": 256,"min": 16, "max": 4096, "step": 1}),
                  "interpolation": (["linear", "ease_in", "ease_out", "ease_in_out"],),
+                 "start_level": ("FLOAT", {"default": 1.0,"min": 0.0, "max": 1.0, "step": 0.01}),
+                 "end_level": ("FLOAT", {"default": 0.0,"min": 0.0, "max": 1.0, "step": 0.01}),
         },
     } 
     
-
-
-
-    def createfademask(self, frames, width, height, invert, interpolation):
+    def createfademask(self, frames, width, height, invert, interpolation, start_level, end_level):
         def ease_in(t):
             return t * t
 
@@ -166,7 +165,7 @@ class CreateFadeMask:
             elif interpolation == "ease_in_out":
                 t = ease_in_out(t)
             
-            color = 1.0 - t
+            color = start_level - t * (start_level - end_level)
             image = np.full((height, width), color, dtype=np.float32)
             image_batch[i] = image
             
