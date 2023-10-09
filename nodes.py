@@ -64,6 +64,42 @@ class CreateGradientMask:
             image_batch[i] = offset_gradient.reshape(1, -1)
         output = torch.from_numpy(image_batch)
         mask = output
+        out.append(mask)
+        if invert:
+            return (1.0 - torch.cat(out, dim=0),)
+        return (torch.cat(out, dim=0),)
+
+class CreateFadeMask:
+    
+    RETURN_TYPES = ("MASK",)
+    FUNCTION = "createfademask"
+    CATEGORY = "KJNodes"
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                 "invert": ("BOOLEAN", {"default": False}),
+                 "frames": ("INT", {"default": 0,"min": 0, "max": 255, "step": 1}),
+                 "width": ("INT", {"default": 256,"min": 16, "max": 4096, "step": 1}),
+                 "height": ("INT", {"default": 256,"min": 16, "max": 4096, "step": 1}),
+        },
+    } 
+
+    def createfademask(self, frames, width, height, invert):
+        # Define the number of images in the batch
+        batch_size = frames
+        out = []
+        # Create an empty array to store the image batch
+        image_batch = np.zeros((batch_size, height, width), dtype=np.float32)
+
+        # Generate the image sequence where each image goes from full white to full black
+        for i in range(batch_size):
+            color = 1.0 - i / (batch_size - 1)  # Calculate the color value based on the frame index
+            image = np.full((height, width), color, dtype=np.float32)
+            image_batch[i] = image
+        output = torch.from_numpy(image_batch)
+        mask = output
         print("gradientmaskshape")
         print(mask.shape)
         out.append(mask)
@@ -353,6 +389,7 @@ NODE_CLASS_MAPPINGS = {
     "ColorToMask": ColorToMask,
     "CreateGradientMask": CreateGradientMask,
     "CreateTextMask": CreateTextMask,
+    "CreateFadeMask": CreateFadeMask,
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "INTConstant": "INT Constant",
@@ -362,4 +399,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "ColorToMask": "ColorToMask",
     "CreateGradientMask": "CreateGradientMask",
     "CreateTextMask" : "CreateTextMask",
+    "CreateFadeMask" : "CreateFadeMask",
 }
