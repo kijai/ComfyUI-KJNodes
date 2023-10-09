@@ -5,6 +5,7 @@ import scipy.ndimage
 import numpy as np
 from PIL import ImageColor, Image, ImageDraw, ImageFont
 import os
+import librosa
 
 from nodes import MAX_RESOLUTION
 
@@ -32,6 +33,63 @@ def gaussian_kernel(kernel_size: int, sigma: float, device=None):
         g = torch.exp(-(d * d) / (2.0 * sigma * sigma))
         return g / g.sum()
 
+class CreateAudioMask:
+    
+    RETURN_TYPES = ("IMAGE",)
+    FUNCTION = "createaudiomask"
+    CATEGORY = "KJNodes"
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                 "invert": ("BOOLEAN", {"default": False}),
+                 "frames": ("INT", {"default": 0,"min": 0, "max": 255, "step": 1}),
+                 "scale": ("FLOAT", {"default": 0.5,"min": 0.0, "max": 2.0, "step": 0.01}),
+                 "audio_path": ("STRING", {"default": "audio.wav"}),
+                 "width": ("INT", {"default": 256,"min": 16, "max": 4096, "step": 1}),
+                 "height": ("INT", {"default": 256,"min": 16, "max": 4096, "step": 1}),
+        },
+    } 
+
+    def createaudiomask(self, frames, width, height, invert, audio_path, scale):
+             # Define the number of images in the batch
+        batch_size = frames
+        out = []
+        masks = []
+        if audio_path == "audio.wav": #I don't know why relative path won't work otherwise...
+            audio_path = os.path.join(script_dir, audio_path)
+        audio, sr = librosa.load(audio_path)
+        spectrogram = np.abs(librosa.stft(audio))
+        #normalized_spectrogram = (spectrogram - np.min(spectrogram)) / (np.max(spectrogram) - np.min(spectrogram))
+        
+        # Generate the text
+        for i in range(batch_size):
+           image = Image.new("RGB", (width, height), "black")
+           draw = ImageDraw.Draw(image)
+           frame = spectrogram[:, i]
+           circle_radius = int(height * np.mean(frame))
+           circle_radius *= scale
+           circle_center = (width // 2, height // 2)  # Calculate the center of the image
+
+
+           draw.ellipse([(circle_center[0] - circle_radius, circle_center[1] - circle_radius),
+                      (circle_center[0] + circle_radius, circle_center[1] + circle_radius)],
+                      fill='white')
+          
+           
+           image = np.array(image).astype(np.float32) / 255.0
+           image = torch.from_numpy(image)[None,]
+           mask = image[:, :, :, 0] 
+           masks.append(mask)
+           out.append(image)
+
+        if invert:
+            return (1.0 - torch.cat(out, dim=0),)
+        return (torch.cat(out, dim=0),torch.cat(masks, dim=0),)
+       
+
+    
 class CreateGradientMask:
     
     RETURN_TYPES = ("MASK",)
@@ -127,7 +185,7 @@ class CreateTextMask:
                  "width": ("INT", {"default": 256,"min": 16, "max": 4096, "step": 1}),
                  "height": ("INT", {"default": 256,"min": 16, "max": 4096, "step": 1}),
                  "start_rotation": ("INT", {"default": 0,"min": 0, "max": 359, "step": 1}),
-                 "end_rotation": ("INT", {"default": 359,"min": 0, "max": 359, "step": 1}),
+                 "end_rotation": ("INT", {"default": 359,"min": -359, "max": 359, "step": 1}),
         },
     } 
 
@@ -389,6 +447,7 @@ NODE_CLASS_MAPPINGS = {
     "ColorToMask": ColorToMask,
     "CreateGradientMask": CreateGradientMask,
     "CreateTextMask": CreateTextMask,
+    "CreateAudioMask": CreateAudioMask,
     "CreateFadeMask": CreateFadeMask,
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
