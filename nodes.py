@@ -61,9 +61,7 @@ class CreateAudioMask:
             audio_path = os.path.join(script_dir, audio_path)
         audio, sr = librosa.load(audio_path)
         spectrogram = np.abs(librosa.stft(audio))
-        #normalized_spectrogram = (spectrogram - np.min(spectrogram)) / (np.max(spectrogram) - np.min(spectrogram))
         
-        # Generate the text
         for i in range(batch_size):
            image = Image.new("RGB", (width, height), "black")
            draw = ImageDraw.Draw(image)
@@ -72,12 +70,10 @@ class CreateAudioMask:
            circle_radius *= scale
            circle_center = (width // 2, height // 2)  # Calculate the center of the image
 
-
            draw.ellipse([(circle_center[0] - circle_radius, circle_center[1] - circle_radius),
                       (circle_center[0] + circle_radius, circle_center[1] + circle_radius)],
                       fill='white')
-          
-           
+             
            image = np.array(image).astype(np.float32) / 255.0
            image = torch.from_numpy(image)[None,]
            mask = image[:, :, :, 0] 
@@ -106,14 +102,12 @@ class CreateGradientMask:
                  "height": ("INT", {"default": 256,"min": 16, "max": 4096, "step": 1}),
         },
     } 
-
     def createmask(self, frames, width, height, invert):
         # Define the number of images in the batch
         batch_size = frames
         out = []
         # Create an empty array to store the image batch
         image_batch = np.zeros((batch_size, height, width), dtype=np.float32)
-
         # Generate the black to white gradient for each image
         for i in range(batch_size):
             gradient = np.linspace(1.0, 0.0, width, dtype=np.float32)
@@ -141,26 +135,45 @@ class CreateFadeMask:
                  "frames": ("INT", {"default": 0,"min": 0, "max": 255, "step": 1}),
                  "width": ("INT", {"default": 256,"min": 16, "max": 4096, "step": 1}),
                  "height": ("INT", {"default": 256,"min": 16, "max": 4096, "step": 1}),
+                 "interpolation": (["linear", "ease_in", "ease_out", "ease_in_out"],),
         },
     } 
+    
 
-    def createfademask(self, frames, width, height, invert):
-        # Define the number of images in the batch
+
+
+    def createfademask(self, frames, width, height, invert, interpolation):
+        def ease_in(t):
+            return t * t
+
+        def ease_out(t):
+            return 1 - (1 - t) * (1 - t)
+
+        def ease_in_out(t):
+            return 3 * t * t - 2 * t * t * t
+
         batch_size = frames
         out = []
-        # Create an empty array to store the image batch
         image_batch = np.zeros((batch_size, height, width), dtype=np.float32)
-
-        # Generate the image sequence where each image goes from full white to full black
+        
         for i in range(batch_size):
-            color = 1.0 - i / (batch_size - 1)  # Calculate the color value based on the frame index
+            t = i / (batch_size - 1)
+            
+            if interpolation == "ease_in":
+                t = ease_in(t)
+            elif interpolation == "ease_out":
+                t = ease_out(t)
+            elif interpolation == "ease_in_out":
+                t = ease_in_out(t)
+            
+            color = 1.0 - t
             image = np.full((height, width), color, dtype=np.float32)
             image_batch[i] = image
+            
         output = torch.from_numpy(image_batch)
         mask = output
-        print("gradientmaskshape")
-        print(mask.shape)
         out.append(mask)
+        
         if invert:
             return (1.0 - torch.cat(out, dim=0),)
         return (torch.cat(out, dim=0),)

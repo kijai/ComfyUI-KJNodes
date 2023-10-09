@@ -32,3 +32,4 @@ Grows or shrinks (with negative values) mask, option to invert input, returns ma
 
 # Installation
 1. Clone this repo into `custom_nodes` folder.
+2. Install dependencies: pip install -r requirements.txt
