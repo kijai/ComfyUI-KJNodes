@@ -627,9 +627,12 @@ class ConditioningSetMaskAndCombine4:
                 "negative_2": ("CONDITIONING", ),
                 "positive_3": ("CONDITIONING", ),
                 "negative_3": ("CONDITIONING", ),
+                "positive_4": ("CONDITIONING", ),
+                "negative_4": ("CONDITIONING", ),
                 "mask_1": ("MASK", ),
                 "mask_2": ("MASK", ),
                 "mask_3": ("MASK", ),
+                "mask_4": ("MASK", ),
                 "strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.01}),
                 "set_cond_area": (["default", "mask bounds"],),
             }
