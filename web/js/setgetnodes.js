@@ -3,6 +3,26 @@ import { ComfyWidgets } from '../../../scripts/widgets.js';
 //based on diffus3's SetGet: https://github.com/diffus3/ComfyUI-extensions
 
 // Nodes that allow you to tunnel connections for cleaner graphs
+function setColorAndBgColor(type) {
+    const colorMap = {
+        "MODEL": LGraphCanvas.node_colors.blue,
+        "LATENT": LGraphCanvas.node_colors.purple,
+        "VAE": LGraphCanvas.node_colors.red,
+        "CONDITIONING": LGraphCanvas.node_colors.brown,
+        "IMAGE": LGraphCanvas.node_colors.pale_blue,
+        "CLIP": LGraphCanvas.node_colors.yellow,
+        "INT": LGraphCanvas.node_colors.green,
+		"MASK": LGraphCanvas.node_colors.cyan
+    };
+
+    const colors = colorMap[type];
+    if (colors) {
+        this.color = colors.color;
+        this.bgcolor = colors.bgcolor;
+    } else {
+        // Handle the default case if needed
+    }
+}
 app.registerExtension({
 	name: "SetNode",
 	registerCustomNodes() {
@@ -19,7 +39,6 @@ app.registerExtension({
 
 				const node = this;
 
-				
 				this.addWidget(
 					"text", 
 					"Constant", 
@@ -37,8 +56,6 @@ app.registerExtension({
 				
 				this.addInput("*", "*");
 				this.addOutput("*", '*');
-
-				
 
 				this.onConnectionsChange = function(
 					slotType,	//1 = input, 2 = output
@@ -58,63 +75,42 @@ app.registerExtension({
 					if (slotType == 2 && !isChangeConnect) {
 						this.outputs[slot].type = '*';
 						this.outputs[slot].name = '*';
+						
 					}	
 					//On Connect
 					if (link_info && node.graph && slotType == 1 && isChangeConnect) {
-						
 						const fromNode = node.graph._nodes.find((otherNode) => otherNode.id == link_info.origin_id);
-						const type = fromNode.outputs[link_info.origin_slot].type;
 						
-						if (this.title === "Set"){
-							console.log("setting title to Set_" + type);
-							this.title = "Set_" + type;	
-						}
-						if (this.widgets[0].value === '*'){
-							console.log("setting default value to " + type);
-							this.widgets[0].value = type	
-						}
+						if (fromNode && fromNode.outputs && fromNode.outputs[link_info.origin_slot]) {
+							const type = fromNode.outputs[link_info.origin_slot].type;
 						
-						this.validateName(node.graph);
-						this.inputs[0].type = type;
-						this.inputs[0].name = type;
-						
-						switch (type) {
-							case "MODEL":
-								this.color = LGraphCanvas.node_colors.blue.color;
-								this.bgcolor = LGraphCanvas.node_colors.blue.bgcolor;
-								break;
-							case "LATENT":
-								this.color = LGraphCanvas.node_colors.purple.color;
-								this.bgcolor = LGraphCanvas.node_colors.purple.bgcolor;
-								break;
-							case "VAE":
-								this.color = LGraphCanvas.node_colors.red.color;
-								this.bgcolor = LGraphCanvas.node_colors.red.bgcolor;
-								break;
-							case "CONDITIONING":
-								this.color = LGraphCanvas.node_colors.brown.color;
-								this.bgcolor = LGraphCanvas.node_colors.brown.bgcolor;
-								break;
-							case "IMAGE":
-								this.color = LGraphCanvas.node_colors.pale_blue.color;
-								this.bgcolor = LGraphCanvas.node_colors.pale_blue.bgcolor;
-								break;
-							case "CLIP":
-								this.color = LGraphCanvas.node_colors.yellow.color;
-								this.bgcolor = LGraphCanvas.node_colors.yellow.bgcolor;
-								break;
-							case "INT":
-								this.color = LGraphCanvas.node_colors.green.color;
-								this.bgcolor = LGraphCanvas.node_colors.green.bgcolor;
-								break;
+							if (this.title === "Set"){
+								this.title = "Set_" + type;	
+							}
+							if (this.widgets[0].value === '*'){
+								this.widgets[0].value = type	
+							}
+							
+							this.validateName(node.graph);
+							this.inputs[0].type = type;
+							this.inputs[0].name = type;
+							
+							setColorAndBgColor.call(this, type);
+						} else {
+							alert("Error: Set node input undefined. Most likely you're missing custom nodes");
 						}
 					}
 					if (link_info && node.graph && slotType == 2 && isChangeConnect) {
 						const fromNode = node.graph._nodes.find((otherNode) => otherNode.id == link_info.origin_id);
-						const type = fromNode.inputs[link_info.origin_slot].type;
-
-						this.outputs[0].type = type;
-						this.outputs[0].name = type;
+						
+						if (fromNode && fromNode.inputs && fromNode.inputs[link_info.origin_slot]) {
+							const type = fromNode.inputs[link_info.origin_slot].type;
+							
+							this.outputs[0].type = type;
+							this.outputs[0].name = type;
+						} else {
+							alert("Error: Get Set node output undefined. Most likely you're missing custom nodes");
+						}
 					}
 					
 
@@ -124,26 +120,22 @@ app.registerExtension({
 
 				this.validateName = function(graph) {
 					let widgetValue = node.widgets[0].value;
-					
-					if (widgetValue != '') {
+				
+					if (widgetValue !== '') {
 						let tries = 0;
-						let collisions = [];
-						
-						do {
-							collisions = graph._nodes.filter((otherNode) => {
-								if (otherNode == this) {
-									return false;
-								}
-								if (otherNode.type == 'SetNode' && otherNode.widgets[0].value === widgetValue) {
-									return true;
-								}
-								return false;
-							})
-							if (collisions.length > 0) {
-								widgetValue = node.widgets[0].value + "_" + tries;
+						const existingValues = new Set();
+				
+						graph._nodes.forEach(otherNode => {
+							if (otherNode !== this && otherNode.type === 'SetNode') {
+								existingValues.add(otherNode.widgets[0].value);
 							}
+						});
+				
+						while (existingValues.has(widgetValue)) {
+							widgetValue = node.widgets[0].value + "_" + tries;
 							tries++;
-						} while (collisions.length > 0)
+						}
+				
 						node.widgets[0].value = widgetValue;
 						this.update();
 					}
@@ -165,46 +157,41 @@ app.registerExtension({
 
 
 				this.update = function() {
-					if (node.graph) {
-						this.findGetters(node.graph).forEach((getter) => {
-							
-							getter.setType(this.inputs[0].type);
-						});
-						if (this.widgets[0].value) {
-							this.findGetters(node.graph, true).forEach((getter) => {
-								getter.setName(this.widgets[0].value)
-							});
-						}
-
-						const allGetters = node.graph._nodes.filter((otherNode) => otherNode.type == "GetNode");
-						allGetters.forEach((otherNode) => {
-							if (otherNode.setComboValues) {
-								otherNode.setComboValues();
-							}
-						})
+					if (!node.graph) {
+						return;
 					}
+				
+					const getters = this.findGetters(node.graph);
+					getters.forEach(getter => {
+						getter.setType(this.inputs[0].type);
+					});
+				
+					if (this.widgets[0].value) {
+						const gettersWithPreviousName = this.findGetters(node.graph, true);
+						gettersWithPreviousName.forEach(getter => {
+							getter.setName(this.widgets[0].value);
+						});
+					}
+				
+					const allGetters = node.graph._nodes.filter(otherNode => otherNode.type === "GetNode");
+					allGetters.forEach(otherNode => {
+						if (otherNode.setComboValues) {
+							otherNode.setComboValues();
+						}
+					});
 				}
 
 
 				this.findGetters = function(graph, checkForPreviousName) {
 					const name = checkForPreviousName ? this.properties.previousName : this.widgets[0].value;
-					return graph._nodes.filter((otherNode) => {
-						if (otherNode.type == 'GetNode' && otherNode.widgets[0].value === name && name != '') {
-							return true;
-						}
-						return false;
-					})
+					return graph._nodes.filter(otherNode => otherNode.type === 'GetNode' && otherNode.widgets[0].value === name && name !== '');
 				}
-
 
 				// This node is purely frontend and does not impact the resulting prompt so should not be serialized
 				this.isVirtualNode = true;
 			}
 
 			onRemoved() {
-				// console.log("onRemove");
-				// console.log(this);
-				// console.log(this.flags);
 				const allGetters = this.graph._nodes.filter((otherNode) => otherNode.type == "GetNode");
 				allGetters.forEach((otherNode) => {
 					if (otherNode.setComboValues) {
@@ -213,7 +200,6 @@ app.registerExtension({
 				})
 			}
 		}
-
 
 		LiteGraph.registerNodeType(
 			"SetNode",
@@ -225,7 +211,6 @@ app.registerExtension({
 		SetNode.category = "KJNodes";
 	},
 });
-
 
 app.registerExtension({
 	name: "GetNode",
@@ -257,10 +242,7 @@ app.registerExtension({
 					}
 				)
 
-
-				this.addOutput("*", '*');
-
-				
+				this.addOutput("*", '*');			
 				this.onConnectionsChange = function(
 					slotType,	//0 = output, 1 = input
 					slot,	//self-explanatory
@@ -270,15 +252,13 @@ app.registerExtension({
 				) {
 					this.validateLinks();	
 				}
-
-				
+			
 				this.setName = function(name) {
 					node.widgets[0].value = name;
 					node.onRename();
 					node.serialize();
 				}
 				
-
 				this.onRename = function() {
 					const setter = this.findSetter(node.graph);
 					if (setter) {
@@ -286,36 +266,8 @@ app.registerExtension({
 						
 						this.setType(linkType);
 						this.title = "Get_" + setter.widgets[0].value;
-						switch (linkType) {
-							case "MODEL":
-								this.color = LGraphCanvas.node_colors.blue.color;
-								this.bgcolor = LGraphCanvas.node_colors.blue.bgcolor;
-								break;
-							case "LATENT":
-								this.color = LGraphCanvas.node_colors.purple.color;
-								this.bgcolor = LGraphCanvas.node_colors.purple.bgcolor;
-								break;
-							case "VAE":
-								this.color = LGraphCanvas.node_colors.red.color;
-								this.bgcolor = LGraphCanvas.node_colors.red.bgcolor;
-								break;
-							case "CONDITIONING":
-								this.color = LGraphCanvas.node_colors.brown.color;
-								this.bgcolor = LGraphCanvas.node_colors.brown.bgcolor;
-								break;
-							case "IMAGE":
-								this.color = LGraphCanvas.node_colors.pale_blue.color;
-								this.bgcolor = LGraphCanvas.node_colors.pale_blue.bgcolor;
-								break;
-							case "CLIP":
-								this.color = LGraphCanvas.node_colors.yellow.color;
-								this.bgcolor = LGraphCanvas.node_colors.yellow.bgcolor;
-								break;
-							case "INT":
-								this.color = LGraphCanvas.node_colors.green.color;
-								this.bgcolor = LGraphCanvas.node_colors.green.bgcolor;
-								break;
-						}
+						
+						setColorAndBgColor.call(this, linkType);
 
 					} else {
 						this.setType('*');
@@ -329,18 +281,15 @@ app.registerExtension({
 				};
 
 				this.validateLinks = function() {
-					//console.log("validating links");
-					if (this.outputs[0].type != '*' && this.outputs[0].links) {
-						//console.log("in");
-						this.outputs[0].links.forEach((linkId) => {
+					if (this.outputs[0].type !== '*' && this.outputs[0].links) {
+						this.outputs[0].links.filter(linkId => {
 							const link = node.graph.links[linkId];
-							if (link && link.type != this.outputs[0].type && link.type != '*') {
-								//console.log("removing link");
-								node.graph.removeLink(linkId)
-							}
-						})
-					} 
-				}
+							return link && (link.type !== this.outputs[0].type && link.type !== '*');
+						}).forEach(linkId => {
+							node.graph.removeLink(linkId);
+						});
+					}
+				};
 
 				this.setType = function(type) {
 					this.outputs[0].name = type;
@@ -350,47 +299,29 @@ app.registerExtension({
 
 				this.findSetter = function(graph) {
 					const name = this.widgets[0].value;
-					return graph._nodes.find((otherNode) => {
-						if (otherNode.type == 'SetNode' && otherNode.widgets[0].value === name && name != '') {
-							return true;
-						}
-						return false;
-					})
-				}
+					return graph._nodes.find(otherNode => otherNode.type === 'SetNode' && otherNode.widgets[0].value === name && name !== '');
+				};
 
 				// This node is purely frontend and does not impact the resulting prompt so should not be serialized
 				this.isVirtualNode = true;
 			}
 
-
 			getInputLink(slot) {
-                const setter = this.findSetter(this.graph);
-                
+				const setter = this.findSetter(this.graph);
+			
 				if (setter) {
-					const slot_info = setter.inputs[slot];
-                    //console.log("slot info");
-                    //console.log(slot_info);
-                    //console.log(this.graph.links);
-                    const link = this.graph.links[ slot_info.link ];
-                    //console.log("link:");
-                    //console.log(link);
-                    return link;
+					const slotInfo = setter.inputs[slot];
+					const link = this.graph.links[slotInfo.link];
+					return link;
 				} else {
-                    //console.log(this.widgets[0]);
-                    //console.log(this.widgets[0].value);
-					alert("No SetNode found for " + this.widgets[0].value + "(" + this.type + ")");
-					throw new Error("No SetNode found for " + this.widgets[0].value + "(" + this.type + ")");
-					
+					const errorMessage = "No SetNode found for " + this.widgets[0].value + "(" + this.type + ")";
+					alert(errorMessage);
+					throw new Error(errorMessage);
 				}
-
 			}
 			onAdded(graph) {
-				//this.setComboValues();
-				//this.validateName(graph);
 			}
-
 		}
-
 
 		LiteGraph.registerNodeType(
 			"GetNode",

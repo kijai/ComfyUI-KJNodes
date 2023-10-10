@@ -1,6 +1,10 @@
 # KJNodes for ComfyUI
 
-Various quality of life -nodes made by combining functionality of existing nodes for ComfyUI, mostly just visual stuff to improve usability.
+Various quality of life and masking related -nodes and scripts made by combining functionality of existing nodes for ComfyUI.
+
+# Installation
+1. Clone this repo into `custom_nodes` folder.
+2. Install dependencies: pip install -r requirements.txt
 
 ## Javascript
 
@@ -16,11 +20,11 @@ Could still be buggy, especially when loading workflow with missing nodes, use w
 
 ### ColorToMask
 
-RBG color value to mask, works with batches and AnimateDiff
+RBG color value to mask, works with batches and AnimateDiff.
 
 ### ConditioningMultiCombine
 
-Combine any number of conditions, saves space
+Combine any number of conditions, saves space.
 
 ### ConditioningSetMaskAndCombine
 
@@ -30,6 +34,10 @@ Mask and combine two sets of conditions, saves space.
 
 Grows or shrinks (with negative values) mask, option to invert input, returns mask and inverted mask. Additionally Blurs the mask, this is a slow operation especially with big batches.
 
-# Installation
-1. Clone this repo into `custom_nodes` folder.
-2. Install dependencies: pip install -r requirements.txt
+### CreateFadeMask
+
+This node creates batch of single color images by interpolating between white/black levels. Useful to control mask strengths or QR code controlnet input weight when combined with MaskComposite node.
+
+### CreateAudioMask
+
+Work in progress, currently creates a sphere that's size is synced with audio input.
