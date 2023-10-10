@@ -6,6 +6,8 @@ import numpy as np
 from PIL import ImageColor, Image, ImageDraw, ImageFont
 import os
 import librosa
+from scipy.special import erf
+from .fluid import Fluid
 
 from nodes import MAX_RESOLUTION
 
@@ -32,6 +34,84 @@ def gaussian_kernel(kernel_size: int, sigma: float, device=None):
         d = torch.sqrt(x * x + y * y)
         g = torch.exp(-(d * d) / (2.0 * sigma * sigma))
         return g / g.sum()
+
+class CreateFluidMask:
+    
+    RETURN_TYPES = ("IMAGE", "MASK")
+    FUNCTION = "createfluidmask"
+    CATEGORY = "KJNodes"
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                 "invert": ("BOOLEAN", {"default": False}),
+                 "frames": ("INT", {"default": 0,"min": 0, "max": 255, "step": 1}),
+                 "width": ("INT", {"default": 256,"min": 16, "max": 4096, "step": 1}),
+                 "height": ("INT", {"default": 256,"min": 16, "max": 4096, "step": 1}),
+                 "inflow_count": ("INT", {"default": 3,"min": 0, "max": 255, "step": 1}),
+                 "inflow_velocity": ("INT", {"default": 1,"min": 0, "max": 255, "step": 1}),
+                 "inflow_radius": ("INT", {"default": 8,"min": 0, "max": 255, "step": 1}),
+                 "inflow_padding": ("INT", {"default": 50,"min": 0, "max": 255, "step": 1}),
+                 "inflow_duration": ("INT", {"default": 60,"min": 0, "max": 255, "step": 1}),
+
+        },
+    } 
+    #using code from https://github.com/GregTJ/stable-fluids
+    def createfluidmask(self, frames, width, height, invert, inflow_count, inflow_velocity, inflow_radius, inflow_padding, inflow_duration):
+        out = []
+        masks = []
+        print(frames)
+        RESOLUTION = width, height
+        DURATION = frames
+
+        INFLOW_PADDING = inflow_padding
+        INFLOW_DURATION = inflow_duration
+        INFLOW_RADIUS = inflow_radius
+        INFLOW_VELOCITY = inflow_velocity
+        INFLOW_COUNT = inflow_count
+
+        print('Generating fluid solver, this may take some time.')
+        fluid = Fluid(RESOLUTION, 'dye')
+
+        center = np.floor_divide(RESOLUTION, 2)
+        r = np.min(center) - INFLOW_PADDING
+
+        points = np.linspace(-np.pi, np.pi, INFLOW_COUNT, endpoint=False)
+        points = tuple(np.array((np.cos(p), np.sin(p))) for p in points)
+        normals = tuple(-p for p in points)
+        points = tuple(r * p + center for p in points)
+
+        inflow_velocity = np.zeros_like(fluid.velocity)
+        inflow_dye = np.zeros(fluid.shape)
+        for p, n in zip(points, normals):
+            mask = np.linalg.norm(fluid.indices - p[:, None, None], axis=0) <= INFLOW_RADIUS
+            inflow_velocity[:, mask] += n[:, None] * INFLOW_VELOCITY
+            inflow_dye[mask] = 1
+
+        
+        for f in range(DURATION):
+            print(f'Computing frame {f + 1} of {DURATION}.')
+            if f <= INFLOW_DURATION:
+                fluid.velocity += inflow_velocity
+                fluid.dye += inflow_dye
+
+            curl = fluid.step()[1]
+            # Using the error function to make the contrast a bit higher. 
+            # Any other sigmoid function e.g. smoothstep would work.
+            curl = (erf(curl * 2) + 1) / 4
+
+            color = np.dstack((curl, np.ones(fluid.shape), fluid.dye))
+            color = (np.clip(color, 0, 1) * 255).astype('uint8')
+            image = np.array(color).astype(np.float32) / 255.0
+            image = torch.from_numpy(image)[None,]
+            mask = image[:, :, :, 0] 
+            masks.append(mask)
+            out.append(image)
+        
+        if invert:
+            return (1.0 - torch.cat(out, dim=0),1.0 - torch.cat(masks, dim=0),)
+        return (torch.cat(out, dim=0),torch.cat(masks, dim=0),)
 
 class CreateAudioMask:
     
@@ -548,6 +628,7 @@ NODE_CLASS_MAPPINGS = {
     "CreateTextMask": CreateTextMask,
     "CreateAudioMask": CreateAudioMask,
     "CreateFadeMask": CreateFadeMask,
+    "CreateFluidMask" :CreateFluidMask,
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "INTConstant": "INT Constant",
@@ -559,4 +640,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "CreateGradientMask": "CreateGradientMask",
     "CreateTextMask" : "CreateTextMask",
     "CreateFadeMask" : "CreateFadeMask",
+    "CreateFluidMask" : "CreateFluidMask",
 }
