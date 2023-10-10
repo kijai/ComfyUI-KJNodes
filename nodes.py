@@ -474,7 +474,15 @@ class ConditioningMultiCombine:
             new_cond = kwargs[f"conditioning_{c + 1}"]
             cond = cond_combine_node.combine(new_cond, cond)[0]
         return (cond, inputcount,)
-  
+
+def append_helper(t, mask, c, set_area_to_bounds, strength):
+        n = [t[0], t[1].copy()]
+        _, h, w = mask.shape
+        n[1]['mask'] = mask
+        n[1]['set_area_to_bounds'] = set_area_to_bounds
+        n[1]['mask_strength'] = strength
+        c.append(n)  
+
 class ConditioningSetMaskAndCombine:
     @classmethod
     def INPUT_TYPES(cls):
@@ -507,33 +515,13 @@ class ConditioningSetMaskAndCombine:
         if len(mask_2.shape) < 3:
             mask_2 = mask_2.unsqueeze(0)
         for t in positive_1:
-            n = [t[0], t[1].copy()]
-            _, h, w = mask_1.shape
-            n[1]['mask'] = mask_1
-            n[1]['set_area_to_bounds'] = set_area_to_bounds
-            n[1]['mask_strength'] = strength
-            c.append(n)
+            append_helper(t, mask_1, c, set_area_to_bounds, strength)
         for t in positive_2:
-            n = [t[0], t[1].copy()]
-            _, h, w = mask_2.shape
-            n[1]['mask'] = mask_2
-            n[1]['set_area_to_bounds'] = set_area_to_bounds
-            n[1]['mask_strength'] = strength
-            c.append(n)
+            append_helper(t, mask_2, c, set_area_to_bounds, strength)
         for t in negative_1:
-            n = [t[0], t[1].copy()]
-            _, h, w = mask_1.shape
-            n[1]['mask'] = mask_1
-            n[1]['set_area_to_bounds'] = set_area_to_bounds
-            n[1]['mask_strength'] = strength
-            c2.append(n)
+            append_helper(t, mask_1, c2, set_area_to_bounds, strength)
         for t in negative_2:
-            n = [t[0], t[1].copy()]
-            _, h, w = mask_2.shape
-            n[1]['mask'] = mask_2
-            n[1]['set_area_to_bounds'] = set_area_to_bounds
-            n[1]['mask_strength'] = strength
-            c2.append(n)
+            append_helper(t, mask_2, c2, set_area_to_bounds, strength)
         return (c, c2)
 
 class ConditioningSetMaskAndCombine3:
@@ -573,48 +561,18 @@ class ConditioningSetMaskAndCombine3:
         if len(mask_3.shape) < 3:
             mask_3 = mask_3.unsqueeze(0)
         for t in positive_1:
-            n = [t[0], t[1].copy()]
-            _, h, w = mask_1.shape
-            n[1]['mask'] = mask_1
-            n[1]['set_area_to_bounds'] = set_area_to_bounds
-            n[1]['mask_strength'] = strength
-            c.append(n)
+            append_helper(t, mask_1, c, set_area_to_bounds, strength)
         for t in positive_2:
-            n = [t[0], t[1].copy()]
-            _, h, w = mask_2.shape
-            n[1]['mask'] = mask_2
-            n[1]['set_area_to_bounds'] = set_area_to_bounds
-            n[1]['mask_strength'] = strength
-            c.append(n)
+            append_helper(t, mask_2, c, set_area_to_bounds, strength)
         for t in positive_3:
-            n = [t[0], t[1].copy()]
-            _, h, w = mask_3.shape
-            n[1]['mask'] = mask_3
-            n[1]['set_area_to_bounds'] = set_area_to_bounds
-            n[1]['mask_strength'] = strength
-            c.append(n)
+            append_helper(t, mask_3, c, set_area_to_bounds, strength)
         for t in negative_1:
-            n = [t[0], t[1].copy()]
-            _, h, w = mask_1.shape
-            n[1]['mask'] = mask_1
-            n[1]['set_area_to_bounds'] = set_area_to_bounds
-            n[1]['mask_strength'] = strength
-            c2.append(n)
+            append_helper(t, mask_1, c2, set_area_to_bounds, strength)
         for t in negative_2:
-            n = [t[0], t[1].copy()]
-            _, h, w = mask_2.shape
-            n[1]['mask'] = mask_2
-            n[1]['set_area_to_bounds'] = set_area_to_bounds
-            n[1]['mask_strength'] = strength
-            c2.append(n)
+            append_helper(t, mask_2, c2, set_area_to_bounds, strength)
         for t in negative_3:
-            n = [t[0], t[1].copy()]
-            _, h, w = mask_3.shape
-            n[1]['mask'] = mask_3
-            n[1]['set_area_to_bounds'] = set_area_to_bounds
-            n[1]['mask_strength'] = strength
-            c2.append(n)
-        return (c, c2)   
+            append_helper(t, mask_3, c2, set_area_to_bounds, strength)
+        return (c, c2)
 
 class ConditioningSetMaskAndCombine4:
     @classmethod
@@ -643,7 +601,7 @@ class ConditioningSetMaskAndCombine4:
     FUNCTION = "append"
     CATEGORY = "KJNodes"
 
-    def append(self, positive_1, negative_1, positive_2, positive_3, positive_4, negative_2, negative_3, negative_4,mask_1, mask_2, mask_3, mask_4, set_cond_area, strength):
+    def append(self, positive_1, negative_1, positive_2, positive_3, positive_4, negative_2, negative_3, negative_4, mask_1, mask_2, mask_3, mask_4, set_cond_area, strength):
         c = []
         c2 = []
         set_area_to_bounds = False
@@ -658,62 +616,22 @@ class ConditioningSetMaskAndCombine4:
         if len(mask_4.shape) < 3:
             mask_4 = mask_4.unsqueeze(0)
         for t in positive_1:
-            n = [t[0], t[1].copy()]
-            _, h, w = mask_1.shape
-            n[1]['mask'] = mask_1
-            n[1]['set_area_to_bounds'] = set_area_to_bounds
-            n[1]['mask_strength'] = strength
-            c.append(n)
+            append_helper(t, mask_1, c, set_area_to_bounds, strength)
         for t in positive_2:
-            n = [t[0], t[1].copy()]
-            _, h, w = mask_2.shape
-            n[1]['mask'] = mask_2
-            n[1]['set_area_to_bounds'] = set_area_to_bounds
-            n[1]['mask_strength'] = strength
-            c.append(n)
+            append_helper(t, mask_2, c, set_area_to_bounds, strength)
         for t in positive_3:
-            n = [t[0], t[1].copy()]
-            _, h, w = mask_3.shape
-            n[1]['mask'] = mask_3
-            n[1]['set_area_to_bounds'] = set_area_to_bounds
-            n[1]['mask_strength'] = strength
-            c.append(n)
+            append_helper(t, mask_3, c, set_area_to_bounds, strength)
         for t in positive_4:
-            n = [t[0], t[1].copy()]
-            _, h, w = mask_3.shape
-            n[1]['mask'] = mask_3
-            n[1]['set_area_to_bounds'] = set_area_to_bounds
-            n[1]['mask_strength'] = strength
-            c.append(n)
+            append_helper(t, mask_4, c, set_area_to_bounds, strength)
         for t in negative_1:
-            n = [t[0], t[1].copy()]
-            _, h, w = mask_1.shape
-            n[1]['mask'] = mask_1
-            n[1]['set_area_to_bounds'] = set_area_to_bounds
-            n[1]['mask_strength'] = strength
-            c2.append(n)
+            append_helper(t, mask_1, c2, set_area_to_bounds, strength)
         for t in negative_2:
-            n = [t[0], t[1].copy()]
-            _, h, w = mask_2.shape
-            n[1]['mask'] = mask_2
-            n[1]['set_area_to_bounds'] = set_area_to_bounds
-            n[1]['mask_strength'] = strength
-            c2.append(n)
+            append_helper(t, mask_2, c2, set_area_to_bounds, strength)
         for t in negative_3:
-            n = [t[0], t[1].copy()]
-            _, h, w = mask_3.shape
-            n[1]['mask'] = mask_3
-            n[1]['set_area_to_bounds'] = set_area_to_bounds
-            n[1]['mask_strength'] = strength
-            c2.append(n)
+            append_helper(t, mask_3, c2, set_area_to_bounds, strength)
         for t in negative_4:
-            n = [t[0], t[1].copy()]
-            _, h, w = mask_3.shape
-            n[1]['mask'] = mask_3
-            n[1]['set_area_to_bounds'] = set_area_to_bounds
-            n[1]['mask_strength'] = strength
-            c2.append(n)
-        return (c, c2)   
+            append_helper(t, mask_4, c2, set_area_to_bounds, strength)
+        return (c, c2)
      
 NODE_CLASS_MAPPINGS = {
     "INTConstant": INTConstant,
