@@ -8,6 +8,7 @@ import os
 import librosa
 from scipy.special import erf
 from .fluid import Fluid
+import comfy.model_management
 
 from nodes import MAX_RESOLUTION
 
@@ -632,7 +633,38 @@ class ConditioningSetMaskAndCombine4:
         for t in negative_4:
             append_helper(t, mask_4, c2, set_area_to_bounds, strength)
         return (c, c2)
-     
+    
+class VRAM_Debug:
+    
+    @classmethod
+    
+    def INPUT_TYPES(s):
+      return {
+        "required": {
+			  "model": ("MODEL",),
+              
+		  },
+        "optional": {
+            "clip_vision": ("CLIP_VISION", ),
+        }
+	  }
+    RETURN_TYPES = ("MODEL", "INT", "INT",)
+    RETURN_NAMES = ("model", "freemem_before", "freemem_after")
+    FUNCTION = "VRAMdebug"
+    CATEGORY = "KJNodes"
+
+    def VRAMdebug(self, model, clip_vision=None):
+        freemem_before = comfy.model_management.get_free_memory()
+        print(freemem_before)
+        torch.cuda.empty_cache()
+        torch.cuda.ipc_collect()
+        if clip_vision is not None:
+            print("unloading clip_vision_clone")
+            comfy.model_management.unload_model_clones(clip_vision.patcher)
+        freemem_after = comfy.model_management.get_free_memory()
+        print(freemem_after)
+        return (model, freemem_before, freemem_after)
+          
 NODE_CLASS_MAPPINGS = {
     "INTConstant": INTConstant,
     "ConditioningMultiCombine": ConditioningMultiCombine,
@@ -646,6 +678,7 @@ NODE_CLASS_MAPPINGS = {
     "CreateAudioMask": CreateAudioMask,
     "CreateFadeMask": CreateFadeMask,
     "CreateFluidMask" :CreateFluidMask,
+    "VRAM_Debug" : VRAM_Debug,
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "INTConstant": "INT Constant",
@@ -659,4 +692,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "CreateTextMask" : "CreateTextMask",
     "CreateFadeMask" : "CreateFadeMask",
     "CreateFluidMask" : "CreateFluidMask",
+    "VRAM_Debug" : "VRAM Debug",
 }
