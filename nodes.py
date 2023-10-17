@@ -334,7 +334,7 @@ class GrowMaskWithBlur:
                 "blur_radius": ("INT", {
                     "default": 0,
                     "min": 0,
-                    "max": 31,
+                    "max": 999,
                     "step": 1
                 }),
                 "sigma": ("FLOAT", {
