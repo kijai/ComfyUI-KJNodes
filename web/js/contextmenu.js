@@ -12,14 +12,16 @@ function addMenuHandler(nodeType, cb) {
 }
 
 function addNode(name, nextTo, options) {
-	options = { select: true, shiftY: 0, shiftX: 0, before: false, ...(options || {}) };
+	console.log("name:", name);
+	console.log("nextTo:", nextTo);
+	options = { side: "left", select: true, shiftY: 0, shiftX: 0, ...(options || {}) };
 	const node = LiteGraph.createNode(name);
 	app.graph.add(node);
+	
 	node.pos = [
-		options.before ? nextTo.pos[0] - node.size[0] - 30 : nextTo.pos[0] + nextTo.size[0] + 30,
-		nextTo.pos[0] + options.shiftX,
-		nextTo.pos[1] + options.shiftY,
+		options.side === "left" ? nextTo.pos[0] - (node.size[0] + options.offset): nextTo.pos[0] + nextTo.size[0] + options.offset,
 		
+		nextTo.pos[1] + options.shiftY,
 	];
 	if (options.select) {
 		app.canvas.selectNode(node, false);
@@ -35,12 +37,11 @@ app.registerExtension({
 				options.unshift(
 					{
 					content: "Add GetNode",
-					callback: () => {addNode("GetNode", this, { shiftY: 0,shiftX: this.size[0] + 30 });}
+					callback: () => {addNode("GetNode", this, { side:"left", offset: 30});}
 					},
 					{
 					content: "Add SetNode",
-					callback: () => {
-						addNode("SetNode", this);
+					callback: () => {addNode("SetNode", this, { side:"right", offset: 30 });
 					},
 					
 				});
