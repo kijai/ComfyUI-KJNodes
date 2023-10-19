@@ -1,6 +1,8 @@
 import { app } from "../../../scripts/app.js";
 
-// Adds context menu entries, code from pyssssscustom-scripts
+
+
+// Adds context menu entries, code partly from pyssssscustom-scripts
 
 function addMenuHandler(nodeType, cb) {
 	const getOpts = nodeType.prototype.getExtraMenuOptions;
@@ -48,5 +50,69 @@ app.registerExtension({
 			});
 				
 		}
+		
+
 	},
+		async setup(app) {
+			const onChange = (value) => {
+				if (value) {
+					const valuesToAddToIn = ["GetNode"];
+					const valuesToAddToOut = ["SetNode"];
+			
+					for (const arr of Object.values(LiteGraph.slot_types_default_in)) {
+						for (const valueToAdd of valuesToAddToIn) {
+							const idx = arr.indexOf(valueToAdd);
+							if (idx !== 0) {
+								arr.splice(idx, 1);
+							}
+							arr.unshift(valueToAdd);
+						}
+					}
+			
+					for (const arr of Object.values(LiteGraph.slot_types_default_out)) {
+						for (const valueToAdd of valuesToAddToOut) {
+							const idx = arr.indexOf(valueToAdd);
+							if (idx !== 0) {
+								arr.splice(idx, 1);
+							}
+							arr.unshift(valueToAdd);
+						}
+					}
+				}
+			};
+			
+			app.ui.settings.addSetting({
+				id: "KJNodes.SetGetMenu",
+				name: "🔗💥⛓️ Make Set/Get -nodes defaults (turn off and reload to disable)",
+				defaultValue: false,
+				type: "boolean",
+				options: (value) => [
+					{
+						value: true,
+						text: "On",
+						selected: value === true,
+					},
+					{
+						value: false,
+						text: "Off",
+						selected: value === false,
+					},
+				],
+				onChange: onChange,
+				
+			});
+			app.ui.settings.addSetting({
+				id: "KJNodes.DisableMiddleClickDefault",
+				name: "Middle click default node adding",
+				defaultValue: false,
+				type: "boolean",
+				options: (value) => [
+					{ value: true, text: "On", selected: value === true },
+					{ value: false, text: "Off", selected: value === false },
+				],
+				onChange: (value) => {
+					LiteGraph.middle_click_slot_add_default_node = value;
+				},
+			});
+}
 });
