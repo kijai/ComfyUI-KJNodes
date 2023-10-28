@@ -670,7 +670,28 @@ class VRAM_Debug:
         freemem_after = comfy.model_management.get_free_memory()
         print(freemem_after)
         return (model, freemem_before, freemem_after)
-          
+    
+class SomethingToString:
+    @classmethod
+    
+    def INPUT_TYPES(s):
+     return {
+        "required": {
+        "input": ("*", {"forceinput": True, "default": ""}),
+    },
+    }
+    RETURN_TYPES = ("STRING",)
+    FUNCTION = "stringify"
+    CATEGORY = "KJNodes"
+
+    def stringify(self, input):
+        if isinstance(input, (int, float, bool)):   
+            stringified = str(input)
+            print(stringified)
+        else:
+            return
+        return (stringified,)
+    
 NODE_CLASS_MAPPINGS = {
     "INTConstant": INTConstant,
     "ConditioningMultiCombine": ConditioningMultiCombine,
@@ -685,6 +706,7 @@ NODE_CLASS_MAPPINGS = {
     "CreateFadeMask": CreateFadeMask,
     "CreateFluidMask" :CreateFluidMask,
     "VRAM_Debug" : VRAM_Debug,
+    "SomethingToString" : SomethingToString,
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "INTConstant": "INT Constant",
@@ -699,4 +721,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "CreateFadeMask" : "CreateFadeMask",
     "CreateFluidMask" : "CreateFluidMask",
     "VRAM_Debug" : "VRAM Debug",
+    "SomethingToString" : "SomethingToString",
 }
