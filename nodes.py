@@ -279,15 +279,14 @@ class CrossFadeImages:
                  "images_1": ("IMAGE",),
                  "images_2": ("IMAGE",),
                  "interpolation": (["linear", "ease_in", "ease_out", "ease_in_out", "bounce", "elastic", "glitchy", "exponential_ease_out"],),
-                 "batch_size": ("INT", {"default": 1,"min": 0, "max": 4096, "step": 1}),
                  "transition_start_index": ("INT", {"default": 1,"min": 0, "max": 4096, "step": 1}),
                  "transitioning_frames": ("INT", {"default": 1,"min": 0, "max": 4096, "step": 1}),
-                 "start_level": ("FLOAT", {"default": 1.0,"min": 0.0, "max": 1.0, "step": 0.01}),
-                 "end_level": ("FLOAT", {"default": 0.0,"min": 0.0, "max": 1.0, "step": 0.01}),
+                 "start_level": ("FLOAT", {"default": 0.0,"min": 0.0, "max": 1.0, "step": 0.01}),
+                 "end_level": ("FLOAT", {"default": 1.0,"min": 0.0, "max": 1.0, "step": 0.01}),
         },
     } 
     
-    def crossfadeimages(self, images_1, images_2, transition_start_index, transitioning_frames, interpolation, batch_size, start_level, end_level):
+    def crossfadeimages(self, images_1, images_2, transition_start_index, transitioning_frames, interpolation, start_level, end_level):
 
         def crossfade(images_1, images_2, alpha):
             crossfade = (1 - alpha) * images_1 + alpha * images_2
@@ -321,26 +320,30 @@ class CrossFadeImages:
             "exponential_ease_out": exponential_ease_out,
         }
 
-        #batch_size = images_1.size(0)
         crossfade_images = []
         
-        alphas = torch.linspace(start_level, end_level, batch_size)
-        for i in range(batch_size):
+        alphas = torch.linspace(start_level, end_level, transitioning_frames)
+        for i in range(transitioning_frames):
             alpha = alphas[i]
-            image1 = images_1[i]
-            image2 = images_2[i]
+            image1 = images_1[i - transition_start_index]
+            image2 = images_2[i + transition_start_index]
             easing_function = easing_functions.get(interpolation)
-            if i >= transition_start_index and i < transition_start_index + transitioning_frames:
-                # Apply transition effect within the transition frame length
-                transition_alpha = (i - transition_start_index) / transitioning_frames
-                alpha = easing_function(transition_alpha)  # Apply the easing function to the alpha value
-            else:
-                alpha = end_level if i < transition_start_index else start_level
+            alpha = easing_function(alpha)  # Apply the easing function to the alpha value
 
             crossfade_image = crossfade(image1, image2, alpha)
             crossfade_images.append(crossfade_image)
+            
+        # Convert crossfade_images to tensor
+        crossfade_images = torch.stack(crossfade_images, dim=0)
+        # Append the remaining frames from images_2
+        remaining_images_2 = images_2[transition_start_index + transitioning_frames:]
+        crossfade_images = torch.cat([crossfade_images, remaining_images_2], dim=0)
 
-        return (torch.stack(crossfade_images, dim=0),)
+        # Append the beginning of images_1
+        beginning_images_1 = images_1[:transition_start_index]
+        crossfade_images = torch.cat([beginning_images_1, crossfade_images], dim=0)
+
+        return (crossfade_images,)
 
 class CreateTextMask:
     
