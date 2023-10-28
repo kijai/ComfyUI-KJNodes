@@ -9,7 +9,7 @@ import librosa
 from scipy.special import erf
 from .fluid import Fluid
 import comfy.model_management
-
+import math
 from nodes import MAX_RESOLUTION
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -266,6 +266,83 @@ class CreateFadeMask:
             return (1.0 - torch.cat(out, dim=0),)
         return (torch.cat(out, dim=0),)
 
+class CrossFadeImages:
+    
+    RETURN_TYPES = ("IMAGE",)
+    FUNCTION = "crossfadeimages"
+    CATEGORY = "KJNodes"
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                 "images_1": ("IMAGE",),
+                 "images_2": ("IMAGE",),
+                 "interpolation": (["linear", "ease_in", "ease_out", "ease_in_out", "bounce", "elastic", "glitchy", "exponential_ease_out"],),
+                 "transition_start_index": ("INT", {"default": 1,"min": 0, "max": 4096, "step": 1}),
+                 "transitioning_frames": ("INT", {"default": 1,"min": 0, "max": 4096, "step": 1}),
+                 "start_level": ("FLOAT", {"default": 1.0,"min": 0.0, "max": 1.0, "step": 0.01}),
+                 "end_level": ("FLOAT", {"default": 0.0,"min": 0.0, "max": 1.0, "step": 0.01}),
+        },
+    } 
+    
+    def crossfadeimages(self, images_1, images_2, transition_start_index, transitioning_frames, interpolation, start_level, end_level):
+
+        def crossfade(images_1, images_2, alpha):
+            crossfade = (1 - alpha) * images_1 + alpha * images_2
+            return crossfade
+        def ease_in(t):
+            return t * t
+        def ease_out(t):
+            return 1 - (1 - t) * (1 - t)
+        def ease_in_out(t):
+            return 3 * t * t - 2 * t * t * t
+        def bounce(t):
+            if t < 0.5:
+                return self.ease_out(t * 2) * 0.5
+            else:
+                return self.ease_in((t - 0.5) * 2) * 0.5 + 0.5
+        def elastic(t):
+            return math.sin(13 * math.pi / 2 * t) * math.pow(2, 10 * (t - 1))
+        def glitchy(t):
+            return t + 0.1 * math.sin(40 * t)
+        def exponential_ease_out(t):
+            return 1 - (1 - t) ** 4
+
+        easing_functions = {
+            "linear": lambda t: t,
+            "ease_in": ease_in,
+            "ease_out": ease_out,
+            "ease_in_out": ease_in_out,
+            "bounce": bounce,
+            "elastic": elastic,
+            "glitchy": glitchy,
+            "exponential_ease_out": exponential_ease_out,
+        }
+
+        
+        batch_size = images_1.size(0)
+        crossfade_images = []
+        #transition_frame_length = int(batch_size / transitioning_frames)
+        
+        alphas = torch.linspace(start_level, end_level, batch_size)
+        for i in range(batch_size):
+            alpha = alphas[i]
+            image1 = images_1[i]
+            image2 = images_2[i]
+            easing_function = easing_functions.get(interpolation)
+            if i >= transition_start_index and i < transition_start_index + transitioning_frames:
+                # Apply transition effect within the transition frame length
+                transition_alpha = (i - transition_start_index) / transitioning_frames
+                alpha = easing_function(transition_alpha)  # Apply the easing function to the alpha value
+            else:
+                alpha = end_level if i < transition_start_index else start_level
+
+            crossfade_image = crossfade(image1, image2, alpha)
+            crossfade_images.append(crossfade_image)
+
+        return (torch.stack(crossfade_images, dim=0),)
+
 class CreateTextMask:
     
     RETURN_TYPES = ("IMAGE", "MASK",)
@@ -500,7 +577,8 @@ class ConditioningSetMaskAndCombine:
                 "negative_2": ("CONDITIONING", ),
                 "mask_1": ("MASK", ),
                 "mask_2": ("MASK", ),
-                "strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.01}),
+                "mask_1_strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.01}),
+                "mask_2_strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.01}),
                 "set_cond_area": (["default", "mask bounds"],),
             }
         }
@@ -510,7 +588,7 @@ class ConditioningSetMaskAndCombine:
     FUNCTION = "append"
     CATEGORY = "KJNodes"
 
-    def append(self, positive_1, negative_1, positive_2, negative_2, mask_1, mask_2, set_cond_area, strength):
+    def append(self, positive_1, negative_1, positive_2, negative_2, mask_1, mask_2, set_cond_area, mask_1_strength, mask_2_strength):
         c = []
         c2 = []
         set_area_to_bounds = False
@@ -521,13 +599,13 @@ class ConditioningSetMaskAndCombine:
         if len(mask_2.shape) < 3:
             mask_2 = mask_2.unsqueeze(0)
         for t in positive_1:
-            append_helper(t, mask_1, c, set_area_to_bounds, strength)
+            append_helper(t, mask_1, c, set_area_to_bounds, mask_1_strength)
         for t in positive_2:
-            append_helper(t, mask_2, c, set_area_to_bounds, strength)
+            append_helper(t, mask_2, c, set_area_to_bounds, mask_2_strength)
         for t in negative_1:
-            append_helper(t, mask_1, c2, set_area_to_bounds, strength)
+            append_helper(t, mask_1, c2, set_area_to_bounds, mask_1_strength)
         for t in negative_2:
-            append_helper(t, mask_2, c2, set_area_to_bounds, strength)
+            append_helper(t, mask_2, c2, set_area_to_bounds, mask_2_strength)
         return (c, c2)
 
 class ConditioningSetMaskAndCombine3:
@@ -544,7 +622,9 @@ class ConditioningSetMaskAndCombine3:
                 "mask_1": ("MASK", ),
                 "mask_2": ("MASK", ),
                 "mask_3": ("MASK", ),
-                "strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.01}),
+                "mask_1_strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.01}),
+                "mask_2_strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.01}),
+                "mask_3_strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.01}),
                 "set_cond_area": (["default", "mask bounds"],),
             }
         }
@@ -554,7 +634,7 @@ class ConditioningSetMaskAndCombine3:
     FUNCTION = "append"
     CATEGORY = "KJNodes"
 
-    def append(self, positive_1, negative_1, positive_2, positive_3, negative_2, negative_3, mask_1, mask_2, mask_3, set_cond_area, strength):
+    def append(self, positive_1, negative_1, positive_2, positive_3, negative_2, negative_3, mask_1, mask_2, mask_3, set_cond_area, mask_1_strength, mask_2_strength, mask_3_strength):
         c = []
         c2 = []
         set_area_to_bounds = False
@@ -567,17 +647,17 @@ class ConditioningSetMaskAndCombine3:
         if len(mask_3.shape) < 3:
             mask_3 = mask_3.unsqueeze(0)
         for t in positive_1:
-            append_helper(t, mask_1, c, set_area_to_bounds, strength)
+            append_helper(t, mask_1, c, set_area_to_bounds, mask_1_strength)
         for t in positive_2:
-            append_helper(t, mask_2, c, set_area_to_bounds, strength)
+            append_helper(t, mask_2, c, set_area_to_bounds, mask_2_strength)
         for t in positive_3:
-            append_helper(t, mask_3, c, set_area_to_bounds, strength)
+            append_helper(t, mask_3, c, set_area_to_bounds, mask_3_strength)
         for t in negative_1:
-            append_helper(t, mask_1, c2, set_area_to_bounds, strength)
+            append_helper(t, mask_1, c2, set_area_to_bounds, mask_1_strength)
         for t in negative_2:
-            append_helper(t, mask_2, c2, set_area_to_bounds, strength)
+            append_helper(t, mask_2, c2, set_area_to_bounds, mask_2_strength)
         for t in negative_3:
-            append_helper(t, mask_3, c2, set_area_to_bounds, strength)
+            append_helper(t, mask_3, c2, set_area_to_bounds, mask_3_strength)
         return (c, c2)
 
 class ConditioningSetMaskAndCombine4:
@@ -597,7 +677,10 @@ class ConditioningSetMaskAndCombine4:
                 "mask_2": ("MASK", ),
                 "mask_3": ("MASK", ),
                 "mask_4": ("MASK", ),
-                "strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.01}),
+                "mask_1_strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.01}),
+                "mask_2_strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.01}),
+                "mask_3_strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.01}),
+                "mask_4_strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.01}),
                 "set_cond_area": (["default", "mask bounds"],),
             }
         }
@@ -607,7 +690,7 @@ class ConditioningSetMaskAndCombine4:
     FUNCTION = "append"
     CATEGORY = "KJNodes"
 
-    def append(self, positive_1, negative_1, positive_2, positive_3, positive_4, negative_2, negative_3, negative_4, mask_1, mask_2, mask_3, mask_4, set_cond_area, strength):
+    def append(self, positive_1, negative_1, positive_2, positive_3, positive_4, negative_2, negative_3, negative_4, mask_1, mask_2, mask_3, mask_4, set_cond_area, mask_1_strength, mask_2_strength, mask_3_strength, mask_4_strength):
         c = []
         c2 = []
         set_area_to_bounds = False
@@ -622,21 +705,93 @@ class ConditioningSetMaskAndCombine4:
         if len(mask_4.shape) < 3:
             mask_4 = mask_4.unsqueeze(0)
         for t in positive_1:
-            append_helper(t, mask_1, c, set_area_to_bounds, strength)
+            append_helper(t, mask_1, c, set_area_to_bounds, mask_1_strength)
         for t in positive_2:
-            append_helper(t, mask_2, c, set_area_to_bounds, strength)
+            append_helper(t, mask_2, c, set_area_to_bounds, mask_2_strength)
         for t in positive_3:
-            append_helper(t, mask_3, c, set_area_to_bounds, strength)
+            append_helper(t, mask_3, c, set_area_to_bounds, mask_3_strength)
         for t in positive_4:
-            append_helper(t, mask_4, c, set_area_to_bounds, strength)
+            append_helper(t, mask_4, c, set_area_to_bounds, mask_4_strength)
         for t in negative_1:
-            append_helper(t, mask_1, c2, set_area_to_bounds, strength)
+            append_helper(t, mask_1, c2, set_area_to_bounds, mask_1_strength)
         for t in negative_2:
-            append_helper(t, mask_2, c2, set_area_to_bounds, strength)
+            append_helper(t, mask_2, c2, set_area_to_bounds, mask_2_strength)
         for t in negative_3:
-            append_helper(t, mask_3, c2, set_area_to_bounds, strength)
+            append_helper(t, mask_3, c2, set_area_to_bounds, mask_3_strength)
         for t in negative_4:
-            append_helper(t, mask_4, c2, set_area_to_bounds, strength)
+            append_helper(t, mask_4, c2, set_area_to_bounds, mask_4_strength)
+        return (c, c2)
+
+class ConditioningSetMaskAndCombine5:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "positive_1": ("CONDITIONING", ),
+                "negative_1": ("CONDITIONING", ),
+                "positive_2": ("CONDITIONING", ),
+                "negative_2": ("CONDITIONING", ),
+                "positive_3": ("CONDITIONING", ),
+                "negative_3": ("CONDITIONING", ),
+                "positive_4": ("CONDITIONING", ),
+                "negative_4": ("CONDITIONING", ),
+                "positive_5": ("CONDITIONING", ),
+                "negative_5": ("CONDITIONING", ),
+                "mask_1": ("MASK", ),
+                "mask_2": ("MASK", ),
+                "mask_3": ("MASK", ),
+                "mask_4": ("MASK", ),
+                "mask_5": ("MASK", ),
+                "mask_1_strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.01}),
+                "mask_2_strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.01}),
+                "mask_3_strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.01}),
+                "mask_4_strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.01}),
+                "mask_5_strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.01}),
+                "set_cond_area": (["default", "mask bounds"],),
+            }
+        }
+
+    RETURN_TYPES = ("CONDITIONING","CONDITIONING",)
+    RETURN_NAMES = ("combined_positive", "combined_negative",)
+    FUNCTION = "append"
+    CATEGORY = "KJNodes"
+
+    def append(self, positive_1, negative_1, positive_2, positive_3, positive_4, positive_5, negative_2, negative_3, negative_4, negative_5, mask_1, mask_2, mask_3, mask_4, mask_5, set_cond_area, mask_1_strength, mask_2_strength, mask_3_strength, mask_4_strength, mask_5_strength):
+        c = []
+        c2 = []
+        set_area_to_bounds = False
+        if set_cond_area != "default":
+            set_area_to_bounds = True
+        if len(mask_1.shape) < 3:
+            mask_1 = mask_1.unsqueeze(0)
+        if len(mask_2.shape) < 3:
+            mask_2 = mask_2.unsqueeze(0)
+        if len(mask_3.shape) < 3:
+            mask_3 = mask_3.unsqueeze(0)
+        if len(mask_4.shape) < 3:
+            mask_4 = mask_4.unsqueeze(0)
+        if len(mask_5.shape) < 3:
+            mask_5 = mask_5.unsqueeze(0)
+        for t in positive_1:
+            append_helper(t, mask_1, c, set_area_to_bounds, mask_1_strength)
+        for t in positive_2:
+            append_helper(t, mask_2, c, set_area_to_bounds, mask_2_strength)
+        for t in positive_3:
+            append_helper(t, mask_3, c, set_area_to_bounds, mask_3_strength)
+        for t in positive_4:
+            append_helper(t, mask_4, c, set_area_to_bounds, mask_4_strength)
+        for t in positive_5:
+            append_helper(t, mask_5, c, set_area_to_bounds, mask_5_strength)
+        for t in negative_1:
+            append_helper(t, mask_1, c2, set_area_to_bounds, mask_1_strength)
+        for t in negative_2:
+            append_helper(t, mask_2, c2, set_area_to_bounds, mask_2_strength)
+        for t in negative_3:
+            append_helper(t, mask_3, c2, set_area_to_bounds, mask_3_strength)
+        for t in negative_4:
+            append_helper(t, mask_4, c2, set_area_to_bounds, mask_4_strength)
+        for t in negative_5:
+            append_helper(t, mask_5, c2, set_area_to_bounds, mask_5_strength)
         return (c, c2)
     
 class VRAM_Debug:
@@ -698,6 +853,7 @@ NODE_CLASS_MAPPINGS = {
     "ConditioningSetMaskAndCombine": ConditioningSetMaskAndCombine,
     "ConditioningSetMaskAndCombine3": ConditioningSetMaskAndCombine3,
     "ConditioningSetMaskAndCombine4": ConditioningSetMaskAndCombine4,
+    "ConditioningSetMaskAndCombine5": ConditioningSetMaskAndCombine5,
     "GrowMaskWithBlur": GrowMaskWithBlur,
     "ColorToMask": ColorToMask,
     "CreateGradientMask": CreateGradientMask,
@@ -707,6 +863,7 @@ NODE_CLASS_MAPPINGS = {
     "CreateFluidMask" :CreateFluidMask,
     "VRAM_Debug" : VRAM_Debug,
     "SomethingToString" : SomethingToString,
+    "CrossFadeImages": CrossFadeImages
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "INTConstant": "INT Constant",
@@ -714,6 +871,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "ConditioningSetMaskAndCombine": "ConditioningSetMaskAndCombine",
     "ConditioningSetMaskAndCombine3": "ConditioningSetMaskAndCombine3",
     "ConditioningSetMaskAndCombine4": "ConditioningSetMaskAndCombine4",
+    "ConditioningSetMaskAndCombine5": "ConditioningSetMaskAndCombine5",
     "GrowMaskWithBlur": "GrowMaskWithBlur",
     "ColorToMask": "ColorToMask",
     "CreateGradientMask": "CreateGradientMask",
@@ -721,5 +879,6 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "CreateFadeMask" : "CreateFadeMask",
     "CreateFluidMask" : "CreateFluidMask",
     "VRAM_Debug" : "VRAM Debug",
+    "CrossFadeImages": "CrossFadeImages"
     "SomethingToString" : "SomethingToString",
 }
