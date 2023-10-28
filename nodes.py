@@ -863,7 +863,7 @@ NODE_CLASS_MAPPINGS = {
     "CreateFluidMask" :CreateFluidMask,
     "VRAM_Debug" : VRAM_Debug,
     "SomethingToString" : SomethingToString,
-    "CrossFadeImages": CrossFadeImages
+    "CrossFadeImages": CrossFadeImages,
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "INTConstant": "INT Constant",
@@ -879,6 +879,6 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "CreateFadeMask" : "CreateFadeMask",
     "CreateFluidMask" : "CreateFluidMask",
     "VRAM_Debug" : "VRAM Debug",
-    "CrossFadeImages": "CrossFadeImages"
-    "SomethingToString" : "SomethingToString",
+    "CrossFadeImages": "CrossFadeImages",
+    "SomethingToString": "SomethingToString",
 }
