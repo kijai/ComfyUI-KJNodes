@@ -335,9 +335,16 @@ class CrossFadeImages:
             
         # Convert crossfade_images to tensor
         crossfade_images = torch.stack(crossfade_images, dim=0)
-        # Append the remaining frames from images_2
-        remaining_images_2 = images_2[transition_start_index + transitioning_frames:]
-        crossfade_images = torch.cat([crossfade_images, remaining_images_2], dim=0)
+        # Get the last frame result of the interpolation
+        last_frame = crossfade_images[-1]
+        # Calculate the number of remaining frames from images_2
+        remaining_frames = len(images_2) - (transition_start_index + transitioning_frames)
+        # Append the last frame result duplicated to crossfade_images
+        remaining_frames_images = last_frame.unsqueeze(0).repeat(remaining_frames, 1, 1, 1)
+        crossfade_images = torch.cat([crossfade_images, remaining_frames_images], dim=0)
+        # # Append the remaining frames from images_2
+        # remaining_images_2 = images_2[transition_start_index + transitioning_frames:]
+        # crossfade_images = torch.cat([crossfade_images, remaining_images_2], dim=0)
 
         # Append the beginning of images_1
         beginning_images_1 = images_1[:transition_start_index]
@@ -900,7 +907,7 @@ class EmptyLatentImagePresets:
 
 #https://github.com/hahnec/color-matcher/
 from color_matcher import ColorMatcher
-from color_matcher.normalizer import Normalizer
+#from color_matcher.normalizer import Normalizer
 
 class ColorMatch:
     @classmethod
