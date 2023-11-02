@@ -11,8 +11,10 @@ function setColorAndBgColor(type) {
         "CONDITIONING": LGraphCanvas.node_colors.brown,
         "IMAGE": LGraphCanvas.node_colors.pale_blue,
         "CLIP": LGraphCanvas.node_colors.yellow,
-        "INT": LGraphCanvas.node_colors.green,
-		"MASK": LGraphCanvas.node_colors.cyan
+        "FLOAT": LGraphCanvas.node_colors.green,
+		"MASK": LGraphCanvas.node_colors.cyan,
+		"INT": { color: "#1b4669", bgcolor: "#29699c"},
+
     };
 
     const colors = colorMap[type];

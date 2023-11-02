@@ -13,6 +13,7 @@ import math
 from nodes import MAX_RESOLUTION
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
+
 class INTConstant:
     @classmethod
     def INPUT_TYPES(s):
@@ -29,7 +30,24 @@ class INTConstant:
 
     def get_value(self, value):
         return (value,)
-    
+
+class FloatConstant:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": {
+            "value": ("FLOAT", {"default": 0.0, "min": -0xffffffffffffffff, "max": 0xffffffffffffffff, "step": 0.01}),
+        },
+        }
+
+    RETURN_TYPES = ("FLOAT",)
+    RETURN_NAMES = ("value",)
+    FUNCTION = "get_value"
+
+    CATEGORY = "KJNodes"
+
+    def get_value(self, value):
+        return (value,)
+
 def gaussian_kernel(kernel_size: int, sigma: float, device=None):
         x, y = torch.meshgrid(torch.linspace(-1, 1, kernel_size, device=device), torch.linspace(-1, 1, kernel_size, device=device), indexing="ij")
         d = torch.sqrt(x * x + y * y)
@@ -62,7 +80,6 @@ class CreateFluidMask:
     def createfluidmask(self, frames, width, height, invert, inflow_count, inflow_velocity, inflow_radius, inflow_padding, inflow_duration):
         out = []
         masks = []
-        print(frames)
         RESOLUTION = width, height
         DURATION = frames
 
@@ -321,11 +338,11 @@ class CrossFadeImages:
         }
 
         crossfade_images = []
-        
+
         alphas = torch.linspace(start_level, end_level, transitioning_frames)
         for i in range(transitioning_frames):
             alpha = alphas[i]
-            image1 = images_1[i - transition_start_index]
+            image1 = images_1[i + transition_start_index]
             image2 = images_2[i + transition_start_index]
             easing_function = easing_functions.get(interpolation)
             alpha = easing_function(alpha)  # Apply the easing function to the alpha value
@@ -342,14 +359,9 @@ class CrossFadeImages:
         # Append the last frame result duplicated to crossfade_images
         remaining_frames_images = last_frame.unsqueeze(0).repeat(remaining_frames, 1, 1, 1)
         crossfade_images = torch.cat([crossfade_images, remaining_frames_images], dim=0)
-        # # Append the remaining frames from images_2
-        # remaining_images_2 = images_2[transition_start_index + transitioning_frames:]
-        # crossfade_images = torch.cat([crossfade_images, remaining_images_2], dim=0)
-
         # Append the beginning of images_1
         beginning_images_1 = images_1[:transition_start_index]
         crossfade_images = torch.cat([beginning_images_1, crossfade_images], dim=0)
-
         return (crossfade_images,)
 
 class CreateTextMask:
@@ -963,6 +975,7 @@ class ColorMatch:
 
 NODE_CLASS_MAPPINGS = {
     "INTConstant": INTConstant,
+    "FloatConstant": FloatConstant,
     "ConditioningMultiCombine": ConditioningMultiCombine,
     "ConditioningSetMaskAndCombine": ConditioningSetMaskAndCombine,
     "ConditioningSetMaskAndCombine3": ConditioningSetMaskAndCombine3,
@@ -983,6 +996,7 @@ NODE_CLASS_MAPPINGS = {
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "INTConstant": "INT Constant",
+    "FloatConstant": "Float Constant",
     "ConditioningMultiCombine": "Conditioning Multi Combine",
     "ConditioningSetMaskAndCombine": "ConditioningSetMaskAndCombine",
     "ConditioningSetMaskAndCombine3": "ConditioningSetMaskAndCombine3",

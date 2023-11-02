@@ -8,6 +8,11 @@ app.registerExtension({
             switch (title) {
                 case "INT Constant":
                     node.setSize([200, 58]);
+                    node.color = "#1b4669";
+                    node.bgcolor = "#29699c";
+                    break;
+                case "Float Constant":
+                    node.setSize([200, 58]);
                     node.color = LGraphCanvas.node_colors.green.color;
                     node.bgcolor = LGraphCanvas.node_colors.green.bgcolor;
                     break;
