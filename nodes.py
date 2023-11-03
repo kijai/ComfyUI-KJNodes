@@ -285,7 +285,7 @@ class CreateFadeMask:
 
 class CrossFadeImages:
     
-    RETURN_TYPES = ("IMAGE",)
+    RETURN_TYPES = ("IMAGE", "IMAGE")
     FUNCTION = "crossfadeimages"
     CATEGORY = "KJNodes"
 
@@ -362,8 +362,33 @@ class CrossFadeImages:
         # Append the beginning of images_1
         beginning_images_1 = images_1[:transition_start_index]
         crossfade_images = torch.cat([beginning_images_1, crossfade_images], dim=0)
-        return (crossfade_images,)
+        return (crossfade_images, )
 
+class GetImageRangeFromBatch:
+    
+    RETURN_TYPES = ("IMAGE",)
+    FUNCTION = "imagesfrombatch"
+    CATEGORY = "KJNodes"
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                 "images": ("IMAGE",),
+                 "start_index": ("INT", {"default": 1,"min": 0, "max": 4096, "step": 1}),
+                 "num_frames": ("INT", {"default": 1,"min": 0, "max": 4096, "step": 1}),
+        },
+    } 
+    
+    def imagesfrombatch(self, images, start_index, num_frames):
+        if start_index >= len(images):
+            raise ValueError("GetImageRangeFromBatch: Start index is out of range")
+        end_index = start_index + num_frames
+        if end_index > len(images):
+            raise ValueError("GetImageRangeFromBatch: End index is out of range")
+        chosen_images = images[start_index:end_index]
+        return (chosen_images, )
+    
 class CreateTextMask:
     
     RETURN_TYPES = ("IMAGE", "MASK",)
@@ -876,7 +901,8 @@ class EmptyLatentImagePresets:
         return {
         "required": {
             "dimensions": (
-            [   '768 x 512',
+            [   '512 x 512',
+                '768 x 512',
                 '960 x 512',
                 '1024 x 512',
                 '1536 x 640',
@@ -887,7 +913,7 @@ class EmptyLatentImagePresets:
                 '1024 x 1024',
             ],
             {
-            "default": '1024 x 1024'
+            "default": '512 x 512'
              }),
            
             "invert": ("BOOLEAN", {"default": False}),
@@ -993,6 +1019,7 @@ NODE_CLASS_MAPPINGS = {
     "CrossFadeImages": CrossFadeImages,
     "EmptyLatentImagePresets": EmptyLatentImagePresets,
     "ColorMatch": ColorMatch,
+    "GetImageRangeFromBatch": GetImageRangeFromBatch
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "INTConstant": "INT Constant",
@@ -1013,4 +1040,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "SomethingToString": "SomethingToString",
     "EmptyLatentImagePresets": "EmptyLatentImagePresets",
     "ColorMatch": "ColorMatch",
+    "GetImageRangeFromBatch": "GetImageRangeFromBatch"
 }
