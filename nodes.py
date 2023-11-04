@@ -393,6 +393,24 @@ class GetImageRangeFromBatch:
             raise ValueError("GetImageRangeFromBatch: End index is out of range")
         chosen_images = images[start_index:end_index]
         return (chosen_images, )
+
+class ReverseImageBatch:
+    
+    RETURN_TYPES = ("IMAGE",)
+    FUNCTION = "reverseimagebatch"
+    CATEGORY = "KJNodes"
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                 "images": ("IMAGE",),
+        },
+    } 
+    
+    def reverseimagebatch(self, images):
+        reversed_images = torch.flip(images, [0])
+        return (reversed_images, )
     
 class CreateTextMask:
     
@@ -409,43 +427,46 @@ class CreateTextMask:
                  "text_x": ("INT", {"default": 0,"min": 0, "max": 4096, "step": 1}),
                  "text_y": ("INT", {"default": 0,"min": 0, "max": 4096, "step": 1}),
                  "font_size": ("INT", {"default": 32,"min": 8, "max": 4096, "step": 1}),
+                 "font_color": ("STRING", {"default": "white"}),
                  "text": ("STRING", {"default": "HELLO!"}),
                  "font_path": ("STRING", {"default": "fonts\\TTNorms-Black.otf"}),
-                 "width": ("INT", {"default": 256,"min": 16, "max": 4096, "step": 1}),
-                 "height": ("INT", {"default": 256,"min": 16, "max": 4096, "step": 1}),
+                 "width": ("INT", {"default": 512,"min": 16, "max": 4096, "step": 1}),
+                 "height": ("INT", {"default": 512,"min": 16, "max": 4096, "step": 1}),
                  "start_rotation": ("INT", {"default": 0,"min": 0, "max": 359, "step": 1}),
-                 "end_rotation": ("INT", {"default": 359,"min": -359, "max": 359, "step": 1}),
+                 "end_rotation": ("INT", {"default": 0,"min": -359, "max": 359, "step": 1}),
         },
     } 
 
-    def createtextmask(self, frames, width, height, invert, text_x, text_y, text, font_size, font_path, start_rotation, end_rotation):
+    def createtextmask(self, frames, width, height, invert, text_x, text_y, text, font_size, font_color, font_path, start_rotation, end_rotation):
         # Define the number of images in the batch
         batch_size = frames
         out = []
         masks = []
         rotation = start_rotation
-        if frames > 1:
+        if start_rotation != end_rotation:
             rotation_increment = (end_rotation - start_rotation) / (batch_size - 1)
         if font_path == "fonts\\TTNorms-Black.otf": #I don't know why relative path won't work otherwise...
             font_path = os.path.join(script_dir, font_path)
         # Generate the text
         for i in range(batch_size):
-           image = Image.new("RGB", (width, height), "black")
-           draw = ImageDraw.Draw(image)
-           font = ImageFont.truetype(font_path, font_size)
-           text_width, text_height = draw.textsize(text, font=font)
-           text_center_x = text_x + text_width / 2
-           text_center_y = text_y + text_height / 2
-           draw.text((text_x, text_y), text, font=font, fill="white")
-           image = image.rotate(rotation, center=(text_center_x, text_center_y))
-           image = np.array(image).astype(np.float32) / 255.0
-           image = torch.from_numpy(image)[None,]
-           mask = image[:, :, :, 0] 
-           masks.append(mask)
-           out.append(image)
-           rotation += rotation_increment
+            image = Image.new("RGB", (width, height), "black")
+            draw = ImageDraw.Draw(image)
+            font = ImageFont.truetype(font_path, font_size)
+            text_width, text_height = draw.textsize(text, font=font)
+            text_center_x = text_x + text_width / 2
+            text_center_y = text_y + text_height / 2
+            draw.text((text_x, text_y), text, font=font, fill=font_color)
+            if start_rotation != end_rotation:
+                image = image.rotate(rotation, center=(text_center_x, text_center_y))
+                rotation += rotation_increment
+            image = np.array(image).astype(np.float32) / 255.0
+            image = torch.from_numpy(image)[None,]
+            mask = image[:, :, :, 0] 
+            masks.append(mask)
+            out.append(image)
+            
         if invert:
-            return (1.0 - torch.cat(out, dim=0),)
+            return (1.0 - torch.cat(out, dim=0), 1.0 - torch.cat(masks, dim=0),)
         return (torch.cat(out, dim=0),torch.cat(masks, dim=0),)
     
 class GrowMaskWithBlur:
@@ -1098,7 +1119,8 @@ NODE_CLASS_MAPPINGS = {
     "EmptyLatentImagePresets": EmptyLatentImagePresets,
     "ColorMatch": ColorMatch,
     "GetImageRangeFromBatch": GetImageRangeFromBatch,
-    "SaveImageWithAlpha": SaveImageWithAlpha
+    "SaveImageWithAlpha": SaveImageWithAlpha,
+    "ReverseImageBatch": ReverseImageBatch
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "INTConstant": "INT Constant",
@@ -1120,5 +1142,6 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "EmptyLatentImagePresets": "EmptyLatentImagePresets",
     "ColorMatch": "ColorMatch",
     "GetImageRangeFromBatch": "GetImageRangeFromBatch",
-    "SaveImageWithAlpha": "SaveImageWithAlpha"
+    "SaveImageWithAlpha": "SaveImageWithAlpha",
+    "ReverseImageBatch": "ReverseImageBatch"
 }
