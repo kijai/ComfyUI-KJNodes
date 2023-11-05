@@ -453,7 +453,8 @@ class CreateTextMask:
             image = Image.new("RGB", (width, height), "black")
             draw = ImageDraw.Draw(image)
             font = ImageFont.truetype(font_path, font_size)
-            text_width, text_height = draw.textsize(text, font=font)
+            text_width = font.getlength(text)
+            text_height = font_size
             text_center_x = text_x + text_width / 2
             text_center_y = text_y + text_height / 2
             draw.text((text_x, text_y), text, font=font, fill=font_color)
