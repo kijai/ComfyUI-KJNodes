@@ -362,9 +362,16 @@ class CrossFadeImages:
         last_frame = crossfade_images[-1]
         # Calculate the number of remaining frames from images_2
         remaining_frames = len(images_2) - (transition_start_index + transitioning_frames)
-        # Append the last frame result duplicated to crossfade_images
-        remaining_frames_images = last_frame.unsqueeze(0).repeat(remaining_frames, 1, 1, 1)
-        crossfade_images = torch.cat([crossfade_images, remaining_frames_images], dim=0)
+        # Crossfade the remaining frames with the last used alpha value
+        for i in range(remaining_frames):
+            alpha = alphas[-1]
+            image1 = images_1[i + transition_start_index + transitioning_frames]
+            image2 = images_2[i + transition_start_index + transitioning_frames]
+            easing_function = easing_functions.get(interpolation)
+            alpha = easing_function(alpha)  # Apply the easing function to the alpha value
+
+            crossfade_image = crossfade(image1, image2, alpha)
+            crossfade_images = torch.cat([crossfade_images, crossfade_image.unsqueeze(0)], dim=0)
         # Append the beginning of images_1
         beginning_images_1 = images_1[:transition_start_index]
         crossfade_images = torch.cat([beginning_images_1, crossfade_images], dim=0)
@@ -394,6 +401,36 @@ class GetImageRangeFromBatch:
             raise ValueError("GetImageRangeFromBatch: End index is out of range")
         chosen_images = images[start_index:end_index]
         return (chosen_images, )
+  
+class ReplaceImagesInBatch:
+    
+    RETURN_TYPES = ("IMAGE",)
+    FUNCTION = "replace"
+    CATEGORY = "KJNodes"
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                 "original_images": ("IMAGE",),
+                 "replacement_images": ("IMAGE",),
+                 "start_index": ("INT", {"default": 1,"min": 0, "max": 4096, "step": 1}),
+        },
+    } 
+    
+    def replace(self, original_images, replacement_images, start_index):
+        images = None
+        if start_index >= len(original_images):
+            raise ValueError("GetImageRangeFromBatch: Start index is out of range")
+        end_index = start_index + len(replacement_images)
+        if end_index > len(original_images):
+            raise ValueError("GetImageRangeFromBatch: End index is out of range")
+         # Create a copy of the original_images tensor
+        original_images_copy = original_images.clone()
+        original_images_copy[start_index:end_index] = replacement_images
+        images = original_images_copy
+        return (images, )
+    
 
 class ReverseImageBatch:
     
@@ -1261,6 +1298,7 @@ NODE_CLASS_MAPPINGS = {
     "ImageGridComposite3x3": ImageGridComposite3x3,
     "ImageConcanate": ImageConcanate,
     "ImageBatchTestPattern": ImageBatchTestPattern,
+    "ReplaceImagesInBatch": ReplaceImagesInBatch
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "INTConstant": "INT Constant",
@@ -1287,5 +1325,6 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "ImageGridComposite2x2": "ImageGridComposite2x2",
     "ImageGridComposite3x3": "ImageGridComposite3x3",
     "ImageConcanate": "ImageConcanate",
-    "ImageBatchTestPattern": "ImageBatchTestPattern"
+    "ImageBatchTestPattern": "ImageBatchTestPattern",
+    "ReplaceImagesInBatch": "ReplaceImagesInBatch"
 }
