@@ -1,6 +1,7 @@
 import nodes
 import torch
 import torch.nn.functional as F
+import torchvision.utils as vutils
 import scipy.ndimage
 import numpy as np
 from PIL import ImageColor, Image, ImageDraw, ImageFont
@@ -1097,6 +1098,55 @@ class SaveImageWithAlpha:
             })
 
         return { "ui": { "images": results } }
+
+
+class ImageGridComposite2x2:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": {
+            "image1": ("IMAGE",),
+            "image2": ("IMAGE",),
+            "image3": ("IMAGE",),
+            "image4": ("IMAGE",),
+            
+        }}
+
+    RETURN_TYPES = ("IMAGE",)
+    FUNCTION = "compositegrid"
+    CATEGORY = "KJNodes"
+
+    def compositegrid(self, image1, image2, image3, image4):
+        top_row = torch.cat((image1, image2), dim=2)
+        bottom_row = torch.cat((image3, image4), dim=2)
+        grid = torch.cat((top_row, bottom_row), dim=1)
+        return (grid,)
+    
+class ImageGridComposite3x3:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": {
+            "image1": ("IMAGE",),
+            "image2": ("IMAGE",),
+            "image3": ("IMAGE",),
+            "image4": ("IMAGE",),
+            "image5": ("IMAGE",),
+            "image6": ("IMAGE",),
+            "image7": ("IMAGE",),
+            "image8": ("IMAGE",),
+            "image9": ("IMAGE",),
+            
+        }}
+
+    RETURN_TYPES = ("IMAGE",)
+    FUNCTION = "compositegrid"
+    CATEGORY = "KJNodes"
+
+    def compositegrid(self, image1, image2, image3, image4, image5, image6, image7, image8, image9):
+        top_row = torch.cat((image1, image2, image3), dim=2)
+        mid_row = torch.cat((image4, image5, image6), dim=2)
+        bottom_row = torch.cat((image7, image8, image9), dim=2)
+        grid = torch.cat((top_row, mid_row, bottom_row), dim=1)
+        return (grid,)
     
 NODE_CLASS_MAPPINGS = {
     "INTConstant": INTConstant,
@@ -1120,7 +1170,9 @@ NODE_CLASS_MAPPINGS = {
     "ColorMatch": ColorMatch,
     "GetImageRangeFromBatch": GetImageRangeFromBatch,
     "SaveImageWithAlpha": SaveImageWithAlpha,
-    "ReverseImageBatch": ReverseImageBatch
+    "ReverseImageBatch": ReverseImageBatch,
+    "ImageGridComposite2x2": ImageGridComposite2x2,
+    "ImageGridComposite3x3": ImageGridComposite3x3
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "INTConstant": "INT Constant",
@@ -1143,5 +1195,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "ColorMatch": "ColorMatch",
     "GetImageRangeFromBatch": "GetImageRangeFromBatch",
     "SaveImageWithAlpha": "SaveImageWithAlpha",
-    "ReverseImageBatch": "ReverseImageBatch"
+    "ReverseImageBatch": "ReverseImageBatch",
+    "ImageGridComposite2x2": "ImageGridComposite2x2",
+    "ImageGridComposite3x3": "ImageGridComposite3x3"
 }
