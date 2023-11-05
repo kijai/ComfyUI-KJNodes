@@ -1100,7 +1100,32 @@ class SaveImageWithAlpha:
 
         return { "ui": { "images": results } }
 
+class ImageConcanate:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": {
+            "image1": ("IMAGE",),
+            "image2": ("IMAGE",),
+            "direction": (
+            [   'right',
+                'down',
+            ],
+            {
+            "default": 'right'
+             }),
+        }}
 
+    RETURN_TYPES = ("IMAGE",)
+    FUNCTION = "concanate"
+    CATEGORY = "KJNodes"
+
+    def concanate(self, image1, image2, direction):
+        if direction == 'right':
+            row = torch.cat((image1, image2), dim=2)
+        elif direction == 'down':
+            row = torch.cat((image1, image2), dim=1)
+        return (row,)
+    
 class ImageGridComposite2x2:
     @classmethod
     def INPUT_TYPES(s):
@@ -1108,8 +1133,7 @@ class ImageGridComposite2x2:
             "image1": ("IMAGE",),
             "image2": ("IMAGE",),
             "image3": ("IMAGE",),
-            "image4": ("IMAGE",),
-            
+            "image4": ("IMAGE",),   
         }}
 
     RETURN_TYPES = ("IMAGE",)
@@ -1134,8 +1158,7 @@ class ImageGridComposite3x3:
             "image6": ("IMAGE",),
             "image7": ("IMAGE",),
             "image8": ("IMAGE",),
-            "image9": ("IMAGE",),
-            
+            "image9": ("IMAGE",),     
         }}
 
     RETURN_TYPES = ("IMAGE",)
@@ -1173,7 +1196,8 @@ NODE_CLASS_MAPPINGS = {
     "SaveImageWithAlpha": SaveImageWithAlpha,
     "ReverseImageBatch": ReverseImageBatch,
     "ImageGridComposite2x2": ImageGridComposite2x2,
-    "ImageGridComposite3x3": ImageGridComposite3x3
+    "ImageGridComposite3x3": ImageGridComposite3x3,
+    "ImageConcanate": ImageConcanate
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "INTConstant": "INT Constant",
@@ -1198,5 +1222,6 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "SaveImageWithAlpha": "SaveImageWithAlpha",
     "ReverseImageBatch": "ReverseImageBatch",
     "ImageGridComposite2x2": "ImageGridComposite2x2",
-    "ImageGridComposite3x3": "ImageGridComposite3x3"
+    "ImageGridComposite3x3": "ImageGridComposite3x3",
+    "ImageConcanate": "ImageConcanate"
 }
