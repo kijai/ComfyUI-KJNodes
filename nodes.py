@@ -291,7 +291,7 @@ class CreateFadeMask:
 
 class CrossFadeImages:
     
-    RETURN_TYPES = ("IMAGE", "IMAGE")
+    RETURN_TYPES = ("IMAGE",)
     FUNCTION = "crossfadeimages"
     CATEGORY = "KJNodes"
 
