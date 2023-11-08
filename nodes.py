@@ -1289,11 +1289,15 @@ class BatchCropFromMask:
         "IMAGE",
         "IMAGE",
         "BBOX",
+        "INT",
+        "INT",
     )
     RETURN_NAMES = (
         "original_images",
         "cropped_images",
         "bboxes",
+        "width",
+        "height",
     )
     FUNCTION = "crop"
     CATEGORY = "KJNodes/masking"
@@ -1343,7 +1347,7 @@ class BatchCropFromMask:
             cropped_images.append(cropped_img)
         cropped_out = torch.stack(cropped_images, dim=0)
         
-        return (original_images, cropped_out, bounding_boxes,)
+        return (original_images, cropped_out, bounding_boxes, bbox_size, bbox_size,)
 
 
 def bbox_to_region(bbox, target_size=None):
