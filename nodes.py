@@ -1575,7 +1575,7 @@ class RoundMask:
 
     RETURN_TYPES = ("MASK",)
     FUNCTION = "round"
-    CATEGORY = "KJNodes"
+    CATEGORY = "KJNodes/masking"
 
     def round(self, mask):
         mask = mask.round()
