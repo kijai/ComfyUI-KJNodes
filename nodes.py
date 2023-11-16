@@ -1986,7 +1986,51 @@ class OffsetMask:
                     mask = torch.cat([mask[:, -temp_y:, :], torch.zeros((batch_size, -temp_y, width))], dim=1)
 
         return mask,
-    
+
+class WidgetToString:
+    @classmethod
+    def IS_CHANGED(cls, **kwargs):
+        return float("NaN")
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "id": ("INT", {"default": 0}),
+                "widget_name": ("STRING", {"multiline": False}),
+                "return_all": ("BOOLEAN", {"default": False}),
+            },
+            "hidden": {"extra_pnginfo": "EXTRA_PNGINFO",
+                       "prompt": "PROMPT"},
+        }
+
+    RETURN_TYPES = ("STRING", )
+    FUNCTION = "get_widget_value"
+    CATEGORY = "KJNodes"
+
+    def get_widget_value(self, id, widget_name, extra_pnginfo, prompt, return_all=False):
+        workflow = extra_pnginfo["workflow"]
+        results = []
+        for node in workflow["nodes"]:
+            print(node)
+            node_id = node["id"]
+
+            if node_id != id:
+                continue
+
+            values = prompt[str(node_id)]
+            if "inputs" in values:
+                if return_all:
+                    results.append(', '.join(f'{k}: {v}' for k, v in values["inputs"].items()))
+                elif widget_name in values["inputs"]:
+                    v = values["inputs"][widget_name]
+                    return (v, )
+                else:
+                    raise NameError(f"Widget not found: {id}.{widget_name}")
+        if not results:
+            raise NameError(f"Node not found: {id}")
+        return (', '.join(results).strip(', '), )
+
 NODE_CLASS_MAPPINGS = {
     "INTConstant": INTConstant,
     "FloatConstant": FloatConstant,
@@ -2023,6 +2067,7 @@ NODE_CLASS_MAPPINGS = {
     "RoundMask": RoundMask,
     "ResizeMask": ResizeMask,
     "OffsetMask": OffsetMask,
+    "WidgetToString": WidgetToString,
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "INTConstant": "INT Constant",
@@ -2059,4 +2104,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "RoundMask": "RoundMask",
     "ResizeMask": "ResizeMask",
     "OffsetMask": "OffsetMask",
+    "WidgetToString": "WidgetToString",
 }
