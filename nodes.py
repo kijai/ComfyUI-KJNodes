@@ -1799,9 +1799,9 @@ class BatchCLIPSeg:
                     {
                         "images": ("IMAGE",),
                         "text": ("STRING", {"multiline": False}),
-                        "threshold": ("FLOAT", {"default": 0.4,"min": 0.0, "max": 10.0, "step": 0.01}),
+                        "threshold": ("FLOAT", {"default": 0.15,"min": 0.0, "max": 10.0, "step": 0.01}),
                         "binary_mask": ("BOOLEAN", {"default": True}),
-                        "combine_mask": ("BOOLEAN", {"default": True}),
+                        "combine_mask": ("BOOLEAN", {"default": False}),
                         "use_cuda": ("BOOLEAN", {"default": True}),
                      },
                 }
