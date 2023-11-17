@@ -1335,9 +1335,7 @@ class BatchCropFromMask:
         bounding_boxes = []
         cropped_images = []
 
-       # Initialize max_bbox_size for the first frame
-        if not hasattr(self, 'max_bbox_size'):
-            self.max_bbox_size = 0
+        self.max_bbox_size = 0
 
         # First, calculate the maximum bounding box size across all masks
         curr_max_bbox_size = 0
