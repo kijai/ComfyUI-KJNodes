@@ -1366,9 +1366,9 @@ class BatchCropFromMask:
         self.max_bbox_height = int(self.max_bbox_height * crop_size_mult)
         bbox_aspect_ratio = self.max_bbox_width / self.max_bbox_height
 
-        # Make sure max_bbox_size is divisible by 16, if not, round it upwards so it is
-        self.max_bbox_width = math.ceil(self.max_bbox_width / 32) * 32
-        self.max_bbox_height = math.ceil(self.max_bbox_height / 32) * 32
+        # # Make sure max_bbox_size is divisible by 32, if not, round it upwards so it is
+        # self.max_bbox_width = math.ceil(self.max_bbox_width / 32) * 32
+        # self.max_bbox_height = math.ceil(self.max_bbox_height / 32) * 32
 
         # Then, for each mask and corresponding image...
         for i, (mask, img) in enumerate(zip(masks, original_images)):
