@@ -1957,7 +1957,7 @@ class OffsetMask:
 
         batch_size, height, width = mask.shape
 
-        if angle is not 0 and incremental:
+        if angle != 0 and incremental:
             for i in range(batch_size):
                 rotation_angle = angle * (i+1)
                 mask[i] = TF.rotate(mask[i].unsqueeze(0), rotation_angle).squeeze(0)
@@ -2128,7 +2128,7 @@ class CreateVoronoiMask:
     def INPUT_TYPES(s):
         return {
             "required": {
-                 "frames": ("INT", {"default": 1,"min": 1, "max": 4096, "step": 1}),
+                 "frames": ("INT", {"default": 16,"min": 2, "max": 4096, "step": 1}),
                  "num_points": ("INT", {"default": 15,"min": 1, "max": 4096, "step": 1}),
                  "line_width": ("INT", {"default": 4,"min": 1, "max": 4096, "step": 1}),
                  "speed": ("FLOAT", {"default": 0.5,"min": 0.0, "max": 1.0, "step": 0.01}),
@@ -2142,9 +2142,15 @@ class CreateVoronoiMask:
         batch_size = frames
         out = []
           
-         # Create start and end points for each point
+        # Calculate aspect ratio
+        aspect_ratio = frame_width / frame_height
+        
+        # Create start and end points for each point, considering the aspect ratio
         start_points = np.random.rand(num_points, 2)
+        start_points[:, 0] *= aspect_ratio
+        
         end_points = np.random.rand(num_points, 2)
+        end_points[:, 0] *= aspect_ratio
 
         for i in range(batch_size):
             # Interpolate the points' positions based on the current frame
@@ -2152,15 +2158,18 @@ class CreateVoronoiMask:
             t = np.clip(t, 0, 1)  # ensure t is in [0, 1]
             points = (1 - t) * start_points + t * end_points  # lerp
 
+            # Adjust points for aspect ratio
+            points[:, 0] *= aspect_ratio
+
             vor = Voronoi(points)
 
             # Create a blank image with a white background
             fig, ax = plt.subplots()
             plt.subplots_adjust(left=0, right=1, bottom=0, top=1)
-            ax.set_xlim([0, 1]); ax.set_ylim([0, 1])
+            ax.set_xlim([0, aspect_ratio]); ax.set_ylim([0, 1])  # adjust x limits
             ax.axis('off')
             ax.margins(0, 0)
-            fig.set_size_inches(frame_width/100, frame_height/100)
+            fig.set_size_inches(aspect_ratio * frame_height/100, frame_height/100)  # adjust figure size
             ax.fill_between([0, 1], [0, 1], color='white')
 
             # Plot each Voronoi ridge
@@ -2179,6 +2188,83 @@ class CreateVoronoiMask:
 
             out.append(mask)
 
+        return (torch.stack(out, dim=0), 1.0 - torch.stack(out, dim=0),)
+    
+from mpl_toolkits.axes_grid1 import ImageGrid
+
+from .magictex import *
+
+class CreateMagicMask:
+    
+    RETURN_TYPES = ("MASK", "MASK",)
+    RETURN_NAMES = ("mask", "mask_inverted",)
+    FUNCTION = "createmagicmask"
+    CATEGORY = "KJNodes/masking/generate"
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                 "frames": ("INT", {"default": 16,"min": 2, "max": 4096, "step": 1}),
+                 "depth": ("INT", {"default": 2,"min": 1, "max": 50, "step": 1}),
+                 "distortion": ("FLOAT", {"default": 1.0,"min": 0.0, "max": 10.0, "step": 0.01}),
+                 "seed": ("INT", {"default": 123,"min": 0, "max": 99999999, "step": 1}),
+                 "transitions": ("INT", {"default": 2,"min": 1, "max": 20, "step": 1}),
+                 "frame_width": ("INT", {"default": 512,"min": 16, "max": 4096, "step": 1}),
+                 "frame_height": ("INT", {"default": 512,"min": 16, "max": 4096, "step": 1}),
+        },
+    } 
+
+    def createmagicmask(self, frames, transitions, depth, distortion, seed, frame_width, frame_height):
+        rng = np.random.default_rng(seed)
+        out = []
+        coords = coordinate_grid((frame_width, frame_height))
+
+        # Calculate the number of frames for each transition
+        frames_per_transition = frames // transitions
+
+        # Generate a base set of parameters
+        base_params = {
+            "coords": random_transform(coords, rng),
+            "depth": depth,
+            "distortion": distortion,
+        }
+        for t in range(transitions):
+        # Generate a second set of parameters that is at most max_diff away from the base parameters
+            params1 = base_params.copy()
+            params2 = base_params.copy()
+
+            params1['coords'] = random_transform(coords, rng)
+            params2['coords'] = random_transform(coords, rng)
+
+            for i in range(frames_per_transition):
+                # Compute the interpolation factor
+                alpha = i / frames_per_transition
+
+                # Interpolate between the two sets of parameters
+                params = params1.copy()
+                params['coords'] = (1 - alpha) * params1['coords'] + alpha * params2['coords']
+
+                tex = magic(**params)
+
+                fig = plt.figure(figsize=(10, 10))
+                ax = fig.add_subplot(111)
+                plt.subplots_adjust(left=0, right=1, bottom=0, top=1)
+                
+                ax.get_yaxis().set_ticks([])
+                ax.get_xaxis().set_ticks([])
+                ax.imshow(tex, aspect='auto')
+                
+                fig.canvas.draw()
+                img = np.array(fig.canvas.renderer._renderer)
+                
+                plt.close(fig)
+                
+                pil_img = Image.fromarray(img).convert("L")
+                mask = torch.tensor(np.array(pil_img)) / 255.0
+                
+                out.append(mask)
+        
         return (torch.stack(out, dim=0), 1.0 - torch.stack(out, dim=0),)
     
 NODE_CLASS_MAPPINGS = {
@@ -2220,6 +2306,7 @@ NODE_CLASS_MAPPINGS = {
     "WidgetToString": WidgetToString,
     "CreateShapeMask": CreateShapeMask,
     "CreateVoronoiMask": CreateVoronoiMask,
+    "CreateMagicMask": CreateMagicMask,
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "INTConstant": "INT Constant",
@@ -2259,4 +2346,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "WidgetToString": "WidgetToString",
     "CreateShapeMask": "CreateShapeMask",
     "CreateVoronoiMask": "CreateVoronoiMask",
+    "CreateMagicMask": "CreateMagicMask",
 }
