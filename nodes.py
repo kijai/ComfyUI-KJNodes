@@ -2279,7 +2279,31 @@ class CreateMagicMask:
                 out.append(mask)
         
         return (torch.stack(out, dim=0), 1.0 - torch.stack(out, dim=0),)
-    
+
+class BboxToInt:
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "bboxes": ("BBOX",),
+                "index": ("INT", {"default": 0,"min": 0, "max": 99999999, "step": 1}),
+            },
+        }
+
+    RETURN_TYPES = ("INT","INT","INT","INT","INT","INT",)
+    RETURN_NAMES = ("x_min","y_min","width","height", "center_x","center_y",)
+    FUNCTION = "bboxtoint"
+
+    CATEGORY = "KJNodes/masking"
+
+    def bboxtoint(self, bboxes, index):
+        x_min, y_min, width, height = bboxes[index]
+        center_x = int(x_min + width / 2)
+        center_y = int(y_min + height / 2)
+        
+        return (x_min, y_min, width, height, center_x, center_y,)
+      
 NODE_CLASS_MAPPINGS = {
     "INTConstant": INTConstant,
     "FloatConstant": FloatConstant,
@@ -2320,6 +2344,7 @@ NODE_CLASS_MAPPINGS = {
     "CreateShapeMask": CreateShapeMask,
     "CreateVoronoiMask": CreateVoronoiMask,
     "CreateMagicMask": CreateMagicMask,
+    "BboxToInt": BboxToInt,
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "INTConstant": "INT Constant",
@@ -2360,4 +2385,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "CreateShapeMask": "CreateShapeMask",
     "CreateVoronoiMask": "CreateVoronoiMask",
     "CreateMagicMask": "CreateMagicMask",
+    "BboxToInt": "BboxToInt",
 }
