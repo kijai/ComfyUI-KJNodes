@@ -238,7 +238,7 @@ class CreateFadeMask:
         return {
             "required": {
                  "invert": ("BOOLEAN", {"default": False}),
-                 "frames": ("INT", {"default": 0,"min": 0, "max": 255, "step": 1}),
+                 "frames": ("INT", {"default": 2,"min": 2, "max": 255, "step": 1}),
                  "width": ("INT", {"default": 256,"min": 16, "max": 4096, "step": 1}),
                  "height": ("INT", {"default": 256,"min": 16, "max": 4096, "step": 1}),
                  "interpolation": (["linear", "ease_in", "ease_out", "ease_in_out"],),
@@ -249,7 +249,7 @@ class CreateFadeMask:
         },
     } 
     
-    def createfademask(self, frames, width, height, invert, interpolation, start_level, midpoint_level, end_level, midpoint_frame=None):
+    def createfademask(self, frames, width, height, invert, interpolation, start_level, midpoint_level, end_level, midpoint_frame):
         def ease_in(t):
             return t * t
 
@@ -263,7 +263,7 @@ class CreateFadeMask:
         out = []
         image_batch = np.zeros((batch_size, height, width), dtype=np.float32)
 
-        if midpoint_frame is None:
+        if midpoint_frame is 0:
             midpoint_frame = batch_size // 2
 
         for i in range(batch_size):
@@ -2219,10 +2219,10 @@ class CreateMagicMask:
         return {
             "required": {
                  "frames": ("INT", {"default": 16,"min": 2, "max": 4096, "step": 1}),
-                 "depth": ("INT", {"default": 2,"min": 1, "max": 50, "step": 1}),
-                 "distortion": ("FLOAT", {"default": 1.0,"min": 0.0, "max": 10.0, "step": 0.01}),
+                 "depth": ("INT", {"default": 12,"min": 1, "max": 500, "step": 1}),
+                 "distortion": ("FLOAT", {"default": 1.5,"min": 0.0, "max": 100.0, "step": 0.01}),
                  "seed": ("INT", {"default": 123,"min": 0, "max": 99999999, "step": 1}),
-                 "transitions": ("INT", {"default": 2,"min": 1, "max": 20, "step": 1}),
+                 "transitions": ("INT", {"default": 1,"min": 1, "max": 20, "step": 1}),
                  "frame_width": ("INT", {"default": 512,"min": 16, "max": 4096, "step": 1}),
                  "frame_height": ("INT", {"default": 512,"min": 16, "max": 4096, "step": 1}),
         },
@@ -2260,7 +2260,9 @@ class CreateMagicMask:
 
                 tex = magic(**params)
 
-                fig = plt.figure(figsize=(10, 10))
+                dpi = frame_width / 10
+                fig = plt.figure(figsize=(10, 10), dpi=dpi)
+
                 ax = fig.add_subplot(111)
                 plt.subplots_adjust(left=0, right=1, bottom=0, top=1)
                 
