@@ -2140,9 +2140,9 @@ class WidgetToString:
             values = prompt[str(node_id)]
             if "inputs" in values:
                 if return_all:
-                    results.append(', '.join(f'{k}: {v}' for k, v in values["inputs"].items()))
+                    results.append(', '.join(f'{k}: {str(v)}' for k, v in values["inputs"].items()))
                 elif widget_name in values["inputs"]:
-                    v = values["inputs"][widget_name]
+                    v = str(values["inputs"][widget_name])  # Convert to string here
                     return (v, )
                 else:
                     raise NameError(f"Widget not found: {id}.{widget_name}")
@@ -2390,7 +2390,9 @@ class BboxToInt:
         center_y = int(y_min + height / 2)
         
         return (x_min, y_min, width, height, center_x, center_y,)
-      
+
+
+
 NODE_CLASS_MAPPINGS = {
     "INTConstant": INTConstant,
     "FloatConstant": FloatConstant,
