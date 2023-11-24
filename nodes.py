@@ -1773,7 +1773,6 @@ class BatchCropFromMaskAdvanced:
 
         return (original_images, cropped_out, cropped_masks_out, combined_crop_out, combined_crop_mask_out, bounding_boxes, combined_bounding_box, self.max_bbox_size, self.max_bbox_size)
 
-
 def bbox_to_region(bbox, target_size=None):
     bbox = bbox_check(bbox, target_size)
     return (bbox[0], bbox[1], bbox[0] + bbox[2], bbox[1] + bbox[3])
@@ -1838,7 +1837,6 @@ class BatchUncropAdvanced:
             crop = crop_imgs[i]
             bbox = bboxes[i]
             
-                  
             if use_combined_mask:
                 bb_x, bb_y, bb_width, bb_height = combined_bounding_box[0]
                 paste_region = bbox_to_region((bb_x, bb_y, bb_width, bb_height), img.size)
@@ -2391,7 +2389,28 @@ class BboxToInt:
         
         return (x_min, y_min, width, height, center_x, center_y,)
 
+class SplitBboxes:
 
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "bboxes": ("BBOX",),
+                "index": ("INT", {"default": 0,"min": 0, "max": 99999999, "step": 1}),
+            },
+        }
+
+    RETURN_TYPES = ("BBOX","BBOX",)
+    RETURN_NAMES = ("bboxes_a","bboxes_b",)
+    FUNCTION = "splitbbox"
+
+    CATEGORY = "KJNodes/masking"
+
+    def splitbbox(self, bboxes, index):
+        bboxes_a = bboxes[:index]  # Sub-list from the start of bboxes up to (but not including) the index
+        bboxes_b = bboxes[index:]  # Sub-list from the index to the end of bboxes
+
+        return (bboxes_a, bboxes_b,)
 
 NODE_CLASS_MAPPINGS = {
     "INTConstant": INTConstant,
@@ -2435,6 +2454,7 @@ NODE_CLASS_MAPPINGS = {
     "CreateVoronoiMask": CreateVoronoiMask,
     "CreateMagicMask": CreateMagicMask,
     "BboxToInt": BboxToInt,
+    "SplitBboxes": SplitBboxes,
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "INTConstant": "INT Constant",
@@ -2477,4 +2497,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "CreateVoronoiMask": "CreateVoronoiMask",
     "CreateMagicMask": "CreateMagicMask",
     "BboxToInt": "BboxToInt",
+    "SplitBboxes": "SplitBboxes",
 }
