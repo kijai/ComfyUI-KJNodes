@@ -1385,7 +1385,7 @@ class BatchCropFromMask:
             "required": {
                 "original_images": ("IMAGE",),
                 "masks": ("MASK",),
-                "crop_size_mult": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.01}),
+                "crop_size_mult": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.001}),
                 "bbox_smooth_alpha": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.01}),
             },
         }
@@ -1410,14 +1410,14 @@ class BatchCropFromMask:
     def smooth_bbox_size(self, prev_bbox_size, curr_bbox_size, alpha):
         if alpha == 0:
             return prev_bbox_size
-        return int(alpha * curr_bbox_size + (1 - alpha) * prev_bbox_size)
+        return round(alpha * curr_bbox_size + (1 - alpha) * prev_bbox_size)
 
     def smooth_center(self, prev_center, curr_center, alpha=0.5):
         if alpha == 0:
             return prev_center
         return (
-            int(alpha * curr_center[0] + (1 - alpha) * prev_center[0]),
-            int(alpha * curr_center[1] + (1 - alpha) * prev_center[1])
+            round(alpha * curr_center[0] + (1 - alpha) * prev_center[0]),
+            round(alpha * curr_center[1] + (1 - alpha) * prev_center[1])
         )
 
     def crop(self, masks, original_images, crop_size_mult, bbox_smooth_alpha):
@@ -1446,8 +1446,8 @@ class BatchCropFromMask:
         self.max_bbox_height = self.smooth_bbox_size(self.max_bbox_height, curr_max_bbox_height, bbox_smooth_alpha)
 
         # Apply the crop size multiplier
-        self.max_bbox_width = int(self.max_bbox_width * crop_size_mult)
-        self.max_bbox_height = int(self.max_bbox_height * crop_size_mult)
+        self.max_bbox_width = round(self.max_bbox_width * crop_size_mult)
+        self.max_bbox_height = round(self.max_bbox_height * crop_size_mult)
         bbox_aspect_ratio = self.max_bbox_width / self.max_bbox_height
 
         # # Make sure max_bbox_size is divisible by 32, if not, round it upwards so it is
@@ -1464,7 +1464,7 @@ class BatchCropFromMask:
             # Calculate center of bounding box
             center_x = np.mean(non_zero_indices[1])
             center_y = np.mean(non_zero_indices[0])
-            curr_center = (int(center_x), int(center_y))
+            curr_center = (round(center_x), round(center_y))
 
             # If this is the first frame, initialize prev_center with curr_center
             if not hasattr(self, 'prev_center'):
@@ -1495,7 +1495,7 @@ class BatchCropFromMask:
             
             # Calculate the new dimensions while maintaining the aspect ratio
             new_height = min(cropped_img.shape[0], self.max_bbox_height)
-            new_width = int(new_height * bbox_aspect_ratio)
+            new_width = round(new_height * bbox_aspect_ratio)
 
             # Resize the image
             resize_transform = Resize((new_height, new_width))
@@ -1587,10 +1587,10 @@ class BatchUncrop:
             scale_y = crop_rescale
 
             # scaled paste_region
-            paste_region = (int(paste_region[0]*scale_x), int(paste_region[1]*scale_y), int(paste_region[2]*scale_x), int(paste_region[3]*scale_y))
+            paste_region = (round(paste_region[0]*scale_x), round(paste_region[1]*scale_y), round(paste_region[2]*scale_x), round(paste_region[3]*scale_y))
 
             # rescale the crop image to fit the paste_region
-            crop = crop.resize((int(paste_region[2]-paste_region[0]), int(paste_region[3]-paste_region[1])))
+            crop = crop.resize((round(paste_region[2]-paste_region[0]), round(paste_region[3]-paste_region[1])))
             crop_img = crop.convert("RGB")
    
             if border_blending > 1.0:
@@ -1604,7 +1604,7 @@ class BatchUncrop:
             mask = Image.new("L", img.size, 0)
 
             mask_block = Image.new("L", (paste_region[2]-paste_region[0], paste_region[3]-paste_region[1]), 255)
-            mask_block = inset_border(mask_block, int(blend_ratio / 2), (0), border_top, border_bottom, border_left, border_right)
+            mask_block = inset_border(mask_block, round(blend_ratio / 2), (0), border_top, border_bottom, border_left, border_right)
                       
             mask.paste(mask_block, paste_region)
             blend.paste(crop_img, paste_region)
@@ -1657,11 +1657,11 @@ class BatchCropFromMaskAdvanced:
     CATEGORY = "KJNodes/masking"
 
     def smooth_bbox_size(self, prev_bbox_size, curr_bbox_size, alpha):
-          return int(alpha * curr_bbox_size + (1 - alpha) * prev_bbox_size)
+          return round(alpha * curr_bbox_size + (1 - alpha) * prev_bbox_size)
 
     def smooth_center(self, prev_center, curr_center, alpha=0.5):
-        return (int(alpha * curr_center[0] + (1 - alpha) * prev_center[0]),
-                int(alpha * curr_center[1] + (1 - alpha) * prev_center[1]))
+        return (round(alpha * curr_center[0] + (1 - alpha) * prev_center[0]),
+                round(alpha * curr_center[1] + (1 - alpha) * prev_center[1]))
 
     def crop(self, masks, original_images, crop_size_mult, bbox_smooth_alpha):
         bounding_boxes = []
@@ -1687,11 +1687,11 @@ class BatchCropFromMaskAdvanced:
         new_min_x, new_max_x, new_min_y, new_max_y, combined_bbox_size = calculate_bbox(_mask)
         center_x = (new_min_x + new_max_x) / 2
         center_y = (new_min_y + new_max_y) / 2
-        half_box_size = int(combined_bbox_size // 2)
-        new_min_x = max(0, int(center_x - half_box_size))
-        new_max_x = min(original_images[0].shape[1], int(center_x + half_box_size))
-        new_min_y = max(0, int(center_y - half_box_size))
-        new_max_y = min(original_images[0].shape[0], int(center_y + half_box_size))
+        half_box_size = round(combined_bbox_size // 2)
+        new_min_x = max(0, round(center_x - half_box_size))
+        new_max_x = min(original_images[0].shape[1], round(center_x + half_box_size))
+        new_min_y = max(0, round(center_y - half_box_size))
+        new_max_y = min(original_images[0].shape[0], round(center_y + half_box_size))
         
         combined_bounding_box.append((new_min_x, new_min_y, new_max_x - new_min_x, new_max_y - new_min_y))   
         
@@ -1702,9 +1702,9 @@ class BatchCropFromMaskAdvanced:
         # Smooth the changes in the bounding box size
         self.max_bbox_size = self.smooth_bbox_size(self.max_bbox_size, curr_max_bbox_size, bbox_smooth_alpha)
         # Apply the crop size multiplier
-        self.max_bbox_size = int(self.max_bbox_size * crop_size_mult)
-        # Make sure max_bbox_size is divisible by 32, if not, round it upwards so it is
-        self.max_bbox_size = math.ceil(self.max_bbox_size / 32) * 32
+        self.max_bbox_size = round(self.max_bbox_size * crop_size_mult)
+        # Make sure max_bbox_size is divisible by 16, if not, round it upwards so it is
+        self.max_bbox_size = math.ceil(self.max_bbox_size / 16) * 16
 
         # Then, for each mask and corresponding image...
         for i, (mask, img) in enumerate(zip(masks, original_images)):
@@ -1716,7 +1716,7 @@ class BatchCropFromMaskAdvanced:
             # Calculate center of bounding box
             center_x = np.mean(non_zero_indices[1])
             center_y = np.mean(non_zero_indices[0])
-            curr_center = (int(center_x), int(center_y))
+            curr_center = (round(center_x), round(center_y))
 
             # If this is the first frame, initialize prev_center with curr_center
             if not hasattr(self, 'prev_center'):
@@ -1848,10 +1848,10 @@ class BatchUncropAdvanced:
             
             # scale paste_region
             scale_x = scale_y = crop_rescale
-            paste_region = (int(paste_region[0]*scale_x), int(paste_region[1]*scale_y), int(paste_region[2]*scale_x), int(paste_region[3]*scale_y))
+            paste_region = (round(paste_region[0]*scale_x), round(paste_region[1]*scale_y), round(paste_region[2]*scale_x), round(paste_region[3]*scale_y))
 
             # rescale the crop image to fit the paste_region
-            crop = crop.resize((int(paste_region[2]-paste_region[0]), int(paste_region[3]-paste_region[1])))
+            crop = crop.resize((round(paste_region[2]-paste_region[0]), round(paste_region[3]-paste_region[1])))
             crop_img = crop.convert("RGB")
 
             #border blending
@@ -1866,7 +1866,7 @@ class BatchUncropAdvanced:
             if use_square_mask:
                 mask = Image.new("L", img.size, 0)
                 mask_block = Image.new("L", (paste_region[2]-paste_region[0], paste_region[3]-paste_region[1]), 255)
-                mask_block = inset_border(mask_block, int(blend_ratio / 2), (0))
+                mask_block = inset_border(mask_block, round(blend_ratio / 2), (0))
                 mask.paste(mask_block, paste_region)
             else:
                 original_mask = tensor2pil(mask)[0]
