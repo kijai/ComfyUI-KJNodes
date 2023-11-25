@@ -479,13 +479,15 @@ class GetImageRangeFromBatch:
         return {
             "required": {
                  "images": ("IMAGE",),
-                 "start_index": ("INT", {"default": 1,"min": 0, "max": 4096, "step": 1}),
-                 "num_frames": ("INT", {"default": 1,"min": 0, "max": 4096, "step": 1}),
+                 "start_index": ("INT", {"default": 0,"min": -1, "max": 4096, "step": 1}),
+                 "num_frames": ("INT", {"default": 1,"min": 1, "max": 4096, "step": 1}),
         },
     } 
     
     def imagesfrombatch(self, images, start_index, num_frames):
-        if start_index >= len(images):
+        if start_index == -1:
+            start_index = len(images) - num_frames
+        if start_index < 0 or start_index >= len(images):
             raise ValueError("GetImageRangeFromBatch: Start index is out of range")
         end_index = start_index + num_frames
         if end_index > len(images):
