@@ -2436,7 +2436,7 @@ class ImageGrabPIL:
                  "width": ("INT", {"default": 512,"min": 0, "max": 4096, "step": 1}),
                  "height": ("INT", {"default": 512,"min": 0, "max": 4096, "step": 1}),
                  "num_frames": ("INT", {"default": 1,"min": 1, "max": 255, "step": 1}),
-                 "delay": ("FLOAT", {"default": 0.1,"min": 0.0, "max": 10.0, "step": 0.1}),
+                 "delay": ("FLOAT", {"default": 0.1,"min": 0.01, "max": 10.0, "step": 0.01}),
         },
     } 
 
