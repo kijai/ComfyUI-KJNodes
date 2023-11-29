@@ -2414,7 +2414,7 @@ class SplitBboxes:
         return (bboxes_a, bboxes_b,)
 
 from PIL import ImageGrab
-
+import time
 class ImageGrabPIL:
 
     @classmethod
@@ -2435,22 +2435,27 @@ class ImageGrabPIL:
                  "y": ("INT", {"default": 0,"min": 0, "max": 4096, "step": 1}),
                  "width": ("INT", {"default": 512,"min": 0, "max": 4096, "step": 1}),
                  "height": ("INT", {"default": 512,"min": 0, "max": 4096, "step": 1}),
+                 "num_frames": ("INT", {"default": 1,"min": 1, "max": 255, "step": 1}),
+                 "delay": ("FLOAT", {"default": 0.1,"min": 0.0, "max": 10.0, "step": 0.1}),
         },
     } 
 
-    def screencap(self, x, y, width, height):
-    
-        # Define the bounding box of the area you want to capture
+    def screencap(self, x, y, width, height, num_frames, delay):
+        captures = []
         bbox = (x, y, x + width, y + height)
-
-        # Capture the screen
-        screen_capture = ImageGrab.grab(bbox=bbox)
-
-        # Convert the PIL Image directly to a PyTorch tensor if that's the desired final format
-        screen_capture_torch = torch.tensor(np.array(screen_capture), dtype=torch.float32) / 255.0
-        screen_capture_torch = screen_capture_torch.unsqueeze(0)  # Permute to have channel-first format and add batch dimension
-
-        return (screen_capture_torch,)
+        
+        for _ in range(num_frames):
+            # Capture screen
+            screen_capture = ImageGrab.grab(bbox=bbox)
+            screen_capture_torch = torch.tensor(np.array(screen_capture), dtype=torch.float32) / 255.0
+            screen_capture_torch = screen_capture_torch.unsqueeze(0)
+            captures.append(screen_capture_torch)
+            
+            # Wait for a short delay if more than one frame is to be captured
+            if num_frames > 1:
+                time.sleep(delay)
+        
+        return (torch.cat(captures, dim=0),)
 
 
 NODE_CLASS_MAPPINGS = {
