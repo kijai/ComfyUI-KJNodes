@@ -2131,7 +2131,6 @@ class WidgetToString:
         workflow = extra_pnginfo["workflow"]
         results = []
         for node in workflow["nodes"]:
-            print(node)
             node_id = node["id"]
 
             if node_id != id:
@@ -2414,6 +2413,46 @@ class SplitBboxes:
 
         return (bboxes_a, bboxes_b,)
 
+from PIL import ImageGrab
+
+class ImageGrabPIL:
+
+    @classmethod
+    def IS_CHANGED(cls):
+
+        return
+
+    RETURN_TYPES = ("IMAGE",)
+    RETURN_NAMES = ("image",)
+    FUNCTION = "screencap"
+    CATEGORY = "KJNodes/experimental"
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                 "x": ("INT", {"default": 0,"min": 0, "max": 4096, "step": 1}),
+                 "y": ("INT", {"default": 0,"min": 0, "max": 4096, "step": 1}),
+                 "width": ("INT", {"default": 512,"min": 0, "max": 4096, "step": 1}),
+                 "height": ("INT", {"default": 512,"min": 0, "max": 4096, "step": 1}),
+        },
+    } 
+
+    def screencap(self, x, y, width, height):
+    
+        # Define the bounding box of the area you want to capture
+        bbox = (x, y, x + width, y + height)
+
+        # Capture the screen
+        screen_capture = ImageGrab.grab(bbox=bbox)
+
+        # Convert the PIL Image directly to a PyTorch tensor if that's the desired final format
+        screen_capture_torch = torch.tensor(np.array(screen_capture), dtype=torch.float32) / 255.0
+        screen_capture_torch = screen_capture_torch.unsqueeze(0)  # Permute to have channel-first format and add batch dimension
+
+        return (screen_capture_torch,)
+
+
 NODE_CLASS_MAPPINGS = {
     "INTConstant": INTConstant,
     "FloatConstant": FloatConstant,
@@ -2457,6 +2496,7 @@ NODE_CLASS_MAPPINGS = {
     "CreateMagicMask": CreateMagicMask,
     "BboxToInt": BboxToInt,
     "SplitBboxes": SplitBboxes,
+    "ImageGrabPIL": ImageGrabPIL
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "INTConstant": "INT Constant",
@@ -2500,4 +2540,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "CreateMagicMask": "CreateMagicMask",
     "BboxToInt": "BboxToInt",
     "SplitBboxes": "SplitBboxes",
+    "ImageGrabPIL": "ImageGrabPIL"
 }
