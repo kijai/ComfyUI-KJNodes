@@ -31,7 +31,6 @@ class INTConstant:
             "value": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
         },
         }
-
     RETURN_TYPES = ("INT",)
     RETURN_NAMES = ("value",)
     FUNCTION = "get_value"
@@ -263,7 +262,7 @@ class CreateFadeMask:
         out = []
         image_batch = np.zeros((batch_size, height, width), dtype=np.float32)
 
-        if midpoint_frame is 0:
+        if midpoint_frame == 0:
             midpoint_frame = batch_size // 2
 
         for i in range(batch_size):
@@ -2436,7 +2435,7 @@ class ImageGrabPIL:
                  "width": ("INT", {"default": 512,"min": 0, "max": 4096, "step": 1}),
                  "height": ("INT", {"default": 512,"min": 0, "max": 4096, "step": 1}),
                  "num_frames": ("INT", {"default": 1,"min": 1, "max": 255, "step": 1}),
-                 "delay": ("FLOAT", {"default": 0.1,"min": 0.01, "max": 10.0, "step": 0.01}),
+                 "delay": ("FLOAT", {"default": 0.1,"min": 0.0, "max": 10.0, "step": 0.01}),
         },
     } 
 
@@ -2457,6 +2456,24 @@ class ImageGrabPIL:
         
         return (torch.cat(captures, dim=0),)
 
+class DummyLatentOut:
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+            "latent": ("LATENT",),
+            }
+        }
+
+    RETURN_TYPES = ("LATENT",)
+    FUNCTION = "dummy"
+    CATEGORY = "KJNodes"
+    OUTPUT_NODE = True
+
+    def dummy(self, latent):
+
+        return (latent,)
 
 NODE_CLASS_MAPPINGS = {
     "INTConstant": INTConstant,
@@ -2501,7 +2518,8 @@ NODE_CLASS_MAPPINGS = {
     "CreateMagicMask": CreateMagicMask,
     "BboxToInt": BboxToInt,
     "SplitBboxes": SplitBboxes,
-    "ImageGrabPIL": ImageGrabPIL
+    "ImageGrabPIL": ImageGrabPIL,
+    "DummyLatentOut": DummyLatentOut
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "INTConstant": "INT Constant",
@@ -2545,5 +2563,6 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "CreateMagicMask": "CreateMagicMask",
     "BboxToInt": "BboxToInt",
     "SplitBboxes": "SplitBboxes",
-    "ImageGrabPIL": "ImageGrabPIL"
+    "ImageGrabPIL": "ImageGrabPIL",
+    "DummyLatentOut": "DummyLatentOut"
 }
