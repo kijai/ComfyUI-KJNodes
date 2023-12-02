@@ -313,7 +313,9 @@ app.registerExtension({
 			
 				if (setter) {
 					const slotInfo = setter.inputs[slot];
+					console.log(slotInfo)
 					const link = this.graph.links[slotInfo.link];
+					console.log(link)
 					return link;
 				} else {
 					const errorMessage = "No SetNode found for " + this.widgets[0].value + "(" + this.type + ")";

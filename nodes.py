@@ -2475,6 +2475,56 @@ class DummyLatentOut:
 
         return (latent,)
 
+class NormalizeLatent:
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+            "latent": ("LATENT",),
+            }
+        }
+
+    RETURN_TYPES = ("LATENT",)
+    FUNCTION = "normalize"
+    CATEGORY = "KJNodes"
+    OUTPUT_NODE = True
+
+    def normalize(self, latent):
+        samples = latent["samples"]
+        samples /= samples.std()
+        out = latent.copy()
+        out["samples"] = samples
+        return (out,)
+    
+class FlipSigmasAdjusted:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required":
+                    {"sigmas": ("SIGMAS", ),
+                     }
+                }
+    RETURN_TYPES = ("SIGMAS",)
+    CATEGORY = "sampling/custom_sampling/sigmas"
+
+    FUNCTION = "get_sigmas_adjusted"
+
+    def get_sigmas_adjusted(self, sigmas):
+        print(sigmas)
+        sigmas = sigmas.flip(0)
+        if sigmas[0] == 0:
+            sigmas[0] = 0.0001
+        adjusted_sigmas = sigmas.clone()  # Create a copy to hold the adjusted values
+
+        # Apply the special adjustment: use the current index except for the first element
+        for i in range(1, len(sigmas)):
+            adjusted_sigmas[i] = sigmas[i - 1]
+
+        if adjusted_sigmas[0] == 0:
+            adjusted_sigmas[0] = 0.0001  # Apply the zero adjustment if necessary
+        print(adjusted_sigmas)
+        return (adjusted_sigmas,)
+    
 NODE_CLASS_MAPPINGS = {
     "INTConstant": INTConstant,
     "FloatConstant": FloatConstant,
@@ -2519,7 +2569,9 @@ NODE_CLASS_MAPPINGS = {
     "BboxToInt": BboxToInt,
     "SplitBboxes": SplitBboxes,
     "ImageGrabPIL": ImageGrabPIL,
-    "DummyLatentOut": DummyLatentOut
+    "DummyLatentOut": DummyLatentOut,
+    "NormalizeLatent": NormalizeLatent,
+    "FlipSigmasAdjusted": FlipSigmasAdjusted
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "INTConstant": "INT Constant",
@@ -2564,5 +2616,8 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "BboxToInt": "BboxToInt",
     "SplitBboxes": "SplitBboxes",
     "ImageGrabPIL": "ImageGrabPIL",
-    "DummyLatentOut": "DummyLatentOut"
+    "DummyLatentOut": "DummyLatentOut",
+    "NormalizeLatent": "NormalizeLatent",
+    "FlipSigmasAdjusted": "FlipSigmasAdjusted"
+
 }
