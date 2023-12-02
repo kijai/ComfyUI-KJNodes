@@ -44,7 +44,7 @@ class FloatConstant:
     @classmethod
     def INPUT_TYPES(s):
         return {"required": {
-            "value": ("FLOAT", {"default": 0.0, "min": -0xffffffffffffffff, "max": 0xffffffffffffffff, "step": 0.01}),
+            "value": ("FLOAT", {"default": 0.0, "min": -0xffffffffffffffff, "max": 0xffffffffffffffff, "step": 0.001}),
         },
         }
 
@@ -2487,7 +2487,7 @@ class NormalizeLatent:
 
     RETURN_TYPES = ("LATENT",)
     FUNCTION = "normalize"
-    CATEGORY = "KJNodes"
+    CATEGORY = "KJNodes/noise"
     OUTPUT_NODE = True
 
     def normalize(self, latent):
@@ -2505,25 +2505,55 @@ class FlipSigmasAdjusted:
                      }
                 }
     RETURN_TYPES = ("SIGMAS",)
-    CATEGORY = "sampling/custom_sampling/sigmas"
+    CATEGORY = "KJNodes/noise"
 
     FUNCTION = "get_sigmas_adjusted"
 
     def get_sigmas_adjusted(self, sigmas):
-        print(sigmas)
+        
         sigmas = sigmas.flip(0)
         if sigmas[0] == 0:
             sigmas[0] = 0.0001
-        adjusted_sigmas = sigmas.clone()  # Create a copy to hold the adjusted values
-
-        # Apply the special adjustment: use the current index except for the first element
+        adjusted_sigmas = sigmas.clone()
+        #offset sigma
         for i in range(1, len(sigmas)):
             adjusted_sigmas[i] = sigmas[i - 1]
 
         if adjusted_sigmas[0] == 0:
-            adjusted_sigmas[0] = 0.0001  # Apply the zero adjustment if necessary
-        print(adjusted_sigmas)
+            adjusted_sigmas[0] = 0.0001  
+        
         return (adjusted_sigmas,)
+ 
+class InjectNoiseToLatent:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": {
+            "latents":("LATENT",),  
+            "strength": ("FLOAT", {"default": 0.1, "min": 0.0, "max": 200.0, "step": 0.001}),
+            "noise":  ("LATENT",),
+            "normalize": ("BOOLEAN", {"default": False}),
+            "average": ("BOOLEAN", {"default": False}),
+            },
+            }
+    
+    RETURN_TYPES = ("LATENT",)
+    FUNCTION = "injectnoise"
+
+    CATEGORY = "KJNodes/noise"
+        
+    def injectnoise(self, latents, strength, noise, normalize, average):
+        samples = latents.copy()
+        if latents["samples"].shape != noise["samples"].shape:
+            raise ValueError("InjectNoiseToLatent: Latent and noise must have the same shape")
+        if average:
+            noised = (samples["samples"].clone() + noise["samples"].clone()) / 2
+        else:
+            noised = samples["samples"].clone() + noise["samples"].clone() * strength
+        if normalize:
+            noised = noised / noised.std()
+        
+        samples["samples"] = noised
+        return (samples,)
     
 NODE_CLASS_MAPPINGS = {
     "INTConstant": INTConstant,
@@ -2571,7 +2601,8 @@ NODE_CLASS_MAPPINGS = {
     "ImageGrabPIL": ImageGrabPIL,
     "DummyLatentOut": DummyLatentOut,
     "NormalizeLatent": NormalizeLatent,
-    "FlipSigmasAdjusted": FlipSigmasAdjusted
+    "FlipSigmasAdjusted": FlipSigmasAdjusted,
+    "InjectNoiseToLatent": InjectNoiseToLatent
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "INTConstant": "INT Constant",
@@ -2618,6 +2649,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "ImageGrabPIL": "ImageGrabPIL",
     "DummyLatentOut": "DummyLatentOut",
     "NormalizeLatent": "NormalizeLatent",
-    "FlipSigmasAdjusted": "FlipSigmasAdjusted"
+    "FlipSigmasAdjusted": "FlipSigmasAdjusted",
+    "InjectNoiseToLatent": "InjectNoiseToLatent"
 
 }
