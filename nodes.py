@@ -2554,6 +2554,58 @@ class InjectNoiseToLatent:
         
         samples["samples"] = noised
         return (samples,)
+
+class AddLabel:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": {
+            "image":("IMAGE",),  
+            "text_x": ("INT", {"default": 10, "min": 0, "max": 4096, "step": 1}),
+            "text_y": ("INT", {"default": 2, "min": 0, "max": 4096, "step": 1}),
+            "height": ("INT", {"default": 48, "min": 0, "max": 4096, "step": 1}),
+            "font_size": ("INT", {"default": 32, "min": 0, "max": 4096, "step": 1}),
+            "font_color": ("STRING", {"default": "white"}),
+            "label_color": ("STRING", {"default": "black"}),
+            "font_path": ("STRING", {"default": "fonts\\TTNorms-Black.otf"}),
+            "text": ("STRING", {"default": "Text"}),
+            "direction": (
+            [   'up',
+                'down',
+            ],
+            {
+            "default": 'up'
+            
+             }),
+            },
+            }
+    
+    RETURN_TYPES = ("IMAGE",)
+    FUNCTION = "addlabel"
+
+    CATEGORY = "KJNodes"
+        
+    def addlabel(self, image, text_x, text_y, text, height, font_size, font_color, label_color, font_path, direction):
+        batch_size = image.shape[0]
+        width = image.shape[2]
+        
+        if font_path == "fonts\\TTNorms-Black.otf": #I don't know why relative path won't work otherwise...
+            font_path = os.path.join(script_dir, font_path)
+            
+        label_image = Image.new("RGB", (width, height), label_color)
+        draw = ImageDraw.Draw(label_image)
+        font = ImageFont.truetype(font_path, font_size)
+        draw.text((text_x, text_y), text, font=font, fill=font_color) 
+        label_image = np.array(label_image).astype(np.float32) / 255.0
+        label_image = torch.from_numpy(label_image)[None, :, :, :]
+        # Duplicate the label image for the entire batch
+        label_batch = label_image.repeat(batch_size, 1, 1, 1)
+
+        if direction == 'down':
+            combined_images = torch.cat((image, label_batch), dim=1)
+        elif direction == 'up':
+            combined_images = torch.cat((label_batch, image), dim=1)
+        
+        return (combined_images,)
     
 NODE_CLASS_MAPPINGS = {
     "INTConstant": INTConstant,
@@ -2602,7 +2654,8 @@ NODE_CLASS_MAPPINGS = {
     "DummyLatentOut": DummyLatentOut,
     "NormalizeLatent": NormalizeLatent,
     "FlipSigmasAdjusted": FlipSigmasAdjusted,
-    "InjectNoiseToLatent": InjectNoiseToLatent
+    "InjectNoiseToLatent": InjectNoiseToLatent,
+    "AddLabel": AddLabel
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "INTConstant": "INT Constant",
@@ -2650,6 +2703,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "DummyLatentOut": "DummyLatentOut",
     "NormalizeLatent": "NormalizeLatent",
     "FlipSigmasAdjusted": "FlipSigmasAdjusted",
-    "InjectNoiseToLatent": "InjectNoiseToLatent"
+    "InjectNoiseToLatent": "InjectNoiseToLatent",
+    "AddLabel": "AddLabel"
 
 }
