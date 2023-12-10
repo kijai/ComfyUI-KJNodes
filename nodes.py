@@ -2663,7 +2663,47 @@ class ReferenceOnlySimple3:
         out_mask = torch.zeros((1,mask.shape[1],mask.shape[2]), dtype=torch.float32, device="cpu")
         return (model_reference, {"samples": out_latent, "noise_mask": torch.cat((out_mask,out_mask, mask))})
  
+class SoundReactive:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": {  
+            "average_level": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 99999, "step": 0.01}),
+            "low_level": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 99999, "step": 0.01}),
+            "mid_level": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 99999, "step": 0.01}),
+            "high_level": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 99999, "step": 0.01}),
+            "low_range_hz": ("INT", {"default": 150, "min": 0, "max": 9999, "step": 1}),
+            "mid_range_hz": ("INT", {"default": 2000, "min": 0, "max": 9999, "step": 1}),
+            "multiplier": ("FLOAT", {"default": 1.0, "min": 0.01, "max": 99999, "step": 0.01}),
+            "normalize": ("BOOLEAN", {"default": False}),
+            },
+            }
+    
+    RETURN_TYPES = ("FLOAT","FLOAT","FLOAT","FLOAT","INT","INT","INT","INT")
+    RETURN_NAMES =("average_level", "low_level", "mid_level", "high_level", "average_level_int", "low_level_int", "mid_level_int", "high_level_int")
+    FUNCTION = "react"
 
+    CATEGORY = "KJNodes/experimental"
+        
+    def react(self, low_level, mid_level, high_level, low_range_hz, mid_range_hz, average_level, multiplier, normalize):
+        low_level *= multiplier
+        mid_level *= multiplier
+        high_level *= multiplier
+        average_level = average_level * multiplier
+
+        if normalize:
+            low_level = low_level / 255
+            mid_level = mid_level / 255
+            high_level = high_level / 255
+            average_level = average_level / 255
+
+        low_level_int = int(low_level)
+        mid_level_int = int(mid_level)
+        high_level_int = int(high_level)
+        average_level_int = int(average_level)
+        
+        
+        return (average_level, low_level, mid_level, high_level, average_level_int, low_level_int, mid_level_int, high_level_int)
+    
 NODE_CLASS_MAPPINGS = {
     "INTConstant": INTConstant,
     "FloatConstant": FloatConstant,
@@ -2713,7 +2753,8 @@ NODE_CLASS_MAPPINGS = {
     "FlipSigmasAdjusted": FlipSigmasAdjusted,
     "InjectNoiseToLatent": InjectNoiseToLatent,
     "AddLabel": AddLabel,
-    "ReferenceOnlySimple3": ReferenceOnlySimple3
+    "ReferenceOnlySimple3": ReferenceOnlySimple3,
+    "SoundReactive": SoundReactive
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "INTConstant": "INT Constant",
@@ -2763,6 +2804,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "FlipSigmasAdjusted": "FlipSigmasAdjusted",
     "InjectNoiseToLatent": "InjectNoiseToLatent",
     "AddLabel": "AddLabel",
-    "ReferenceOnlySimple3": "ReferenceOnlySimple3"
+    "ReferenceOnlySimple3": "ReferenceOnlySimple3",
+    "SoundReactive": "SoundReactive"
 
 }
