@@ -1,7 +1,7 @@
 import { app } from "../../../scripts/app.js";
 
 
-
+var nodeAutoColor = true
 // Adds context menu entries, code partly from pyssssscustom-scripts
 
 function addMenuHandler(nodeType, cb) {
@@ -113,6 +113,18 @@ app.registerExtension({
 				onChange: (value) => {
 					LiteGraph.middle_click_slot_add_default_node = value;
 				},
+			});
+			app.ui.settings.addSetting({
+				id: "KJNodes.nodeAutoColor",
+				name: "Automatically set node colors",
+				defaultValue: true,
+				type: "boolean",
+				options: (value) => [
+					{ value: true, text: "On", selected: value === true },
+					{ value: false, text: "Off", selected: value === false },
+				],
+				// onChange: (value) => {
+				// },
 			});
 }
 });

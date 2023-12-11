@@ -25,6 +25,7 @@ function setColorAndBgColor(type) {
         // Handle the default case if needed
     }
 }
+
 app.registerExtension({
 	name: "SetNode",
 	registerCustomNodes() {
@@ -97,7 +98,9 @@ app.registerExtension({
 							this.inputs[0].type = type;
 							this.inputs[0].name = type;
 							
-							setColorAndBgColor.call(this, type);
+							if (app.ui.settings.getSettingValue("KJNodes.nodeAutoColor")){
+								setColorAndBgColor.call(this, type);	
+							}
 						} else {
 							alert("Error: Set node input undefined. Most likely you're missing custom nodes");
 						}
@@ -269,7 +272,9 @@ app.registerExtension({
 						this.setType(linkType);
 						this.title = "Get_" + setter.widgets[0].value;
 						
-						setColorAndBgColor.call(this, linkType);
+						if (app.ui.settings.getSettingValue("KJNodes.nodeAutoColor")){
+							setColorAndBgColor.call(this, type);	
+						}
 
 					} else {
 						this.setType('*');
