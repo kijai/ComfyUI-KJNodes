@@ -2703,6 +2703,35 @@ class SoundReactive:
         
         
         return (average_level, low_level, mid_level, high_level, average_level_int, low_level_int, mid_level_int, high_level_int)
+
+class GenerateNoise:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": { 
+            "width": ("INT", {"default": 512,"min": 16, "max": 4096, "step": 1}),
+            "height": ("INT", {"default": 512,"min": 16, "max": 4096, "step": 1}),
+            "batch_size": ("INT", {"default": 1, "min": 1, "max": 4096}),
+            "seed": ("INT", {"default": 123,"min": 0, "max": 0xffffffffffffffff, "step": 1}),
+            "multiplier": ("FLOAT", {"default": 80.3,"min": 0.0, "max": 4096, "step": 0.01}),
+            "constant_batch_noise": ("BOOLEAN", {"default": False}),
+            "normalize": ("BOOLEAN", {"default": False}),
+            },
+            }
+    
+    RETURN_TYPES = ("LATENT",)
+    FUNCTION = "generatenoise"
+
+    CATEGORY = "KJNodes/noise"
+        
+    def generatenoise(self, batch_size, width, height, seed, multiplier, constant_batch_noise, normalize):
+        generator = torch.manual_seed(seed)
+        noise = torch.randn([batch_size, 4, height // 8, width // 8], dtype=torch.float32, layout=torch.strided, generator=generator, device="cpu")
+        noise *= multiplier
+        if normalize:
+            noise = noise / noise.std()
+        if constant_batch_noise:
+            noise = noise[0].repeat(batch_size, 1, 1, 1)
+        return ({"samples":noise}, )
     
 NODE_CLASS_MAPPINGS = {
     "INTConstant": INTConstant,
@@ -2754,7 +2783,8 @@ NODE_CLASS_MAPPINGS = {
     "InjectNoiseToLatent": InjectNoiseToLatent,
     "AddLabel": AddLabel,
     "ReferenceOnlySimple3": ReferenceOnlySimple3,
-    "SoundReactive": SoundReactive
+    "SoundReactive": SoundReactive,
+    "GenerateNoise": GenerateNoise
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "INTConstant": "INT Constant",
@@ -2805,6 +2835,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "InjectNoiseToLatent": "InjectNoiseToLatent",
     "AddLabel": "AddLabel",
     "ReferenceOnlySimple3": "ReferenceOnlySimple3",
-    "SoundReactive": "SoundReactive"
+    "SoundReactive": "SoundReactive",
+    "GenerateNoise": "GenerateNoise"
 
 }
