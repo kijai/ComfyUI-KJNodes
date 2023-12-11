@@ -2712,10 +2712,14 @@ class GenerateNoise:
             "height": ("INT", {"default": 512,"min": 16, "max": 4096, "step": 1}),
             "batch_size": ("INT", {"default": 1, "min": 1, "max": 4096}),
             "seed": ("INT", {"default": 123,"min": 0, "max": 0xffffffffffffffff, "step": 1}),
-            "multiplier": ("FLOAT", {"default": 80.3,"min": 0.0, "max": 4096, "step": 0.01}),
+            "multiplier": ("FLOAT", {"default": 1.0,"min": 0.0, "max": 4096, "step": 0.01}),
             "constant_batch_noise": ("BOOLEAN", {"default": False}),
             "normalize": ("BOOLEAN", {"default": False}),
             },
+            "optional": {
+            "model": ("MODEL", ),
+            "sigmas": ("SIGMAS", ),
+            }
             }
     
     RETURN_TYPES = ("LATENT",)
@@ -2723,10 +2727,17 @@ class GenerateNoise:
 
     CATEGORY = "KJNodes/noise"
         
-    def generatenoise(self, batch_size, width, height, seed, multiplier, constant_batch_noise, normalize):
+    def generatenoise(self, batch_size, width, height, seed, multiplier, constant_batch_noise, normalize, sigmas=None, model=None):
+
         generator = torch.manual_seed(seed)
         noise = torch.randn([batch_size, 4, height // 8, width // 8], dtype=torch.float32, layout=torch.strided, generator=generator, device="cpu")
-        noise *= multiplier
+        if sigmas is not None:
+            sigma = sigmas[0] - sigmas[-1]
+            sigma /= model.model.latent_format.scale_factor
+            noise *= sigma
+
+        noise *=multiplier
+
         if normalize:
             noise = noise / noise.std()
         if constant_batch_noise:
