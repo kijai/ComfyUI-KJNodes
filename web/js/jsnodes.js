@@ -36,8 +36,10 @@ app.registerExtension({
 					let animationFrameId;
 					let analyser;
 					let dataArray;
-					let lowRangeHz;
-    				let midRangeHz;
+					let startRangeHz;
+    				let endRangeHz;
+					let smoothingFactor = 0.5;
+					let smoothedSoundLevel = 0;
 				
 					// Function to update the widget value in real-time
 					const updateWidgetValueInRealTime = () => {
@@ -45,47 +47,35 @@ app.registerExtension({
 						if (analyser && dataArray) {
 							analyser.getByteFrequencyData(dataArray);
 
+							const startRangeHzWidget = this.widgets.find(w => w.name === "start_range_hz");
+							if (startRangeHzWidget) startRangeHz = startRangeHzWidget.value;
+							const endRangeHzWidget = this.widgets.find(w => w.name === "end_range_hz");
+							if (endRangeHzWidget) endRangeHz = endRangeHzWidget.value;
+							const smoothingFactorWidget = this.widgets.find(w => w.name === "smoothing_factor");
+							if (smoothingFactorWidget) smoothingFactor = smoothingFactorWidget.value;
+
 							// Calculate frequency bin width (frequency resolution)
 							const frequencyBinWidth = audioContext.sampleRate / analyser.fftSize;	
 							// Convert the widget values from Hz to indices
-							const lowRangeIndex = Math.floor(lowRangeHz / frequencyBinWidth);
-							const midRangeIndex = Math.floor(midRangeHz / frequencyBinWidth);
-
-							// Define frequency ranges for low, mid, and high
-							const frequencyRanges = {
-								low: { start: 0, end: lowRangeIndex },
-								mid: { start: lowRangeIndex, end: midRangeIndex },
-								high: { start: midRangeIndex, end: dataArray.length }
-							};	
-							const lowRangeHzWidget = this.widgets.find(w => w.name === "low_range_hz");
-							if (lowRangeHzWidget) lowRangeHz = lowRangeHzWidget.value;
-
-							const midRangeHzWidget = this.widgets.find(w => w.name === "mid_range_hz");
-							if (midRangeHzWidget) midRangeHz = midRangeHzWidget.value;
+							const startRangeIndex = Math.floor(startRangeHz / frequencyBinWidth);
+							const endRangeIndex = Math.floor(endRangeHz / frequencyBinWidth);
 
 							// Function to calculate the average value for a frequency range
 							const calculateAverage = (start, end) => {
 								const sum = dataArray.slice(start, end).reduce((acc, val) => acc + val, 0);
-								return sum / (end - start);
+								const average = sum / (end - start);
+
+								// Apply exponential moving average smoothing
+    							smoothedSoundLevel = (average * (1 - smoothingFactor)) + (smoothedSoundLevel * smoothingFactor);
+								return smoothedSoundLevel;
 							};
 							// Calculate the average levels for each frequency range
-							const lowLevel = calculateAverage(frequencyRanges.low.start, frequencyRanges.low.end);
-							const midLevel = calculateAverage(frequencyRanges.low.end, frequencyRanges.mid.end); // mid starts where low ends
-							const highLevel = calculateAverage(frequencyRanges.mid.end, frequencyRanges.high.end); // high starts where mid ends
-							const averageLevel = dataArray.reduce((sum, averageLevel) => sum + averageLevel, 0) / dataArray.length;
+							const soundLevel = calculateAverage(startRangeIndex, endRangeIndex);
 							
 							// Update the widget values
-							const averageLevelWidget = this.widgets.find(w => w.name === "average_level");
-							if (averageLevelWidget) averageLevelWidget.value = averageLevel;
 
-							const lowLevelWidget = this.widgets.find(w => w.name === "low_level");
-							if (lowLevelWidget) lowLevelWidget.value = lowLevel;
-
-							const midLevelWidget = this.widgets.find(w => w.name === "mid_level");
-							if (midLevelWidget) midLevelWidget.value = midLevel;
-
-							const highLevelWidget = this.widgets.find(w => w.name === "high_level");
-							if (highLevelWidget) highLevelWidget.value = highLevel;
+							const lowLevelWidget = this.widgets.find(w => w.name === "sound_level");
+							if (lowLevelWidget) lowLevelWidget.value = soundLevel;
 
 							animationFrameId = requestAnimationFrame(updateWidgetValueInRealTime);
 						}
@@ -103,10 +93,10 @@ app.registerExtension({
 							dataArray = new Uint8Array(analyser.frequencyBinCount);
 							// Get the range values from widgets (assumed to be in Hz)
 							const lowRangeWidget = this.widgets.find(w => w.name === "low_range_hz");
-							if (lowRangeWidget) lowRangeHz = lowRangeWidget.value;
+							if (lowRangeWidget) startRangeHz = lowRangeWidget.value;
 				
 							const midRangeWidget = this.widgets.find(w => w.name === "mid_range_hz");
-							if (midRangeWidget) midRangeHz = midRangeWidget.value;
+							if (midRangeWidget) endRangeHz = midRangeWidget.value;
 						}
 						
 						navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {

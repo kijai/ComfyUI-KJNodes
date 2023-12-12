@@ -2667,42 +2667,31 @@ class SoundReactive:
     @classmethod
     def INPUT_TYPES(s):
         return {"required": {  
-            "average_level": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 99999, "step": 0.01}),
-            "low_level": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 99999, "step": 0.01}),
-            "mid_level": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 99999, "step": 0.01}),
-            "high_level": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 99999, "step": 0.01}),
-            "low_range_hz": ("INT", {"default": 150, "min": 0, "max": 9999, "step": 1}),
-            "mid_range_hz": ("INT", {"default": 2000, "min": 0, "max": 9999, "step": 1}),
+            "sound_level": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 99999, "step": 0.01}),
+            "start_range_hz": ("INT", {"default": 150, "min": 0, "max": 9999, "step": 1}),
+            "end_range_hz": ("INT", {"default": 2000, "min": 0, "max": 9999, "step": 1}),
             "multiplier": ("FLOAT", {"default": 1.0, "min": 0.01, "max": 99999, "step": 0.01}),
+            "smoothing_factor": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.01}),
             "normalize": ("BOOLEAN", {"default": False}),
             },
             }
     
-    RETURN_TYPES = ("FLOAT","FLOAT","FLOAT","FLOAT","INT","INT","INT","INT")
-    RETURN_NAMES =("average_level", "low_level", "mid_level", "high_level", "average_level_int", "low_level_int", "mid_level_int", "high_level_int")
+    RETURN_TYPES = ("FLOAT","INT",)
+    RETURN_NAMES =("sound_level", "sound_level_int",)
     FUNCTION = "react"
 
     CATEGORY = "KJNodes/experimental"
         
-    def react(self, low_level, mid_level, high_level, low_range_hz, mid_range_hz, average_level, multiplier, normalize):
-        low_level *= multiplier
-        mid_level *= multiplier
-        high_level *= multiplier
-        average_level = average_level * multiplier
+    def react(self, sound_level, start_range_hz, end_range_hz, smoothing_factor, multiplier, normalize):
+
+        sound_level *= multiplier
 
         if normalize:
-            low_level = low_level / 255
-            mid_level = mid_level / 255
-            high_level = high_level / 255
-            average_level = average_level / 255
+            sound_level /= 255
 
-        low_level_int = int(low_level)
-        mid_level_int = int(mid_level)
-        high_level_int = int(high_level)
-        average_level_int = int(average_level)
+        sound_level_int = int(sound_level)        
         
-        
-        return (average_level, low_level, mid_level, high_level, average_level_int, low_level_int, mid_level_int, high_level_int)
+        return (sound_level, sound_level_int, )
     
 NODE_CLASS_MAPPINGS = {
     "INTConstant": INTConstant,
