@@ -2689,13 +2689,9 @@ class SoundReactive:
         if normalize:
             sound_level /= 255
 
-        sound_level_int = int(sound_level)        
-        <<<<<<< HEAD
-        return (sound_level, sound_level_int, )
-        
-=======
-        
-        return (average_level, low_level, mid_level, high_level, average_level_int, low_level_int, mid_level_int, high_level_int)
+        sound_level_int = int(sound_level)
+        return (sound_level, sound_level_int, )     
+       
 
 class GenerateNoise:
     @classmethod
@@ -2736,7 +2732,7 @@ class GenerateNoise:
         if constant_batch_noise:
             noise = noise[0].repeat(batch_size, 1, 1, 1)
         return ({"samples":noise}, )
->>>>>>> a66ddc8b04817e551349714d594b0be20a76c878
+
     
 NODE_CLASS_MAPPINGS = {
     "INTConstant": INTConstant,
