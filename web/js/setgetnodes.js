@@ -273,7 +273,7 @@ app.registerExtension({
 						this.title = "Get_" + setter.widgets[0].value;
 						
 						if (app.ui.settings.getSettingValue("KJNodes.nodeAutoColor")){
-							setColorAndBgColor.call(this, type);	
+							setColorAndBgColor.call(this, linkType);	
 						}
 
 					} else {

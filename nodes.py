@@ -2692,7 +2692,6 @@ class SoundReactive:
         sound_level_int = int(sound_level)
         return (sound_level, sound_level_int, )     
        
-
 class GenerateNoise:
     @classmethod
     def INPUT_TYPES(s):
@@ -2755,7 +2754,7 @@ class RemapDepth:
         if clamp:
             image = torch.clamp(image, min=0.0, max=1.0)
         return (image, )
-    
+
 NODE_CLASS_MAPPINGS = {
     "INTConstant": INTConstant,
     "FloatConstant": FloatConstant,
@@ -2808,7 +2807,7 @@ NODE_CLASS_MAPPINGS = {
     "ReferenceOnlySimple3": ReferenceOnlySimple3,
     "SoundReactive": SoundReactive,
     "GenerateNoise": GenerateNoise,
-    "RemapDepth": RemapDepth
+    "RemapDepth": RemapDepth,
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "INTConstant": "INT Constant",
@@ -2861,6 +2860,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "ReferenceOnlySimple3": "ReferenceOnlySimple3",
     "SoundReactive": "SoundReactive",
     "GenerateNoise": "GenerateNoise",
-    "RemapDepth": "RemapDepth"
-
+    "RemapDepth": "RemapDepth",
 }
