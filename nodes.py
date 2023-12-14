@@ -2732,29 +2732,6 @@ class GenerateNoise:
             noise = noise[0].repeat(batch_size, 1, 1, 1)
         return ({"samples":noise}, )
 
-class RemapDepth:
-    @classmethod
-    def INPUT_TYPES(s):
-        return {"required": { 
-            "image": ("IMAGE",),
-            "min": ("FLOAT", {"default": 0.0,"min": -10.0, "max": 1.0, "step": 0.01}),
-            "max": ("FLOAT", {"default": 1.0,"min": 0.0, "max": 10.0, "step": 0.01}),
-            "clamp": ("BOOLEAN", {"default": True}),
-            },
-            }
-    
-    RETURN_TYPES = ("IMAGE",)
-    FUNCTION = "remap"
-
-    CATEGORY = "KJNodes/noise"
-        
-    def remap(self, image, min, max, clamp):
-        
-        image = min + image * (max - min)
-        if clamp:
-            image = torch.clamp(image, min=0.0, max=1.0)
-        return (image, )
-
 NODE_CLASS_MAPPINGS = {
     "INTConstant": INTConstant,
     "FloatConstant": FloatConstant,
@@ -2806,8 +2783,7 @@ NODE_CLASS_MAPPINGS = {
     "AddLabel": AddLabel,
     "ReferenceOnlySimple3": ReferenceOnlySimple3,
     "SoundReactive": SoundReactive,
-    "GenerateNoise": GenerateNoise,
-    "RemapDepth": RemapDepth,
+    "GenerateNoise": GenerateNoise
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "INTConstant": "INT Constant",
@@ -2859,6 +2835,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "AddLabel": "AddLabel",
     "ReferenceOnlySimple3": "ReferenceOnlySimple3",
     "SoundReactive": "SoundReactive",
-    "GenerateNoise": "GenerateNoise",
-    "RemapDepth": "RemapDepth",
+    "GenerateNoise": "GenerateNoise"
 }
