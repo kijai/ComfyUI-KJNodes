@@ -25,7 +25,15 @@ function setColorAndBgColor(type) {
         // Handle the default case if needed
     }
 }
+let isAlertShown = false;
 
+function showAlertWithThrottle(message, delay) {
+    if (!isAlertShown) {
+        isAlertShown = true;
+        alert(message);
+        setTimeout(() => isAlertShown = false, delay);
+    }
+}
 app.registerExtension({
 	name: "SetNode",
 	registerCustomNodes() {
@@ -322,7 +330,7 @@ app.registerExtension({
 					return link;
 				} else {
 					const errorMessage = "No SetNode found for " + this.widgets[0].value + "(" + this.type + ")";
-					console.log(errorMessage);
+					showAlertWithThrottle(errorMessage, 5000);
 					throw new Error(errorMessage);
 				}
 			}
