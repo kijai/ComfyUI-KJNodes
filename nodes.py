@@ -2750,26 +2750,12 @@ def camera_embeddings(elevation, azimuth):
     return embeddings
 
 def interpolate_angle(start, end, fraction):
-    # Normalize start angle to range [0, 360)
-    start = start % 360
-
-    # If end angle is negative, convert it to the equivalent positive angle
-    if end < 0:
-        end = 360 + end
-
-    # Ensure the end angle is greater than the start angle for clockwise interpolation
-    if end <= start:
-        end += 360
-
-    # Calculate the clockwise distance from start to end
-    distance = end - start
-
-    # Interpolate the angle using the fraction and wrap it to range [-180, 180)
-    interpolated = (start + distance * fraction) % 360
-    if interpolated > 180:
-        interpolated -= 360
-
-    return interpolated
+    # Calculate the difference in angles and adjust for wraparound if necessary
+    diff = (end - start + 540) % 360 - 180
+    # Apply fraction to the difference
+    interpolated = start + fraction * diff
+    # Normalize the result to be within the range of -180 to 180
+    return (interpolated + 180) % 360 - 180
 
 class StableZero123_BatchSchedule:
     @classmethod
