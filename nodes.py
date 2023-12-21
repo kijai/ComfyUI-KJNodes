@@ -510,15 +510,15 @@ class GetImagesFromBatchIndexed:
     } 
     
     def indexedimagesfrombatch(self, images, indexes):
+        
         # Parse the indexes string into a list of integers
         index_list = [int(index.strip()) for index in indexes.split(',')]
         
-        # Fetch images based on parsed indexes
-        chosen_images = [images[index] for index in index_list if 0 <= index < len(images)]
+        # Convert list of indices to a PyTorch tensor
+        indices_tensor = torch.tensor(index_list, dtype=torch.long)
         
-        # Check if any index was out of range and raise an error if so
-        if len(chosen_images) != len(index_list):
-            raise ValueError("One or more indexes are out of range")
+        # Select the images at the specified indices
+        chosen_images = images[indices_tensor]
         
         return (chosen_images,)
     
