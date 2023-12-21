@@ -1147,13 +1147,15 @@ class ColorMatch:
     
     def colormatch(self, image_ref, image_target, method):
         cm = ColorMatcher()
+        image_ref = image_ref.cpu()
+        image_target = image_target.cpu()
         batch_size = image_target.size(0)
         out = []
         images_target = image_target.squeeze()
         images_ref = image_ref.squeeze()
 
-        image_ref_np = images_ref.cpu().numpy()
-        images_target_np = images_target.cpu().numpy()
+        image_ref_np = images_ref.numpy()
+        images_target_np = images_target.numpy()
 
         if image_ref.size(0) > 1 and image_ref.size(0) != batch_size:
             raise ValueError("ColorMatch: Use either single reference image or a matching batch of reference images.")
