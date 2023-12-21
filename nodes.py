@@ -493,7 +493,35 @@ class GetImageRangeFromBatch:
             raise ValueError("GetImageRangeFromBatch: End index is out of range")
         chosen_images = images[start_index:end_index]
         return (chosen_images, )
-  
+    
+class GetImagesFromBatchIndexed:
+    
+    RETURN_TYPES = ("IMAGE",)
+    FUNCTION = "indexedimagesfrombatch"
+    CATEGORY = "KJNodes"
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                 "images": ("IMAGE",),
+                 "indexes": ("STRING", {"default": "0, 1, 2", "multiline": True}),
+        },
+    } 
+    
+    def indexedimagesfrombatch(self, images, indexes):
+        # Parse the indexes string into a list of integers
+        index_list = [int(index.strip()) for index in indexes.split(',')]
+        
+        # Fetch images based on parsed indexes
+        chosen_images = [images[index] for index in index_list if 0 <= index < len(images)]
+        
+        # Check if any index was out of range and raise an error if so
+        if len(chosen_images) != len(index_list):
+            raise ValueError("One or more indexes are out of range")
+        
+        return (chosen_images,)
+    
 class ReplaceImagesInBatch:
     
     RETURN_TYPES = ("IMAGE",)
@@ -2945,6 +2973,7 @@ NODE_CLASS_MAPPINGS = {
     "SoundReactive": SoundReactive,
     "GenerateNoise": GenerateNoise,
     "StableZero123_BatchSchedule": StableZero123_BatchSchedule,
+    "GetImagesFromBatchIndexed": GetImagesFromBatchIndexed,
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "INTConstant": "INT Constant",
@@ -2998,4 +3027,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "SoundReactive": "SoundReactive",
     "GenerateNoise": "GenerateNoise",
     "StableZero123_BatchSchedule": "StableZero123_BatchSchedule",
+    "GetImagesFromBatchIndexed": "GetImagesFromBatchIndexed",
 }
