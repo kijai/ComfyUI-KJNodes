@@ -2891,6 +2891,26 @@ class StableZero123_BatchSchedule:
 
         latent = torch.zeros([batch_size, 4, height // 8, width // 8])
         return (final_positive, final_negative, {"samples": latent})
+
+class ImageBatchRepeatEveryNth:
+    
+    RETURN_TYPES = ("IMAGE",)
+    FUNCTION = "repeat"
+    CATEGORY = "KJNodes"
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                 "images": ("IMAGE",),
+                 "repeats": ("INT", {"default": 1, "min": 1, "max": 4096}),
+        },
+    } 
+    
+    def repeat(self, images, repeats):
+       
+        repeated_images = torch.repeat_interleave(images, repeats=repeats, dim=0)
+        return (repeated_images, )
     
 NODE_CLASS_MAPPINGS = {
     "INTConstant": INTConstant,
@@ -2945,6 +2965,7 @@ NODE_CLASS_MAPPINGS = {
     "SoundReactive": SoundReactive,
     "GenerateNoise": GenerateNoise,
     "StableZero123_BatchSchedule": StableZero123_BatchSchedule,
+    "ImageBatchRepeatEveryNth": ImageBatchRepeatEveryNth
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "INTConstant": "INT Constant",
@@ -2998,4 +3019,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "SoundReactive": "SoundReactive",
     "GenerateNoise": "GenerateNoise",
     "StableZero123_BatchSchedule": "StableZero123_BatchSchedule",
+    "ImageBatchRepeatEveryNth": "ImageBatchRepeatEveryNth"
 }
