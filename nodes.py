@@ -2920,7 +2920,7 @@ class StableZero123_BatchSchedule:
         latent = torch.zeros([batch_size, 4, height // 8, width // 8])
         return (final_positive, final_negative, {"samples": latent})
 
-class ImageBatchRepeatEveryNth:
+class ImageBatchRepeatInterleaving:
     
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "repeat"
@@ -2994,7 +2994,7 @@ NODE_CLASS_MAPPINGS = {
     "GenerateNoise": GenerateNoise,
     "StableZero123_BatchSchedule": StableZero123_BatchSchedule,
     "GetImagesFromBatchIndexed": GetImagesFromBatchIndexed,
-    "ImageBatchRepeatEveryNth": ImageBatchRepeatEveryNth
+    "ImageBatchRepeatInterleaving": ImageBatchRepeatInterleaving
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "INTConstant": "INT Constant",
@@ -3049,5 +3049,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "GenerateNoise": "GenerateNoise",
     "StableZero123_BatchSchedule": "StableZero123_BatchSchedule",
     "GetImagesFromBatchIndexed": "GetImagesFromBatchIndexed",
-    "ImageBatchRepeatEveryNth": "ImageBatchRepeatEveryNth"
+    "ImageBatchRepeatInterleaving": "ImageBatchRepeatInterleaving"
 }
