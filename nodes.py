@@ -2938,19 +2938,6 @@ class ImageBatchRepeatInterleaving:
         repeated_images = torch.repeat_interleave(images, repeats=repeats, dim=0)
         return (repeated_images, )
 
-class MarigoldVAELoader:
-    #Paste stuffs from VAELoader nodes
-    def load_vae(self, vae_name):
-        if vae_name in ["taesd", "taesdxl"]:
-            sd = self.load_taesd(vae_name)
-        else:
-            vae_path = folder_paths.get_full_path("vae", vae_name)
-            sd = comfy.utils.load_torch_file(vae_path)
-        vae = comfy.sd.VAE(sd=sd)
-        #Override the regularization
-        vae.first_stage_model.regularization = lambda x: torch.chunk(x, dim=2)
-        return (vae,)
-
 NODE_CLASS_MAPPINGS = {
     "INTConstant": INTConstant,
     "FloatConstant": FloatConstant,
@@ -3006,7 +2993,6 @@ NODE_CLASS_MAPPINGS = {
     "StableZero123_BatchSchedule": StableZero123_BatchSchedule,
     "GetImagesFromBatchIndexed": GetImagesFromBatchIndexed,
     "ImageBatchRepeatInterleaving": ImageBatchRepeatInterleaving,
-    "MarigoldVAELoader": MarigoldVAELoader
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "INTConstant": "INT Constant",
@@ -3062,5 +3048,4 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "StableZero123_BatchSchedule": "StableZero123_BatchSchedule",
     "GetImagesFromBatchIndexed": "GetImagesFromBatchIndexed",
     "ImageBatchRepeatInterleaving": "ImageBatchRepeatInterleaving",
-    "MarigoldVAELoader": "MarigoldVAELoader"
 }
