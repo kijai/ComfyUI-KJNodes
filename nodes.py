@@ -638,11 +638,11 @@ class GrowMaskWithBlur:
                 "incremental_expandrate": ("INT", {"default": 0, "min": 0, "max": 100, "step": 1}),
                 "tapered_corners": ("BOOLEAN", {"default": True}),
                 "flip_input": ("BOOLEAN", {"default": False}),
-                "blur_radius": ("INT", {
-                    "default": 0,
-                    "min": 0,
-                    "max": 999,
-                    "step": 1
+                "blur_radius": ("FLOAT", {
+                    "default": 0.0,
+                    "min": 0.0,
+                    "max": 100,
+                    "step": 0.1
                 }),
                 "lerp_alpha": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}),
                 "decay_factor": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}),
