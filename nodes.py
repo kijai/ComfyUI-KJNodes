@@ -1864,7 +1864,7 @@ class FilterZeroMasksAndCorrespondingImages:
         
         if also_process_images:
             non_zero_mask_images_out = torch.stack(non_zero_mask_images, dim=0)
-            zero_mask_images_out = torch.stack(zero_mask_images, dim=0)
+            zero_mask_images_out = torch.stack(zero_mask_images, dim=0) if len(zero_mask_images) > 0 else None
         else:
             non_zero_mask_images_out = zero_mask_images_out = None
 
