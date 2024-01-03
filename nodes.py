@@ -1897,15 +1897,12 @@ class InsertImageBatchByIndexes:
     CATEGORY = "KJNodes"
     
     def insert(self, images, images_to_insert, insert_indexes):
-        """_summary_
-
-        Args:
-            images (_type_): _description_
-            images_to_insert (_type_): _description_
-            insert_indexes (_type_): _description_
+        """
+        This node is designed to be use with node FilterZeroMasksAndCorrespondingImages
+        It inserts the images_to_insert into images according to insert_indexes
 
         Returns:
-            _type_: _description_
+            images_after_insert: updated original images with origonal sequence order 
         """
         
         images_after_insert = images
