@@ -12,7 +12,6 @@ from PIL.PngImagePlugin import PngInfo
 import json
 import re
 import os
-import librosa
 import random
 from scipy.special import erf
 from .fluid import Fluid
@@ -141,7 +140,12 @@ class CreateFluidMask:
         return (torch.cat(out, dim=0),torch.cat(masks, dim=0),)
 
 class CreateAudioMask:
-    
+    def __init__(self):
+        try:
+            import librosa
+            self.librosa = librosa
+        except ImportError:
+            print("Can not import librosa. Install it with 'pip install librosa'")
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "createaudiomask"
     CATEGORY = "KJNodes/masking/generate"
@@ -151,7 +155,7 @@ class CreateAudioMask:
         return {
             "required": {
                  "invert": ("BOOLEAN", {"default": False}),
-                 "frames": ("INT", {"default": 0,"min": 0, "max": 255, "step": 1}),
+                 "frames": ("INT", {"default": 16,"min": 1, "max": 255, "step": 1}),
                  "scale": ("FLOAT", {"default": 0.5,"min": 0.0, "max": 2.0, "step": 0.01}),
                  "audio_path": ("STRING", {"default": "audio.wav"}),
                  "width": ("INT", {"default": 256,"min": 16, "max": 4096, "step": 1}),
@@ -166,8 +170,8 @@ class CreateAudioMask:
         masks = []
         if audio_path == "audio.wav": #I don't know why relative path won't work otherwise...
             audio_path = os.path.join(script_dir, audio_path)
-        audio, sr = librosa.load(audio_path)
-        spectrogram = np.abs(librosa.stft(audio))
+        audio, sr = self.librosa.load(audio_path)
+        spectrogram = np.abs(self.librosa.stft(audio))
         
         for i in range(batch_size):
            image = Image.new("RGB", (width, height), "black")
@@ -693,7 +697,6 @@ class GrowMaskWithBlur:
             # Convert the tensor list to PIL images, apply blur, and convert back
             for idx, tensor in enumerate(out):
                 # Convert tensor to PIL image
-                #pil_image = TF.to_pil_image(tensor.cpu().detach())
                 pil_image = tensor2pil(tensor.cpu().detach())[0]
                 # Apply Gaussian blur
                 pil_image = pil_image.filter(ImageFilter.GaussianBlur(blur_radius))
