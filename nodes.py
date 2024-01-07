@@ -2755,7 +2755,8 @@ class AddLabel:
         
         if font == "TTNorms-Black.otf":
             font_path = os.path.join(script_dir, "fonts", "TTNorms-Black.otf")
-            
+        else:
+            font_path = font
         label_image = Image.new("RGB", (width, height), label_color)
         draw = ImageDraw.Draw(label_image)
         font = ImageFont.truetype(font_path, font_size)
