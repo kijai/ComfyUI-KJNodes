@@ -703,8 +703,7 @@ class GrowMaskWithBlur:
                 # Convert back to tensor
                 out[idx] = pil2tensor(pil_image)
         
-        blurred = torch.cat(out, dim=0)
-        print(blurred.shape)
+        blurred = torch.stack(out, dim=0)
         return (blurred, 1.0 - blurred)
            
         
