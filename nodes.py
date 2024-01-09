@@ -703,7 +703,7 @@ class GrowMaskWithBlur:
                 # Convert back to tensor
                 out[idx] = pil2tensor(pil_image)
         
-        blurred = torch.stack(out, dim=0)
+        blurred = torch.cat(out, dim=0)
         return (blurred, 1.0 - blurred)
            
         
@@ -2366,7 +2366,6 @@ class CreateShapeMask:
             image = pil2tensor(image)
             mask = image[:, :, :, 0]
             out.append(mask)
-
         return (torch.cat(out, dim=0), 1.0 - torch.cat(out, dim=0),)
     
 class CreateVoronoiMask:
@@ -3004,7 +3003,6 @@ class StableZero123_BatchSchedule:
                 interpolated_azimuth = interpolate_angle(azimuth_points[prev_point][1], azimuth_points[next_point][1], fraction)
             else:
                 interpolated_azimuth = azimuth_points[prev_point][1]
-            print(interpolated_azimuth)
             # Interpolate the elevation
             next_elevation_point = 1
             while next_elevation_point < len(elevation_points) and i >= elevation_points[next_elevation_point][0]:
