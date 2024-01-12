@@ -618,7 +618,7 @@ class CreateTextMask:
             text_height = font_size
             text_center_x = text_x + text_width / 2
             text_center_y = text_y + text_height / 2
-            draw.text((text_x, text_y), text, font=font, fill=font_color)
+            draw.text((text_x, text_y), text, font=font, fill=font_color, features=['-liga'])
             if start_rotation != end_rotation:
                 image = image.rotate(rotation, center=(text_center_x, text_center_y))
                 rotation += rotation_increment
@@ -1386,7 +1386,7 @@ class ImageBatchTestPattern:
             text_x = (width - text_width / 2) // 2
             text_y = (height - text_height) // 2
 
-            draw.text((text_x, text_y), str(number + start_from), font=font, fill=color)
+            draw.text((text_x, text_y), str(number + start_from), font=font, fill=color, features=['-liga'])
 
             # Convert the image to a numpy array and normalize the pixel values
             image = np.array(image).astype(np.float32) / 255.0
@@ -2759,7 +2759,7 @@ class AddLabel:
         label_image = Image.new("RGB", (width, height), label_color)
         draw = ImageDraw.Draw(label_image)
         font = ImageFont.truetype(font_path, font_size)
-        draw.text((text_x, text_y), text, font=font, fill=font_color) 
+        draw.text((text_x, text_y), text, font=font, fill=font_color, features=['-liga'])
         label_image = np.array(label_image).astype(np.float32) / 255.0
         label_image = torch.from_numpy(label_image)[None, :, :, :]
         # Duplicate the label image for the entire batch
