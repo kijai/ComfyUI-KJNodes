@@ -1237,12 +1237,10 @@ class SaveImageWithAlpha:
             a = 255. * alpha.cpu().numpy()
             img = Image.fromarray(np.clip(i, 0, 255).astype(np.uint8))
             
-            if a.shape == img.size[::-1]:  # Check if the mask has the same size as the image
-                print("Applying mask")
-                a = np.clip(a, 0, 255).astype(np.uint8)
-                img.putalpha(Image.fromarray(a, mode='L'))
-            else:
-                raise ValueError("SaveImageWithAlpha: Mask size does not match")
+             # Resize the mask to match the image size
+            a_resized = Image.fromarray(a).resize(img.size, Image.ANTIALIAS)
+            a_resized = np.clip(a_resized, 0, 255).astype(np.uint8)
+            img.putalpha(Image.fromarray(a_resized, mode='L'))
             metadata = None
             if not args.disable_metadata:
                 metadata = PngInfo()
