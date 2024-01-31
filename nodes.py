@@ -3364,6 +3364,27 @@ def interpolate_coordinates(coordinates_dict, batch_size):
 
     return interpolated
 
+from scipy.interpolate import CubicSpline
+import numpy as np
+
+def interpolate_coordinates_with_curves(coordinates_dict, batch_size):
+    sorted_coords = sorted(coordinates_dict.items())
+    x_coords, y_coords = zip(*[coord for index, coord in sorted_coords])
+
+    # Create the spline curve functions
+    indices = np.array([index for index, coord in sorted_coords])
+    cs_x = CubicSpline(indices, x_coords)
+    cs_y = CubicSpline(indices, y_coords)
+
+    # Generate interpolated coordinates using the spline functions
+    interpolated_indices = np.arange(0, batch_size)
+    interpolated_x = cs_x(interpolated_indices)
+    interpolated_y = cs_y(interpolated_indices)
+
+    # Round the interpolated coordinates and create the dictionary
+    interpolated = {i: (round(x), round(y)) for i, (x, y) in enumerate(zip(interpolated_x, interpolated_y))}
+    return interpolated
+
 def plot_to_tensor(coordinates_dict, interpolated_dict, height, width, box_size):
     from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
     import matplotlib.patches as patches
@@ -3411,6 +3432,14 @@ class GLIGENTextBoxApplyBatch:
                               "width": ("INT", {"default": 64, "min": 8, "max": MAX_RESOLUTION, "step": 8}),
                               "height": ("INT", {"default": 64, "min": 8, "max": MAX_RESOLUTION, "step": 8}),
                               "coordinates": ("STRING", {"multiline": True}),
+                              "interpolation": (
+                                [   
+                                    'straight',
+                                    'CubicSpline',
+                                ],
+                                {
+                                "default": 'CubicSpline'
+                                 }),
                              }}
     RETURN_TYPES = ("CONDITIONING", "IMAGE",)
     FUNCTION = "append"
@@ -3419,7 +3448,7 @@ class GLIGENTextBoxApplyBatch:
 
 
 
-    def append(self, latents, conditioning_to, clip, gligen_textbox_model, text, width, height, coordinates):
+    def append(self, latents, conditioning_to, clip, gligen_textbox_model, text, width, height, coordinates, interpolation):
 
         coordinates_dict = parse_coordinates(coordinates)
         batch_size = sum(tensor.size(0) for tensor in latents.values())
@@ -3427,7 +3456,11 @@ class GLIGENTextBoxApplyBatch:
         cond, cond_pooled = clip.encode_from_tokens(clip.tokenize(text), return_pooled=True)
 
         # Interpolate coordinates for the entire batch
-        interpolated_coords = interpolate_coordinates(coordinates_dict, batch_size)
+        if interpolation == 'CubicSpline':
+            interpolated_coords = interpolate_coordinates_with_curves(coordinates_dict, batch_size)
+        if interpolation == 'straight':
+            interpolated_coords = interpolate_coordinates(coordinates_dict, batch_size)
+            
         plot_image_tensor = plot_to_tensor(coordinates_dict, interpolated_coords, 512, 512, height)
         for t in conditioning_to:
             n = [t[0], t[1].copy()]
