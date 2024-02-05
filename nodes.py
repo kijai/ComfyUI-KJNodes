@@ -3521,15 +3521,14 @@ class ImageUpscaleWithModelBatched:
         
         for start_idx in range(0, in_img.shape[0], per_batch):
             sub_images = upscale_model(in_img[start_idx:start_idx+per_batch])
-            t.append(sub_images)
+            t.append(sub_images.cpu())
             # Calculate the number of images processed in this batch
             batch_count = sub_images.shape[0]
             # Update the progress bar by the number of images processed in this batch
             pbar.update(batch_count)
         upscale_model.cpu()
         
-     
-        t = torch.cat(t, dim=0).permute(0, 2, 3, 1)
+        t = torch.cat(t, dim=0).permute(0, 2, 3, 1).cpu()
 
         return (t,)    
 
