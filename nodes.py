@@ -1128,14 +1128,21 @@ class VRAM_Debug:
         freemem_after = comfy.model_management.get_free_memory()
         print(freemem_after)
         return (model, freemem_before, freemem_after)
-    
+
+class AnyType(str):
+  """A special class that is always equal in not equal comparisons. Credit to pythongosssss"""
+
+  def __ne__(self, __value: object) -> bool:
+    return False
+any = AnyType("*")
+
 class SomethingToString:
     @classmethod
     
     def INPUT_TYPES(s):
      return {
         "required": {
-        "input": ("*", {"forceinput": True, "default": ""}),
+        "input": (any, {}),
     },
     }
     RETURN_TYPES = ("STRING",)
@@ -2319,12 +2326,7 @@ class OffsetMask:
            
         return mask,
 
-class AnyType(str):
-  """A special class that is always equal in not equal comparisons. Credit to pythongosssss"""
 
-  def __ne__(self, __value: object) -> bool:
-    return False
-any = AnyType("*")
 class WidgetToString:
     @classmethod
     def IS_CHANGED(cls, **kwargs):
