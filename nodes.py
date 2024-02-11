@@ -393,6 +393,47 @@ class CreateFadeMaskAdvanced:
         if invert:
             return (1.0 - torch.cat(out, dim=0),)
         return (torch.cat(out, dim=0),)
+    
+class ScaleBatchPromptSchedule:
+    
+    RETURN_TYPES = ("STRING",)
+    FUNCTION = "scaleschedule"
+    CATEGORY = "KJNodes"
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                 "input_str": ("STRING", {"default": "0:(0.0),\n7:(1.0),\n15:(0.0)\n", "forceinput": True}),
+                 "old_frame_count": ("INT", {"default": 1,"min": 1, "max": 255, "step": 1}),
+                 "new_frame_count": ("INT", {"default": 1,"min": 1, "max": 255, "step": 1}),
+                
+        },
+    } 
+    
+    def scaleschedule(self, old_frame_count, input_str, new_frame_count):
+        print("input_str:", input_str)
+        pattern = r'"(\d+)"\s*:\s*"(.*?)"(?:,|\Z)'
+        frame_strings = dict(re.findall(pattern, input_str))
+        
+        # Calculate the scaling factor
+        scaling_factor = (new_frame_count - 1) / (old_frame_count - 1)
+        
+        # Initialize a dictionary to store the new frame numbers and strings
+        new_frame_strings = {}
+        
+        # Iterate over the frame numbers and strings
+        for old_frame, string in frame_strings.items():
+            # Calculate the new frame number
+            new_frame = int(round(int(old_frame) * scaling_factor))
+            
+            # Store the new frame number and corresponding string
+            new_frame_strings[new_frame] = string
+        
+        # Format the output string
+        output_str = ', '.join([f'"{k}":"{v}"' for k, v in sorted(new_frame_strings.items())])
+        print(output_str)
+        return (output_str,)
 
 class CrossFadeImages:
     
@@ -3598,7 +3639,8 @@ NODE_CLASS_MAPPINGS = {
     "StringConstant": StringConstant,
     "GLIGENTextBoxApplyBatch": GLIGENTextBoxApplyBatch,
     "CondPassThrough": CondPassThrough,
-    "ImageUpscaleWithModelBatched": ImageUpscaleWithModelBatched
+    "ImageUpscaleWithModelBatched": ImageUpscaleWithModelBatched,
+    "ScaleBatchPromptSchedule": ScaleBatchPromptSchedule
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "INTConstant": "INT Constant",
@@ -3663,5 +3705,6 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "StringConstant": "StringConstant",
     "GLIGENTextBoxApplyBatch": "GLIGENTextBoxApplyBatch",
     "CondPassThrough": "CondPassThrough",
-    "ImageUpscaleWithModelBatched": "ImageUpscaleWithModelBatched"
+    "ImageUpscaleWithModelBatched": "ImageUpscaleWithModelBatched",
+    "ScaleBatchPromptSchedule": "ScaleBatchPromptSchedule"
 }
