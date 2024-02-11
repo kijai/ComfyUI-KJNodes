@@ -404,9 +404,9 @@ class ScaleBatchPromptSchedule:
     def INPUT_TYPES(s):
         return {
             "required": {
-                 "input_str": ("STRING", {"default": "0:(0.0),\n7:(1.0),\n15:(0.0)\n", "forceinput": True}),
-                 "old_frame_count": ("INT", {"default": 1,"min": 1, "max": 255, "step": 1}),
-                 "new_frame_count": ("INT", {"default": 1,"min": 1, "max": 255, "step": 1}),
+                 "input_str": ("STRING", {"forceInput": True,"default": "0:(0.0),\n7:(1.0),\n15:(0.0)\n"}),
+                 "old_frame_count": ("INT", {"forceInput": True,"default": 1,"min": 1, "max": 4096, "step": 1}),
+                 "new_frame_count": ("INT", {"forceInput": True,"default": 1,"min": 1, "max": 4096, "step": 1}),
                 
         },
     } 
