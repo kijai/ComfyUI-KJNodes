@@ -3639,7 +3639,7 @@ class EffnetEncode:
 
         effnet.load_state_dict(effnet_state_dict if 'state_dict' not in effnet_checkpoint else effnet_checkpoint['state_dict'])
         effnet.eval().requires_grad_(False).to(device)
-        t = effnet(image)
+        t = effnet(image).cpu()
         return ({"samples":t}, )  
 
 
