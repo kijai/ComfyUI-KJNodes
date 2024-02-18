@@ -1185,15 +1185,22 @@ class SomethingToString:
         "required": {
         "input": (any, {}),
     },
+    "optional": {
+        "prefix": ("STRING", {"default": ""}),
+        "suffix": ("STRING", {"default": ""}),
+    }
     }
     RETURN_TYPES = ("STRING",)
     FUNCTION = "stringify"
     CATEGORY = "KJNodes"
 
-    def stringify(self, input):
+    def stringify(self, input, prefix="", suffix=""):
         if isinstance(input, (int, float, bool)):   
             stringified = str(input)
-            print(stringified)
+            if prefix:  # Check if prefix is not empty
+                stringified = prefix + stringified  # Add the prefix
+            if suffix:  # Check if suffix is not empty
+                stringified = stringified + suffix  # Add the suffix
         else:
             return
         return (stringified,)
