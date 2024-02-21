@@ -29,6 +29,7 @@ app.registerExtension({
                         }
 				});
 				}
+				break;
 			case "SoundReactive":
 				nodeType.prototype.onNodeCreated = function () {
 					let audioContext;
