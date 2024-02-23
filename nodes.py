@@ -3642,7 +3642,24 @@ class EffnetEncode:
         t = effnet(image).cpu()
         return ({"samples":t}, )  
 
+class ImageNormalize_Neg1_To_1:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": { 
+                              "images": ("IMAGE",),
+    
+                              }}
+    RETURN_TYPES = ("IMAGE",)
+    FUNCTION = "normalize"
 
+    CATEGORY = "KJNodes"
+
+    def normalize(self,images):
+        
+        images = images * 2.0 - 1.0
+
+        return (images,)    
+    
 NODE_CLASS_MAPPINGS = {
     "INTConstant": INTConstant,
     "FloatConstant": FloatConstant,
@@ -3709,7 +3726,8 @@ NODE_CLASS_MAPPINGS = {
     "CondPassThrough": CondPassThrough,
     "ImageUpscaleWithModelBatched": ImageUpscaleWithModelBatched,
     "ScaleBatchPromptSchedule": ScaleBatchPromptSchedule,
-    "EffnetEncode": EffnetEncode
+    "EffnetEncode": EffnetEncode,
+    "ImageNormalize_Neg1_To_1": ImageNormalize_Neg1_To_1
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "INTConstant": "INT Constant",
@@ -3776,5 +3794,6 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "CondPassThrough": "CondPassThrough",
     "ImageUpscaleWithModelBatched": "ImageUpscaleWithModelBatched",
     "ScaleBatchPromptSchedule": "ScaleBatchPromptSchedule",
-    "EffnetEncode": "EffnetEncode"
+    "EffnetEncode": "EffnetEncode",
+    "ImageNormalize_Neg1_To_1": "ImageNormalize_Neg1_To_1"
 }
