@@ -3659,7 +3659,37 @@ class ImageNormalize_Neg1_To_1:
         images = images * 2.0 - 1.0
 
         return (images,)    
-    
+
+class X0_passlatent(comfy.model_sampling.EPS):
+    def calculate_denoised(self, sigma, model_output, model_input):
+        return model_output
+    def calculate_input(self, sigma, noise):
+        return noise
+class SingleStepSampling:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": { "model": ("MODEL",),
+                              }}
+
+    RETURN_TYPES = ("MODEL",)
+    FUNCTION = "patch"
+
+    CATEGORY = "KJNodes"
+
+    def patch(self, model):
+        m = model.clone()
+
+        sampling_base = comfy.model_sampling.ModelSamplingDiscrete
+        sampling_type = X0_passlatent
+
+        class ModelSamplingAdvanced(sampling_base, sampling_type):
+            pass
+
+        model_sampling = ModelSamplingAdvanced(model.model.model_config)
+
+        m.add_object_patch("model_sampling", model_sampling)
+        return (m, )
+
 NODE_CLASS_MAPPINGS = {
     "INTConstant": INTConstant,
     "FloatConstant": FloatConstant,
@@ -3727,7 +3757,8 @@ NODE_CLASS_MAPPINGS = {
     "ImageUpscaleWithModelBatched": ImageUpscaleWithModelBatched,
     "ScaleBatchPromptSchedule": ScaleBatchPromptSchedule,
     "EffnetEncode": EffnetEncode,
-    "ImageNormalize_Neg1_To_1": ImageNormalize_Neg1_To_1
+    "ImageNormalize_Neg1_To_1": ImageNormalize_Neg1_To_1,
+    "SingleStepSampling": SingleStepSampling,
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "INTConstant": "INT Constant",
@@ -3795,5 +3826,6 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "ImageUpscaleWithModelBatched": "ImageUpscaleWithModelBatched",
     "ScaleBatchPromptSchedule": "ScaleBatchPromptSchedule",
     "EffnetEncode": "EffnetEncode",
-    "ImageNormalize_Neg1_To_1": "ImageNormalize_Neg1_To_1"
+    "ImageNormalize_Neg1_To_1": "ImageNormalize_Neg1_To_1",
+    "SingleStepSampling": "SingleStepSampling",
 }
