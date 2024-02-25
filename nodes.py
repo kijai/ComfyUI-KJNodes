@@ -3660,35 +3660,81 @@ class ImageNormalize_Neg1_To_1:
 
         return (images,)    
 
-class X0_passlatent(comfy.model_sampling.EPS):
-    def calculate_denoised(self, sigma, model_output, model_input):
-        return model_output
-    def calculate_input(self, sigma, noise):
-        return noise
-class SingleStepSampling:
+
+    
+import comfy.sample
+from nodes import CLIPTextEncode, VAEEncode, VAEDecode, LoraLoader
+
+class Intrinsic_lora_sampling:
+    def __init__(self):
+        self.loaded_lora = None
     @classmethod
     def INPUT_TYPES(s):
         return {"required": { "model": ("MODEL",),
+                              "lora_name": (folder_paths.get_filename_list("loras"), ),
+                               "task": (
+                                [   
+                                    'depth map',
+                                    'surface normals',
+                                    'albedo',
+                                    'shading',
+                                ],
+                                {
+                                "default": 'depth map'
+                                 }),
+                              "text": ("STRING", {"multiline": True, "default": "depth map"}),
+                              "clip": ("CLIP", ),
+                              "vae": ("VAE", ),
+                              "image": ("IMAGE",),
+                             
                               }}
 
-    RETURN_TYPES = ("MODEL",)
-    FUNCTION = "patch"
-
+    RETURN_TYPES = ("IMAGE",)
+    FUNCTION = "onestepsample"
     CATEGORY = "KJNodes"
 
-    def patch(self, model):
-        m = model.clone()
+    def onestepsample(self, model, lora_name, clip, vae, image, text, task):
+        
+        encoded_latent, = VAEEncode.encode(self, vae, image[:,:,:,:3])
+        sample = encoded_latent["samples"]
+        noise = torch.zeros(sample.size(), dtype=sample.dtype, layout=sample.layout, device="cpu")
 
+        prompt = task + "," + text
+        print(prompt)
+        positive, = CLIPTextEncode.encode(self, clip, prompt)
+        negative = positive #negative shouldn't do anything in this scenario
+
+        #custom model sampling to pass latent through as it is
+        class X0_PassThrough(comfy.model_sampling.EPS):
+            def calculate_denoised(self, sigma, model_output, model_input):
+                return model_output
+            def calculate_input(self, sigma, noise):
+                return noise
+            
         sampling_base = comfy.model_sampling.ModelSamplingDiscrete
-        sampling_type = X0_passlatent
+        sampling_type = X0_PassThrough
 
         class ModelSamplingAdvanced(sampling_base, sampling_type):
             pass
-
         model_sampling = ModelSamplingAdvanced(model.model.model_config)
+        model_clone = model.clone()
+        model_clone_with_lora = LoraLoader.load_lora(self, model_clone, None, lora_name, 1.0, 0)[0]
+        model_clone_with_lora.add_object_patch("model_sampling", model_sampling)
 
-        m.add_object_patch("model_sampling", model_sampling)
-        return (m, )
+        samples = {"samples": comfy.sample.sample(model_clone_with_lora, noise, 1, 1.0, "euler", "simple", positive, negative, sample,
+                                  denoise=1.0, disable_noise=True, start_step=0, last_step=1,
+                                  force_full_denoise=True, noise_mask=None, callback=None, disable_pbar=True, seed=None)}
+        
+        image_out, = VAEDecode.decode(self, vae, samples)
+        if task == 'depth map':
+            imax = image_out.max()
+            imin = image_out.min()
+            image_out = (image_out-imin)/(imax-imin)
+            image_out = 0.299 * image_out[..., 0] + 0.587 * image_out[..., 1] + 0.114 * image_out[..., 2]
+            image_out = image_out.unsqueeze(-1).repeat(1, 1, 1, 3)
+        else:
+            image_out = image_out.clamp(-1.,1.)
+        return (image_out, )
 
 NODE_CLASS_MAPPINGS = {
     "INTConstant": INTConstant,
@@ -3758,7 +3804,7 @@ NODE_CLASS_MAPPINGS = {
     "ScaleBatchPromptSchedule": ScaleBatchPromptSchedule,
     "EffnetEncode": EffnetEncode,
     "ImageNormalize_Neg1_To_1": ImageNormalize_Neg1_To_1,
-    "SingleStepSampling": SingleStepSampling,
+    "Intrinsic_lora_sampling": Intrinsic_lora_sampling,
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "INTConstant": "INT Constant",
@@ -3827,5 +3873,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "ScaleBatchPromptSchedule": "ScaleBatchPromptSchedule",
     "EffnetEncode": "EffnetEncode",
     "ImageNormalize_Neg1_To_1": "ImageNormalize_Neg1_To_1",
-    "SingleStepSampling": "SingleStepSampling",
+    "Intrinsic_lora_sampling": "Intrinsic_lora_sampling",
 }
