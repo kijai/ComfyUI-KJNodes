@@ -3694,7 +3694,7 @@ class Intrinsic_lora_sampling:
     CATEGORY = "KJNodes"
 
     def onestepsample(self, model, lora_name, clip, vae, image, text, task):
-        
+        pbar = comfy.utils.ProgressBar(3)
         encoded_latent, = VAEEncode.encode(self, vae, image[:,:,:,:3])
         sample = encoded_latent["samples"]
         noise = torch.zeros(sample.size(), dtype=sample.dtype, layout=sample.layout, device="cpu")
@@ -3702,6 +3702,7 @@ class Intrinsic_lora_sampling:
         prompt = task + "," + text
         print(prompt)
         positive, = CLIPTextEncode.encode(self, clip, prompt)
+        pbar.update(1)
         negative = positive #negative shouldn't do anything in this scenario
 
         #custom model sampling to pass latent through as it is
@@ -3724,8 +3725,9 @@ class Intrinsic_lora_sampling:
         samples = {"samples": comfy.sample.sample(model_clone_with_lora, noise, 1, 1.0, "euler", "simple", positive, negative, sample,
                                   denoise=1.0, disable_noise=True, start_step=0, last_step=1,
                                   force_full_denoise=True, noise_mask=None, callback=None, disable_pbar=True, seed=None)}
-        
+        pbar.update(1)
         image_out, = VAEDecode.decode(self, vae, samples)
+        pbar.update(1)
         if task == 'depth map':
             imax = image_out.max()
             imin = image_out.min()
@@ -3737,6 +3739,7 @@ class Intrinsic_lora_sampling:
             image_out = 1.0 - image_out
         else:
             image_out = image_out.clamp(-1.,1.)
+            
         return (image_out, )
 
 NODE_CLASS_MAPPINGS = {
