@@ -3682,7 +3682,7 @@ class Intrinsic_lora_sampling:
                                 {
                                 "default": 'depth map'
                                  }),
-                              "text": ("STRING", {"multiline": True, "default": "depth map"}),
+                              "text": ("STRING", {"multiline": True, "default": ""}),
                               "clip": ("CLIP", ),
                               "vae": ("VAE", ),
                               "image": ("IMAGE",),
@@ -3732,6 +3732,9 @@ class Intrinsic_lora_sampling:
             image_out = (image_out-imin)/(imax-imin)
             image_out = 0.299 * image_out[..., 0] + 0.587 * image_out[..., 1] + 0.114 * image_out[..., 2]
             image_out = image_out.unsqueeze(-1).repeat(1, 1, 1, 3)
+        elif task == 'surface normals':
+            image_out = image_out.clamp(-1.,1.)
+            image_out = 1.0 - image_out
         else:
             image_out = image_out.clamp(-1.,1.)
         return (image_out, )
