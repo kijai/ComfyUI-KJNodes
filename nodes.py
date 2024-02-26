@@ -3663,7 +3663,7 @@ class ImageNormalize_Neg1_To_1:
 
     
 import comfy.sample
-from nodes import CLIPTextEncode, LoraLoader
+from nodes import CLIPTextEncode
 folder_paths.add_model_folder_path("intristic_loras", os.path.join(script_dir, "intristic_loras"))
 
 class Intrinsic_lora_sampling:
@@ -3717,15 +3717,21 @@ class Intrinsic_lora_sampling:
                 return model_output
             def calculate_input(self, sigma, noise):
                 return noise
-            
         sampling_base = comfy.model_sampling.ModelSamplingDiscrete
         sampling_type = X0_PassThrough
 
         class ModelSamplingAdvanced(sampling_base, sampling_type):
             pass
         model_sampling = ModelSamplingAdvanced(model.model.model_config)
+
+        #load lora
         model_clone = model.clone()
-        model_clone_with_lora = LoraLoader.load_lora(self, model_clone, None, lora_name, 1.0, 0)[0]
+        lora_path = folder_paths.get_full_path("intristic_loras", lora_name)        
+        lora = comfy.utils.load_torch_file(lora_path, safe_load=True)
+        self.loaded_lora = (lora_path, lora)
+
+        model_clone_with_lora = comfy.sd.load_lora_for_models(model_clone, None, lora, 1.0, 0)[0]
+
         model_clone_with_lora.add_object_patch("model_sampling", model_sampling)
 
         samples = {"samples": comfy.sample.sample(model_clone_with_lora, noise, 1, 1.0, "euler", "simple", positive, negative, sample,
