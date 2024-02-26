@@ -3663,15 +3663,17 @@ class ImageNormalize_Neg1_To_1:
 
     
 import comfy.sample
-from nodes import CLIPTextEncode, VAEEncode, VAEDecode, LoraLoader
+from nodes import CLIPTextEncode, LoraLoader
+folder_paths.add_model_folder_path("intristic_loras", os.path.join(script_dir, "intristic_loras"))
 
 class Intrinsic_lora_sampling:
     def __init__(self):
         self.loaded_lora = None
+        
     @classmethod
     def INPUT_TYPES(s):
         return {"required": { "model": ("MODEL",),
-                              "lora_name": (folder_paths.get_filename_list("loras"), ),
+                              "lora_name": (folder_paths.get_filename_list("intristic_loras"), ),
                                "task": (
                                 [   
                                     'depth map',
@@ -3735,7 +3737,6 @@ class Intrinsic_lora_sampling:
         for start_idx in range(0, samples["samples"].shape[0], per_batch):
             decoded.append(vae.decode(samples["samples"][start_idx:start_idx+per_batch]))
         image_out = torch.cat(decoded, dim=0)
-        #image_out, = VAEDecode.decode(self, vae, samples)
 
         pbar.update(1)
 
