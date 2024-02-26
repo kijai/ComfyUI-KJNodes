@@ -3670,44 +3670,50 @@ class Intrinsic_lora_sampling:
     @classmethod
     def INPUT_TYPES(s):
         return {"required": { "model": ("MODEL",),
-                              "lora_name": (folder_paths.get_filename_list("intristic_loras"), ),
-                               "task": (
-                                [   
-                                    'depth map',
-                                    'surface normals',
-                                    'albedo',
-                                    'shading',
-                                ],
-                                {
-                                "default": 'depth map'
-                                 }),
-                              "text": ("STRING", {"multiline": True, "default": ""}),
-                              "clip": ("CLIP", ),
-                              "vae": ("VAE", ),
-                              "image": ("IMAGE",),
-                              "per_batch": ("INT", {"default": 16, "min": 1, "max": 4096, "step": 1}),
-                             
-                              }}
+                "lora_name": (folder_paths.get_filename_list("intristic_loras"), ),
+                "task": (
+                [   
+                    'depth map',
+                    'surface normals',
+                    'albedo',
+                    'shading',
+                ],
+                {
+                "default": 'depth map'
+                    }),
+                "text": ("STRING", {"multiline": True, "default": ""}),
+                "clip": ("CLIP", ),
+                "vae": ("VAE", ),
+                "per_batch": ("INT", {"default": 16, "min": 1, "max": 4096, "step": 1}),
+        },
+            "optional": {
+            "image": ("IMAGE",),
+            "optional_latent": ("LATENT",),
+            },
+        }
 
-    RETURN_TYPES = ("IMAGE",)
+    RETURN_TYPES = ("IMAGE", "LATENT",)
     FUNCTION = "onestepsample"
     CATEGORY = "KJNodes"
 
-    def onestepsample(self, model, lora_name, clip, vae, image, text, task, per_batch):
+    def onestepsample(self, model, lora_name, clip, vae, text, task, per_batch, image=None, optional_latent=None):
         pbar = comfy.utils.ProgressBar(3)
 
-        image_list = []
-        for start_idx in range(0, image.shape[0], per_batch):
-            sub_pixels = vae.vae_encode_crop_pixels(image[start_idx:start_idx+per_batch])
-            image_list.append(vae.encode(sub_pixels[:,:,:,:3]))
-
-        sample = torch.cat(image_list, dim=0)
+        if optional_latent is None:
+            image_list = []
+            for start_idx in range(0, image.shape[0], per_batch):
+                sub_pixels = vae.vae_encode_crop_pixels(image[start_idx:start_idx+per_batch])
+                image_list.append(vae.encode(sub_pixels[:,:,:,:3]))
+            sample = torch.cat(image_list, dim=0)
+        else:
+            sample = optional_latent["samples"]
         noise = torch.zeros(sample.size(), dtype=sample.dtype, layout=sample.layout, device="cpu")
         prompt = task + "," + text
         positive, = CLIPTextEncode.encode(self, clip, prompt)
-        pbar.update(1)
         negative = positive #negative shouldn't do anything in this scenario
 
+        pbar.update(1)
+     
         #custom model sampling to pass latent through as it is
         class X0_PassThrough(comfy.model_sampling.EPS):
             def calculate_denoised(self, sigma, model_output, model_input):
@@ -3755,7 +3761,7 @@ class Intrinsic_lora_sampling:
         else:
             image_out = image_out.clamp(-1.,1.)
             
-        return (image_out, )
+        return (image_out, samples,)
 
 class RemapMaskRange:
     @classmethod
