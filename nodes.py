@@ -3754,6 +3754,39 @@ class Intrinsic_lora_sampling:
             
         return (image_out, )
 
+class RemapMaskRange:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "mask": ("MASK",),
+                "min": ("FLOAT", {"default": 0.0,"min": -10.0, "max": 1.0, "step": 0.01}),
+                "max": ("FLOAT", {"default": 1.0,"min": 0.0, "max": 10.0, "step": 0.01}),
+            }
+        }
+
+    RETURN_TYPES = ("MASK",)
+    RETURN_NAMES = ("mask",)
+    FUNCTION = "remap"
+    CATEGORY = "KJNodes/masking"
+
+    def remap(self, mask, min, max):
+
+         # Find the maximum value in the mask
+        mask_max = torch.max(mask)
+        
+        # If the maximum mask value is zero, avoid division by zero by setting it to 1
+        mask_max = mask_max if mask_max > 0 else 1
+        
+        # Scale the mask values to the new range defined by min and max
+        # The highest pixel value in the mask will be scaled to max
+        scaled_mask = (mask / mask_max) * (max - min) + min
+        
+        # Clamp the values to ensure they are within [0.0, 1.0]
+        scaled_mask = torch.clamp(scaled_mask, min=0.0, max=1.0)
+        
+        return (scaled_mask, )
+
 NODE_CLASS_MAPPINGS = {
     "INTConstant": INTConstant,
     "FloatConstant": FloatConstant,
@@ -3823,6 +3856,7 @@ NODE_CLASS_MAPPINGS = {
     "EffnetEncode": EffnetEncode,
     "ImageNormalize_Neg1_To_1": ImageNormalize_Neg1_To_1,
     "Intrinsic_lora_sampling": Intrinsic_lora_sampling,
+    "RemapMaskRange": RemapMaskRange
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "INTConstant": "INT Constant",
@@ -3892,4 +3926,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "EffnetEncode": "EffnetEncode",
     "ImageNormalize_Neg1_To_1": "ImageNormalize_Neg1_To_1",
     "Intrinsic_lora_sampling": "Intrinsic_lora_sampling",
+    "RemapMaskRange": "RemapMaskRange",
 }
