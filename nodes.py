@@ -1145,30 +1145,26 @@ class VRAM_Debug:
     def INPUT_TYPES(s):
       return {
         "required": {
-			  "model": ("MODEL",),
-              "empty_cuda_cache": ("BOOLEAN", {"default": False}),
+			  "image_passthrough": ("IMAGE",),
+              "empty_cache": ("BOOLEAN", {"default": True}),
+              "unload_all_models": ("BOOLEAN", {"default": False}),
 		  },
-        "optional": {
-            "clip_vision": ("CLIP_VISION", ),
         }
-	  }
-    RETURN_TYPES = ("MODEL", "INT", "INT",)
-    RETURN_NAMES = ("model", "freemem_before", "freemem_after")
+    RETURN_TYPES = ("IMAGE", "INT", "INT",)
+    RETURN_NAMES = ("image_passthrough", "freemem_before", "freemem_after")
     FUNCTION = "VRAMdebug"
     CATEGORY = "KJNodes"
 
-    def VRAMdebug(self, model, empty_cuda_cache, clip_vision=None):
+    def VRAMdebug(self, image_passthrough, empty_cache, unload_all_models):
         freemem_before = comfy.model_management.get_free_memory()
         print(freemem_before)
-        if empty_cuda_cache:
-            torch.cuda.empty_cache()
-            torch.cuda.ipc_collect()
-        if clip_vision is not None:
-            print("unloading clip_vision_clone")
-            comfy.model_management.unload_model_clones(clip_vision.patcher)
+        if empty_cache:
+            comfy.model_management.soft_empty_cache()
+        if unload_all_models:
+            comfy.model_management.unload_all_models()
         freemem_after = comfy.model_management.get_free_memory()
         print(freemem_after)
-        return (model, freemem_before, freemem_after)
+        return (image_passthrough, freemem_before, freemem_after)
 
 class AnyType(str):
   """A special class that is always equal in not equal comparisons. Credit to pythongosssss"""
