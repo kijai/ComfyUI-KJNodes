@@ -1157,13 +1157,14 @@ class VRAM_Debug:
 
     def VRAMdebug(self, image_passthrough, empty_cache, unload_all_models):
         freemem_before = comfy.model_management.get_free_memory()
-        print(freemem_before)
+        print("VRAMdebug: free memory before: ", freemem_before)
         if empty_cache:
             comfy.model_management.soft_empty_cache()
         if unload_all_models:
             comfy.model_management.unload_all_models()
         freemem_after = comfy.model_management.get_free_memory()
-        print(freemem_after)
+        print("VRAMdebug: free memory after: ", freemem_after)
+        print("VRAMdebug: freed memory: ", freemem_after - freemem_before)
         return (image_passthrough, freemem_before, freemem_after)
 
 class AnyType(str):
