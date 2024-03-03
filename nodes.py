@@ -1335,7 +1335,8 @@ class SaveImageWithAlpha:
         filename_prefix += self.prefix_append
         full_output_folder, filename, counter, subfolder, filename_prefix = folder_paths.get_save_image_path(filename_prefix, self.output_dir, images[0].shape[1], images[0].shape[0])
         results = list()
-
+        if mask.dtype == torch.float16:
+            mask = mask.to(torch.float32)
         def file_counter():
             max_counter = 0
             # Loop through the existing files
@@ -2480,7 +2481,8 @@ class CreateShapeMask:
             image = pil2tensor(image)
             mask = image[:, :, :, 0]
             out.append(mask)
-        return (torch.cat(out, dim=0), 1.0 - torch.cat(out, dim=0),)
+            outstack = torch.cat(out, dim=0)
+        return (outstack, 1.0 - outstack,)
     
 class CreateVoronoiMask:
     
