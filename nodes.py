@@ -772,17 +772,23 @@ class GrowMaskWithBlur:
                 current_expand += abs(incremental_expandrate)
             output = torch.from_numpy(output)
             if alpha < 1.0 and previous_output is not None:
+                # Interpolate between the previous and current frame
                 output = alpha * output + (1 - alpha) * previous_output
             if decay < 1.0 and previous_output is not None:
+                # Add the decayed previous output to the current frame
                 output += decay * previous_output
                 output = output / output.max()
             previous_output = output
             out.append(output)
 
         if blur_radius != 0:
+            # Convert the tensor list to PIL images, apply blur, and convert back
             for idx, tensor in enumerate(out):
+                # Convert tensor to PIL image
                 pil_image = tensor2pil(tensor.cpu().detach())[0]
+                # Apply Gaussian blur
                 pil_image = pil_image.filter(ImageFilter.GaussianBlur(blur_radius))
+                # Convert back to tensor
                 out[idx] = pil2tensor(pil_image)
             blurred = torch.cat(out, dim=0)
             return (blurred, 1.0 - blurred)
