@@ -1357,7 +1357,7 @@ class SaveImageWithAlpha:
             img = Image.fromarray(np.clip(i, 0, 255).astype(np.uint8))
             
              # Resize the mask to match the image size
-            a_resized = Image.fromarray(a).resize(img.size, Image.ANTIALIAS)
+            a_resized = Image.fromarray(a).resize(img.size, Image.LANCZOS)
             a_resized = np.clip(a_resized, 0, 255).astype(np.uint8)
             img.putalpha(Image.fromarray(a_resized, mode='L'))
             metadata = None
