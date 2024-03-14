@@ -3797,6 +3797,28 @@ class RemapMaskRange:
         
         return (scaled_mask, )
 
+class LoadResAdapterNormalization:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "model": ("MODEL",),
+                "resadapter_path": (folder_paths.get_filename_list("checkpoints"), )
+            } 
+        }
+
+    RETURN_TYPES = ("MODEL",)
+    FUNCTION = "load_res_adapter"
+
+    def load_res_adapter(self, model, resadapter_path):
+        resadapter_path = f"{folder_paths.get_folder_paths('checkpoints')[0]}/{resadapter_path}"
+        
+        if os.path.exists(resadapter_path):
+            norm_state_dict = comfy.utils.load_torch_file(resadapter_path)
+            model_clone = model.clone()
+            model_clone.model.load_state_dict(norm_state_dict, strict=False)
+        return (model_clone, )
+
 NODE_CLASS_MAPPINGS = {
     "INTConstant": INTConstant,
     "FloatConstant": FloatConstant,
@@ -3866,7 +3888,8 @@ NODE_CLASS_MAPPINGS = {
     "EffnetEncode": EffnetEncode,
     "ImageNormalize_Neg1_To_1": ImageNormalize_Neg1_To_1,
     "Intrinsic_lora_sampling": Intrinsic_lora_sampling,
-    "RemapMaskRange": RemapMaskRange
+    "RemapMaskRange": RemapMaskRange,
+    "LoadResAdapterNormalization": LoadResAdapterNormalization
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "INTConstant": "INT Constant",
@@ -3937,4 +3960,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "ImageNormalize_Neg1_To_1": "ImageNormalize_Neg1_To_1",
     "Intrinsic_lora_sampling": "Intrinsic_lora_sampling",
     "RemapMaskRange": "RemapMaskRange",
+    "LoadResAdapterNormalization": "LoadResAdapterNormalization",
 }
