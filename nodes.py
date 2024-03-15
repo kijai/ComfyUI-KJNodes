@@ -1,8 +1,10 @@
 import nodes
 import torch
+
 import torch.nn.functional as F
 from torchvision.transforms import Resize, CenterCrop, InterpolationMode
 from torchvision.transforms import functional as TF
+from scipy.interpolate import CubicSpline
 import scipy.ndimage
 from scipy.spatial import Voronoi
 import matplotlib.pyplot as plt
@@ -1154,7 +1156,7 @@ class VRAM_Debug:
 		}
         
     RETURN_TYPES = ("IMAGE", "MODEL","INT", "INT",)
-    RETURN_NAMES = ("image_passthrough", "freemem_before", "freemem_after")
+    RETURN_NAMES = ("image_passthrough", "model_passthrough", "freemem_before", "freemem_after")
     FUNCTION = "VRAMdebug"
     CATEGORY = "KJNodes"
 
@@ -1254,9 +1256,6 @@ class EmptyLatentImagePresets:
 
         return (latent, int(width), int(height),)
 
-#https://github.com/hahnec/color-matcher/
-from color_matcher import ColorMatcher
-#from color_matcher.normalizer import Normalizer
 
 class ColorMatch:
     @classmethod
@@ -1287,6 +1286,10 @@ class ColorMatch:
     FUNCTION = "colormatch"
     
     def colormatch(self, image_ref, image_target, method):
+        try:
+            from color_matcher import ColorMatcher #https://github.com/hahnec/color-matcher/
+        except:
+            raise Exception("Can't import color-matcher, did you install requirements.txt? Manual install: pip install color-matcher")
         cm = ColorMatcher()
         image_ref = image_ref.cpu()
         image_target = image_target.cpu()
@@ -2282,7 +2285,6 @@ class ResizeMask:
 
         return(outputs, outputs.shape[2], outputs.shape[1],)
     
-from torch.nn.functional import pad   
 class OffsetMask:
     @classmethod
     def INPUT_TYPES(s):
@@ -2355,23 +2357,23 @@ class OffsetMask:
                     if padding_mode == 'empty':
                         mask[i] = torch.cat([torch.zeros((height, temp_x)), mask[i, :, :-temp_x]], dim=1)
                     elif padding_mode in ['replicate', 'reflect']:
-                        mask[i] = pad(mask[i, :, :-temp_x], (0, temp_x), mode=padding_mode)
+                        mask[i] = F.pad(mask[i, :, :-temp_x], (0, temp_x), mode=padding_mode)
                 elif temp_x < 0:
                     if padding_mode == 'empty':
                         mask[i] = torch.cat([mask[i, :, :temp_x], torch.zeros((height, -temp_x))], dim=1)
                     elif padding_mode in ['replicate', 'reflect']:
-                        mask[i] = pad(mask[i, :, -temp_x:], (temp_x, 0), mode=padding_mode)
+                        mask[i] = F.pad(mask[i, :, -temp_x:], (temp_x, 0), mode=padding_mode)
 
                 if temp_y > 0:
                     if padding_mode == 'empty':
                         mask[i] = torch.cat([torch.zeros((temp_y, width)), mask[i, :-temp_y, :]], dim=0)
                     elif padding_mode in ['replicate', 'reflect']:
-                        mask[i] = pad(mask[i, :-temp_y, :], (0, temp_y), mode=padding_mode)
+                        mask[i] = F.pad(mask[i, :-temp_y, :], (0, temp_y), mode=padding_mode)
                 elif temp_y < 0:
                     if padding_mode == 'empty':
                         mask[i] = torch.cat([mask[i, :temp_y, :], torch.zeros((-temp_y, width))], dim=0)
                     elif padding_mode in ['replicate', 'reflect']:
-                        mask[i] = pad(mask[i, -temp_y:, :], (temp_y, 0), mode=padding_mode)
+                        mask[i] = F.pad(mask[i, -temp_y:, :], (temp_y, 0), mode=padding_mode)
            
         return mask,
 
@@ -2895,52 +2897,6 @@ class AddLabel:
         
         return (combined_images,)
 
-class ReferenceOnlySimple3:
-    @classmethod
-    def INPUT_TYPES(s):
-        return {"required": { "model": ("MODEL",),
-                              "reference": ("LATENT",),
-                              "reference2": ("LATENT",),
-                              "input": ("LATENT",),
-                               "batch_size": ("INT", {"default": 1, "min": 1, "max": 64})
-                               }}
-    RETURN_TYPES = ("MODEL", "LATENT")
-    FUNCTION = "reference_only"
-
-    CATEGORY = "KJNodes/experiments"
- 
-    def reference_only(self, model, reference, reference2, input, batch_size):
-        model_reference = model.clone()
-        size_latent = list(reference["samples"].shape)
-        size_latent[0] = batch_size
-        latent = input
- 
-        batch = latent["samples"].shape[0] + reference["samples"].shape[0] + reference2["samples"].shape[0]
-  
-        def reference_apply(q, k, v, extra_options):
-            k = k.clone().repeat(1, 2, 1)
-            offset = 0
-            if q.shape[0] > batch:
-                offset = batch
-                
-            re = extra_options["transformer_index"] % 2
- 
-            for o in range(0, q.shape[0], batch):
-                for x in range(1, batch):
-                    k[x + o, q.shape[1]:] = q[o + re,:]
-            return q, k, k
- 
-        model_reference.set_model_attn1_patch(reference_apply)
-
-        out_latent = torch.cat((reference["samples"], reference2["samples"], latent["samples"]))
-        if "noise_mask" in latent:
-            mask = latent["noise_mask"]
-        else:
-            mask = torch.ones((64,64), dtype=torch.float32, device="cpu")
-            mask = mask.repeat(latent["samples"].shape[0], 1, 1)
- 
-        out_mask = torch.zeros((1,mask.shape[1],mask.shape[2]), dtype=torch.float32, device="cpu")
-        return (model_reference, {"samples": out_latent, "noise_mask": torch.cat((out_mask,out_mask, mask))})
  
 class SoundReactive:
     @classmethod
@@ -3428,8 +3384,6 @@ def interpolate_coordinates(coordinates_dict, batch_size):
 
     return interpolated
 
-from scipy.interpolate import CubicSpline
-import numpy as np
 
 def interpolate_coordinates_with_curves(coordinates_dict, batch_size):
     sorted_coords = sorted(coordinates_dict.items())
@@ -3582,67 +3536,7 @@ class ImageUpscaleWithModelBatched:
         
         t = torch.cat(t, dim=0).permute(0, 2, 3, 1).cpu()
 
-        return (t,)    
-
-
-import torchvision
-from torch import nn
-from safetensors import safe_open
-
-class EfficientNetEncoder(nn.Module):
-    def __init__(self, c_latent=16):
-        super().__init__()
-        self.backbone = torchvision.models.efficientnet_v2_s(weights='DEFAULT').features.eval()
-        self.mapper = nn.Sequential(
-            nn.Conv2d(1280, c_latent, kernel_size=1, bias=False),
-            nn.BatchNorm2d(c_latent, affine=False),  # then normalize them to have mean 0 and std 1
-        )
-
-    def forward(self, x):
-        return self.mapper(self.backbone(x))
-    
-class EffnetEncode:
-    @classmethod
-    def INPUT_TYPES(s):
-        return {"required": { 
-                              "image": ("IMAGE",),
-                              }}
-    RETURN_TYPES = ("LATENT",)
-    FUNCTION = "encode"
-
-    CATEGORY = "KJNodes"
-
-    def encode(self, image):
-        device = comfy.model_management.get_torch_device()
-
-        image = image.permute(0, 3, 1, 2).to(device)
-        effnet_preprocess = torchvision.transforms.Compose([
-            torchvision.transforms.Normalize(
-                mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)
-            )
-        ])
-        image = effnet_preprocess(image)
-        effnet = EfficientNetEncoder()
-
-        effnet_checkpoint = os.path.join(folder_paths.models_dir,"vae", "Stable-cascade","effnet_encoder.safetensors")
-        if not os.path.exists(effnet_checkpoint):
-            try:
-                from huggingface_hub import snapshot_download
-                download_to = os.path.join(folder_paths.models_dir,'vae', "Stable-cascade")
-                snapshot_download(repo_id="stabilityai/stable-cascade", allow_patterns=["effnet_encoder.safetensors"], 
-                                    local_dir=download_to, local_dir_use_symlinks=False)
-            except:
-                raise Exception("Model not found and download failed. (https://huggingface.co/stabilityai/stable-cascade, effnet_encoder.safetensors)")
-
-        effnet_state_dict = {}
-        with safe_open(effnet_checkpoint, framework="pt", device="cpu") as f:
-            for key in f.keys():
-                effnet_state_dict[key] = f.get_tensor(key)
-
-        effnet.load_state_dict(effnet_state_dict if 'state_dict' not in effnet_checkpoint else effnet_checkpoint['state_dict'])
-        effnet.eval().requires_grad_(False).to(device)
-        t = effnet(image).cpu()
-        return ({"samples":t}, )  
+        return (t,)
 
 class ImageNormalize_Neg1_To_1:
     @classmethod
@@ -3659,11 +3553,9 @@ class ImageNormalize_Neg1_To_1:
     def normalize(self,images):
         
         images = images * 2.0 - 1.0
-
         return (images,)    
 
-
-    
+ 
 import comfy.sample
 from nodes import CLIPTextEncode
 folder_paths.add_model_folder_path("intristic_loras", os.path.join(script_dir, "intristic_loras"))
@@ -3822,19 +3714,16 @@ class LoadResAdapterNormalization:
             model_clone = model.clone()
             norm_state_dict = comfy.utils.load_torch_file(resadapter_path)
             new_values = {key[len(prefix_to_remove):]: value for key, value in norm_state_dict.items() if key.startswith(prefix_to_remove)}
-            
-            # Replace the values for the keys in the model's state dict
-            for key in model.model.diffusion_model.state_dict().keys():
-                if key in new_values:
-                    original_tensor = model.model.diffusion_model.state_dict()[key]
-                    new_tensor = new_values[key].to(model.model.diffusion_model.dtype)
-                    if original_tensor.shape == new_tensor.shape:
-                        model_clone.add_object_patch(f"diffusion_model.{key}.data", new_tensor)
-                        print(f"Replaced key: {key}")
-                    else:
-                        print(f"Shape mismatch for key: {key}. Did not replace.")
-            
-
+            try:
+                for key in model.model.diffusion_model.state_dict().keys():
+                    if key in new_values:
+                        original_tensor = model.model.diffusion_model.state_dict()[key]
+                        new_tensor = new_values[key].to(model.model.diffusion_model.dtype)
+                        if original_tensor.shape == new_tensor.shape:
+                            model_clone.add_object_patch(f"diffusion_model.{key}.data", new_tensor)
+            except:
+                raise Exception("Could not patch model, this way of patching was added to ComfyUI on March 3rd 2024, is your ComfyUI up to date?")
+            print("Added resnet normalization patch.")
             return (model_clone, )
         
 class Superprompt:
@@ -3922,7 +3811,6 @@ NODE_CLASS_MAPPINGS = {
     "FlipSigmasAdjusted": FlipSigmasAdjusted,
     "InjectNoiseToLatent": InjectNoiseToLatent,
     "AddLabel": AddLabel,
-    "ReferenceOnlySimple3": ReferenceOnlySimple3,
     "SoundReactive": SoundReactive,
     "GenerateNoise": GenerateNoise,
     "StableZero123_BatchSchedule": StableZero123_BatchSchedule,
@@ -3937,7 +3825,6 @@ NODE_CLASS_MAPPINGS = {
     "CondPassThrough": CondPassThrough,
     "ImageUpscaleWithModelBatched": ImageUpscaleWithModelBatched,
     "ScaleBatchPromptSchedule": ScaleBatchPromptSchedule,
-    "EffnetEncode": EffnetEncode,
     "ImageNormalize_Neg1_To_1": ImageNormalize_Neg1_To_1,
     "Intrinsic_lora_sampling": Intrinsic_lora_sampling,
     "RemapMaskRange": RemapMaskRange,
@@ -3994,7 +3881,6 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "FlipSigmasAdjusted": "FlipSigmasAdjusted",
     "InjectNoiseToLatent": "InjectNoiseToLatent",
     "AddLabel": "AddLabel",
-    "ReferenceOnlySimple3": "ReferenceOnlySimple3",
     "SoundReactive": "SoundReactive",
     "GenerateNoise": "GenerateNoise",
     "StableZero123_BatchSchedule": "StableZero123_BatchSchedule",
@@ -4009,7 +3895,6 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "CondPassThrough": "CondPassThrough",
     "ImageUpscaleWithModelBatched": "ImageUpscaleWithModelBatched",
     "ScaleBatchPromptSchedule": "ScaleBatchPromptSchedule",
-    "EffnetEncode": "EffnetEncode",
     "ImageNormalize_Neg1_To_1": "ImageNormalize_Neg1_To_1",
     "Intrinsic_lora_sampling": "Intrinsic_lora_sampling",
     "RemapMaskRange": "RemapMaskRange",
