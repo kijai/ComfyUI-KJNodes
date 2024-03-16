@@ -3650,10 +3650,9 @@ class Intrinsic_lora_sampling:
             imax = image_out.max()
             imin = image_out.min()
             image_out = (image_out-imin)/(imax-imin)
-            image_out = 0.299 * image_out[..., 0] + 0.587 * image_out[..., 1] + 0.114 * image_out[..., 2]
-            image_out = image_out.unsqueeze(-1).repeat(1, 1, 1, 3)
+            image_out = torch.max(image_out, dim=3, keepdim=True)[0].repeat(1, 1, 1, 3)
         elif task == 'surface normals':
-            image_out = image_out.clamp(-1.,1.)
+            image_out = F.normalize(image_out * 2 - 1, dim=3) / 2 + 0.5
             image_out = 1.0 - image_out
         else:
             image_out = image_out.clamp(-1.,1.)
