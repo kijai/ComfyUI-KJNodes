@@ -2,7 +2,7 @@ import { app } from "../../../scripts/app.js";
 import { ComfyWidgets } from '../../../scripts/widgets.js';
 //based on diffus3's SetGet: https://github.com/diffus3/ComfyUI-extensions
 
-let isPrefixEnabled = false;
+let isPrefixEnabled = true;
 
 // Nodes that allow you to tunnel connections for cleaner graphs
 function setColorAndBgColor(type) {
