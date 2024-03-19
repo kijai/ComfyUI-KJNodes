@@ -249,7 +249,7 @@ app.registerExtension({
 					},
 					{
 						values: () => {
-                            const setterNodes = graph._nodes.filter((otherNode) => otherNode.type == 'SetNode');
+                            const setterNodes = node.graph._nodes.filter((otherNode) => otherNode.type == 'SetNode');
                             return setterNodes.map((otherNode) => otherNode.widgets[0].value).sort();
                         }
 					}
