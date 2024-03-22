@@ -757,7 +757,7 @@ class GrowMaskWithBlur:
         kernel = np.array([[c, 1, c],
                            [1, 1, 1],
                            [c, 1, c]])
-        growmask = mask.reshape((-1, mask.shape[-2], mask.shape[-1]))
+        growmask = mask.reshape((-1, mask.shape[-2], mask.shape[-1])).cpu()
         out = []
         previous_output = None
         current_expand = expand
