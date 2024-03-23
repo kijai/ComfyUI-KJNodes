@@ -2826,6 +2826,7 @@ class InjectNoiseToLatent:
             "optional":{
                 "mask": ("MASK", ),
                 "mix_randn_amount": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1000.0, "step": 0.001}),
+                "seed": ("INT", {"default": 123,"min": 0, "max": 0xffffffffffffffff, "step": 1}),
             }
             }
     
@@ -2834,7 +2835,7 @@ class InjectNoiseToLatent:
 
     CATEGORY = "KJNodes/noise"
         
-    def injectnoise(self, latents, strength, noise, normalize, average, mix_randn_amount=0, mask=None):
+    def injectnoise(self, latents, strength, noise, normalize, average, mix_randn_amount=0, seed=None, mask=None):
         samples = latents.copy()
         if latents["samples"].shape != noise["samples"].shape:
             raise ValueError("InjectNoiseToLatent: Latent and noise must have the same shape")
@@ -2851,6 +2852,8 @@ class InjectNoiseToLatent:
                 mask = mask.repeat((noised.shape[0] -1) // mask.shape[0] + 1, 1, 1, 1)[:noised.shape[0]]
             noised = mask * noised + (1-mask) * latents["samples"]
         if mix_randn_amount > 0:
+            if seed is not None:
+                torch.manual_seed(seed)
             rand_noise = torch.randn_like(noised)
             noised = ((1 - mix_randn_amount) * noised + mix_randn_amount *
                             rand_noise) / ((mix_randn_amount**2 + (1-mix_randn_amount)**2) ** 0.5)
