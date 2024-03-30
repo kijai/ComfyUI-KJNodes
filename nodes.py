@@ -1402,13 +1402,16 @@ class ImageConcanate:
             {
             "default": 'right'
              }),
+            "match_image_size": ("BOOLEAN", {"default": True}),
         }}
 
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "concanate"
     CATEGORY = "KJNodes"
 
-    def concanate(self, image1, image2, direction):
+    def concanate(self, image1, image2, direction, match_image_size):
+        if match_image_size:
+            image2 = torch.nn.functional.interpolate(image2, size=(image1.shape[2], image1.shape[3]), mode="bilinear")
         if direction == 'right':
             row = torch.cat((image1, image2), dim=2)
         elif direction == 'down':
@@ -3908,6 +3911,30 @@ class Superprompt:
         
         return (out, )
 
+class RemapImageRange:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": { 
+            "image": ("IMAGE",),
+            "min": ("FLOAT", {"default": 0.0,"min": -10.0, "max": 1.0, "step": 0.01}),
+            "max": ("FLOAT", {"default": 1.0,"min": 0.0, "max": 10.0, "step": 0.01}),
+            "clamp": ("BOOLEAN", {"default": True}),
+            },
+            }
+    
+    RETURN_TYPES = ("IMAGE",)
+    FUNCTION = "remap"
+
+    CATEGORY = "Marigold"
+        
+    def remap(self, image, min, max, clamp):
+        if image.dtype == torch.float16:
+            image = image.to(torch.float32)
+        image = min + image * (max - min)
+        if clamp:
+            image = torch.clamp(image, min=0.0, max=1.0)
+        return (image, )
+    
 NODE_CLASS_MAPPINGS = {
     "INTConstant": INTConstant,
     "FloatConstant": FloatConstant,
@@ -3978,7 +4005,8 @@ NODE_CLASS_MAPPINGS = {
     "Intrinsic_lora_sampling": Intrinsic_lora_sampling,
     "RemapMaskRange": RemapMaskRange,
     "LoadResAdapterNormalization": LoadResAdapterNormalization,
-    "Superprompt": Superprompt
+    "Superprompt": Superprompt,
+    "RemapImageRange": RemapImageRange
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "INTConstant": "INT Constant",
@@ -4050,4 +4078,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "RemapMaskRange": "RemapMaskRange",
     "LoadResAdapterNormalization": "LoadResAdapterNormalization",
     "Superprompt": "Superprompt",
+    "RemapImageRange": "RemapImageRange",
 }
