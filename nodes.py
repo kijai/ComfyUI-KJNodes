@@ -1402,7 +1402,7 @@ class ImageConcanate:
             {
             "default": 'right'
              }),
-            "match_image_size": ("BOOLEAN", {"default": True}),
+            "match_image_size": ("BOOLEAN", {"default": False}),
         }}
 
     RETURN_TYPES = ("IMAGE",)
