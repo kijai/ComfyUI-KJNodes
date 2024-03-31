@@ -24,6 +24,7 @@ import folder_paths
 from comfy.cli_args import args
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
+folder_paths.add_model_folder_path("kjnodes_fonts", os.path.join(script_dir, "fonts"))
 
 class INTConstant:
     @classmethod
@@ -660,8 +661,10 @@ class ReverseImageBatch:
         reversed_images = torch.flip(images, [0])
         return (reversed_images, )
     
+
+
 class CreateTextMask:
-    
+
     RETURN_TYPES = ("IMAGE", "MASK",)
     FUNCTION = "createtextmask"
     CATEGORY = "KJNodes/masking/generate"
@@ -677,7 +680,7 @@ class CreateTextMask:
                  "font_size": ("INT", {"default": 32,"min": 8, "max": 4096, "step": 1}),
                  "font_color": ("STRING", {"default": "white"}),
                  "text": ("STRING", {"default": "HELLO!"}),
-                 "font_path": ("STRING", {"default": "fonts\\TTNorms-Black.otf"}),
+                 "font": (folder_paths.get_filename_list("kjnodes_fonts"), ),
                  "width": ("INT", {"default": 512,"min": 16, "max": 4096, "step": 1}),
                  "height": ("INT", {"default": 512,"min": 16, "max": 4096, "step": 1}),
                  "start_rotation": ("INT", {"default": 0,"min": 0, "max": 359, "step": 1}),
@@ -685,7 +688,7 @@ class CreateTextMask:
         },
     } 
 
-    def createtextmask(self, frames, width, height, invert, text_x, text_y, text, font_size, font_color, font_path, start_rotation, end_rotation):
+    def createtextmask(self, frames, width, height, invert, text_x, text_y, text, font_size, font_color, font, start_rotation, end_rotation):
         # Define the number of images in the batch
         batch_size = frames
         out = []
@@ -693,8 +696,8 @@ class CreateTextMask:
         rotation = start_rotation
         if start_rotation != end_rotation:
             rotation_increment = (end_rotation - start_rotation) / (batch_size - 1)
-        if font_path == "fonts\\TTNorms-Black.otf": #I don't know why relative path won't work otherwise...
-            font_path = os.path.join(script_dir, font_path)
+
+        font_path = folder_paths.get_full_path("kjnodes_fonts", font)
         # Generate the text
         for i in range(batch_size):
             image = Image.new("RGB", (width, height), "black")
@@ -1475,18 +1478,20 @@ class ImageBatchTestPattern:
             "batch_size": ("INT", {"default": 1,"min": 1, "max": 255, "step": 1}),
             "start_from": ("INT", {"default": 1,"min": 1, "max": 255, "step": 1}),
             "width": ("INT", {"default": 512,"min": 16, "max": 4096, "step": 1}),
-            "height": ("INT", {"default": 512,"min": 16, "max": 4096, "step": 1}),  
+            "height": ("INT", {"default": 512,"min": 16, "max": 4096, "step": 1}),
+            "font": (folder_paths.get_filename_list("kjnodes_fonts"), ),
+            "font_size": ("INT", {"default": 255,"min": 8, "max": 4096, "step": 1}),
         }}
 
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "generatetestpattern"
     CATEGORY = "KJNodes"
 
-    def generatetestpattern(self, batch_size, start_from, width, height):
+    def generatetestpattern(self, batch_size, font, font_size, start_from, width, height):
         out = []
         # Generate the sequential numbers for each image
         numbers = np.arange(batch_size) 
-
+        font_path = folder_paths.get_full_path("kjnodes_fonts", font)
         # Create an image for each number
         for i, number in enumerate(numbers):
             # Create a black image with the number as a random color text
@@ -1499,23 +1504,19 @@ class ImageBatchTestPattern:
             border_box = [(border_width, border_width), (width - border_width, height - border_width)]
             draw.rectangle(border_box, fill=None, outline=border_color)
             
-            font_size = 255  # Choose the desired font size
-            font_path = "fonts\\TTNorms-Black.otf" #I don't know why relative path won't work otherwise...
-            font_path = os.path.join(script_dir, font_path)
-            
             # Generate a random color for the text
             color = (random.randint(0, 255), random.randint(0, 255), random.randint(0, 255))
             
-            font = ImageFont.truetype(font_path, font_size)  # Replace "path_to_font_file.ttf" with the path to your font file
+            font = ImageFont.truetype(font_path, font_size)
             text_width = font_size
             text_height = font_size
             text_x = (width - text_width / 2) // 2
             text_y = (height - text_height) // 2
 
             try:
-                draw.text((text_x, text_y), text, font=font, fill=font_color, features=['-liga'])
+                draw.text((text_x, text_y), str(number), font=font, fill=color, features=['-liga'])
             except:
-                draw.text((text_x, text_y), text, font=font, fill=font_color)
+                draw.text((text_x, text_y), str(number), font=font, fill=color)
 
             # Convert the image to a numpy array and normalize the pixel values
             image = np.array(image).astype(np.float32) / 255.0
@@ -2874,7 +2875,7 @@ class AddLabel:
             "font_size": ("INT", {"default": 32, "min": 0, "max": 4096, "step": 1}),
             "font_color": ("STRING", {"default": "white"}),
             "label_color": ("STRING", {"default": "black"}),
-            "font": ("STRING", {"default": "TTNorms-Black.otf"}),
+            "font": (folder_paths.get_filename_list("kjnodes_fonts"), ),
             "text": ("STRING", {"default": "Text"}),
             "direction": (
             [   'up',
@@ -2899,7 +2900,7 @@ class AddLabel:
         if font == "TTNorms-Black.otf":
             font_path = os.path.join(script_dir, "fonts", "TTNorms-Black.otf")
         else:
-            font_path = font
+            font_path = folder_paths.get_full_path("kjnodes_fonts", font)
         label_image = Image.new("RGB", (width, height), label_color)
         draw = ImageDraw.Draw(label_image)
         font = ImageFont.truetype(font_path, font_size)
