@@ -679,7 +679,7 @@ class CreateTextMask:
                  "text_y": ("INT", {"default": 0,"min": 0, "max": 4096, "step": 1}),
                  "font_size": ("INT", {"default": 32,"min": 8, "max": 4096, "step": 1}),
                  "font_color": ("STRING", {"default": "white"}),
-                 "text": ("STRING", {"default": "HELLO!"}),
+                 "text": ("STRING", {"default": "HELLO!", "multiline": True}),
                  "font": (folder_paths.get_filename_list("kjnodes_fonts"), ),
                  "width": ("INT", {"default": 512,"min": 16, "max": 4096, "step": 1}),
                  "height": ("INT", {"default": 512,"min": 16, "max": 4096, "step": 1}),
@@ -689,7 +689,7 @@ class CreateTextMask:
     } 
 
     def createtextmask(self, frames, width, height, invert, text_x, text_y, text, font_size, font_color, font, start_rotation, end_rotation):
-        # Define the number of images in the batch
+    # Define the number of images in the batch
         batch_size = frames
         out = []
         masks = []
@@ -703,17 +703,47 @@ class CreateTextMask:
             image = Image.new("RGB", (width, height), "black")
             draw = ImageDraw.Draw(image)
             font = ImageFont.truetype(font_path, font_size)
-            text_width = font.getlength(text)
-            text_height = font_size
-            text_center_x = text_x + text_width / 2
-            text_center_y = text_y + text_height / 2
-            try:
-                draw.text((text_x, text_y), text, font=font, fill=font_color, features=['-liga'])
-            except:
-                draw.text((text_x, text_y), text, font=font, fill=font_color)
+            
+            # Split the text into words
+            words = text.split()
+            
+            # Initialize variables for line creation
+            lines = []
+            current_line = []
+            current_line_width = 0
+            
+            # Iterate through words to create lines
+            for word in words:
+                word_width = font.getsize(word)[0]
+                if current_line_width + word_width <= width - 2 * text_x:
+                    current_line.append(word)
+                    current_line_width += word_width + font.getsize(" ")[0] # Add space width
+                else:
+                    lines.append(" ".join(current_line))
+                    current_line = [word]
+                    current_line_width = word_width
+            
+            # Add the last line if it's not empty
+            if current_line:
+                lines.append(" ".join(current_line))
+            
+            # Draw each line of text separately
+            y_offset = text_y
+            for line in lines:
+                text_width = font.getlength(line)
+                text_height = font_size
+                text_center_x = text_x + text_width / 2
+                text_center_y = y_offset + text_height / 2
+                try:
+                    draw.text((text_x, y_offset), line, font=font, fill=font_color, features=['-liga'])
+                except:
+                    draw.text((text_x, y_offset), line, font=font, fill=font_color)
+                y_offset += text_height # Move to the next line
+            
             if start_rotation != end_rotation:
                 image = image.rotate(rotation, center=(text_center_x, text_center_y))
                 rotation += rotation_increment
+            
             image = np.array(image).astype(np.float32) / 255.0
             image = torch.from_numpy(image)[None,]
             mask = image[:, :, :, 0] 
@@ -723,7 +753,7 @@ class CreateTextMask:
         if invert:
             return (1.0 - torch.cat(out, dim=0), 1.0 - torch.cat(masks, dim=0),)
         return (torch.cat(out, dim=0),torch.cat(masks, dim=0),)
-    
+        
 class GrowMaskWithBlur:
     @classmethod
     def INPUT_TYPES(cls):
