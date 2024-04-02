@@ -1889,6 +1889,10 @@ class BatchCropFromMaskAdvanced:
         # Make sure max_bbox_size is divisible by 16, if not, round it upwards so it is
         self.max_bbox_size = math.ceil(self.max_bbox_size / 16) * 16
 
+        if self.max_bbox_size > original_images[0].shape[0] or self.max_bbox_size > original_images[0].shape[1]:
+            # max_bbox_size can only be as big as our input's width or height, and it has to be even
+            self.max_bbox_size = math.floor(min(original_images[0].shape[0], original_images[0].shape[1]) / 2) * 2
+
         # Then, for each mask and corresponding image...
         for i, (mask, img) in enumerate(zip(masks, original_images)):
             _mask = tensor2pil(mask)[0]
@@ -1915,7 +1919,6 @@ class BatchCropFromMaskAdvanced:
             self.prev_center = center
             
             # Create bounding box using max_bbox_size
-            half_box_size = self.max_bbox_size // 2
             half_box_size = self.max_bbox_size // 2
             min_x = max(0, center[0] - half_box_size)
             max_x = min(img.shape[1], center[0] + half_box_size)
