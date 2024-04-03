@@ -41,3 +41,13 @@ This node creates batch of single color images by interpolating between white/bl
 ### CreateAudioMask
 
 Work in progress, currently creates a sphere that's size is synced with audio input.
+
+### WidgetToString
+Outputs the value of a widget on any node as a string
+![example of use](docs/images/2024-04-03_20_49_29-ComfyUI.png)
+
+Enable node id display from Manager menu, to get the ID of the node you want to read a widget from:
+![enable node id display](docs/images/319121636-706b5081-9120-4a29-bd76-901691ada688.png)
+
+Use the node id of the target node, and add the name of the widget to read from
+![use node id and widget name](docs/images/319121566-05f66385-7568-4b1f-8bbc-11053660b02f.png)
