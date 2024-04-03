@@ -51,3 +51,5 @@ Enable node id display from Manager menu, to get the ID of the node you want to 
 
 Use the node id of the target node, and add the name of the widget to read from
 ![use node id and widget name](docs/images/319121566-05f66385-7568-4b1f-8bbc-11053660b02f.png)
+
+Recreating or reloading the target node will change its id, and the WidgetToString node will no longer be able to find it until you update the node id value with the new id.
