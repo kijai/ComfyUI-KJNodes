@@ -811,7 +811,7 @@ class GrowMaskWithBlur:
             if fill_holes:
                 binary_mask = output > 0
                 output = scipy.ndimage.binary_fill_holes(binary_mask)
-                output = output.astype(np.uint8) * 255
+                output = output.astype(np.float32) * 255
             output = torch.from_numpy(output)
             if alpha < 1.0 and previous_output is not None:
                 # Interpolate between the previous and current frame
@@ -1755,8 +1755,15 @@ class BatchUncrop:
                 draw.rectangle((width - border_width, 0, width, height), fill=border_color)
             return image
 
-        if len(original_images) != len(cropped_images) or len(original_images) != len(bboxes):
-            raise ValueError("The number of images, crop_images, and bboxes should be the same")
+        if len(original_images) != len(cropped_images):
+            raise ValueError(f"The number of original_images ({len(original_images)}) and cropped_images ({len(cropped_images)}) should be the same")
+
+        # Ensure there are enough bboxes, but drop the excess if there are more bboxes than images
+        if len(bboxes) > len(original_images):
+            print(f"Warning: Dropping excess bounding boxes. Expected {len(original_images)}, but got {len(bboxes)}")
+            bboxes = bboxes[:len(original_images)]
+        elif len(bboxes) < len(original_images):
+            raise ValueError("There should be at least as many bboxes as there are original and cropped images")
 
         input_images = tensor2pil(original_images)
         crop_imgs = tensor2pil(cropped_images)
@@ -2140,8 +2147,15 @@ class BatchUncropAdvanced:
             draw.rectangle((0, 0, width - 1, height - 1), outline=border_color, width=border_width)
             return bordered_image
 
-        if len(original_images) != len(cropped_images) or len(original_images) != len(bboxes):
-            raise ValueError("The number of images, crop_images, and bboxes should be the same")
+        if len(original_images) != len(cropped_images):
+            raise ValueError(f"The number of original_images ({len(original_images)}) and cropped_images ({len(cropped_images)}) should be the same")
+
+        # Ensure there are enough bboxes, but drop the excess if there are more bboxes than images
+        if len(bboxes) > len(original_images):
+            print(f"Warning: Dropping excess bounding boxes. Expected {len(original_images)}, but got {len(bboxes)}")
+            bboxes = bboxes[:len(original_images)]
+        elif len(bboxes) < len(original_images):
+            raise ValueError("There should be at least as many bboxes as there are original and cropped images")
 
         crop_imgs = tensor2pil(cropped_images)
         input_images = tensor2pil(original_images)
