@@ -42,6 +42,10 @@ This node creates batch of single color images by interpolating between white/bl
 
 Work in progress, currently creates a sphere that's size is synced with audio input.
 
+### RoundMask
+
+![image](https://github.com/kijai/ComfyUI-KJNodes/assets/40791699/52c85202-f74e-4b96-9dac-c8bda5ddcc40)
+
 ### WidgetToString
 Outputs the value of a widget on any node as a string
 ![example of use](docs/images/2024-04-03_20_49_29-ComfyUI.png)
