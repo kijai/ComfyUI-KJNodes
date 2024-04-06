@@ -1,6 +1,4 @@
-import nodes
 import torch
-
 import torch.nn.functional as F
 from torchvision.transforms import Resize, CenterCrop, InterpolationMode
 from torchvision.transforms import functional as TF
@@ -9,7 +7,7 @@ import scipy.ndimage
 from scipy.spatial import Voronoi
 import matplotlib.pyplot as plt
 import numpy as np
-from PIL import ImageFilter, Image, ImageDraw, ImageFont, ImageOps
+from PIL import ImageFilter, Image, ImageDraw, ImageFont
 from PIL.PngImagePlugin import PngInfo
 import json
 import re
@@ -60,7 +58,6 @@ class FloatConstant:
         return (value,)
 
 class StringConstant:
-
     @classmethod
     def INPUT_TYPES(cls):
         return {
@@ -320,6 +317,21 @@ class CreateFadeMaskAdvanced:
     RETURN_TYPES = ("MASK",)
     FUNCTION = "createfademask"
     CATEGORY = "KJNodes/masking/generate"
+    DESCRIPTION = """
+Create a batch of masks interpolated between given frames and values. 
+Uses same syntax as Fizz' BatchValueSchedule.
+First value is the frame index (not that this starts from 0, not 1) 
+and the second value inside the brackets is the float value of the mask in range 0.0 - 1.0
+
+For example the default values:
+0:(0.0)
+7:(1.0)
+15:(0.0)
+
+Would create a mask batch fo 16 frames, starting from black, 
+interpolating with the chosen curve to fully white at the 8th frame, 
+and interpolating from that to fully black at the 16th frame.
+"""
 
     @classmethod
     def INPUT_TYPES(s):
@@ -402,6 +414,10 @@ class ScaleBatchPromptSchedule:
     RETURN_TYPES = ("STRING",)
     FUNCTION = "scaleschedule"
     CATEGORY = "KJNodes"
+    DESCRIPTION = """
+Scales a batch schedule from Fizz' nodes BatchPromptSchedule
+to a different frame count.
+"""
 
     @classmethod
     def INPUT_TYPES(s):
@@ -442,7 +458,7 @@ class CrossFadeImages:
     
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "crossfadeimages"
-    CATEGORY = "KJNodes"
+    CATEGORY = "KJNodes/image"
 
     @classmethod
     def INPUT_TYPES(s):
@@ -530,7 +546,7 @@ class GetImageRangeFromBatch:
     
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "imagesfrombatch"
-    CATEGORY = "KJNodes"
+    CATEGORY = "KJNodes/image"
 
     @classmethod
     def INPUT_TYPES(s):
@@ -557,7 +573,10 @@ class GetImagesFromBatchIndexed:
     
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "indexedimagesfrombatch"
-    CATEGORY = "KJNodes"
+    CATEGORY = "KJNodes/image"
+    DESCRIPTION = """
+Selects and returns the images at the specified indices as an image batch.
+"""
 
     @classmethod
     def INPUT_TYPES(s):
@@ -586,6 +605,9 @@ class GetLatentsFromBatchIndexed:
     RETURN_TYPES = ("LATENT",)
     FUNCTION = "indexedlatentsfrombatch"
     CATEGORY = "KJNodes"
+    DESCRIPTION = """
+Selects and returns the latents at the specified indices as an latent batch.
+"""
 
     @classmethod
     def INPUT_TYPES(s):
@@ -617,7 +639,10 @@ class ReplaceImagesInBatch:
     
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "replace"
-    CATEGORY = "KJNodes"
+    CATEGORY = "KJNodes/image"
+    DESCRIPTION = """
+Replaces the images in a batch, starting from the specified start, with the replacement images.
+"""
 
     @classmethod
     def INPUT_TYPES(s):
@@ -647,7 +672,10 @@ class ReverseImageBatch:
     
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "reverseimagebatch"
-    CATEGORY = "KJNodes"
+    CATEGORY = "KJNodes/image"
+    DESCRIPTION = """
+Reverses the order of the images in a batch.
+"""
 
     @classmethod
     def INPUT_TYPES(s):
@@ -667,7 +695,15 @@ class CreateTextMask:
 
     RETURN_TYPES = ("IMAGE", "MASK",)
     FUNCTION = "createtextmask"
-    CATEGORY = "KJNodes/masking/generate"
+    CATEGORY = "KJNodes/text"
+    DESCRIPTION = """
+Creates a text image and mask. 
+Looks for fonts from this folder:
+ComfyUI/custom_nodes/ComfyUI-KJNodes/fonts
+
+If start_rotation and/or end_rotation are different values, 
+creates animation between them.
+"""
 
     @classmethod
     def INPUT_TYPES(s):
@@ -779,10 +815,20 @@ class GrowMaskWithBlur:
         }
 
     CATEGORY = "KJNodes/masking"
-
     RETURN_TYPES = ("MASK", "MASK",)
     RETURN_NAMES = ("mask", "mask_inverted",)
     FUNCTION = "expand_mask"
+    DESCRIPTION = """
+# GrowMaskWithBlur
+- mask: Input mask or mask batch
+- expand: Expand or contract mask or mask batch by a given amount
+- incremental_expandrate: increase expand rate by a given amount per frame
+- tapered_corners: use tapered corners
+- flip_input: flip input mask
+- blur_radius: value higher than 0 will blur the mask
+- lerp_alpha: alpha value for interpolation between frames
+- decay_factor: decay value for interpolation between frames
+- fill_holes: fill holes in the mask (slow)"""
     
     def expand_mask(self, mask, expand, tapered_corners, flip_input, blur_radius, incremental_expandrate, lerp_alpha, decay_factor, fill_holes=False):
         alpha = lerp_alpha
@@ -837,27 +883,14 @@ class GrowMaskWithBlur:
         else:
             return (torch.stack(out, dim=0), 1.0 - torch.stack(out, dim=0),)
 
-class PlotNode:
-    @classmethod
-    def INPUT_TYPES(s):
-        return {"required": {
-            "start": ("FLOAT", {"default": 0.5, "min": 0.5, "max": 1.0}),
-            "max_frames": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
-        }}
-
-    RETURN_TYPES = ("FLOAT", "INT",)
-    FUNCTION = "plot"
-    CATEGORY = "KJNodes"
-
-    def plot(self, start, max_frames):
-        result = start + max_frames
-        return (result,)
-
 class ColorToMask:
     
     RETURN_TYPES = ("MASK",)
     FUNCTION = "clip"
     CATEGORY = "KJNodes/masking"
+    DESCRIPTION = """
+Converts chosen RGB value to a mask
+"""
 
     @classmethod
     def INPUT_TYPES(s):
@@ -915,9 +948,13 @@ class ConditioningMultiCombine:
     RETURN_NAMES = ("combined", "inputcount")
     FUNCTION = "combine"
     CATEGORY = "KJNodes/masking/conditioning"
+    DESCRIPTION = """
+Combines multiple conditioning nodes into one
+"""
 
     def combine(self, inputcount, **kwargs):
-        cond_combine_node = nodes.ConditioningCombine()
+        from nodes import ConditioningCombine
+        cond_combine_node = ConditioningCombine()
         cond = kwargs["conditioning_1"]
         for c in range(1, inputcount):
             new_cond = kwargs[f"conditioning_{c + 1}"]
@@ -931,14 +968,17 @@ class CondPassThrough:
             "required": {
                 "positive": ("CONDITIONING", ),
                 "negative": ("CONDITIONING", ),
-            },
-        
+            }, 
     }
 
     RETURN_TYPES = ("CONDITIONING", "CONDITIONING",)
     RETURN_NAMES = ("positive", "negative")
     FUNCTION = "passthrough"
     CATEGORY = "KJNodes/misc"
+    DESCRIPTION = """
+    Simply passes through the positive and negative conditioning,
+    workaround for Set node not allowing bypassed inputs.
+"""
 
     def passthrough(self, positive, negative):
         return (positive, negative,)
@@ -972,6 +1012,9 @@ class ConditioningSetMaskAndCombine:
     RETURN_NAMES = ("combined_positive", "combined_negative",)
     FUNCTION = "append"
     CATEGORY = "KJNodes/masking/conditioning"
+    DESCRIPTION = """
+Bundles multiple conditioning mask and combine nodes into one,functionality is identical to ComfyUI native nodes
+"""
 
     def append(self, positive_1, negative_1, positive_2, negative_2, mask_1, mask_2, set_cond_area, mask_1_strength, mask_2_strength):
         c = []
@@ -1018,6 +1061,9 @@ class ConditioningSetMaskAndCombine3:
     RETURN_NAMES = ("combined_positive", "combined_negative",)
     FUNCTION = "append"
     CATEGORY = "KJNodes/masking/conditioning"
+    DESCRIPTION = """
+Bundles multiple conditioning mask and combine nodes into one,functionality is identical to ComfyUI native nodes
+"""
 
     def append(self, positive_1, negative_1, positive_2, positive_3, negative_2, negative_3, mask_1, mask_2, mask_3, set_cond_area, mask_1_strength, mask_2_strength, mask_3_strength):
         c = []
@@ -1074,6 +1120,9 @@ class ConditioningSetMaskAndCombine4:
     RETURN_NAMES = ("combined_positive", "combined_negative",)
     FUNCTION = "append"
     CATEGORY = "KJNodes/masking/conditioning"
+    DESCRIPTION = """
+Bundles multiple conditioning mask and combine nodes into one,functionality is identical to ComfyUI native nodes
+"""
 
     def append(self, positive_1, negative_1, positive_2, positive_3, positive_4, negative_2, negative_3, negative_4, mask_1, mask_2, mask_3, mask_4, set_cond_area, mask_1_strength, mask_2_strength, mask_3_strength, mask_4_strength):
         c = []
@@ -1140,6 +1189,9 @@ class ConditioningSetMaskAndCombine5:
     RETURN_NAMES = ("combined_positive", "combined_negative",)
     FUNCTION = "append"
     CATEGORY = "KJNodes/masking/conditioning"
+    DESCRIPTION = """
+Bundles multiple conditioning mask and combine nodes into one,functionality is identical to ComfyUI native nodes
+"""
 
     def append(self, positive_1, negative_1, positive_2, positive_3, positive_4, positive_5, negative_2, negative_3, negative_4, negative_5, mask_1, mask_2, mask_3, mask_4, mask_5, set_cond_area, mask_1_strength, mask_2_strength, mask_3_strength, mask_4_strength, mask_5_strength):
         c = []
@@ -1187,6 +1239,7 @@ class VRAM_Debug:
       return {
         "required": {
               "empty_cache": ("BOOLEAN", {"default": True}),
+              "gc_collect": ("BOOLEAN", {"default": True}),
               "unload_all_models": ("BOOLEAN", {"default": False}),
         },
         "optional":{
@@ -1198,15 +1251,21 @@ class VRAM_Debug:
     RETURN_TYPES = ("IMAGE", "MODEL","INT", "INT",)
     RETURN_NAMES = ("image_passthrough", "model_passthrough", "freemem_before", "freemem_after")
     FUNCTION = "VRAMdebug"
-    CATEGORY = "KJNodes"
+    CATEGORY = "KJNodes/misc"
+    DESCRIPTION = """
+Placed between model or image chain, performs comfy model management functions and reports free VRAM before and after the functions
+"""
 
-    def VRAMdebug(self, empty_cache, unload_all_models,image_passthrough=None, model_passthrough=None):
+    def VRAMdebug(self, gc_collect,empty_cache, unload_all_models,image_passthrough=None, model_passthrough=None):
         freemem_before = comfy.model_management.get_free_memory()
         print("VRAMdebug: free memory before: ", freemem_before)
         if empty_cache:
             comfy.model_management.soft_empty_cache()
         if unload_all_models:
             comfy.model_management.unload_all_models()
+        if gc_collect:
+            import gc
+            gc.collect()
         freemem_after = comfy.model_management.get_free_memory()
         print("VRAMdebug: free memory after: ", freemem_after)
         print("VRAMdebug: freed memory: ", freemem_after - freemem_before)
@@ -1234,7 +1293,10 @@ class SomethingToString:
     }
     RETURN_TYPES = ("STRING",)
     FUNCTION = "stringify"
-    CATEGORY = "KJNodes"
+    CATEGORY = "KJNodes/text"
+    DESCRIPTION = """
+Converts any type to a string.
+"""
 
     def stringify(self, input, prefix="", suffix=""):
         if isinstance(input, (int, float, bool)):   
@@ -1246,8 +1308,6 @@ class SomethingToString:
         else:
             return
         return (stringified,)
-
-from nodes import EmptyLatentImage
 
 class EmptyLatentImagePresets:
     @classmethod
@@ -1284,6 +1344,7 @@ class EmptyLatentImagePresets:
     CATEGORY = "KJNodes"
 
     def generate(self, dimensions, invert, batch_size):
+        from nodes import EmptyLatentImage
         result = [x.strip() for x in dimensions.split('x')]
         
         if invert:
@@ -1319,15 +1380,20 @@ class ColorMatch:
             },
         }
     
-    CATEGORY = "KJNodes/masking"
+    CATEGORY = "KJNodes/image"
 
     RETURN_TYPES = ("IMAGE",)
     RETURN_NAMES = ("image",)
     FUNCTION = "colormatch"
+    DESCRIPTION = """
+color-matcher enables color transfer across images which comes in handy for automatic color-grading of photographs, paintings and film sequences as well as light-field and stopmotion corrections. The methods behind the mappings are based on the approach from Reinhard et al., the Monge-Kantorovich Linearization (MKL) as proposed by Pitie et al. and our analytical solution to a Multi-Variate Gaussian Distribution (MVGD) transfer in conjunction with classical histogram matching. As shown below our HM-MVGD-HM compound outperforms existing methods.  
+https://github.com/hahnec/color-matcher/
+
+"""
     
     def colormatch(self, image_ref, image_target, method):
         try:
-            from color_matcher import ColorMatcher #https://github.com/hahnec/color-matcher/
+            from color_matcher import ColorMatcher
         except:
             raise Exception("Can't import color-matcher, did you install requirements.txt? Manual install: pip install color-matcher")
         cm = ColorMatcher()
@@ -1372,10 +1438,11 @@ class SaveImageWithAlpha:
 
     RETURN_TYPES = ()
     FUNCTION = "save_images_alpha"
-
     OUTPUT_NODE = True
-
-    CATEGORY = "image"
+    CATEGORY = "KJNodes/image"
+    DESCRIPTION = """
+Saves an image and mask as .PNG with the mask as the alpha channel. 
+"""
 
     def save_images_alpha(self, images, mask, filename_prefix="ComfyUI_image_with_alpha", prompt=None, extra_pnginfo=None):
         filename_prefix += self.prefix_append
@@ -1447,7 +1514,10 @@ class ImageConcanate:
 
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "concanate"
-    CATEGORY = "KJNodes"
+    CATEGORY = "KJNodes/image"
+    DESCRIPTION = """
+Concatenates the image2 to image1 in the specified direction.
+"""
 
     def concanate(self, image1, image2, direction, match_image_size):
         if match_image_size:
@@ -1474,7 +1544,10 @@ class ImageGridComposite2x2:
 
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "compositegrid"
-    CATEGORY = "KJNodes"
+    CATEGORY = "KJNodes/image"
+    DESCRIPTION = """
+Concatenates the 4 input images into a 2x2 grid. 
+"""
 
     def compositegrid(self, image1, image2, image3, image4):
         top_row = torch.cat((image1, image2), dim=2)
@@ -1499,7 +1572,10 @@ class ImageGridComposite3x3:
 
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "compositegrid"
-    CATEGORY = "KJNodes"
+    CATEGORY = "KJNodes/image"
+    DESCRIPTION = """
+Concatenates the 9 input images into a 3x3 grid. 
+"""
 
     def compositegrid(self, image1, image2, image3, image4, image5, image6, image7, image8, image9):
         top_row = torch.cat((image1, image2, image3), dim=2)
@@ -1522,7 +1598,7 @@ class ImageBatchTestPattern:
 
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "generatetestpattern"
-    CATEGORY = "KJNodes"
+    CATEGORY = "KJNodes/text"
 
     def generatetestpattern(self, batch_size, font, font_size, start_from, width, height):
         out = []
@@ -1564,8 +1640,7 @@ class ImageBatchTestPattern:
 
 #based on nodes from mtb https://github.com/melMass/comfy_mtb
 
-from .utility import tensor2pil, pil2tensor, tensor2np, np2tensor
-
+from .utility import tensor2pil, pil2tensor
 
 class BatchCropFromMask:
 
@@ -1639,10 +1714,6 @@ class BatchCropFromMask:
         self.max_bbox_width = round(self.max_bbox_width * crop_size_mult)
         self.max_bbox_height = round(self.max_bbox_height * crop_size_mult)
         bbox_aspect_ratio = self.max_bbox_width / self.max_bbox_height
-
-        # # Make sure max_bbox_size is divisible by 32, if not, round it upwards so it is
-        # self.max_bbox_width = math.ceil(self.max_bbox_width / 32) * 32
-        # self.max_bbox_height = math.ceil(self.max_bbox_height / 32) * 32
 
         # Then, for each mask and corresponding image...
         for i, (mask, img) in enumerate(zip(masks, original_images)):
@@ -2001,29 +2072,18 @@ class FilterZeroMasksAndCorrespondingImages:
             },
         }
 
-    RETURN_TYPES = (
-        "MASK",
-        "IMAGE",
-        "IMAGE",
-        "INDEXES"
-    )
-    RETURN_NAMES = (
-        "non_zero_masks_out",
-        "non_zero_mask_images_out",
-        "zero_mask_images_out",
-        "zero_mask_images_out_indexes"
-    )
+    RETURN_TYPES = ("MASK", "IMAGE", "IMAGE", "INDEXES",)
+    RETURN_NAMES = ("non_zero_masks_out", "non_zero_mask_images_out", "zero_mask_images_out", "zero_mask_images_out_indexes",)
     FUNCTION = "filter"
     CATEGORY = "KJNodes/masking"
+    DESCRIPTION = """
+Filter out all the empty (i.e. all zero) mask in masks  
+Also filter out all the corresponding images in original_images by indexes if provide  
+  
+original_images (optional): If provided, need have same length as masks.
+"""
     
     def filter(self, masks, original_images=None):
-        """
-        Filter out all the empty (i.e. all zero) mask in masks
-        Also filter out all the corresponding images in original_images by indexes if provide
-
-        Args:
-            original_images (optional): If provide, it need have same length as masks.
-        """
         non_zero_masks = []
         non_zero_mask_images = []
         zero_mask_images = []
@@ -2071,24 +2131,19 @@ class InsertImageBatchByIndexes:
             },
         }
 
-    RETURN_TYPES = (
-        "IMAGE",
-    )
-    RETURN_NAMES = (
-        "images_after_insert",
-    )
+    RETURN_TYPES = ("IMAGE", )
+    RETURN_NAMES = ("images_after_insert", )
     FUNCTION = "insert"
-    CATEGORY = "KJNodes"
-    
-    def insert(self, images, images_to_insert, insert_indexes):
-        """
-        This node is designed to be use with node FilterZeroMasksAndCorrespondingImages
-        It inserts the images_to_insert into images according to insert_indexes
+    CATEGORY = "KJNodes/image"
+    DESCRIPTION = """
+This node is designed to be use with node FilterZeroMasksAndCorrespondingImages
+It inserts the images_to_insert into images according to insert_indexes
 
-        Returns:
-            images_after_insert: updated original images with origonal sequence order 
-        """
-        
+Returns:
+    images_after_insert: updated original images with origonal sequence order
+"""
+    
+    def insert(self, images, images_to_insert, insert_indexes):        
         images_after_insert = images
         
         if images_to_insert is not None and insert_indexes is not None:
@@ -2152,8 +2207,8 @@ class BatchUncropAdvanced:
 
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "uncrop"
-
     CATEGORY = "KJNodes/masking"
+
 
     def uncrop(self, original_images, cropped_images, cropped_masks, combined_crop_mask, bboxes, border_blending, crop_rescale, use_combined_mask, use_square_mask, combined_bounding_box = None):
         
@@ -2257,8 +2312,10 @@ class BatchCLIPSeg:
     CATEGORY = "KJNodes/masking"
     RETURN_TYPES = ("MASK",)
     RETURN_NAMES = ("Mask",)
-
     FUNCTION = "segment_image"
+    DESCRIPTION = """
+Segments an image or batch of images using CLIPSeg.
+"""
 
     def segment_image(self, images, text, threshold, binary_mask, combine_mask, use_cuda):        
 
@@ -2318,6 +2375,11 @@ class RoundMask:
     RETURN_TYPES = ("MASK",)
     FUNCTION = "round"
     CATEGORY = "KJNodes/masking"
+    DESCRIPTION = """
+Rounds the mask or batch of masks to a binary mask.  
+<img src="https://github.com/kijai/ComfyUI-KJNodes/assets/40791699/52c85202-f74e-4b96-9dac-c8bda5ddcc40" width="300" height="250" alt="RoundMask example">
+
+"""
 
     def round(self, mask):
         mask = mask.round()
@@ -2339,6 +2401,9 @@ class ResizeMask:
     RETURN_NAMES = ("mask", "width", "height",)
     FUNCTION = "resize"
     CATEGORY = "KJNodes/masking"
+    DESCRIPTION = """
+Resizes the mask or batch of masks to the specified width and height.
+"""
 
     def resize(self, mask, width, height, keep_proportions):
         if keep_proportions:
@@ -2383,6 +2448,16 @@ class OffsetMask:
     RETURN_NAMES = ("mask",)
     FUNCTION = "offset"
     CATEGORY = "KJNodes/masking"
+    DESCRIPTION = """
+Offsets the mask by the specified amount.  
+ - mask: Input mask or mask batch
+ - x: Horizontal offset
+ - y: Vertical offset
+ - angle: Angle in degrees
+ - roll: roll edge wrapping
+ - duplication_factor: Number of times to duplicate the mask to form a batch
+ - border padding_mode: Padding mode for the mask
+"""
 
     def offset(self, mask, x, y, angle, roll=False, incremental=False, duplication_factor=1, padding_mode="empty"):
         # Create duplicates of the mask batch
@@ -2468,7 +2543,11 @@ class WidgetToString:
 
     RETURN_TYPES = ("STRING", )
     FUNCTION = "get_widget_value"
-    CATEGORY = "KJNodes"
+    CATEGORY = "KJNodes/text"
+    DESCRIPTION = """
+Selects a node and it's specified widget and outputs the value as a string.  
+To see node id's, enable node id display from Manager badge menu.
+"""
 
     def get_widget_value(self, id, widget_name, extra_pnginfo, prompt, return_all=False):
         workflow = extra_pnginfo["workflow"]
@@ -2735,6 +2814,57 @@ class BboxToInt:
         
         return (x_min, y_min, width, height, center_x, center_y,)
 
+class BboxVisualize:
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "images": ("IMAGE",),
+                "bboxes": ("BBOX",),
+                "line_width": ("INT", {"default": 1,"min": 1, "max": 10, "step": 1}),
+            },
+        }
+
+    RETURN_TYPES = ("IMAGE",)
+    RETURN_NAMES = ("images",)
+    FUNCTION = "visualizebbox"
+    DESCRIPTION = """
+Visualizes the specified bbox on the image.
+"""
+
+    CATEGORY = "KJNodes/masking"
+
+    def visualizebbox(self, bboxes, images, line_width):
+        image_list = []
+        for image, bbox in zip(images, bboxes):
+            x_min, y_min, width, height = bbox
+            image = image.permute(2, 0, 1)
+
+            img_with_bbox = image.clone()
+            
+            # Define the color for the bbox, e.g., red
+            color = torch.tensor([1, 0, 0], dtype=torch.float32)
+            
+            # Draw lines for each side of the bbox with the specified line width
+            for lw in range(line_width):
+                # Top horizontal line
+                img_with_bbox[:, y_min + lw, x_min:x_min + width] = color[:, None]
+                
+                # Bottom horizontal line
+                img_with_bbox[:, y_min + height - lw, x_min:x_min + width] = color[:, None]
+                
+                # Left vertical line
+                img_with_bbox[:, y_min:y_min + height, x_min + lw] = color[:, None]
+                
+                # Right vertical line
+                img_with_bbox[:, y_min:y_min + height, x_min + width - lw] = color[:, None]
+        
+            img_with_bbox = img_with_bbox.permute(1, 2, 0).unsqueeze(0)
+            image_list.append(img_with_bbox)
+
+        return (torch.cat(image_list, dim=0),)
+    
 class SplitBboxes:
 
     @classmethod
@@ -2814,7 +2944,7 @@ class DummyLatentOut:
 
     RETURN_TYPES = ("LATENT",)
     FUNCTION = "dummy"
-    CATEGORY = "KJNodes"
+    CATEGORY = "KJNodes/misc"
     OUTPUT_NODE = True
 
     def dummy(self, latent):
@@ -2957,7 +3087,7 @@ class AddLabel:
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "addlabel"
 
-    CATEGORY = "KJNodes"
+    CATEGORY = "KJNodes/text"
         
     def addlabel(self, image, text_x, text_y, text, height, font_size, font_color, label_color, font, direction):
         batch_size = image.shape[0]
@@ -3005,7 +3135,7 @@ class SoundReactive:
     RETURN_NAMES =("sound_level", "sound_level_int",)
     FUNCTION = "react"
 
-    CATEGORY = "KJNodes/experimental"
+    CATEGORY = "KJNodes/audio"
         
     def react(self, sound_level, start_range_hz, end_range_hz, smoothing_factor, multiplier, normalize):
 
@@ -3082,14 +3212,15 @@ def interpolate_angle(start, end, fraction):
     # Normalize the result to be within the range of -180 to 180
     return (interpolated + 180) % 360 - 180
 
+
 class StableZero123_BatchSchedule:
     @classmethod
     def INPUT_TYPES(s):
         return {"required": { "clip_vision": ("CLIP_VISION",),
                               "init_image": ("IMAGE",),
                               "vae": ("VAE",),
-                              "width": ("INT", {"default": 256, "min": 16, "max": nodes.MAX_RESOLUTION, "step": 8}),
-                              "height": ("INT", {"default": 256, "min": 16, "max": nodes.MAX_RESOLUTION, "step": 8}),
+                              "width": ("INT", {"default": 256, "min": 16, "max": MAX_RESOLUTION, "step": 8}),
+                              "height": ("INT", {"default": 256, "min": 16, "max": MAX_RESOLUTION, "step": 8}),
                               "batch_size": ("INT", {"default": 1, "min": 1, "max": 4096}),
                               "interpolation": (["linear", "ease_in", "ease_out", "ease_in_out"],),
                               "azimuth_points_string": ("STRING", {"default": "0:(0.0),\n7:(1.0),\n15:(0.0)\n", "multiline": True}),
@@ -3101,7 +3232,7 @@ class StableZero123_BatchSchedule:
 
     FUNCTION = "encode"
 
-    CATEGORY = "KJNodes"
+    CATEGORY = "KJNodes/experimental"
 
     def encode(self, clip_vision, init_image, vae, width, height, batch_size, azimuth_points_string, elevation_points_string, interpolation):
         output = clip_vision.encode_image(init_image)
@@ -3223,8 +3354,8 @@ class SV3D_BatchSchedule:
         return {"required": { "clip_vision": ("CLIP_VISION",),
                               "init_image": ("IMAGE",),
                               "vae": ("VAE",),
-                              "width": ("INT", {"default": 576, "min": 16, "max": nodes.MAX_RESOLUTION, "step": 8}),
-                              "height": ("INT", {"default": 576, "min": 16, "max": nodes.MAX_RESOLUTION, "step": 8}),
+                              "width": ("INT", {"default": 576, "min": 16, "max": MAX_RESOLUTION, "step": 8}),
+                              "height": ("INT", {"default": 576, "min": 16, "max": MAX_RESOLUTION, "step": 8}),
                               "batch_size": ("INT", {"default": 21, "min": 1, "max": 4096}),
                               "interpolation": (["linear", "ease_in", "ease_out", "ease_in_out"],),
                               "azimuth_points_string": ("STRING", {"default": "0:(0.0),\n9:(180.0),\n20:(360.0)\n", "multiline": True}),
@@ -3233,10 +3364,12 @@ class SV3D_BatchSchedule:
     
     RETURN_TYPES = ("CONDITIONING", "CONDITIONING", "LATENT")
     RETURN_NAMES = ("positive", "negative", "latent")
-
     FUNCTION = "encode"
-
-    CATEGORY = "KJNodes"
+    CATEGORY = "KJNodes/experimental"
+    DESCRIPTION = """
+Allow scheduling of the azimuth and elevation conditions for SV3D.  
+Note that SV3D is still a video model and the schedule needs to always go forward
+"""
 
     def encode(self, clip_vision, init_image, vae, width, height, batch_size, azimuth_points_string, elevation_points_string, interpolation):
         output = clip_vision.encode_image(init_image)
@@ -3341,7 +3474,12 @@ class ImageBatchRepeatInterleaving:
     
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "repeat"
-    CATEGORY = "KJNodes"
+    CATEGORY = "KJNodes/image"
+    DESCRIPTION = """
+Repeats each image in a batch by the specified number of times.  
+Example batch of 5 images: 0, 1 ,2, 3, 4  
+with repeats 2 becomes batch of 10 images: 0, 0, 1, 1, 2, 2, 3, 3, 4, 4  
+"""
 
     @classmethod
     def INPUT_TYPES(s):
@@ -3388,10 +3526,14 @@ class NormalizedAmplitudeToMask:
                         }),
                      },}
 
-    CATEGORY = "AudioScheduler/Amplitude"
-
+    CATEGORY = "KJNodes/audio"
     RETURN_TYPES = ("MASK",)
     FUNCTION = "convert"
+    DESCRIPTION = """
+Works as a bridge to the AudioScheduler -nodes: 
+https://github.com/a1lazydog/ComfyUI-AudioScheduler
+Creates masks based on the normalized amplitude.
+"""
 
     def convert(self, normalized_amp, width, height, frame_offset, shape, location_x, location_y, size, color):
         # Ensure normalized_amp is an array and within the range [0, 1]
@@ -3460,7 +3602,7 @@ class OffsetMaskByNormalizedAmplitude:
     RETURN_TYPES = ("MASK",)
     RETURN_NAMES = ("mask",)
     FUNCTION = "offset"
-    CATEGORY = "KJNodes/masking"
+    CATEGORY = "KJNodes/audio"
 
     def offset(self, mask, x, y, angle_multiplier, rotate, normalized_amp):
 
@@ -3501,7 +3643,7 @@ class ImageTransformByNormalizedAmplitude:
 
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "amptransform"
-    CATEGORY = "KJNodes"
+    CATEGORY = "KJNodes/audio"
 
     def amptransform(self, image, normalized_amp, zoom_scale, cumulative, x_offset, y_offset):
         # Ensure normalized_amp is an array and within the range [0, 1]
@@ -3674,9 +3816,10 @@ class GLIGENTextBoxApplyBatch:
                              }}
     RETURN_TYPES = ("CONDITIONING", "IMAGE",)
     FUNCTION = "append"
-
-    CATEGORY = "conditioning/gligen"
-
+    CATEGORY = "KJNodes/experimental"
+    DESCRIPTION = """
+Experimental, does not function yet as ComfyUI base changes are needed
+"""
 
 
     def append(self, latents, conditioning_to, clip, gligen_textbox_model, text, width, height, coordinates, interpolation):
@@ -3725,8 +3868,10 @@ class ImageUpscaleWithModelBatched:
                               }}
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "upscale"
-
-    CATEGORY = "KJNodes"
+    CATEGORY = "KJNodes/image"
+    DESCRIPTION = """
+Same as ComfyUI native model upscaling node, but allows setting sub-batches for reduced VRAM usage.
+"""
 
     def upscale(self, upscale_model, images, per_batch):
         
@@ -3760,8 +3905,10 @@ class ImageNormalize_Neg1_To_1:
                               }}
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "normalize"
-
-    CATEGORY = "KJNodes"
+    CATEGORY = "KJNodes/misc"
+    DESCRIPTION = """
+Normalize the images to be in the range [-1, 1]  
+"""
 
     def normalize(self,images):
         
@@ -3805,6 +3952,9 @@ class Intrinsic_lora_sampling:
     RETURN_TYPES = ("IMAGE", "LATENT",)
     FUNCTION = "onestepsample"
     CATEGORY = "KJNodes"
+    DESCRIPTION = """
+https://github.com/duxiaodan/intrinsic-lora
+"""
 
     def onestepsample(self, model, lora_name, clip, vae, text, task, per_batch, image=None, optional_latent=None):
         pbar = comfy.utils.ProgressBar(3)
@@ -3887,6 +4037,9 @@ class RemapMaskRange:
     RETURN_NAMES = ("mask",)
     FUNCTION = "remap"
     CATEGORY = "KJNodes/masking"
+    DESCRIPTION = """
+Sets new min and max values for the mask.
+"""
 
     def remap(self, mask, min, max):
 
@@ -3917,6 +4070,7 @@ class LoadResAdapterNormalization:
 
     RETURN_TYPES = ("MODEL",)
     FUNCTION = "load_res_adapter"
+    CATEGORY = "KJNodes/experimental"
 
     def load_res_adapter(self, model, resadapter_path):
         print("ResAdapter: Checking ResAdapter path")
@@ -3957,6 +4111,13 @@ class Superprompt:
 
     RETURN_TYPES = ("STRING",)
     FUNCTION = "process"
+    CATEGORY = "KJNodes/text"
+    DESCRIPTION = """
+SuperPrompt
+A T5 model fine-tuned on the SuperPrompt dataset for upsampling text prompts to more detailed descriptions.  
+Meant to be used as a pre-generation step for text-to-image models that benefit from more detailed prompts.  
+https://huggingface.co/roborovski/superprompt-v1
+"""
 
     def process(self, instruction_prompt, prompt, max_new_tokens):
         device = comfy.model_management.get_torch_device()
@@ -3991,8 +4152,10 @@ class RemapImageRange:
     
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "remap"
-
-    CATEGORY = "KJNodes"
+    CATEGORY = "KJNodes/image"
+    DESCRIPTION = """
+Remaps the image values to the specified range. 
+"""
         
     def remap(self, image, min, max, clamp):
         if image.dtype == torch.float16:
@@ -4026,8 +4189,10 @@ class CameraPoseVisualizer:
     
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "plot"
-
-    CATEGORY = "KJNodes"
+    CATEGORY = "KJNodes/misc"
+    DESCRIPTION = """
+Visualizes the camera poses from a .txt file with RealEstate camera intrinsics and coordinates in a 3D plot. 
+"""
         
     def plot(self, pose_file_path, sample_stride, frames, base_xval, zval, use_exact_fx, relative_c2w, x_min, x_max, y_min, y_max, z_min, z_max, use_viewer):
         import matplotlib as mpl
@@ -4199,7 +4364,8 @@ NODE_CLASS_MAPPINGS = {
     "LoadResAdapterNormalization": LoadResAdapterNormalization,
     "Superprompt": Superprompt,
     "RemapImageRange": RemapImageRange,
-    "CameraPoseVisualizer": CameraPoseVisualizer
+    "CameraPoseVisualizer": CameraPoseVisualizer,
+    "BboxVisualize": BboxVisualize
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "INTConstant": "INT Constant",
@@ -4273,4 +4439,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "Superprompt": "Superprompt",
     "RemapImageRange": "RemapImageRange",
     "CameraPoseVisualizer": "CameraPoseVisualizer",
+    "BboxVisualize": "BboxVisualize",
 }

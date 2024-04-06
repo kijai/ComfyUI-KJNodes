@@ -1,7 +1,7 @@
 import { app } from "../../../scripts/app.js";
 
 app.registerExtension({
-	name: "KJNodes.ConditioningMultiCombine",
+	name: "KJNodes.jsnodes",
 	async beforeRegisterNodeDef(nodeType, nodeData, app) {
 		switch (nodeData.name) {
 			case "ConditioningMultiCombine":
