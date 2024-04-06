@@ -52,6 +52,9 @@ app.registerExtension({
 			if (nodeData?.category?.startsWith("KJNodes")) {
 				addDocumentation(nodeData, nodeType);
 			}
+      if (nodeData?.category?.includes("SUPIR")) {
+				addDocumentation(nodeData, nodeType);
+			}
 		} catch (error) {
 			console.error("Error in registering KJNodes.HelpPopup", error);
 		}
@@ -128,7 +131,6 @@ const create_documentation_stylesheet = () => {
     if (!nodeData.description) {
       return
     }
-    let hasResized = false //track if the popup has been resized manually
 
     const drawFg = nodeType.prototype.onDrawForeground
     nodeType.prototype.onDrawForeground = function (ctx) {
@@ -210,7 +212,6 @@ const create_documentation_stylesheet = () => {
 
         document.addEventListener('mouseup', function () {
           isResizing = false
-          hasResized = true
         })
 
         document.body.appendChild(docElement)
@@ -241,12 +242,6 @@ const create_documentation_stylesheet = () => {
           left: `${transform.a + transform.e}px`,
           top: `${transform.d + transform.f}px`,
          };
-        // keep possible manual resize
-        if (!hasResized) {
-          //styleObject.height = `${this.size[1] || this.parent?.inputHeight || 32}px`;
-          //styleObject.height = `${docElement.offsetHeight || 32}px`;
-          styleObject.width = `${this.size[0] * 1.5}px`;
-        }
         Object.assign(docElement.style, styleObject);
       }
 

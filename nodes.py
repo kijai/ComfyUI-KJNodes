@@ -2,27 +2,23 @@ import torch
 import torch.nn.functional as F
 from torchvision.transforms import Resize, CenterCrop, InterpolationMode
 from torchvision.transforms import functional as TF
-from scipy.interpolate import CubicSpline
+
 import scipy.ndimage
-from scipy.spatial import Voronoi
 import matplotlib.pyplot as plt
 import numpy as np
 from PIL import ImageFilter, Image, ImageDraw, ImageFont
-from PIL.PngImagePlugin import PngInfo
+
 import json
 import re
 import os
 import random
-from scipy.special import erf
-from .fluid import Fluid
-import comfy.model_management
 import math
+
+import model_management
 from nodes import MAX_RESOLUTION
 import folder_paths
-from comfy.cli_args import args
-
-script_dir = os.path.dirname(os.path.abspath(__file__))
-folder_paths.add_model_folder_path("kjnodes_fonts", os.path.join(script_dir, "fonts"))
+script_directory = os.path.dirname(os.path.abspath(__file__))
+folder_paths.add_model_folder_path("kjnodes_fonts", os.path.join(script_directory, "fonts"))
 
 class INTConstant:
     @classmethod
@@ -34,7 +30,6 @@ class INTConstant:
     RETURN_TYPES = ("INT",)
     RETURN_NAMES = ("value",)
     FUNCTION = "get_value"
-
     CATEGORY = "KJNodes/constants"
 
     def get_value(self, value):
@@ -51,7 +46,6 @@ class FloatConstant:
     RETURN_TYPES = ("FLOAT",)
     RETURN_NAMES = ("value",)
     FUNCTION = "get_value"
-
     CATEGORY = "KJNodes/constants"
 
     def get_value(self, value):
@@ -67,7 +61,6 @@ class StringConstant:
         }
     RETURN_TYPES = ("STRING",)
     FUNCTION = "passtring"
-
     CATEGORY = "KJNodes/constants"
 
     def passtring(self, string):
@@ -92,11 +85,12 @@ class CreateFluidMask:
                  "inflow_radius": ("INT", {"default": 8,"min": 0, "max": 255, "step": 1}),
                  "inflow_padding": ("INT", {"default": 50,"min": 0, "max": 255, "step": 1}),
                  "inflow_duration": ("INT", {"default": 60,"min": 0, "max": 255, "step": 1}),
-
         },
     } 
     #using code from https://github.com/GregTJ/stable-fluids
     def createfluidmask(self, frames, width, height, invert, inflow_count, inflow_velocity, inflow_radius, inflow_padding, inflow_duration):
+        from .fluid import Fluid
+        from scipy.spatial import erf
         out = []
         masks = []
         RESOLUTION = width, height
@@ -159,7 +153,7 @@ class CreateAudioMask:
             print("Can not import librosa. Install it with 'pip install librosa'")
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "createaudiomask"
-    CATEGORY = "KJNodes/masking/generate"
+    CATEGORY = "KJNodes/deprecated"
 
     @classmethod
     def INPUT_TYPES(s):
@@ -180,7 +174,7 @@ class CreateAudioMask:
         out = []
         masks = []
         if audio_path == "audio.wav": #I don't know why relative path won't work otherwise...
-            audio_path = os.path.join(script_dir, audio_path)
+            audio_path = os.path.join(script_directory, audio_path)
         audio, sr = self.librosa.load(audio_path)
         spectrogram = np.abs(self.librosa.stft(audio))
         
@@ -245,7 +239,7 @@ class CreateFadeMask:
     
     RETURN_TYPES = ("MASK",)
     FUNCTION = "createfademask"
-    CATEGORY = "KJNodes/masking/generate"
+    CATEGORY = "KJNodes/deprecated"
 
     @classmethod
     def INPUT_TYPES(s):
@@ -321,13 +315,13 @@ class CreateFadeMaskAdvanced:
 Create a batch of masks interpolated between given frames and values. 
 Uses same syntax as Fizz' BatchValueSchedule.
 First value is the frame index (not that this starts from 0, not 1) 
-and the second value inside the brackets is the float value of the mask in range 0.0 - 1.0
+and the second value inside the brackets is the float value of the mask in range 0.0 - 1.0  
 
-For example the default values:
-0:(0.0)
-7:(1.0)
-15:(0.0)
-
+For example the default values:  
+0:(0.0)  
+7:(1.0)  
+15:(0.0)  
+  
 Would create a mask batch fo 16 frames, starting from black, 
 interpolating with the chosen curve to fully white at the 8th frame, 
 and interpolating from that to fully black at the 16th frame.
@@ -941,7 +935,6 @@ class ConditioningMultiCombine:
                 "conditioning_1": ("CONDITIONING", ),
                 "conditioning_2": ("CONDITIONING", ),
             },
-        
     }
 
     RETURN_TYPES = ("CONDITIONING", "INT")
@@ -1257,16 +1250,16 @@ Placed between model or image chain, performs comfy model management functions a
 """
 
     def VRAMdebug(self, gc_collect,empty_cache, unload_all_models,image_passthrough=None, model_passthrough=None):
-        freemem_before = comfy.model_management.get_free_memory()
+        freemem_before = model_management.get_free_memory()
         print("VRAMdebug: free memory before: ", freemem_before)
         if empty_cache:
-            comfy.model_management.soft_empty_cache()
+            model_management.soft_empty_cache()
         if unload_all_models:
-            comfy.model_management.unload_all_models()
+            model_management.unload_all_models()
         if gc_collect:
             import gc
             gc.collect()
-        freemem_after = comfy.model_management.get_free_memory()
+        freemem_after = model_management.get_free_memory()
         print("VRAMdebug: free memory after: ", freemem_after)
         print("VRAMdebug: freed memory: ", freemem_after - freemem_before)
         return (image_passthrough, model_passthrough, freemem_before, freemem_after)
@@ -1386,7 +1379,14 @@ class ColorMatch:
     RETURN_NAMES = ("image",)
     FUNCTION = "colormatch"
     DESCRIPTION = """
-color-matcher enables color transfer across images which comes in handy for automatic color-grading of photographs, paintings and film sequences as well as light-field and stopmotion corrections. The methods behind the mappings are based on the approach from Reinhard et al., the Monge-Kantorovich Linearization (MKL) as proposed by Pitie et al. and our analytical solution to a Multi-Variate Gaussian Distribution (MVGD) transfer in conjunction with classical histogram matching. As shown below our HM-MVGD-HM compound outperforms existing methods.  
+color-matcher enables color transfer across images which comes in handy for automatic  
+color-grading of photographs, paintings and film sequences as well as light-field  
+and stopmotion corrections.  
+
+The methods behind the mappings are based on the approach from Reinhard et al.,  
+the Monge-Kantorovich Linearization (MKL) as proposed by Pitie et al. and our analytical solution  
+to a Multi-Variate Gaussian Distribution (MVGD) transfer in conjunction with classical histogram   
+matching. As shown below our HM-MVGD-HM compound outperforms existing methods.   
 https://github.com/hahnec/color-matcher/
 
 """
@@ -1445,6 +1445,8 @@ Saves an image and mask as .PNG with the mask as the alpha channel.
 """
 
     def save_images_alpha(self, images, mask, filename_prefix="ComfyUI_image_with_alpha", prompt=None, extra_pnginfo=None):
+        from comfy.cli_args import args
+        from PIL.PngImagePlugin import PngInfo
         filename_prefix += self.prefix_append
         full_output_folder, filename, counter, subfolder, filename_prefix = folder_paths.get_save_image_path(filename_prefix, self.output_dir, images[0].shape[1], images[0].shape[0])
         results = list()
@@ -2287,9 +2289,6 @@ class BatchUncropAdvanced:
 
         return (pil2tensor(out_images),)
 
-
-from transformers import CLIPSegProcessor, CLIPSegForImageSegmentation
-
 class BatchCLIPSeg:
 
     def __init__(self):
@@ -2318,7 +2317,7 @@ Segments an image or batch of images using CLIPSeg.
 """
 
     def segment_image(self, images, text, threshold, binary_mask, combine_mask, use_cuda):        
-
+        from transformers import CLIPSegProcessor, CLIPSegForImageSegmentation
         out = []
         height, width, _ = images[0].shape
         if use_cuda and torch.cuda.is_available():
@@ -2659,6 +2658,7 @@ class CreateVoronoiMask:
     } 
 
     def createvoronoi(self, frames, num_points, line_width, speed, frame_width, frame_height):
+        from scipy.spatial import Voronoi
         # Define the number of images in the batch
         batch_size = frames
         out = []
@@ -2710,10 +2710,6 @@ class CreateVoronoiMask:
             out.append(mask)
 
         return (torch.stack(out, dim=0), 1.0 - torch.stack(out, dim=0),)
-    
-from mpl_toolkits.axes_grid1 import ImageGrid
-
-from .magictex import *
 
 class CreateMagicMask:
     
@@ -2737,6 +2733,7 @@ class CreateMagicMask:
     } 
 
     def createmagicmask(self, frames, transitions, depth, distortion, seed, frame_width, frame_height):
+        from .magictex import coordinate_grid, random_transform, magic
         rng = np.random.default_rng(seed)
         out = []
         coords = coordinate_grid((frame_width, frame_height))
@@ -2804,9 +2801,10 @@ class BboxToInt:
     RETURN_TYPES = ("INT","INT","INT","INT","INT","INT",)
     RETURN_NAMES = ("x_min","y_min","width","height", "center_x","center_y",)
     FUNCTION = "bboxtoint"
-
     CATEGORY = "KJNodes/masking"
-
+    DESCRIPTION = """
+Returns selected index from bounding box list as integers.
+"""
     def bboxtoint(self, bboxes, index):
         x_min, y_min, width, height = bboxes[index]
         center_x = int(x_min + width / 2)
@@ -2879,8 +2877,10 @@ class SplitBboxes:
     RETURN_TYPES = ("BBOX","BBOX",)
     RETURN_NAMES = ("bboxes_a","bboxes_b",)
     FUNCTION = "splitbbox"
-
     CATEGORY = "KJNodes/masking"
+    DESCRIPTION = """
+Splits the specified bbox list at the given index into two lists.
+"""
 
     def splitbbox(self, bboxes, index):
         bboxes_a = bboxes[:index]  # Sub-list from the start of bboxes up to (but not including) the index
@@ -2901,6 +2901,10 @@ class ImageGrabPIL:
     RETURN_NAMES = ("image",)
     FUNCTION = "screencap"
     CATEGORY = "KJNodes/experimental"
+    DESCRIPTION = """
+Captures an area specified by screen coordinates.  
+Can be used for realtime diffusion with autoqueue.
+"""
 
     @classmethod
     def INPUT_TYPES(s):
@@ -2946,32 +2950,13 @@ class DummyLatentOut:
     FUNCTION = "dummy"
     CATEGORY = "KJNodes/misc"
     OUTPUT_NODE = True
+    DESCRIPTION = """
+Does nothing, used to trigger generic workflow output.    
+A way to get previews in the UI without saving anything to disk.
+"""
 
     def dummy(self, latent):
-
         return (latent,)
-
-class NormalizeLatent:
-
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-            "latent": ("LATENT",),
-            }
-        }
-
-    RETURN_TYPES = ("LATENT",)
-    FUNCTION = "normalize"
-    CATEGORY = "KJNodes/noise"
-    OUTPUT_NODE = True
-
-    def normalize(self, latent):
-        samples = latent["samples"]
-        samples /= samples.std()
-        out = latent.copy()
-        out["samples"] = samples
-        return (out,)
     
 class FlipSigmasAdjusted:
     @classmethod
@@ -3094,7 +3079,7 @@ class AddLabel:
         width = image.shape[2]
         
         if font == "TTNorms-Black.otf":
-            font_path = os.path.join(script_dir, "fonts", "TTNorms-Black.otf")
+            font_path = os.path.join(script_directory, "fonts", "TTNorms-Black.otf")
         else:
             font_path = folder_paths.get_full_path("kjnodes_fonts", font)
         label_image = Image.new("RGB", (width, height), label_color)
@@ -3134,7 +3119,6 @@ class SoundReactive:
     RETURN_TYPES = ("FLOAT","INT",)
     RETURN_NAMES =("sound_level", "sound_level_int",)
     FUNCTION = "react"
-
     CATEGORY = "KJNodes/audio"
         
     def react(self, sound_level, start_range_hz, end_range_hz, smoothing_factor, multiplier, normalize):
@@ -3167,8 +3151,10 @@ class GenerateNoise:
     
     RETURN_TYPES = ("LATENT",)
     FUNCTION = "generatenoise"
-
     CATEGORY = "KJNodes/noise"
+    DESCRIPTION = """
+Generates noise for injection or to be used as empty latents on samplers with add_noise off.
+"""
         
     def generatenoise(self, batch_size, width, height, seed, multiplier, constant_batch_noise, normalize, sigmas=None, model=None):
 
@@ -3229,9 +3215,7 @@ class StableZero123_BatchSchedule:
     
     RETURN_TYPES = ("CONDITIONING", "CONDITIONING", "LATENT")
     RETURN_NAMES = ("positive", "negative", "latent")
-
     FUNCTION = "encode"
-
     CATEGORY = "KJNodes/experimental"
 
     def encode(self, clip_vision, init_image, vae, width, height, batch_size, azimuth_points_string, elevation_points_string, interpolation):
@@ -3530,8 +3514,8 @@ class NormalizedAmplitudeToMask:
     RETURN_TYPES = ("MASK",)
     FUNCTION = "convert"
     DESCRIPTION = """
-Works as a bridge to the AudioScheduler -nodes: 
-https://github.com/a1lazydog/ComfyUI-AudioScheduler
+Works as a bridge to the AudioScheduler -nodes:  
+https://github.com/a1lazydog/ComfyUI-AudioScheduler  
 Creates masks based on the normalized amplitude.
 """
 
@@ -3603,6 +3587,11 @@ class OffsetMaskByNormalizedAmplitude:
     RETURN_NAMES = ("mask",)
     FUNCTION = "offset"
     CATEGORY = "KJNodes/audio"
+    DESCRIPTION = """
+Works as a bridge to the AudioScheduler -nodes:  
+https://github.com/a1lazydog/ComfyUI-AudioScheduler  
+Offsets masks based on the normalized amplitude.
+"""
 
     def offset(self, mask, x, y, angle_multiplier, rotate, normalized_amp):
 
@@ -3644,6 +3633,11 @@ class ImageTransformByNormalizedAmplitude:
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "amptransform"
     CATEGORY = "KJNodes/audio"
+    DESCRIPTION = """
+Works as a bridge to the AudioScheduler -nodes:  
+https://github.com/a1lazydog/ComfyUI-AudioScheduler  
+Transforms image based on the normalized amplitude.
+"""
 
     def amptransform(self, image, normalized_amp, zoom_scale, cumulative, x_offset, y_offset):
         # Ensure normalized_amp is an array and within the range [0, 1]
@@ -3739,8 +3733,8 @@ def interpolate_coordinates(coordinates_dict, batch_size):
 
     return interpolated
 
-
 def interpolate_coordinates_with_curves(coordinates_dict, batch_size):
+    from scipy.interpolate import CubicSpline
     sorted_coords = sorted(coordinates_dict.items())
     x_coords, y_coords = zip(*[coord for index, coord in sorted_coords])
 
@@ -3872,10 +3866,9 @@ class ImageUpscaleWithModelBatched:
     DESCRIPTION = """
 Same as ComfyUI native model upscaling node, but allows setting sub-batches for reduced VRAM usage.
 """
-
     def upscale(self, upscale_model, images, per_batch):
         
-        device = comfy.model_management.get_torch_device()
+        device = model_management.get_torch_device()
         upscale_model.to(device)
         in_img = images.movedim(-1,-3).to(device)
         
@@ -3911,14 +3904,12 @@ Normalize the images to be in the range [-1, 1]
 """
 
     def normalize(self,images):
-        
         images = images * 2.0 - 1.0
         return (images,)    
 
- 
 import comfy.sample
 from nodes import CLIPTextEncode
-folder_paths.add_model_folder_path("intristic_loras", os.path.join(script_dir, "intristic_loras"))
+folder_paths.add_model_folder_path("intristic_loras", os.path.join(script_directory, "intristic_loras"))
 
 class Intrinsic_lora_sampling:
     def __init__(self):
@@ -4120,10 +4111,10 @@ https://huggingface.co/roborovski/superprompt-v1
 """
 
     def process(self, instruction_prompt, prompt, max_new_tokens):
-        device = comfy.model_management.get_torch_device()
+        device = model_management.get_torch_device()
         from transformers import T5Tokenizer, T5ForConditionalGeneration
 
-        checkpoint_path = os.path.join(script_dir, "models","superprompt-v1")
+        checkpoint_path = os.path.join(script_directory, "models","superprompt-v1")
         tokenizer = T5Tokenizer.from_pretrained("google/flan-t5-small", legacy=False)
 
         model = T5ForConditionalGeneration.from_pretrained(checkpoint_path, device_map=device)
@@ -4339,7 +4330,6 @@ NODE_CLASS_MAPPINGS = {
     "SplitBboxes": SplitBboxes,
     "ImageGrabPIL": ImageGrabPIL,
     "DummyLatentOut": DummyLatentOut,
-    "NormalizeLatent": NormalizeLatent,
     "FlipSigmasAdjusted": FlipSigmasAdjusted,
     "InjectNoiseToLatent": InjectNoiseToLatent,
     "AddLabel": AddLabel,
@@ -4379,9 +4369,10 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "ColorToMask": "ColorToMask",
     "CreateGradientMask": "CreateGradientMask",
     "CreateTextMask" : "CreateTextMask",
-    "CreateFadeMask" : "CreateFadeMask",
+    "CreateFadeMask" : "CreateFadeMask (Deprecated)",
     "CreateFadeMaskAdvanced" : "CreateFadeMaskAdvanced",
     "CreateFluidMask" : "CreateFluidMask",
+    "CreateAudioMask" : "CreateAudioMask (Deprecated)",
     "VRAM_Debug" : "VRAM Debug",
     "CrossFadeImages": "CrossFadeImages",
     "SomethingToString": "SomethingToString",
@@ -4413,7 +4404,6 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "SplitBboxes": "SplitBboxes",
     "ImageGrabPIL": "ImageGrabPIL",
     "DummyLatentOut": "DummyLatentOut",
-    "NormalizeLatent": "NormalizeLatent",
     "FlipSigmasAdjusted": "FlipSigmasAdjusted",
     "InjectNoiseToLatent": "InjectNoiseToLatent",
     "AddLabel": "AddLabel",
