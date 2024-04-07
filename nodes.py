@@ -733,11 +733,11 @@ class CreateTextMask:
     FUNCTION = "createtextmask"
     CATEGORY = "KJNodes/text"
     DESCRIPTION = """
-Creates a text image and mask. 
-Looks for fonts from this folder:
+Creates a text image and mask.  
+Looks for fonts from this folder:  
 ComfyUI/custom_nodes/ComfyUI-KJNodes/fonts
-
-If start_rotation and/or end_rotation are different values, 
+  
+If start_rotation and/or end_rotation are different values,  
 creates animation between them.
 """
 
@@ -2628,6 +2628,11 @@ class CreateShapeMask:
     RETURN_NAMES = ("mask", "mask_inverted",)
     FUNCTION = "createshapemask"
     CATEGORY = "KJNodes/masking/generate"
+    DESCRIPTION = """
+Creates a mask or batch of masks with the specified shape.  
+Locations are center locations.  
+Grow value is the amount to grow the shape on each frame, creating animated masks.
+"""
 
     @classmethod
     def INPUT_TYPES(s):
@@ -3023,7 +3028,6 @@ class FlipSigmasAdjusted:
     RETURN_TYPES = ("SIGMAS", "STRING",)
     RETURN_NAMES = ("SIGMAS", "sigmas_string",)
     CATEGORY = "KJNodes/noise"
-
     FUNCTION = "get_sigmas_adjusted"
 
     def get_sigmas_adjusted(self, sigmas, divide_by_last_sigma, divide_by, offset_by):
@@ -3069,7 +3073,6 @@ class InjectNoiseToLatent:
     
     RETURN_TYPES = ("LATENT",)
     FUNCTION = "injectnoise"
-
     CATEGORY = "KJNodes/noise"
         
     def injectnoise(self, latents, strength, noise, normalize, average, mix_randn_amount=0, seed=None, mask=None):
@@ -3123,8 +3126,14 @@ class AddLabel:
     
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "addlabel"
-
     CATEGORY = "KJNodes/text"
+    DESCRIPTION = """
+Creates a new with the given text, and concatenates it to  
+either above or below the input image.  
+Note that this changes the input image's height!  
+Fonts are loaded from this folder:  
+ComfyUI/custom_nodes/ComfyUI-KJNodes/fonts
+"""
         
     def addlabel(self, image, text_x, text_y, text, height, font_size, font_color, label_color, font, direction):
         batch_size = image.shape[0]
@@ -3172,6 +3181,11 @@ class SoundReactive:
     RETURN_NAMES =("sound_level", "sound_level_int",)
     FUNCTION = "react"
     CATEGORY = "KJNodes/audio"
+    DESCRIPTION = """
+Reacts to the sound level of the input.  
+Uses your browsers sound input options and requires.  
+Meant to be used with realtime diffusion with autoqueue.
+"""
         
     def react(self, sound_level, start_range_hz, end_range_hz, smoothing_factor, multiplier, normalize):
 
@@ -3404,7 +3418,8 @@ class SV3D_BatchSchedule:
     CATEGORY = "KJNodes/experimental"
     DESCRIPTION = """
 Allow scheduling of the azimuth and elevation conditions for SV3D.  
-Note that SV3D is still a video model and the schedule needs to always go forward
+Note that SV3D is still a video model and the schedule needs to always go forward  
+https://huggingface.co/stabilityai/sv3d
 """
 
     def encode(self, clip_vision, init_image, vae, width, height, batch_size, azimuth_points_string, elevation_points_string, interpolation):
@@ -3916,7 +3931,8 @@ class ImageUpscaleWithModelBatched:
     FUNCTION = "upscale"
     CATEGORY = "KJNodes/image"
     DESCRIPTION = """
-Same as ComfyUI native model upscaling node, but allows setting sub-batches for reduced VRAM usage.
+Same as ComfyUI native model upscaling node,  
+but allows setting sub-batches for reduced VRAM usage.
 """
     def upscale(self, upscale_model, images, per_batch):
         
@@ -3996,7 +4012,10 @@ class Intrinsic_lora_sampling:
     FUNCTION = "onestepsample"
     CATEGORY = "KJNodes"
     DESCRIPTION = """
-https://github.com/duxiaodan/intrinsic-lora
+Sampler to use the intrinsic loras:  
+https://github.com/duxiaodan/intrinsic-lora  
+These LoRAs are tiny and thus included  
+with this node pack.
 """
 
     def onestepsample(self, model, lora_name, clip, vae, text, task, per_batch, image=None, optional_latent=None):
@@ -4156,9 +4175,11 @@ class Superprompt:
     FUNCTION = "process"
     CATEGORY = "KJNodes/text"
     DESCRIPTION = """
-SuperPrompt
-A T5 model fine-tuned on the SuperPrompt dataset for upsampling text prompts to more detailed descriptions.  
-Meant to be used as a pre-generation step for text-to-image models that benefit from more detailed prompts.  
+# SuperPrompt
+A T5 model fine-tuned on the SuperPrompt dataset for  
+upsampling text prompts to more detailed descriptions.  
+Meant to be used as a pre-generation step for text-to-image  
+models that benefit from more detailed prompts.  
 https://huggingface.co/roborovski/superprompt-v1
 """
 
@@ -4234,7 +4255,8 @@ class CameraPoseVisualizer:
     FUNCTION = "plot"
     CATEGORY = "KJNodes/misc"
     DESCRIPTION = """
-Visualizes the camera poses from a .txt file with RealEstate camera intrinsics and coordinates in a 3D plot. 
+Visualizes the camera poses from a .txt file with  
+RealEstate camera intrinsics and coordinates in a 3D plot. 
 """
         
     def plot(self, pose_file_path, sample_stride, frames, base_xval, zval, use_exact_fx, relative_c2w, x_min, x_max, y_min, y_max, z_min, z_max, use_viewer):
@@ -4333,9 +4355,7 @@ Visualizes the camera poses from a .txt file with RealEstate camera intrinsics a
             ret_poses = [np.linalg.inv(w2c) for w2c in w2cs]
         ret_poses = [transform_matrix @ x for x in ret_poses]
         return np.array(ret_poses, dtype=np.float32)           
-    
-
-        
+   
 NODE_CLASS_MAPPINGS = {
     "INTConstant": INTConstant,
     "FloatConstant": FloatConstant,
