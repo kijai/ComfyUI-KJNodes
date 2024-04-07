@@ -52,7 +52,10 @@ app.registerExtension({
 			if (nodeData?.category?.startsWith("KJNodes")) {
 				addDocumentation(nodeData, nodeType);
 			}
-      if (nodeData?.category?.includes("SUPIR")) {
+      if (nodeData?.category?.startsWith("SUPIR")) {
+				addDocumentation(nodeData, nodeType);
+			}
+      if (nodeData?.category?.startsWith("VoiceCraft")) {
 				addDocumentation(nodeData, nodeType);
 			}
 		} catch (error) {
@@ -104,6 +107,9 @@ const create_documentation_stylesheet = () => {
         /* Scrollbar styling for Firefox */
         scrollbar-width: thin;
         scrollbar-color: var(--fg-color) var(--bg-color);
+        a {
+          color: yellow;
+        }
         a:visited {
           color: orange;
         }
