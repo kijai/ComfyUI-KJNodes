@@ -741,17 +741,29 @@ creates animation between them.
             lines = []
             current_line = []
             current_line_width = 0
-            
-            # Iterate through words to create lines
-            for word in words:
-                word_width = font.getsize(word)[0]
-                if current_line_width + word_width <= width - 2 * text_x:
-                    current_line.append(word)
-                    current_line_width += word_width + font.getsize(" ")[0] # Add space width
-                else:
-                    lines.append(" ".join(current_line))
-                    current_line = [word]
-                    current_line_width = word_width
+            try: #new pillow  
+                # Iterate through words to create lines
+                for word in words:
+                    left, _, right, _ = font.getbbox(word)
+                    font_width = right - left
+                    word_width = font_width * len(word) # Assuming each character is the same width
+                    if current_line_width + word_width <= width - 2 * text_x:
+                        current_line.append(word)
+                        current_line_width += word_width + font_width # Add space width
+                    else:
+                        lines.append(" ".join(current_line))
+                        current_line = [word]
+                        current_line_width = word_width
+            except: #old pillow             
+                for word in words:
+                    word_width = font.getsize(word)[0]
+                    if current_line_width + word_width <= width - 2 * text_x:
+                        current_line.append(word)
+                        current_line_width += word_width + font.getsize(" ")[0] # Add space width
+                    else:
+                        lines.append(" ".join(current_line))
+                        current_line = [word]
+                        current_line_width = word_width
             
             # Add the last line if it's not empty
             if current_line:
