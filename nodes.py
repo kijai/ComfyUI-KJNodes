@@ -744,12 +744,10 @@ creates animation between them.
             try: #new pillow  
                 # Iterate through words to create lines
                 for word in words:
-                    left, _, right, _ = font.getbbox(word)
-                    font_width = right - left
-                    word_width = font_width * len(word) # Assuming each character is the same width
+                    word_width = font.getbbox(word)[2]
                     if current_line_width + word_width <= width - 2 * text_x:
                         current_line.append(word)
-                        current_line_width += word_width + font_width # Add space width
+                        current_line_width += word_width + font.getbbox(" ")[2] # Add space width
                     else:
                         lines.append(" ".join(current_line))
                         current_line = [word]
