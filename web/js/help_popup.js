@@ -190,14 +190,14 @@ const create_documentation_stylesheet = () => {
 
         // close button
         const closeButton = document.createElement('div');
-        closeButton.textContent = '❌'; // Use an emoji or text for the close button
+        closeButton.textContent = '❌';
         closeButton.style.position = 'absolute';
         closeButton.style.top = '0';
         closeButton.style.right = '0';
         closeButton.style.cursor = 'pointer';
-        closeButton.style.padding = '5px'; // Add some padding around the text
-        closeButton.style.color = 'red'; // Set the text color
-        closeButton.style.fontSize = '16px'; // Adjust the font size as needed
+        closeButton.style.padding = '5px';
+        closeButton.style.color = 'red';
+        closeButton.style.fontSize = '12px';
 
         docElement.appendChild(closeButton)
 
