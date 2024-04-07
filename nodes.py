@@ -11,6 +11,7 @@ from PIL import ImageFilter, Image, ImageDraw, ImageFont
 import json
 import re
 import os
+import io
 import random
 import math
 
@@ -65,6 +66,47 @@ class StringConstant:
 
     def passtring(self, string):
         return (string, )
+
+class StringConstantMultiline:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "string": ("STRING", {"default": "", "multiline": True}),
+                "strip_newlines": ("BOOLEAN", {"default": True}),
+            }
+        }
+    RETURN_TYPES = ("STRING",)
+    FUNCTION = "stringify"
+    CATEGORY = "KJNodes/constants"
+
+    def stringify(self, string, strip_newlines):
+        new_string = []
+        for line in io.StringIO(string):
+            if not line.strip().startswith("\n") and strip_newlines:
+                line = line.replace("\n", '')
+            new_string.append(line)
+        new_string = "\n".join(new_string)
+
+        return (new_string, )
+    
+class JoinStrings:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "string1": ("STRING", {"default": '', "forceInput": True}),
+                "string2": ("STRING", {"default": '', "forceInput": True}),
+                "delimiter": ("STRING", {"default": ' ', "multiline": False}),
+            }
+        }
+    RETURN_TYPES = ("STRING",)
+    FUNCTION = "joinstring"
+    CATEGORY = "KJNodes/constants"
+
+    def joinstring(self, string1, string2, delimiter):
+        joined_string = string1 + delimiter + string2
+        return (joined_string, )
 
 class CreateFluidMask:
     
@@ -1467,7 +1509,7 @@ Saves an image and mask as .PNG with the mask as the alpha channel.
             # Loop through the existing files
             for existing_file in os.listdir(full_output_folder):
                 # Check if the file matches the expected format
-                match = re.fullmatch(f"{filename}_(\d+)_?\.[a-zA-Z0-9]+", existing_file)
+                match = re.fullmatch(fr"{filename}_(\d+)_?\.[a-zA-Z0-9]+", existing_file)
                 if match:
                     # Extract the numeric portion of the filename
                     file_counter = int(match.group(1))
@@ -4292,7 +4334,8 @@ Visualizes the camera poses from a .txt file with RealEstate camera intrinsics a
         ret_poses = [transform_matrix @ x for x in ret_poses]
         return np.array(ret_poses, dtype=np.float32)           
     
-    
+
+        
 NODE_CLASS_MAPPINGS = {
     "INTConstant": INTConstant,
     "FloatConstant": FloatConstant,
@@ -4365,7 +4408,9 @@ NODE_CLASS_MAPPINGS = {
     "Superprompt": Superprompt,
     "RemapImageRange": RemapImageRange,
     "CameraPoseVisualizer": CameraPoseVisualizer,
-    "BboxVisualize": BboxVisualize
+    "BboxVisualize": BboxVisualize,
+    "StringConstantMultiline": StringConstantMultiline,
+    "JoinStrings": JoinStrings,
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "INTConstant": "INT Constant",
@@ -4440,4 +4485,6 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "RemapImageRange": "RemapImageRange",
     "CameraPoseVisualizer": "CameraPoseVisualizer",
     "BboxVisualize": "BboxVisualize",
+    "StringConstantMultiline": "StringConstantMultiline",
+    "JoinStrings": "JoinStrings",
 }
