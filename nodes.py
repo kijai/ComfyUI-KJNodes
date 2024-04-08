@@ -21,6 +21,13 @@ import folder_paths
 script_directory = os.path.dirname(os.path.abspath(__file__))
 folder_paths.add_model_folder_path("kjnodes_fonts", os.path.join(script_directory, "fonts"))
 
+class AnyType(str):
+  """A special class that is always equal in not equal comparisons. Credit to pythongosssss"""
+
+  def __ne__(self, __value: object) -> bool:
+    return False
+any = AnyType("*")
+
 class INTConstant:
     @classmethod
     def INPUT_TYPES(s):
@@ -1283,25 +1290,24 @@ class VRAM_Debug:
     def INPUT_TYPES(s):
       return {
         "required": {
-              "empty_cache": ("BOOLEAN", {"default": True}),
-              "gc_collect": ("BOOLEAN", {"default": True}),
-              "unload_all_models": ("BOOLEAN", {"default": False}),
+            "input": (any, {}),
+            "empty_cache": ("BOOLEAN", {"default": True}),
+            "gc_collect": ("BOOLEAN", {"default": True}),
+            "unload_all_models": ("BOOLEAN", {"default": False}),
         },
-        "optional":{
-            "image_passthrough": ("IMAGE",),
-            "model_passthrough": ("MODEL",),
-        }
-		}
+	}
         
-    RETURN_TYPES = ("IMAGE", "MODEL","INT", "INT",)
-    RETURN_NAMES = ("image_passthrough", "model_passthrough", "freemem_before", "freemem_after")
+    RETURN_TYPES = (any, "INT", "INT",)
+    RETURN_NAMES = ("output", "freemem_before", "freemem_after")
     FUNCTION = "VRAMdebug"
     CATEGORY = "KJNodes/misc"
     DESCRIPTION = """
-Placed between model or image chain, performs comfy model management functions and reports free VRAM before and after the functions
+Returns the input unchanged, and performs comfy model  
+management functions and garbage collection,  
+reports free VRAM before and after the operations.
 """
 
-    def VRAMdebug(self, gc_collect,empty_cache, unload_all_models,image_passthrough=None, model_passthrough=None):
+    def VRAMdebug(self, input, gc_collect,empty_cache, unload_all_models):
         freemem_before = model_management.get_free_memory()
         print("VRAMdebug: free memory before: ", freemem_before)
         if empty_cache:
@@ -1314,14 +1320,7 @@ Placed between model or image chain, performs comfy model management functions a
         freemem_after = model_management.get_free_memory()
         print("VRAMdebug: free memory after: ", freemem_after)
         print("VRAMdebug: freed memory: ", freemem_after - freemem_before)
-        return (image_passthrough, model_passthrough, freemem_before, freemem_after)
-
-class AnyType(str):
-  """A special class that is always equal in not equal comparisons. Credit to pythongosssss"""
-
-  def __ne__(self, __value: object) -> bool:
-    return False
-any = AnyType("*")
+        return (input, freemem_before, freemem_after)
 
 class SomethingToString:
     @classmethod
@@ -1354,6 +1353,28 @@ Converts any type to a string.
             return
         return (stringified,)
 
+class Sleep:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "input": (any, {}),
+                "minutes": ("INT", {"default": 0, "min": 0, "max": 1439}),
+                "seconds": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 59.99, "step": 0.01}),
+            },
+        }
+    RETURN_TYPES = (any,)
+    FUNCTION = "sleepdelay"
+    CATEGORY = "KJNodes/misc"
+    DESCRIPTION = """
+Delays the execution for the input amount of time.
+"""
+
+    def sleepdelay(self, input, minutes, seconds):
+        total_seconds = minutes * 60 + seconds
+        time.sleep(total_seconds)
+        return input,
+    
 class EmptyLatentImagePresets:
     @classmethod
     def INPUT_TYPES(cls):  
@@ -1401,7 +1422,6 @@ class EmptyLatentImagePresets:
         latent = EmptyLatentImage().generate(width, height, batch_size)[0]
 
         return (latent, int(width), int(height),)
-
 
 class ColorMatch:
     @classmethod
@@ -2602,8 +2622,10 @@ To see node id's, enable node id display from Manager badge menu.
 
     def get_widget_value(self, id, widget_name, extra_pnginfo, prompt, return_all=False):
         workflow = extra_pnginfo["workflow"]
+        print(workflow)
         results = []
         for node in workflow["nodes"]:
+            print(node)
             node_id = node["id"]
 
             if node_id != id:
@@ -3882,7 +3904,6 @@ class GLIGENTextBoxApplyBatch:
 Experimental, does not function yet as ComfyUI base changes are needed
 """
 
-
     def append(self, latents, conditioning_to, clip, gligen_textbox_model, text, width, height, coordinates, interpolation):
 
         coordinates_dict = parse_coordinates(coordinates)
@@ -4431,6 +4452,7 @@ NODE_CLASS_MAPPINGS = {
     "BboxVisualize": BboxVisualize,
     "StringConstantMultiline": StringConstantMultiline,
     "JoinStrings": JoinStrings,
+    "Sleep": Sleep
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "INTConstant": "INT Constant",
@@ -4507,4 +4529,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "BboxVisualize": "BboxVisualize",
     "StringConstantMultiline": "StringConstantMultiline",
     "JoinStrings": "JoinStrings",
+    "Sleep": "🛌 Sleep 🛌",
 }
