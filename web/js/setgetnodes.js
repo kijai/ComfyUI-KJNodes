@@ -26,6 +26,7 @@ function setColorAndBgColor(type) {
     }
 }
 let isAlertShown = false;
+let disablePrefix = app.ui.settings.getSettingValue("KJNodes.disablePrefix")
 
 function showAlertWithThrottle(message, delay) {
     if (!isAlertShown) {
@@ -57,7 +58,7 @@ app.registerExtension({
 					(s, t, u, v, x) => {
 						node.validateName(node.graph);
 						if(this.widgets[0].value !== ''){
-							this.title = "Set_" + this.widgets[0].value;
+							this.title = (!disablePrefix ? "Set_" : "") + this.widgets[0].value;
 						}
 						this.update();
 						this.properties.previousName = this.widgets[0].value;
@@ -96,7 +97,7 @@ app.registerExtension({
 							const type = fromNode.outputs[link_info.origin_slot].type;
 						
 							if (this.title === "Set"){
-								this.title = "Set_" + type;	
+								this.title = (!disablePrefix ? "Set_" : "") + type;
 							}
 							if (this.widgets[0].value === '*'){
 								this.widgets[0].value = type	
@@ -278,7 +279,7 @@ app.registerExtension({
 						let linkType = (setter.inputs[0].type);
 						
 						this.setType(linkType);
-						this.title = "Get_" + setter.widgets[0].value;
+						this.title = (!disablePrefix ? "Get_" : "") + setter.widgets[0].value;
 						
 						if (app.ui.settings.getSettingValue("KJNodes.nodeAutoColor")){
 							setColorAndBgColor.call(this, linkType);	

@@ -27,7 +27,7 @@ export const loadScript = (
       scriptEle.addEventListener('error', (ev) => {
         reject({
           status: false,
-          message: `Failed to load the script ＄{FILE_URL}`,
+          message: `Failed to load the script ${FILE_URL}`,
         })
       })
 
@@ -48,6 +48,11 @@ loadScript('/kjweb_async/purify.min.js').catch((e) => {
 app.registerExtension({
 	name: "KJNodes.HelpPopup",
 	async beforeRegisterNodeDef(nodeType, nodeData) {
+  
+  if (app.ui.settings.getSettingValue("KJNodes.helpPopup") === false) {
+    return;
+    }
+
   const categories = ["KJNodes", "SUPIR", "VoiceCraft", "Marigold"];
 		try {
 			categories.forEach(category => {
