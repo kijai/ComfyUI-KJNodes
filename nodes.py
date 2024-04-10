@@ -1290,24 +1290,29 @@ class VRAM_Debug:
     def INPUT_TYPES(s):
       return {
         "required": {
-            "input": (any, {}),
+            
             "empty_cache": ("BOOLEAN", {"default": True}),
             "gc_collect": ("BOOLEAN", {"default": True}),
             "unload_all_models": ("BOOLEAN", {"default": False}),
         },
+        "optional": {
+            "any_input": (any, {}),
+            "image_pass": ("IMAGE",),
+            "model_pass": ("MODEL",),
+        }
 	}
         
-    RETURN_TYPES = (any, "INT", "INT",)
-    RETURN_NAMES = ("output", "freemem_before", "freemem_after")
+    RETURN_TYPES = (any, "IMAGE","MODEL","INT", "INT",)
+    RETURN_NAMES = ("any_output", "image_pass", "model_pass", "freemem_before", "freemem_after")
     FUNCTION = "VRAMdebug"
     CATEGORY = "KJNodes/misc"
     DESCRIPTION = """
-Returns the input unchanged, and performs comfy model  
-management functions and garbage collection,  
+Returns the inputs unchanged, they are only used as triggers,  
+and performs comfy model management functions and garbage collection,  
 reports free VRAM before and after the operations.
 """
 
-    def VRAMdebug(self, input, gc_collect,empty_cache, unload_all_models):
+    def VRAMdebug(self, gc_collect,empty_cache, unload_all_models, image_pass=None, model_pass=None, any_input=None):
         freemem_before = model_management.get_free_memory()
         print("VRAMdebug: free memory before: ", freemem_before)
         if empty_cache:
@@ -1320,7 +1325,7 @@ reports free VRAM before and after the operations.
         freemem_after = model_management.get_free_memory()
         print("VRAMdebug: free memory after: ", freemem_after)
         print("VRAMdebug: freed memory: ", freemem_after - freemem_before)
-        return (input, freemem_before, freemem_after)
+        return (any_input, image_pass, model_pass, freemem_before, freemem_after)
 
 class SomethingToString:
     @classmethod
