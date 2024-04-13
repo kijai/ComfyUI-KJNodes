@@ -591,6 +591,10 @@ class GetImageRangeFromBatch:
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "imagesfrombatch"
     CATEGORY = "KJNodes/image"
+    DESCRIPTION = """
+Creates a new batch using images from the input,  
+batch, starting from start_index.
+"""
 
     @classmethod
     def INPUT_TYPES(s):
@@ -685,7 +689,8 @@ class ReplaceImagesInBatch:
     FUNCTION = "replace"
     CATEGORY = "KJNodes/image"
     DESCRIPTION = """
-Replaces the images in a batch, starting from the specified start, with the replacement images.
+Replaces the images in a batch, starting from the specified start index,  
+with the replacement images.
 """
 
     @classmethod
@@ -1670,6 +1675,8 @@ class ImageBatchTestPattern:
         return {"required": {
             "batch_size": ("INT", {"default": 1,"min": 1, "max": 255, "step": 1}),
             "start_from": ("INT", {"default": 1,"min": 1, "max": 255, "step": 1}),
+            "text_x": ("INT", {"default": 256,"min": 0, "max": 4096, "step": 1}),
+            "text_y": ("INT", {"default": 256,"min": 0, "max": 4096, "step": 1}),
             "width": ("INT", {"default": 512,"min": 16, "max": 4096, "step": 1}),
             "height": ("INT", {"default": 512,"min": 16, "max": 4096, "step": 1}),
             "font": (folder_paths.get_filename_list("kjnodes_fonts"), ),
@@ -1680,43 +1687,37 @@ class ImageBatchTestPattern:
     FUNCTION = "generatetestpattern"
     CATEGORY = "KJNodes/text"
 
-    def generatetestpattern(self, batch_size, font, font_size, start_from, width, height):
+    def generatetestpattern(self, batch_size, font, font_size, start_from, width, height, text_x, text_y):
         out = []
         # Generate the sequential numbers for each image
-        numbers = np.arange(batch_size) 
+        numbers = np.arange(start_from, start_from + batch_size)
         font_path = folder_paths.get_full_path("kjnodes_fonts", font)
-        # Create an image for each number
-        for i, number in enumerate(numbers):
-            # Create a black image with the number as a random color text
-            image = Image.new("RGB", (width, height), color=0)
-            draw = ImageDraw.Draw(image)
 
-            # Draw a border around the image
-            border_width = 10
-            border_color = (255, 255, 255)  # white color
-            border_box = [(border_width, border_width), (width - border_width, height - border_width)]
-            draw.rectangle(border_box, fill=None, outline=border_color)
+        for number in numbers:
+            # Create a black image with the number as a random color text
+            image = Image.new("RGB", (width, height), color='black')
+            draw = ImageDraw.Draw(image)
             
             # Generate a random color for the text
-            color = (random.randint(0, 255), random.randint(0, 255), random.randint(0, 255))
+            font_color = (random.randint(0, 255), random.randint(0, 255), random.randint(0, 255))
             
             font = ImageFont.truetype(font_path, font_size)
-            text_width = font_size
-            text_height = font_size
-            text_x = (width - text_width / 2) // 2
-            text_y = (height - text_height) // 2
-
+            
+            # Get the size of the text and position it in the center
+            text = str(number)
+           
             try:
-                draw.text((text_x, text_y), str(number), font=font, fill=color, features=['-liga'])
+                draw.text((text_x, text_y), text, font=font, fill=font_color, features=['-liga'])
             except:
-                draw.text((text_x, text_y), str(number), font=font, fill=color)
-
+                draw.text((text_x, text_y), text, font=font, fill=font_color,)
+            
             # Convert the image to a numpy array and normalize the pixel values
-            image = np.array(image).astype(np.float32) / 255.0
-            image = torch.from_numpy(image)[None,]
-            out.append(image)            
-
-        return (torch.cat(out, dim=0),)
+            image_np = np.array(image).astype(np.float32) / 255.0
+            image_tensor = torch.from_numpy(image_np).unsqueeze(0)
+            out.append(image_tensor)
+        out_tensor = torch.cat(out, dim=0)
+  
+        return (out_tensor,)
 
 #based on nodes from mtb https://github.com/melMass/comfy_mtb
 
