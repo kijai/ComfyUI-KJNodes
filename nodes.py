@@ -4504,6 +4504,77 @@ class ImagePadForOutpaintMasked:
 
         return (new_image, mask,)
     
+class SplineEditor:
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "coordinates": ("STRING", {"multiline": True}),
+            },
+        }
+
+    RETURN_TYPES = ("STRING", "FLOAT")
+    FUNCTION = "splinedata"
+
+    CATEGORY = "KJNodes/experimental"
+
+    def splinedata(self, coordinates):
+        
+        coordinates = self.parse_custom_format(coordinates)
+        print(coordinates)
+        # Step 1: Calculate distance from bottom for each point
+        distances_from_bottom = [512 - point['y'] for point in coordinates]
+
+        # Step 2: Normalize the values
+        max_distance = max(distances_from_bottom)
+        normalized_values = [distance / max_distance for distance in distances_from_bottom]
+
+        # Step 3: Calculate distances between points
+        distances_between_points = [
+            abs(coordinates[i+1]['x'] - coordinates[i]['x']) for i in range(len(coordinates)-1)
+        ]
+
+        # Step 4: Interpolate x distances based on normalized distances from bottom
+        interpolated_x_distances = [
+            distance * normalized_value for distance, normalized_value in zip(distances_between_points, normalized_values[:-1])
+        ]
+
+        print(interpolated_x_distances)
+        return (coordinates, interpolated_x_distances,)
+    def parse_custom_format(self, coords_str):
+        # Remove the square brackets and split the string into key-value pairs
+        pairs = coords_str.strip('[]').split(',')
+        print(pairs)
+        
+        # Initialize an empty list to hold the dictionaries
+        coordinates = []
+        
+        # Initialize an empty dictionary to hold the current point
+        current_point = {}
+        
+        # Iterate over the pairs
+        for pair in pairs:
+            # Split the pair into key and value
+            key, value = pair.strip('"').split(':')
+            print(key)
+            # Strip any whitespace and convert the value to float
+            key = key.strip('"')
+            value = float(value)
+            print(value)
+            
+            # Add the key-value pair to the current point
+            current_point[key] = value
+            
+            # If the current point has both 'x' and 'y' keys, it's complete
+            if 'x' in current_point and 'y' in current_point:
+                # Add the current point to the list of coordinates
+                coordinates.append(current_point)
+                # Reset the current point for the next iteration
+                current_point = {}
+    
+        return coordinates
+    
 NODE_CLASS_MAPPINGS = {
     "INTConstant": INTConstant,
     "FloatConstant": FloatConstant,
@@ -4581,7 +4652,8 @@ NODE_CLASS_MAPPINGS = {
     "StringConstantMultiline": StringConstantMultiline,
     "JoinStrings": JoinStrings,
     "Sleep": Sleep,
-    "ImagePadForOutpaintMasked": ImagePadForOutpaintMasked
+    "ImagePadForOutpaintMasked": ImagePadForOutpaintMasked,
+    "SplineEditor": SplineEditor
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "INTConstant": "INT Constant",
@@ -4661,4 +4733,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "JoinStrings": "JoinStrings",
     "Sleep": "🛌 Sleep 🛌",
     "ImagePadForOutpaintMasked": "Pad Image For Outpaint Masked",
+    "SplineEditor": "Spline Editor",
 }
