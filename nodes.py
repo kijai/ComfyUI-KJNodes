@@ -4511,69 +4511,51 @@ class SplineEditor:
         return {
             "required": {
                 "coordinates": ("STRING", {"multiline": True}),
+                "mask_width": ("INT", {"default": 512, "min": 8, "max": MAX_RESOLUTION, "step": 8}),
+                "mask_height": ("INT", {"default": 512, "min": 8, "max": MAX_RESOLUTION, "step": 18}),
+                "points_to_sample": ("INT", {"default": 4, "min": 2, "max": 1000, "step": 1}),
+                "interpolation": (
+                [   
+                    'cardinal',
+                    'monotone',
+                    'basis',
+                    'linear',
+                    'step-before',
+                    'step-after',
+                ],
+                {
+                "default": 'cardinal'
+                    }),
             },
         }
 
-    RETURN_TYPES = ("STRING", "FLOAT")
+    RETURN_TYPES = ("MASK", "STRING", "FLOAT")
     FUNCTION = "splinedata"
 
     CATEGORY = "KJNodes/experimental"
 
-    def splinedata(self, coordinates):
+    def splinedata(self, mask_width, mask_height, coordinates, interpolation, points_to_sample):
         
-        coordinates = self.parse_custom_format(coordinates)
+        coordinates = json.loads(coordinates)
         print(coordinates)
-        # Step 1: Calculate distance from bottom for each point
-        distances_from_bottom = [512 - point['y'] for point in coordinates]
 
-        # Step 2: Normalize the values
-        max_distance = max(distances_from_bottom)
-        normalized_values = [distance / max_distance for distance in distances_from_bottom]
-
-        # Step 3: Calculate distances between points
-        distances_between_points = [
-            abs(coordinates[i+1]['x'] - coordinates[i]['x']) for i in range(len(coordinates)-1)
+        normalized_y_values = [
+            1.0 - (point['y'] / 512)
+            for point in coordinates
         ]
 
-        # Step 4: Interpolate x distances based on normalized distances from bottom
-        interpolated_x_distances = [
-            distance * normalized_value for distance, normalized_value in zip(distances_between_points, normalized_values[:-1])
-        ]
+        # Create a color map for grayscale intensities
+        color_map = lambda y: torch.full((mask_height, mask_width, 3), y, dtype=torch.float32)
 
-        print(interpolated_x_distances)
-        return (coordinates, interpolated_x_distances,)
-    def parse_custom_format(self, coords_str):
-        # Remove the square brackets and split the string into key-value pairs
-        pairs = coords_str.strip('[]').split(',')
-        print(pairs)
-        
-        # Initialize an empty list to hold the dictionaries
-        coordinates = []
-        
-        # Initialize an empty dictionary to hold the current point
-        current_point = {}
-        
-        # Iterate over the pairs
-        for pair in pairs:
-            # Split the pair into key and value
-            key, value = pair.strip('"').split(':')
-            print(key)
-            # Strip any whitespace and convert the value to float
-            key = key.strip('"')
-            value = float(value)
-            print(value)
-            
-            # Add the key-value pair to the current point
-            current_point[key] = value
-            
-            # If the current point has both 'x' and 'y' keys, it's complete
-            if 'x' in current_point and 'y' in current_point:
-                # Add the current point to the list of coordinates
-                coordinates.append(current_point)
-                # Reset the current point for the next iteration
-                current_point = {}
+        # Create image tensors for each normalized y value
+        image_tensors = [color_map(y) for y in normalized_y_values]
+
+        # Batch the tensors
+        masks_out = torch.stack(image_tensors)
+        masks_out = masks_out.mean(dim=-1)
+        print(masks_out.shape)
+        return (masks_out, coordinates, normalized_y_values,)
     
-        return coordinates
     
 NODE_CLASS_MAPPINGS = {
     "INTConstant": INTConstant,

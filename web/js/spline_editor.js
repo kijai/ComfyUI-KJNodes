@@ -60,34 +60,8 @@ export const loadScript = (
         border-style: solid;
         border-width: medium;
         border-color: var(--border-color);
-        height: 512px;
-        width: 512px;
-        max-height: 100%;
-        /* Scrollbar styling for Chrome */
-        &::-webkit-scrollbar {
-           width: 6px;
-        }
-        &::-webkit-scrollbar-track {
-           background: var(--bg-color);
-        }
-        &::-webkit-scrollbar-thumb {
-           background-color: var(--fg-color);
-           border-radius: 6px;
-           border: 3px solid var(--bg-color);
-        }
-       
-        /* Scrollbar styling for Firefox */
-        scrollbar-width: thin;
-        scrollbar-color: var(--fg-color) var(--bg-color);
-        a {
-          color: yellow;
-        }
-        a:visited {
-          color: orange;
-        }
-        a:hover {
-          color: red;
-        }
+        height: 544px;
+        width: 544px;
        }
         `
       document.head.appendChild(styleTag)
@@ -97,76 +71,52 @@ export const loadScript = (
 loadScript('/kjweb_async/svg-path-properties.min.js').catch((e) => {
     console.log(e)
 })
-
-class SplineEditorWidget {
-    constructor(inputName, defaultValue) {
-        //this.name = inputName || "Spline";
-        //this._value = defaultValue || [{ x: 0, y: 0 }];
-        this.type = "SPLINE";
-        //this.selectedPointIndex = null;
-        this.resize        
-        }
-    
-    computeSize(width) {
-        return [width, 300];
-    }
-
-    configure(data) {
-        console.log(data)
-    }
-
-    value() {
-        console.debug('Returning value', this._value)
-        return this._value
-    }
-    setValue(value) {
-        console.debug('Setting value', value)
-        this._value = value
-    }
-}
+loadScript('/kjweb_async/protovis.min.js').catch((e) => {
+  console.log(e)
+})
+create_documentation_stylesheet()
 
 app.registerExtension({
     name: 'KJNodes.curves', 
     
     async beforeRegisterNodeDef(nodeType, nodeData) {
         if (nodeData.name == 'SplineEditor') {
-            addElement(nodeData, nodeType);
+          addElement(nodeData, nodeType);
         }
     },
-    // getCustomWidgets: function () {
-    //     return {
-    //         SPLINE: (node, inputName, inputData, app) => {
-    //         console.log(inputName)    
-    //         console.log(inputData)
-    //         console.log("Registering KJNodes curve widget");
-    //             return {
-    //             widget: node.addCustomWidget(
-    //                 new SplineEditorWidget(inputName, inputData[1]?.default)
-    //             ),
-    //             }
-    //         }
-    //     }
-    // }
 })
 
-export const addElement = (nodeData,nodeType, opts = { icon_size: 24, icon_margin: 4 }) => {
-    opts = opts || {}
-    const iconSize = opts.icon_size ? opts.icon_size : 14
-    const iconMargin = opts.icon_margin ? opts.icon_margin : 4
+export const addElement = (nodeData,nodeType) => {
     console.log("Creating spline editor")
+    const iconSize = 24
+    const iconMargin = 4
+    
     let splineEditor = null
     let vis = null
     
     const drawFg = nodeType.prototype.onDrawForeground
     nodeType.prototype.onNodeCreated = function () {
-        this.coordWidget = this.widgets.find(w => w.name === "coordinates"); 
+      console.log("Node created")
+        this.coordWidget = this.widgets.find(w => w.name === "coordinates");
+        this.interpolationWidget = this.widgets.find(w => w.name === "interpolation");
+        this.pointsWidget = this.widgets.find(w => w.name === "points_to_sample");
+    }
+    nodeType.prototype.onRemoved = function () {
+      console.log("Node removed")
+      if (splineEditor !== null) {
+        splineEditor.parentNode.removeChild(splineEditor)
+        splineEditor = null
+      }
     }
     nodeType.prototype.onDrawForeground = function (ctx) {
-    const r = drawFg ? drawFg.apply(this, arguments) : undefined
-    if (this.flags.collapsed) return r
-    const x = this.size[0] - iconSize - iconMargin
-    if (splineEditor === null) {
-        create_documentation_stylesheet()
+      console.log("Drawing foreground")
+      const r = drawFg ? drawFg.apply(this, arguments) : undefined
+      if (this.flags.collapsed) return r
+      
+      const x = this.size[0] - iconSize - iconMargin
+
+      if (this.show_doc && splineEditor === null) {
+        console.log("Drawing spline editor")
         splineEditor = document.createElement('div');
         splineEditor.classList.add('spline-editor');
 
@@ -185,141 +135,153 @@ export const addElement = (nodeData,nodeType, opts = { icon_size: 24, icon_margi
             this.show_doc = !this.show_doc
             splineEditor.parentNode.removeChild(splineEditor)
             splineEditor = null
-           });
-           
+          });
+            
         splineEditor.appendChild(closeButton)
-        
-        document.body.appendChild(splineEditor)
         
         var w = 512
         var h = 512
-        var i = 3    
-        loadScript('/kjweb_async/protovis.min.js').then(() => {
-            console.log('Protovis loaded successfully');
-           
-
-        var points = pv.range(1, 5).map(i => ({
+        var i = 3
+        
+        if (points == null) {
+          var points = pv.range(1, 5).map(i => ({
             x: i * w / 5,
             y: 50 + Math.random() * (h - 100)
-        }));
-        var interpolate = "cardinal"
+          }));
+        }
+
         var segmented = false
         vis = new pv.Panel()
-            .width(w)
-            .height(h)
-            .fillStyle("var(--comfy-menu-bg)")
-            //.strokeStyle("orange")
-            .lineWidth(0)
-            .antialias(false)
-            .margin(2)
-            .event("mousedown", function() {
+          .width(w)
+          .height(h)
+          .fillStyle("var(--comfy-menu-bg)")
+          .strokeStyle("orange")
+          .lineWidth(0)
+          .antialias(false)
+          .margin(10)
+          .event("mousedown", function() {
+            if (pv.event.shiftKey) { // Use pv.event to access the event object
                 i = points.push(this.mouse()) - 1;
                 return this;
-               });
+            }
+          });
         vis.add(pv.Rule)
-               .data(pv.range(0, 8, .5))
-               .bottom(d =>  d * 70 + 9.5)
-               .strokeStyle("white")
-               .lineWidth(2)
+          .data(pv.range(0, 8, .5))
+          .bottom(d =>  d * 70 + 9.5)
+          .strokeStyle("gray")
+          .lineWidth(1)
 
         vis.add(pv.Line)
-            .data(() => points)
-            .left(d => d.x)
-            .top(d => d.y)
-            .interpolate(() => interpolate)
-            .segmented(() => segmented)
-            .strokeStyle(pv.Colors.category10().by(pv.index))
-            .tension(0.5)
-            .lineWidth(3);
+          .data(() => points)
+          .left(d => d.x)
+          .top(d => d.y)
+          .interpolate(() => this.interpolationWidget.value)
+          .segmented(() => segmented)
+          .strokeStyle(pv.Colors.category10().by(pv.index))
+          .tension(0.5)
+          .lineWidth(3)
 
         vis.add(pv.Dot)
-            .data(() => points)
-            .left(d => d.x)
-            .top(d => d.y)
-            .radius(7)
-            .cursor("move")
-            .strokeStyle(function() { return i == this.index ? "#ff7f0e" : "#1f77b4"; })
-            .fillStyle(function() { return "rgba(100, 100, 100, 0.2)"; })
-            //.anchor("center").add(pv.Label)
-                //.font(d => Math.sqrt(d[2]) * 20 + "px sans-serif")
-              //  .text(d => d[2])
-            .event("mousedown", pv.Behavior.drag())
-            .event("dragstart", function() {
-                i = this.index;
-                return this;
+          .data(() => points)
+          .left(d => d.x)
+          .top(d => d.y)
+          .radius(7)
+          .cursor("move")
+          .strokeStyle(function() { return i == this.index ? "#ff7f0e" : "#1f77b4"; })
+          .fillStyle(function() { return "rgba(100, 100, 100, 0.2)"; })
+          .event("mousedown", pv.Behavior.drag())
+          .event("dragstart", function() {
+              i = this.index;
+              return this;
+          })
+          .event("drag", vis)
+          .anchor("top").add(pv.Label)
+              .font(d => Math.sqrt(d[2]) * 32 + "px sans-serif")
+              //.text(d => `(${Math.round(d.x)}, ${Math.round(d.y)})`)
+              .text(d => {
+                // Normalize y to range 0.0 to 1.0, considering the inverted y-axis
+                var normalizedY = 1.0 - (d.y / h);
+                return `${normalizedY.toFixed(2)}`;
             })
-            .event("drag", vis)
+              .textStyle("orange")
 
-        pv.listen(window, "mousedown", () => { 
+        //disable context menu on right click     
+        document.addEventListener('contextmenu', function(e) {
+          if (e.button === 2) { // Right mouse button
+              e.preventDefault();
+              e.stopPropagation();
+            }
+        })
+        //right click remove dot
+        pv.listen(window, "mousedown", () => {
             window.focus();
-            //logPathLength();
+            if (pv.event.button === 2) {
+              points.splice(i--, 1);
+              vis.render();
+              }
             });
-        pv.listen(window, "mouseup", () => { 
-            //logPathLength();
-            if (svgPathElement !== null) {
-                let coords = samplePoints(svgPathElement, points.length);
+        //send coordinates to node on mouseup
+        pv.listen(window, "mouseup", () => {           
+            if (pathElements !== null) {
+                let coords = samplePoints(pathElements[0], this.pointsWidget.value);
                 let coordsString = JSON.stringify(coords);
-                if (this.coordWidget) this.coordWidget.value = coordsString;
+                if (this.coordWidget) {
+                  this.coordWidget.value = coordsString;
+                }
             }
         });    
-        pv.listen(window, "keydown", (e) => {
-            console.log("key code: " + e.keyCode)
-            // code 8 is backspace, code 46 is delete
-            if ((e.keyCode == 16 || e.keyCode == 46) && (i >= 0)) {
-                points.splice(i--, 1);
-                vis.render();
-                e.preventDefault();
-            }
-            })
+          
         vis.render();
         var svgElement = vis.canvas();
-        var svgPathElement = document.querySelector('path');
-        splineEditor.appendChild(svgElement);
-               
-        })
-        .catch((error) => {
-            console.error('Failed to load Protovis:', error);
-        });
-    }
-    if (this.show_doc && splineEditor !== null && vis !== null) {
-        const rect = ctx.canvas.getBoundingClientRect()
-        const scaleX = rect.width / ctx.canvas.width
-        const scaleY = rect.height / ctx.canvas.height
-        
-        const transform = new DOMMatrix()
-        .scaleSelf(scaleX -0.05, scaleY -0.05)
-        .multiplySelf(ctx.getTransform())
-        .translateSelf(470, -10)
-        
-        const scale = new DOMMatrix()
-        .scaleSelf(transform.a, transform.d);
+        splineEditor.appendChild(svgElement); 
+      //   this.addDOMWidget("videopreview", "preview", splineEditor, {
+      //     serialize: false,
+      //     hideOnZoom: false,
+         
+      // });
+        document.body.appendChild(splineEditor)
+        var pathElements = svgElement.getElementsByTagName('path'); // Get all path elements          
+      }
+       // close the popup
+       else if (!this.show_doc && splineEditor !== null) {
+        splineEditor.parentNode.removeChild(splineEditor)
+        splineEditor = null
+      }
+      
+      if (this.show_doc && splineEditor !== null && vis !== null) {
+          const rect = ctx.canvas.getBoundingClientRect()
+          const scaleX = rect.width / ctx.canvas.width
+          const scaleY = rect.height / ctx.canvas.height
+          
+          const transform = new DOMMatrix()
+          .scaleSelf(scaleX, scaleY)
+          .translateSelf(this.size[0] * scaleX, 0)
+          .multiplySelf(ctx.getTransform())
+          .translateSelf(10, -32)
+          
+          const scale = new DOMMatrix()
+          .scaleSelf(transform.a, transform.d);
 
-        const styleObject = {
-            transformOrigin: '0 0',
-            transform: scale,
-            left: `${transform.a + transform.e}px`,
-            top: `${transform.d + transform.f}px`,
-            };
-        Object.assign(splineEditor.style, styleObject);
-
-        //vis.render();
-        
-        //logPathLength(svgPathElement);
-       
-        
-        }
-    ctx.save()
-    ctx.translate(x - 2, iconSize - 45)
-    ctx.scale(iconSize / 32, iconSize / 32)
-    ctx.strokeStyle = 'rgba(255,255,255,0.3)'
-    ctx.lineCap = 'round'
-    ctx.lineJoin = 'round'
-    ctx.lineWidth = 2.4
-    ctx.font = 'bold 36px monospace'
-    ctx.fillStyle = 'orange';
-    ctx.fillText('📈', 0, 24)
-    ctx.restore()
-    return r
+          const styleObject = {
+              transformOrigin: '0 0',
+              transform: scale,
+              left: `${transform.a + transform.e}px`,
+              top: `${transform.d + transform.f}px`,
+              };
+          Object.assign(splineEditor.style, styleObject);
+      }
+      ctx.save()
+      ctx.translate(x - 2, iconSize - 45)
+      ctx.scale(iconSize / 32, iconSize / 32)
+      ctx.strokeStyle = 'rgba(255,255,255,0.3)'
+      ctx.lineCap = 'round'
+      ctx.lineJoin = 'round'
+      ctx.lineWidth = 2.4
+      ctx.font = 'bold 36px monospace'
+      ctx.fillStyle = 'orange';
+      ctx.fillText('📈', 0, 24)
+      ctx.restore()
+      return r
     }
     // handle clicking of the icon
     const mouseDown = nodeType.prototype.onMouseDown
@@ -342,22 +304,9 @@ export const addElement = (nodeData,nodeType, opts = { icon_size: 24, icon_margi
       }
       return r;
     }
-    
 }
 
-function logPathLength(svgPathElement) {
-  //var svgPathElement = document.querySelector('path');
-  // If the SVG path element exists, get the path string from the 'd' attribute
-  if (svgPathElement) {
-      var pathString = svgPathElement.getAttribute('d');
 
-      // Now, you can use the svg-path-properties library on this path string.
-      const properties = new svgPathProperties.svgPathProperties(pathString);
-      const length = properties.getTotalLength();
-      // ...and other properties as needed
-      console.log(length);
-  } 
-}
 
 function samplePoints(svgPathElement, numSamples) {
     var pathLength = svgPathElement.getTotalLength();
