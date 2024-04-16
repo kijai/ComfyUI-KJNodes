@@ -76,68 +76,95 @@ loadScript('/kjweb_async/protovis.min.js').catch((e) => {
 })
 create_documentation_stylesheet()
 
+function chainCallback(object, property, callback) {
+  if (object == undefined) {
+      //This should not happen.
+      console.error("Tried to add callback to non-existant object")
+      return;
+  }
+  if (property in object) {
+      const callback_orig = object[property]
+      object[property] = function () {
+          const r = callback_orig.apply(this, arguments);
+          callback.apply(this, arguments);
+          return r
+      };
+  } else {
+      object[property] = callback;
+  }
+}
 app.registerExtension({
     name: 'KJNodes.curves', 
     
     async beforeRegisterNodeDef(nodeType, nodeData) {
-        if (nodeData.name == 'SplineEditor') {
-          addElement(nodeData, nodeType);
+        if (nodeData?.name == 'SplineEditor') {
+          chainCallback(nodeType.prototype, "onNodeCreated", function () {
+            var splineEditor = document.createElement('div');
+            splineEditor.classList.add('spline-editor');
+            console.log(this)
+
+            this.addDOMWidget(nodeData.name, "SplineEditorWidget", splineEditor, {
+            serialize: false,
+            hideOnZoom: false,
+            });
+            addElement(nodeData, nodeType, this)
+        });
         }
     },
 })
 
-export const addElement = (nodeData,nodeType) => {
-    console.log("Creating spline editor")
+export const addElement = function(nodeData, nodeType, context) {
+    console.log("Creating spline editor for node", nodeData.name);
+    console.log(context);
     const iconSize = 24
     const iconMargin = 4
-    
-    let splineEditor = null
+  
+    var splineEditor = context.widgets.find(w => w.name === "SplineEditor");
+    console.log(splineEditor);
     let vis = null
+    var show_doc = true
+    //close button
+    const closeButton = document.createElement('div');
+    closeButton.textContent = '❌';
+    closeButton.style.position = 'absolute';
+    closeButton.style.top = '0';
+    closeButton.style.right = '0';
+    closeButton.style.cursor = 'pointer';
+    closeButton.style.padding = '5px';
+    closeButton.style.color = 'red';
+    closeButton.style.fontSize = '12px';
+    closeButton.addEventListener('mousedown', (e) => {
+        e.stopPropagation();
+        show_doc = !show_doc
+        splineEditor.element.parentNode.removeChild(splineEditor.element)
+        splineEditor.element = null
+      });
+    splineEditor.element.appendChild(closeButton)
+    
     
     const drawFg = nodeType.prototype.onDrawForeground
     nodeType.prototype.onNodeCreated = function () {
       console.log("Node created")
-        this.coordWidget = this.widgets.find(w => w.name === "coordinates");
-        this.interpolationWidget = this.widgets.find(w => w.name === "interpolation");
-        this.pointsWidget = this.widgets.find(w => w.name === "points_to_sample");
+        var coordWidget = context.widgets.find(w => w.name === "coordinates");
+        var interpolationWidget = context.widgets.find(w => w.name === "interpolation");
+        var pointsWidget = context.widgets.find(w => w.name === "points_to_sample");
     }
     nodeType.prototype.onRemoved = function () {
       console.log("Node removed")
       if (splineEditor !== null) {
-        splineEditor.parentNode.removeChild(splineEditor)
-        splineEditor = null
+        splineEditor.element.parentNode.removeChild(splineEditor.element)
+        splineEditor.element = null
       }
     }
     nodeType.prototype.onDrawForeground = function (ctx) {
       console.log("Drawing foreground")
       const r = drawFg ? drawFg.apply(this, arguments) : undefined
-      if (this.flags.collapsed) return r
+      if (context.flags.collapsed) return r
       
-      const x = this.size[0] - iconSize - iconMargin
+      const x = context.size[0] - iconSize - iconMargin
 
-      if (this.show_doc && splineEditor === null) {
+      if (show_doc && splineEditor === null) {
         console.log("Drawing spline editor")
-        splineEditor = document.createElement('div');
-        splineEditor.classList.add('spline-editor');
-
-        // close button
-        const closeButton = document.createElement('div');
-        closeButton.textContent = '❌';
-        closeButton.style.position = 'absolute';
-        closeButton.style.top = '0';
-        closeButton.style.right = '0';
-        closeButton.style.cursor = 'pointer';
-        closeButton.style.padding = '5px';
-        closeButton.style.color = 'red';
-        closeButton.style.fontSize = '12px';
-        closeButton.addEventListener('mousedown', (e) => {
-            e.stopPropagation();
-            this.show_doc = !this.show_doc
-            splineEditor.parentNode.removeChild(splineEditor)
-            splineEditor = null
-          });
-            
-        splineEditor.appendChild(closeButton)
         
         var w = 512
         var h = 512
@@ -175,7 +202,7 @@ export const addElement = (nodeData,nodeType) => {
           .data(() => points)
           .left(d => d.x)
           .top(d => d.y)
-          .interpolate(() => this.interpolationWidget.value)
+          .interpolate(() => interpolationWidget.value)
           .segmented(() => segmented)
           .strokeStyle(pv.Colors.category10().by(pv.index))
           .tension(0.5)
@@ -223,32 +250,28 @@ export const addElement = (nodeData,nodeType) => {
         //send coordinates to node on mouseup
         pv.listen(window, "mouseup", () => {           
             if (pathElements !== null) {
-                let coords = samplePoints(pathElements[0], this.pointsWidget.value);
+                let coords = samplePoints(pathElements[0], pointsWidget.value);
                 let coordsString = JSON.stringify(coords);
-                if (this.coordWidget) {
-                  this.coordWidget.value = coordsString;
+                if (coordWidget) {
+                  coordWidget.value = coordsString;
                 }
             }
         });    
           
         vis.render();
         var svgElement = vis.canvas();
-        splineEditor.appendChild(svgElement); 
-      //   this.addDOMWidget("videopreview", "preview", splineEditor, {
-      //     serialize: false,
-      //     hideOnZoom: false,
-         
-      // });
-        document.body.appendChild(splineEditor)
+        splineEditor.element.appendChild(svgElement);
+        
+        //document.body.appendChild(splineEditor)
         var pathElements = svgElement.getElementsByTagName('path'); // Get all path elements          
       }
        // close the popup
-       else if (!this.show_doc && splineEditor !== null) {
-        splineEditor.parentNode.removeChild(splineEditor)
-        splineEditor = null
+       else if (!show_doc && splineEditor !== null) {
+        splineEditor.element.parentNode.removeChild(splineEditor.element)
+        splineEditor.element = null
       }
       
-      if (this.show_doc && splineEditor !== null && vis !== null) {
+      if (show_doc && splineEditor.element !== null && vis !== null) {
           const rect = ctx.canvas.getBoundingClientRect()
           const scaleX = rect.width / ctx.canvas.width
           const scaleY = rect.height / ctx.canvas.height
@@ -257,7 +280,7 @@ export const addElement = (nodeData,nodeType) => {
           .scaleSelf(scaleX, scaleY)
           .translateSelf(this.size[0] * scaleX, 0)
           .multiplySelf(ctx.getTransform())
-          .translateSelf(10, -32)
+          .translateSelf(100, -32)
           
           const scale = new DOMMatrix()
           .scaleSelf(transform.a, transform.d);
@@ -268,7 +291,7 @@ export const addElement = (nodeData,nodeType) => {
               left: `${transform.a + transform.e}px`,
               top: `${transform.d + transform.f}px`,
               };
-          Object.assign(splineEditor.style, styleObject);
+          Object.assign(splineEditor.element.style, styleObject);
       }
       ctx.save()
       ctx.translate(x - 2, iconSize - 45)
@@ -283,27 +306,27 @@ export const addElement = (nodeData,nodeType) => {
       ctx.restore()
       return r
     }
-    // handle clicking of the icon
-    const mouseDown = nodeType.prototype.onMouseDown
-    nodeType.prototype.onMouseDown = function (e, localPos, canvas) {
-      const r = mouseDown ? mouseDown.apply(this, arguments) : undefined
-      const iconX = this.size[0] - iconSize - iconMargin
-      const iconY = iconSize - 45
-      if (
-        localPos[0] > iconX &&
-        localPos[0] < iconX + iconSize &&
-        localPos[1] > iconY &&
-        localPos[1] < iconY + iconSize
-      ) {
-        if (this.show_doc === undefined) {
-          this.show_doc = true
-        } else {
-          this.show_doc = !this.show_doc
-        }
-        return true;
-      }
-      return r;
-    }
+    // // handle clicking of the icon
+    // const mouseDown = nodeType.prototype.onMouseDown
+    // nodeType.prototype.onMouseDown = function (e, localPos, canvas) {
+    //   const r = mouseDown ? mouseDown.apply(this, arguments) : undefined
+    //   const iconX = this.size[0] - iconSize - iconMargin
+    //   const iconY = iconSize - 45
+    //   if (
+    //     localPos[0] > iconX &&
+    //     localPos[0] < iconX + iconSize &&
+    //     localPos[1] > iconY &&
+    //     localPos[1] < iconY + iconSize
+    //   ) {
+    //     if (this.show_doc === undefined) {
+    //       this.show_doc = true
+    //     } else {
+    //       this.show_doc = !this.show_doc
+    //     }
+    //     return true;
+    //   }
+    //   return r;
+    // }
 }
 
 
