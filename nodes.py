@@ -4519,6 +4519,7 @@ class ImageAndMaskPreview(SaveImage):
             "required": {
                 "mask_opacity": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}),
                 "mask_color": ("STRING", {"default": "255, 255, 255"}),
+                "pass_through": ("BOOLEAN", {"default": False}),
              },
             "optional": {
                 "image": ("IMAGE",),
@@ -4526,15 +4527,20 @@ class ImageAndMaskPreview(SaveImage):
             },
             "hidden": {"prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO"},
         }
-
+    RETURN_TYPES = ("IMAGE",)
+    RETURN_NAMES = ("composite",)
     FUNCTION = "execute"
     CATEGORY = "KJNodes"
     DESCRIPTION = """
 Preview an image or a mask, when both inputs are used  
 composites the mask on top of the image.
+with pass_through on the preview is disabled and the  
+composite is returned from the composite slot instead,  
+this allows for the preview to be passed for video combine  
+nodes for example.
 """
 
-    def execute(self, mask_opacity, mask_color, filename_prefix="ComfyUI", image=None, mask=None, prompt=None, extra_pnginfo=None):
+    def execute(self, mask_opacity, mask_color, pass_through, filename_prefix="ComfyUI", image=None, mask=None, prompt=None, extra_pnginfo=None):
         if mask is not None and image is None:
             preview = mask.reshape((-1, 1, mask.shape[-2], mask.shape[-1])).movedim(1, -1).expand(-1, -1, -1, 3)
         elif mask is None and image is not None:
@@ -4550,7 +4556,9 @@ composites the mask on top of the image.
             mask_image[:, :, :, 2] = color_list[2] // 255 # Blue channel
             
             preview, = ImageCompositeMasked.composite(self, image, mask_image, 0, 0, True, mask_adjusted)
-        return self.save_images(preview, filename_prefix, prompt, extra_pnginfo)
+        if pass_through:
+            return (preview, )
+        return(self.save_images(preview, filename_prefix, prompt, extra_pnginfo))
         
     
 class SplineEditor:
