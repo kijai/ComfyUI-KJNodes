@@ -4517,7 +4517,8 @@ class ImageAndMaskPreview(SaveImage):
     def INPUT_TYPES(s):
         return {
             "required": {
-                
+                "mask_opacity": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}),
+                "mask_color": ("STRING", {"default": "255, 255, 255"}),
              },
             "optional": {
                 "image": ("IMAGE",),
@@ -4533,14 +4534,22 @@ Preview an image or a mask, when both inputs are used
 composites the mask on top of the image.
 """
 
-    def execute(self, filename_prefix="ComfyUI", image=None, mask=None, prompt=None, extra_pnginfo=None):
+    def execute(self, mask_opacity, mask_color, filename_prefix="ComfyUI", image=None, mask=None, prompt=None, extra_pnginfo=None):
         if mask is not None and image is None:
             preview = mask.reshape((-1, 1, mask.shape[-2], mask.shape[-1])).movedim(1, -1).expand(-1, -1, -1, 3)
         elif mask is None and image is not None:
             preview = image
         elif mask is not None and image is not None:
-            mask_image = mask.reshape((-1, 1, mask.shape[-2], mask.shape[-1])).movedim(1, -1).expand(-1, -1, -1, 3)
-            preview, = ImageCompositeMasked.composite(self, image, mask_image, 0, 0, True, mask)
+            mask_adjusted = mask * mask_opacity
+            mask_image = mask.reshape((-1, 1, mask.shape[-2], mask.shape[-1])).movedim(1, -1).expand(-1, -1, -1, 3).clone()
+
+            color_list = list(map(int, mask_color.split(', ')))
+            print(color_list[0])
+            mask_image[:, :, :, 0] = color_list[0] // 255 # Red channel
+            mask_image[:, :, :, 1] = color_list[1] // 255 # Green channel
+            mask_image[:, :, :, 2] = color_list[2] // 255 # Blue channel
+            
+            preview, = ImageCompositeMasked.composite(self, image, mask_image, 0, 0, True, mask_adjusted)
         return self.save_images(preview, filename_prefix, prompt, extra_pnginfo)
         
     
