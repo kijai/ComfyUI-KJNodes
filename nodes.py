@@ -17,8 +17,10 @@ import random
 import math
 
 import model_management
-from nodes import MAX_RESOLUTION
+from nodes import MAX_RESOLUTION, SaveImage
+from comfy_extras.nodes_mask import ImageCompositeMasked
 import folder_paths
+
 script_directory = os.path.dirname(os.path.abspath(__file__))
 folder_paths.add_model_folder_path("kjnodes_fonts", os.path.join(script_directory, "fonts"))
 
@@ -4504,6 +4506,44 @@ class ImagePadForOutpaintMasked:
 
         return (new_image, mask,)
     
+class ImageAndMaskPreview(SaveImage):
+    def __init__(self):
+        self.output_dir = folder_paths.get_temp_directory()
+        self.type = "temp"
+        self.prefix_append = "_temp_" + ''.join(random.choice("abcdefghijklmnopqrstupvxyz") for x in range(5))
+        self.compress_level = 4
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                
+             },
+            "optional": {
+                "image": ("IMAGE",),
+                "mask": ("MASK",),                
+            },
+            "hidden": {"prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO"},
+        }
+
+    FUNCTION = "execute"
+    CATEGORY = "KJNodes"
+    DESCRIPTION = """
+Preview an image or a mask, when both inputs are used  
+composites the mask on top of the image.
+"""
+
+    def execute(self, filename_prefix="ComfyUI", image=None, mask=None, prompt=None, extra_pnginfo=None):
+        if mask is not None and image is None:
+            preview = mask.reshape((-1, 1, mask.shape[-2], mask.shape[-1])).movedim(1, -1).expand(-1, -1, -1, 3)
+        elif mask is None and image is not None:
+            preview = image
+        elif mask is not None and image is not None:
+            mask_image = mask.reshape((-1, 1, mask.shape[-2], mask.shape[-1])).movedim(1, -1).expand(-1, -1, -1, 3)
+            preview, = ImageCompositeMasked.composite(self, image, mask_image, 0, 0, True, mask)
+        return self.save_images(preview, filename_prefix, prompt, extra_pnginfo)
+        
+    
 class SplineEditor:
 
     @classmethod
@@ -4635,7 +4675,8 @@ NODE_CLASS_MAPPINGS = {
     "JoinStrings": JoinStrings,
     "Sleep": Sleep,
     "ImagePadForOutpaintMasked": ImagePadForOutpaintMasked,
-    "SplineEditor": SplineEditor
+    "SplineEditor": SplineEditor,
+    "ImageAndMaskPreview": ImageAndMaskPreview
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "INTConstant": "INT Constant",
@@ -4716,4 +4757,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "Sleep": "🛌 Sleep 🛌",
     "ImagePadForOutpaintMasked": "Pad Image For Outpaint Masked",
     "SplineEditor": "Spline Editor",
+    "ImageAndMaskPreview": "Image & Mask Preview",
 }
