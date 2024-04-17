@@ -4622,7 +4622,7 @@ class StabilityAPI_SD3:
                 "api_key": ("STRING", {"multiline": True}),
                 "prompt": ("STRING", {"multiline": True}),
                 "n_prompt": ("STRING", {"multiline": True}),
-                "seed": ("INT", {"default": 123,"min": 0, "max": 0xffffffffffffffff, "step": 1}),
+                "seed": ("INT", {"default": 123,"min": 0, "max": 4294967294, "step": 1}),
                 "model": (
                 [   
                     'sd3',
