@@ -4584,7 +4584,7 @@ class SplineEditor:
     CATEGORY = "KJNodes/experimental"
 
     def splinedata(self, mask_width, mask_height, coordinates, interpolation, points_to_sample):
-        
+        print(coordinates)
         coordinates = json.loads(coordinates)
         print(coordinates)
 
