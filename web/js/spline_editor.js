@@ -54,7 +54,7 @@ export const loadScript = (
         font: 12px monospace;
         line-height: 1.5em;
         padding: 10px;
-        z-index: 5;
+        z-index: 3;
         overflow: hidden;
         border-radius: 10px;
         border-style: solid;
@@ -114,168 +114,345 @@ app.registerExtension({
             splineEditor.canvasEl = document.createElement("div");
             splineEditor.canvasEl.style['width'] = "512px"
             splineEditor.canvasEl.style['height'] = "512px"
-            addElement(nodeData, nodeType, this)
-        });
-        }
-    },
-})
+            splineEditor.canvasEl.style['zIndex'] = "0"
+            var coordWidget = this.widgets.find(w => w.name === "coordinates");
+            var interpolationWidget = this.widgets.find(w => w.name === "interpolation");
+            var pointsWidget = this.widgets.find(w => w.name === "points_to_sample");
+            //addElement(nodeData, nodeType, this)
+            var w = 512
+            var h = 512
+            var i = 3
+            var segmented = false
+            if (points == null) {
+                      var points = pv.range(1, 5).map(i => ({
+                        x: i * w / 5,
+                        y: 50 + Math.random() * (h - 100)
+                      }));
+                    }
+            let vis = new pv.Panel()
+              .width(w)
+              .height(h)
+              .fillStyle("var(--comfy-menu-bg)")
+              .strokeStyle("orange")
+              .lineWidth(0)
+              .antialias(false)
+              .margin(10)
+              .event("mousedown", function() {
+                if (pv.event.shiftKey) { // Use pv.event to access the event object
+                    i = points.push(this.mouse()) - 1;
+                    return this;
+                }
+                });
+                vis.add(pv.Rule)
+              .data(pv.range(0, 8, .5))
+              .bottom(d =>  d * 70 + 9.5)
+              .strokeStyle("gray")
+              .lineWidth(1)
 
-export const addElement = function(nodeData, nodeType, context) {
-    console.log("Creating spline editor for node", nodeData.name);
-    console.log(context);
-    const iconSize = 24
-    const iconMargin = 4
+            vis.add(pv.Line)
+              .data(() => points)
+              .left(d => d.x)
+              .top(d => d.y)
+              .interpolate(() => interpolationWidget.value)
+              .segmented(() => segmented)
+              .strokeStyle(pv.Colors.category10().by(pv.index))
+              .tension(0.5)
+              .lineWidth(3)
+
+            vis.add(pv.Dot)
+              .data(() => points)
+              .left(d => d.x)
+              .top(d => d.y)
+              .radius(7)
+              .cursor("move")
+              .strokeStyle(function() { return i == this.index ? "#ff7f0e" : "#1f77b4"; })
+              .fillStyle(function() { return "rgba(100, 100, 100, 0.2)"; })
+              .event("mousedown", pv.Behavior.drag())
+              .event("dragstart", function() {
+                  i = this.index;
+                  return this;
+              })
+              .event("drag", vis)
+              .anchor("top").add(pv.Label)
+                  .font(d => Math.sqrt(d[2]) * 32 + "px sans-serif")
+                  //.text(d => `(${Math.round(d.x)}, ${Math.round(d.y)})`)
+                  .text(d => {
+                    // Normalize y to range 0.0 to 1.0, considering the inverted y-axis
+                    var normalizedY = 1.0 - (d.y / h);
+                    return `${normalizedY.toFixed(2)}`;
+                })
+                  .textStyle("orange")
+                vis.render();
+                var svgElement = vis.canvas();
+                svgElement.style['zIndex'] = "7"
+                svgElement.style['position'] = "fixed"
+                console.log("Spline editor rendered", svgElement)
+                splineEditor.element.appendChild(svgElement);
+            });
+        }
+      }
+})
+//     const drawFg = nodeType.prototype.onDrawForeground
+//     nodeType.prototype.onDrawForeground = function (ctx) {
+//       const r = drawFg ? drawFg.apply(this, arguments) : undefined
+//       if (this.flags.collapsed) return r
+
+//       var w = 512
+//       var h = 512
+//       var i = 3
+      
+//       if (points == null) {
+//         var points = pv.range(1, 5).map(i => ({
+//           x: i * w / 5,
+//           y: 50 + Math.random() * (h - 100)
+//         }));
+//       }
+
+//       var segmented = false
+//       let vis = new pv.Panel()
+//         .width(w)
+//         .height(h)
+//         .fillStyle("var(--comfy-menu-bg)")
+//         .strokeStyle("orange")
+//         .lineWidth(0)
+//         .antialias(false)
+//         .margin(10)
+//         .event("mousedown", function() {
+//           if (pv.event.shiftKey) { // Use pv.event to access the event object
+//               i = points.push(this.mouse()) - 1;
+//               return this;
+//           }
+//         });
+//         vis.add(pv.Rule)
+//           .data(pv.range(0, 8, .5))
+//           .bottom(d =>  d * 70 + 9.5)
+//           .strokeStyle("gray")
+//           .lineWidth(1)
+
+//         vis.add(pv.Line)
+//           .data(() => points)
+//           .left(d => d.x)
+//           .top(d => d.y)
+//           .interpolate(() => interpolationWidget.value)
+//           .segmented(() => segmented)
+//           .strokeStyle(pv.Colors.category10().by(pv.index))
+//           .tension(0.5)
+//           .lineWidth(3)
+
+//         vis.add(pv.Dot)
+//           .data(() => points)
+//           .left(d => d.x)
+//           .top(d => d.y)
+//           .radius(7)
+//           .cursor("move")
+//           .strokeStyle(function() { return i == this.index ? "#ff7f0e" : "#1f77b4"; })
+//           .fillStyle(function() { return "rgba(100, 100, 100, 0.2)"; })
+//           .event("mousedown", pv.Behavior.drag())
+//           .event("dragstart", function() {
+//               i = this.index;
+//               return this;
+//           })
+//           .event("drag", vis)
+//           .anchor("top").add(pv.Label)
+//               .font(d => Math.sqrt(d[2]) * 32 + "px sans-serif")
+//               //.text(d => `(${Math.round(d.x)}, ${Math.round(d.y)})`)
+//               .text(d => {
+//                 // Normalize y to range 0.0 to 1.0, considering the inverted y-axis
+//                 var normalizedY = 1.0 - (d.y / h);
+//                 return `${normalizedY.toFixed(2)}`;
+//             })
+//               .textStyle("orange")
+
+//         //disable context menu on right click     
+//         document.addEventListener('contextmenu', function(e) {
+//           if (e.button === 2) { // Right mouse button
+//               e.preventDefault();
+//               e.stopPropagation();
+//             }
+//         })
+//         //right click remove dot
+//         pv.listen(window, "mousedown", () => {
+//             window.focus();
+//             if (pv.event.button === 2) {
+//               points.splice(i--, 1);
+//               vis.render();
+//               }
+//             });
+//         //send coordinates to node on mouseup
+//         pv.listen(window, "mouseup", () => {           
+//             if (pathElements !== null) {
+//                 let coords = samplePoints(pathElements[0], pointsWidget.value);
+//                 let coordsString = JSON.stringify(coords);
+//                 if (coordWidget) {
+//                   coordWidget.value = coordsString;
+//                 }
+//             }
+//         });    
+          
+//         vis.render();
+//         var svgElement = vis.canvas();
+//         console.log("Spline editor rendered", svgElement)
+//         splineEditor.element.appendChild(svgElement);
+//     }
+//     },
+// })
+
+// export const addElement = function(nodeData, nodeType, context) {
+//     console.log("Creating spline editor for node", nodeData.name);
+//     console.log(context);
+//     const iconSize = 24
+//     const iconMargin = 4
     
   
-    var splineEditor = context.widgets.find(w => w.name === "SplineEditor");
+//     var splineEditor = context.widgets.find(w => w.name === "SplineEditor");
    
-    console.log(splineEditor);
-    let vis = null
-    var show_doc = true
-    //close button
-    const closeButton = document.createElement('div');
-    closeButton.textContent = '❌';
-    closeButton.style.position = 'absolute';
-    closeButton.style.top = '0';
-    closeButton.style.right = '0';
-    closeButton.style.cursor = 'pointer';
-    closeButton.style.padding = '5px';
-    closeButton.style.color = 'red';
-    closeButton.style.fontSize = '12px';
-    closeButton.style.zIndex = '7';
-    closeButton.addEventListener('mousedown', (e) => {
-        e.stopPropagation();
-        show_doc = !show_doc
-        splineEditor.element.parentNode.removeChild(splineEditor.element)
-        splineEditor.element = null
-      });
-    splineEditor.element.appendChild(closeButton)
+//     console.log(splineEditor);
+//     let vis = null
+//     var show_doc = true
+//     //close button
+//     const closeButton = document.createElement('div');
+//     closeButton.textContent = '❌';
+//     closeButton.style.position = 'absolute';
+//     closeButton.style.top = '0';
+//     closeButton.style.right = '0';
+//     closeButton.style.cursor = 'pointer';
+//     closeButton.style.padding = '5px';
+//     closeButton.style.color = 'red';
+//     closeButton.style.fontSize = '12px';
+//     closeButton.style.zIndex = '7';
+//     closeButton.addEventListener('mousedown', (e) => {
+//         e.stopPropagation();
+//         show_doc = !show_doc
+//         splineEditor.element.parentNode.removeChild(splineEditor.element)
+//         splineEditor.element = null
+//       });
+//     splineEditor.element.appendChild(closeButton)
     
     
     
-    nodeType.prototype.onNodeCreated = function () {
-      console.log("Node created")
-        var coordWidget = context.widgets.find(w => w.name === "coordinates");
-        var interpolationWidget = context.widgets.find(w => w.name === "interpolation");
-        var pointsWidget = context.widgets.find(w => w.name === "points_to_sample");
-    }
-    nodeType.prototype.onRemoved = function () {
-      console.log("Node removed")
-      if (splineEditor !== null) {
-        splineEditor.element.parentNode.removeChild(splineEditor.element)
-        splineEditor.element = null
-      }
-    }
-    const drawFg = nodeType.prototype.onDrawForeground
-    nodeType.prototype.onDrawForeground = function (ctx) {
-      console.log("Drawing foreground")
-      const r = drawFg ? drawFg.apply(this, arguments) : undefined
-      if (context.flags.collapsed) return r
+//     nodeType.prototype.onNodeCreated = function () {
+//       console.log("Node created")
+//         var coordWidget = context.widgets.find(w => w.name === "coordinates");
+//         var interpolationWidget = context.widgets.find(w => w.name === "interpolation");
+//         var pointsWidget = context.widgets.find(w => w.name === "points_to_sample");
+//     }
+//     nodeType.prototype.onRemoved = function () {
+//       console.log("Node removed")
+//       if (splineEditor !== null) {
+//         splineEditor.element.parentNode.removeChild(splineEditor.element)
+//         splineEditor.element = null
+//       }
+//     }
+//     const drawFg = nodeType.prototype.onDrawForeground
+//     nodeType.prototype.onDrawForeground = function (ctx) {
+//       console.log("Drawing foreground")
+//       const r = drawFg ? drawFg.apply(this, arguments) : undefined
+//       if (context.flags.collapsed) return r
       
-      const x = context.size[0] - iconSize - iconMargin
+//       const x = context.size[0] - iconSize - iconMargin
 
-      //if (show_doc && splineEditor === null) {
-        console.log("Drawing spline editor")
+//       //if (show_doc && splineEditor === null) {
+//         console.log("Drawing spline editor")
         
-        var w = 512
-        var h = 512
-        var i = 3
+//         var w = 512
+//         var h = 512
+//         var i = 3
         
-        if (points == null) {
-          var points = pv.range(1, 5).map(i => ({
-            x: i * w / 5,
-            y: 50 + Math.random() * (h - 100)
-          }));
-        }
+//         if (points == null) {
+//           var points = pv.range(1, 5).map(i => ({
+//             x: i * w / 5,
+//             y: 50 + Math.random() * (h - 100)
+//           }));
+//         }
 
-        var segmented = false
-        vis = new pv.Panel()
-          .width(w)
-          .height(h)
-          .fillStyle("var(--comfy-menu-bg)")
-          .strokeStyle("orange")
-          .lineWidth(0)
-          .antialias(false)
-          .margin(10)
-          .event("mousedown", function() {
-            if (pv.event.shiftKey) { // Use pv.event to access the event object
-                i = points.push(this.mouse()) - 1;
-                return this;
-            }
-          });
-        vis.add(pv.Rule)
-          .data(pv.range(0, 8, .5))
-          .bottom(d =>  d * 70 + 9.5)
-          .strokeStyle("gray")
-          .lineWidth(1)
+//         var segmented = false
+//         vis = new pv.Panel()
+//           .width(w)
+//           .height(h)
+//           .fillStyle("var(--comfy-menu-bg)")
+//           .strokeStyle("orange")
+//           .lineWidth(0)
+//           .antialias(false)
+//           .margin(10)
+//           .event("mousedown", function() {
+//             if (pv.event.shiftKey) { // Use pv.event to access the event object
+//                 i = points.push(this.mouse()) - 1;
+//                 return this;
+//             }
+//           });
+//         vis.add(pv.Rule)
+//           .data(pv.range(0, 8, .5))
+//           .bottom(d =>  d * 70 + 9.5)
+//           .strokeStyle("gray")
+//           .lineWidth(1)
 
-        vis.add(pv.Line)
-          .data(() => points)
-          .left(d => d.x)
-          .top(d => d.y)
-          .interpolate(() => interpolationWidget.value)
-          .segmented(() => segmented)
-          .strokeStyle(pv.Colors.category10().by(pv.index))
-          .tension(0.5)
-          .lineWidth(3)
+//         vis.add(pv.Line)
+//           .data(() => points)
+//           .left(d => d.x)
+//           .top(d => d.y)
+//           .interpolate(() => interpolationWidget.value)
+//           .segmented(() => segmented)
+//           .strokeStyle(pv.Colors.category10().by(pv.index))
+//           .tension(0.5)
+//           .lineWidth(3)
 
-        vis.add(pv.Dot)
-          .data(() => points)
-          .left(d => d.x)
-          .top(d => d.y)
-          .radius(7)
-          .cursor("move")
-          .strokeStyle(function() { return i == this.index ? "#ff7f0e" : "#1f77b4"; })
-          .fillStyle(function() { return "rgba(100, 100, 100, 0.2)"; })
-          .event("mousedown", pv.Behavior.drag())
-          .event("dragstart", function() {
-              i = this.index;
-              return this;
-          })
-          .event("drag", vis)
-          .anchor("top").add(pv.Label)
-              .font(d => Math.sqrt(d[2]) * 32 + "px sans-serif")
-              //.text(d => `(${Math.round(d.x)}, ${Math.round(d.y)})`)
-              .text(d => {
-                // Normalize y to range 0.0 to 1.0, considering the inverted y-axis
-                var normalizedY = 1.0 - (d.y / h);
-                return `${normalizedY.toFixed(2)}`;
-            })
-              .textStyle("orange")
+//         vis.add(pv.Dot)
+//           .data(() => points)
+//           .left(d => d.x)
+//           .top(d => d.y)
+//           .radius(7)
+//           .cursor("move")
+//           .strokeStyle(function() { return i == this.index ? "#ff7f0e" : "#1f77b4"; })
+//           .fillStyle(function() { return "rgba(100, 100, 100, 0.2)"; })
+//           .event("mousedown", pv.Behavior.drag())
+//           .event("dragstart", function() {
+//               i = this.index;
+//               return this;
+//           })
+//           .event("drag", vis)
+//           .anchor("top").add(pv.Label)
+//               .font(d => Math.sqrt(d[2]) * 32 + "px sans-serif")
+//               //.text(d => `(${Math.round(d.x)}, ${Math.round(d.y)})`)
+//               .text(d => {
+//                 // Normalize y to range 0.0 to 1.0, considering the inverted y-axis
+//                 var normalizedY = 1.0 - (d.y / h);
+//                 return `${normalizedY.toFixed(2)}`;
+//             })
+//               .textStyle("orange")
 
-        //disable context menu on right click     
-        document.addEventListener('contextmenu', function(e) {
-          if (e.button === 2) { // Right mouse button
-              e.preventDefault();
-              e.stopPropagation();
-            }
-        })
-        //right click remove dot
-        pv.listen(window, "mousedown", () => {
-            window.focus();
-            if (pv.event.button === 2) {
-              points.splice(i--, 1);
-              vis.render();
-              }
-            });
-        //send coordinates to node on mouseup
-        pv.listen(window, "mouseup", () => {           
-            if (pathElements !== null) {
-                let coords = samplePoints(pathElements[0], pointsWidget.value);
-                let coordsString = JSON.stringify(coords);
-                if (coordWidget) {
-                  coordWidget.value = coordsString;
-                }
-            }
-        });    
+//         //disable context menu on right click     
+//         document.addEventListener('contextmenu', function(e) {
+//           if (e.button === 2) { // Right mouse button
+//               e.preventDefault();
+//               e.stopPropagation();
+//             }
+//         })
+//         //right click remove dot
+//         pv.listen(window, "mousedown", () => {
+//             window.focus();
+//             if (pv.event.button === 2) {
+//               points.splice(i--, 1);
+//               vis.render();
+//               }
+//             });
+//         //send coordinates to node on mouseup
+//         pv.listen(window, "mouseup", () => {           
+//             if (pathElements !== null) {
+//                 let coords = samplePoints(pathElements[0], pointsWidget.value);
+//                 let coordsString = JSON.stringify(coords);
+//                 if (coordWidget) {
+//                   coordWidget.value = coordsString;
+//                 }
+//             }
+//         });    
           
-        vis.render();
-        var svgElement = vis.canvas();
-        console.log("Spline editor rendered", svgElement)
-        splineEditor.element.appendChild(svgElement);
+//         vis.render();
+//         var svgElement = vis.canvas();
+//         console.log("Spline editor rendered", svgElement)
+//         splineEditor.element.appendChild(svgElement);
         
-        //document.body.appendChild(splineEditor)
-        var pathElements = svgElement.getElementsByTagName('path'); // Get all path elements          
+//         //document.body.appendChild(splineEditor)
+//         var pathElements = svgElement.getElementsByTagName('path'); // Get all path elements          
       //}
        // close the popup
       //  else if (!show_doc && splineEditor !== null) {
@@ -317,7 +494,7 @@ export const addElement = function(nodeData, nodeType, context) {
       // ctx.fillText('📈', 0, 24)
       // ctx.restore()
       // return r
-    }
+    
     // // handle clicking of the icon
     // const mouseDown = nodeType.prototype.onMouseDown
     // nodeType.prototype.onMouseDown = function (e, localPos, canvas) {
@@ -339,7 +516,7 @@ export const addElement = function(nodeData, nodeType, context) {
     //   }
     //   return r;
     // }
-}
+
 
 
 
