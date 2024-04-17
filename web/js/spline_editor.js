@@ -60,8 +60,6 @@ export const loadScript = (
         border-style: solid;
         border-width: medium;
         border-color: var(--border-color);
-        height: 544px;
-        width: 544px;
        }
         `
       document.head.appendChild(styleTag)
@@ -99,14 +97,23 @@ app.registerExtension({
     async beforeRegisterNodeDef(nodeType, nodeData) {
         if (nodeData?.name == 'SplineEditor') {
           chainCallback(nodeType.prototype, "onNodeCreated", function () {
-            var splineEditor = document.createElement('div');
-            splineEditor.classList.add('spline-editor');
+            var element = document.createElement("div");
+            
             console.log(this)
 
-            this.addDOMWidget(nodeData.name, "SplineEditorWidget", splineEditor, {
+            var splineEditor = this.addDOMWidget(nodeData.name, "SplineEditorWidget", element, {
             serialize: false,
             hideOnZoom: false,
             });
+
+            splineEditor.parentEl = document.createElement("div");
+            splineEditor.parentEl.className = "spline-editor";
+            splineEditor.parentEl.style['width'] = "100%"
+            splineEditor.parentEl.style['height'] = "544px"
+            element.appendChild(splineEditor.parentEl);
+            splineEditor.canvasEl = document.createElement("div");
+            splineEditor.canvasEl.style['width'] = "512px"
+            splineEditor.canvasEl.style['height'] = "512px"
             addElement(nodeData, nodeType, this)
         });
         }
@@ -118,8 +125,10 @@ export const addElement = function(nodeData, nodeType, context) {
     console.log(context);
     const iconSize = 24
     const iconMargin = 4
+    
   
     var splineEditor = context.widgets.find(w => w.name === "SplineEditor");
+   
     console.log(splineEditor);
     let vis = null
     var show_doc = true
@@ -133,6 +142,7 @@ export const addElement = function(nodeData, nodeType, context) {
     closeButton.style.padding = '5px';
     closeButton.style.color = 'red';
     closeButton.style.fontSize = '12px';
+    closeButton.style.zIndex = '7';
     closeButton.addEventListener('mousedown', (e) => {
         e.stopPropagation();
         show_doc = !show_doc
@@ -142,7 +152,7 @@ export const addElement = function(nodeData, nodeType, context) {
     splineEditor.element.appendChild(closeButton)
     
     
-    const drawFg = nodeType.prototype.onDrawForeground
+    
     nodeType.prototype.onNodeCreated = function () {
       console.log("Node created")
         var coordWidget = context.widgets.find(w => w.name === "coordinates");
@@ -156,6 +166,7 @@ export const addElement = function(nodeData, nodeType, context) {
         splineEditor.element = null
       }
     }
+    const drawFg = nodeType.prototype.onDrawForeground
     nodeType.prototype.onDrawForeground = function (ctx) {
       console.log("Drawing foreground")
       const r = drawFg ? drawFg.apply(this, arguments) : undefined
@@ -163,7 +174,7 @@ export const addElement = function(nodeData, nodeType, context) {
       
       const x = context.size[0] - iconSize - iconMargin
 
-      if (show_doc && splineEditor === null) {
+      //if (show_doc && splineEditor === null) {
         console.log("Drawing spline editor")
         
         var w = 512
@@ -260,51 +271,52 @@ export const addElement = function(nodeData, nodeType, context) {
           
         vis.render();
         var svgElement = vis.canvas();
+        console.log("Spline editor rendered", svgElement)
         splineEditor.element.appendChild(svgElement);
         
         //document.body.appendChild(splineEditor)
         var pathElements = svgElement.getElementsByTagName('path'); // Get all path elements          
-      }
+      //}
        // close the popup
-       else if (!show_doc && splineEditor !== null) {
-        splineEditor.element.parentNode.removeChild(splineEditor.element)
-        splineEditor.element = null
-      }
+      //  else if (!show_doc && splineEditor !== null) {
+      //   splineEditor.element.parentNode.removeChild(splineEditor.element)
+      //   splineEditor.element = null
+      // }
       
-      if (show_doc && splineEditor.element !== null && vis !== null) {
-          const rect = ctx.canvas.getBoundingClientRect()
-          const scaleX = rect.width / ctx.canvas.width
-          const scaleY = rect.height / ctx.canvas.height
+      // if (show_doc && splineEditor.element !== null && vis !== null) {
+      //     const rect = ctx.canvas.getBoundingClientRect()
+      //     const scaleX = rect.width / ctx.canvas.width
+      //     const scaleY = rect.height / ctx.canvas.height
           
-          const transform = new DOMMatrix()
-          .scaleSelf(scaleX, scaleY)
-          .translateSelf(this.size[0] * scaleX, 0)
-          .multiplySelf(ctx.getTransform())
-          .translateSelf(100, -32)
+      //     const transform = new DOMMatrix()
+      //     .scaleSelf(scaleX, scaleY)
+      //     .translateSelf(this.size[0] * scaleX, 0)
+      //     .multiplySelf(ctx.getTransform())
+      //     .translateSelf(100, -32)
           
-          const scale = new DOMMatrix()
-          .scaleSelf(transform.a, transform.d);
+      //     const scale = new DOMMatrix()
+      //     .scaleSelf(transform.a, transform.d);
 
-          const styleObject = {
-              transformOrigin: '0 0',
-              transform: scale,
-              left: `${transform.a + transform.e}px`,
-              top: `${transform.d + transform.f}px`,
-              };
-          Object.assign(splineEditor.element.style, styleObject);
-      }
-      ctx.save()
-      ctx.translate(x - 2, iconSize - 45)
-      ctx.scale(iconSize / 32, iconSize / 32)
-      ctx.strokeStyle = 'rgba(255,255,255,0.3)'
-      ctx.lineCap = 'round'
-      ctx.lineJoin = 'round'
-      ctx.lineWidth = 2.4
-      ctx.font = 'bold 36px monospace'
-      ctx.fillStyle = 'orange';
-      ctx.fillText('📈', 0, 24)
-      ctx.restore()
-      return r
+      //     const styleObject = {
+      //         transformOrigin: '0 0',
+      //         transform: scale,
+      //         left: `${transform.a + transform.e}px`,
+      //         top: `${transform.d + transform.f}px`,
+      //         };
+      //     Object.assign(splineEditor.element.style, styleObject);
+      // }
+      // ctx.save()
+      // ctx.translate(x - 2, iconSize - 45)
+      // ctx.scale(iconSize / 32, iconSize / 32)
+      // ctx.strokeStyle = 'rgba(255,255,255,0.3)'
+      // ctx.lineCap = 'round'
+      // ctx.lineJoin = 'round'
+      // ctx.lineWidth = 2.4
+      // ctx.font = 'bold 36px monospace'
+      // ctx.fillStyle = 'orange';
+      // ctx.fillText('📈', 0, 24)
+      // ctx.restore()
+      // return r
     }
     // // handle clicking of the icon
     // const mouseDown = nodeType.prototype.onMouseDown
