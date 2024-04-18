@@ -4619,7 +4619,6 @@ class StabilityAPI_SD3:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "api_key": ("STRING", {"multiline": True}),
                 "prompt": ("STRING", {"multiline": True}),
                 "n_prompt": ("STRING", {"multiline": True}),
                 "seed": ("INT", {"default": 123,"min": 0, "max": 4294967294, "step": 1}),
@@ -4656,9 +4655,11 @@ class StabilityAPI_SD3:
                  }),                 
             },
             "optional": {
+                "api_key": ("STRING", {"multiline": True}),
                 "image": ("IMAGE",),
                 "img2img_strength": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.01}),
-            }
+                "disable_metadata": ("BOOLEAN", {"default": True}),
+            },
         }
 
     RETURN_TYPES = ("IMAGE",)
@@ -4672,6 +4673,13 @@ Although you may have multiple keys in your account,
 you should use the same key for all requests to this API.  
 
 Get your API key here: https://platform.stability.ai/account/keys  
+Recommended to set the key in the config.json -file under this  
+node packs folder.  
+# WARNING:  
+Otherwise the API key may get saved in the image metadata even  
+with "disable_metadata" on if the workflow includes save nodes  
+separate from this node.  
+   
 sd3 requires 6.5 credits per generation  
 sd3-turbo requires 4 credits per generation  
 
@@ -4679,8 +4687,13 @@ If no image is provided, mode is set to text-to-image
 
 """
 
-    def apicall(self, api_key, prompt, n_prompt, model, seed, aspect_ratio, output_format, 
-                img2img_strength=0.5, image=None):
+    def apicall(self, prompt, n_prompt, model, seed, aspect_ratio, output_format, 
+                img2img_strength=0.5, image=None, disable_metadata=True, api_key=""):
+        from comfy.cli_args import args
+        if disable_metadata:
+            args.disable_metadata = True
+        else:
+            args.disable_metadata = False
         
         import requests
         from io import BytesIO
@@ -4713,13 +4726,24 @@ If no image is provided, mode is set to text-to-image
         
         if model != "sd3-turbo":
             data["negative_prompt"] = n_prompt
-    
+
+       
+        headers={
+                "accept": "image/*"
+            }
+        
+        if api_key != "":
+            headers["authorization"] = api_key
+        else:
+            config_file_path = os.path.join(script_directory,"config.json")
+            with open(config_file_path, 'r') as file:
+                config = json.load(file)
+            api_key_from_config = config.get("sai_api_key")
+            headers["authorization"] = api_key_from_config            
+        
         response = requests.post(
             f"https://api.stability.ai/v2beta/stable-image/generate/sd3",
-            headers={
-                "authorization": api_key,
-                "accept": "image/*"
-            },
+            headers=headers,
             files = files,
             data = data,
         )
