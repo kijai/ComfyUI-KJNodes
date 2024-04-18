@@ -4668,7 +4668,7 @@ class StabilityAPI_SD3:
     CATEGORY = "KJNodes/experimental"
     DESCRIPTION = """
 ## Calls StabilityAI API
-- Your Stability API key, used to authenticate your requests.    
+   
 Although you may have multiple keys in your account,  
 you should use the same key for all requests to this API.  
 
