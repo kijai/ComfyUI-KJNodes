@@ -4766,7 +4766,56 @@ If no image is provided, mode is set to text-to-image
                 # If the response is not valid JSON, raise a different exception
                 raise Exception(f"Server error: {response.text}")
     
-    
+
+class MaskOrImageToWeight:
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "output_type": (
+                [   
+                    'list',
+                    'list of lists',
+                ],
+                {
+                "default": 'list'
+                    }),
+             },
+            "optional": {
+                "images": ("IMAGE",),
+                "masks": ("MASK",),                
+            },
+
+        }
+    RETURN_TYPES = ("FLOAT",)
+    FUNCTION = "execute"
+    CATEGORY = "KJNodes"
+    DESCRIPTION = """
+Gets the mean value of mask or image  
+and returns it as a float value.  
+"""
+
+    def execute(self, output_type, images=None, masks=None):
+        mean_values = []
+        if masks is not None and images is None:
+            for mask in masks:
+                mean_values.append(mask.mean().item())
+                print(mean_values)
+        elif masks is None and images is not None:
+            for image in images:
+                mean_values.append(image.mean().item())
+        elif masks is not None and images is not None:
+            raise Exception("MaskOrImageToWeight: Use either mask or image input only.")
+                  
+        # Convert mean_values to the specified output_type
+        if output_type == 'list':
+            return mean_values,
+        elif output_type == 'list of lists':
+            return [[value] for value in mean_values],
+        else:
+            raise ValueError(f"Unsupported output_type: {output_type}")
+        
 NODE_CLASS_MAPPINGS = {
     "INTConstant": INTConstant,
     "FloatConstant": FloatConstant,
@@ -4847,7 +4896,8 @@ NODE_CLASS_MAPPINGS = {
     "ImagePadForOutpaintMasked": ImagePadForOutpaintMasked,
     "SplineEditor": SplineEditor,
     "ImageAndMaskPreview": ImageAndMaskPreview,
-    "StabilityAPI_SD3": StabilityAPI_SD3
+    "StabilityAPI_SD3": StabilityAPI_SD3,
+    "MaskOrImageToWeight": MaskOrImageToWeight
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "INTConstant": "INT Constant",
@@ -4930,4 +4980,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "SplineEditor": "Spline Editor",
     "ImageAndMaskPreview": "Image & Mask Preview",
     "StabilityAPI_SD3": "Stability API SD3",
+    "MaskOrImageToWeight": "Mask Or Image To Weight",
 }
