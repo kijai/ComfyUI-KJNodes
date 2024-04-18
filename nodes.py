@@ -4777,6 +4777,7 @@ class MaskOrImageToWeight:
                 [   
                     'list',
                     'list of lists',
+                    'pandas series',
                 ],
                 {
                 "default": 'list'
@@ -4813,6 +4814,12 @@ and returns it as a float value.
             return mean_values,
         elif output_type == 'list of lists':
             return [[value] for value in mean_values],
+        elif output_type == 'pandas series':
+            try:
+                import pandas as pd
+            except:
+                raise Exception("MaskOrImageToWeight: pandas is not installed. Please install pandas to use this output_type")
+            return pd.Series(mean_values),
         else:
             raise ValueError(f"Unsupported output_type: {output_type}")
         
