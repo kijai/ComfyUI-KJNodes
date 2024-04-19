@@ -4319,6 +4319,9 @@ class CameraPoseVisualizer:
             "z_max": ("FLOAT", {"default": 5.0,"min": -100, "max": 100, "step": 0.01}),
             "use_viewer": ("BOOLEAN", {"default": False}),
             },
+            "optional": {
+                "cameractrl_poses": ("CAMERACTRL_POSES", {"default": None}),
+            }
             }
     
     RETURN_TYPES = ("IMAGE",)
@@ -4329,7 +4332,7 @@ Visualizes the camera poses from a .txt file with
 RealEstate camera intrinsics and coordinates in a 3D plot. 
 """
         
-    def plot(self, pose_file_path, sample_stride, frames, base_xval, zval, use_exact_fx, relative_c2w, x_min, x_max, y_min, y_max, z_min, z_max, use_viewer):
+    def plot(self, pose_file_path, sample_stride, frames, base_xval, zval, use_exact_fx, relative_c2w, x_min, x_max, y_min, y_max, z_min, z_max, use_viewer, cameractrl_poses=None):
         import matplotlib as mpl
         import matplotlib.pyplot as plt
         import io
@@ -4345,10 +4348,18 @@ RealEstate camera intrinsics and coordinates in a 3D plot.
         self.ax.set_ylabel('y')
         self.ax.set_zlabel('z')
         print('initialize camera pose visualizer')
-        with open(pose_file_path, 'r') as f:
-            poses = f.readlines()
-        w2cs = [np.asarray([float(p) for p in pose.strip().split(' ')[7:]]).reshape(3, 4) for pose in poses[1:]]
-        fxs = [float(pose.strip().split(' ')[1]) for pose in poses[1:]]
+        if pose_file_path != "":
+            with open(pose_file_path, 'r') as f:
+                poses = f.readlines()
+                w2cs = [np.asarray([float(p) for p in pose.strip().split(' ')[7:]]).reshape(3, 4) for pose in poses[1:]]
+                fxs = [float(pose.strip().split(' ')[1]) for pose in poses[1:]]
+                print(poses)
+        elif cameractrl_poses is not None:
+            poses = cameractrl_poses
+            w2cs = [np.array(pose[7:]).reshape(3, 4) for pose in cameractrl_poses]
+            fxs = [pose[1] for pose in cameractrl_poses]
+        else:
+            raise ValueError("Please provide either pose_file_path or cameractrl_poses")
 
         cropped_length = frames * sample_stride
         total_frames = len(w2cs)
