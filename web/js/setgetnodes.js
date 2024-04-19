@@ -41,6 +41,7 @@ app.registerExtension({
 		class SetNode {
 			defaultVisibility = true;
 			serialize_widgets = true;
+			drawConnection = false;
 			constructor() {
 				if (!this.properties) {
 					this.properties = {
@@ -213,6 +214,49 @@ app.registerExtension({
 					}
 				})
 			}
+			onSelected() {
+				this.drawConnection = true;
+			}
+			onDeselected() {
+				this.drawConnection = false;
+			}
+			onDrawForeground(ctx, lGraphCanvas) {
+				if (this.drawConnection) {
+					this._drawVirtualLinks(lGraphCanvas, ctx);
+				}
+			}
+			onDrawCollapsed(ctx, lGraphCanvas) {
+				if (this.drawConnection) {
+					this._drawVirtualLinks(lGraphCanvas, ctx);
+				}
+			}
+			_drawVirtualLinks(lGraphCanvas, ctx) {
+				const getters = this.findGetters(this.graph);
+				if (!getters?.length) return;
+				// draw the virtual connection from SetNode to GetNode
+				let start_node_slotpos = [
+				this.size[0],
+				LiteGraph.NODE_TITLE_HEIGHT * 0.5,
+				];
+				for (const getter of getters) {
+				let end_node_slotpos = this.getConnectionPos(false, 0);
+				end_node_slotpos = [
+					getter.pos[0] - end_node_slotpos[0] + this.size[0],
+					getter.pos[1] - end_node_slotpos[1],
+				];
+				lGraphCanvas.renderLink(
+					ctx,
+					start_node_slotpos,
+					end_node_slotpos,
+					null,
+					false,
+					null,
+					"#FFF",
+					LiteGraph.RIGHT,
+					LiteGraph.LEFT
+				);
+				}
+			}
 		}
 
 		LiteGraph.registerNodeType(
@@ -233,6 +277,7 @@ app.registerExtension({
 
 			defaultVisibility = true;
 			serialize_widgets = true;
+			drawConnection = false;
 
 			constructor() {
 				if (!this.properties) {
@@ -266,7 +311,7 @@ app.registerExtension({
 				) {
 					this.validateLinks();	
 				}
-			
+
 				this.setName = function(name) {
 					node.widgets[0].value = name;
 					node.onRename();
@@ -336,6 +381,42 @@ app.registerExtension({
 				}
 			}
 			onAdded(graph) {
+			}
+			onSelected() {
+				this.drawConnection = true;
+			}
+			onDeselected() {
+				this.drawConnection = false;
+			}
+			onDrawForeground(ctx, lGraphCanvas) {
+				if (this.drawConnection) {
+					this._drawVirtualLink(lGraphCanvas, ctx);
+				}
+			}
+			onDrawCollapsed(ctx, lGraphCanvas) {
+				if (this.drawConnection) {
+					this._drawVirtualLink(lGraphCanvas, ctx);
+				}
+			}
+			_drawVirtualLink(lGraphCanvas, ctx) {
+				const setter = this.findSetter(this.graph);
+				if (!setter) return;
+				// draw the virtual connection from SetNode to GetNode
+				let start_node_slotpos = setter.getConnectionPos(false, 0);
+				start_node_slotpos = [
+					start_node_slotpos[0] - this.pos[0],
+					start_node_slotpos[1] - this.pos[1],
+				];
+				let end_node_slotpos = [0, -LiteGraph.NODE_TITLE_HEIGHT * 0.5];
+				lGraphCanvas.renderLink(
+					ctx,
+					start_node_slotpos,
+					end_node_slotpos,
+					null,
+					false,
+					null,
+					"#FFF"
+				);
 			}
 		}
 
