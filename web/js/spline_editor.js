@@ -138,9 +138,12 @@ app.registerExtension({
             })
             chainCallback(this, "onGraphConfigured", function() {
               createSplineEditor(this)
+              this.setSize([550, 800])
               });
+
           }); // onAfterGraphConfigured
         }//node created
+        
       } //before register
 })//register
 
