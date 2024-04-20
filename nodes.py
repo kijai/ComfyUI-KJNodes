@@ -3123,7 +3123,26 @@ class FlipSigmasAdjusted:
         array_string = np.array2string(sigma_np_array, precision=2, separator=', ', threshold=np.inf)
         adjusted_sigmas = adjusted_sigmas / divide_by
         return (adjusted_sigmas, array_string,)
- 
+    
+class CustomSigmas:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required":
+                    {
+                     "sigmas_string" :("STRING", {"default": "14.615, 6.475, 3.861, 2.697, 1.886, 1.396, 0.963, 0.652, 0.399, 0.152, 0.029","multiline": True}),
+                     }
+                }
+    RETURN_TYPES = ("SIGMAS",)
+    RETURN_NAMES = ("SIGMAS",)
+    CATEGORY = "KJNodes/noise"
+    FUNCTION = "customsigmas"
+
+    def customsigmas(self, sigmas_string):
+        sigmas_list = sigmas_string.split(', ')
+        sigmas_float_list = [float(sigma) for sigma in sigmas_list]
+        sigmas_tensor = torch.tensor(sigmas_float_list)
+        
+        return (sigmas_tensor,) 
  
 class InjectNoiseToLatent:
     @classmethod
@@ -4956,7 +4975,8 @@ NODE_CLASS_MAPPINGS = {
     "ImageAndMaskPreview": ImageAndMaskPreview,
     "StabilityAPI_SD3": StabilityAPI_SD3,
     "MaskOrImageToWeight": MaskOrImageToWeight,
-    "FloatToMask": FloatToMask
+    "FloatToMask": FloatToMask,
+    "CustomSigmas": CustomSigmas
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "INTConstant": "INT Constant",
@@ -5041,4 +5061,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "StabilityAPI_SD3": "Stability API SD3",
     "MaskOrImageToWeight": "Mask Or Image To Weight",
     "FloatToMask": "Float To Mask",
+    "CustomSigmas": "Custom Sigmas",
 }
