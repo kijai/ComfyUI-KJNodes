@@ -3130,6 +3130,7 @@ class CustomSigmas:
         return {"required":
                     {
                      "sigmas_string" :("STRING", {"default": "14.615, 6.475, 3.861, 2.697, 1.886, 1.396, 0.963, 0.652, 0.399, 0.152, 0.029","multiline": True}),
+                     "interpolate_to_steps": ("INT", {"default": 10,"min": 0, "max": 255, "step": 1}),
                      }
                 }
     RETURN_TYPES = ("SIGMAS",)
@@ -3147,12 +3148,30 @@ SDXL:
 SVD:  
 700.00, 54.5, 15.886, 7.977, 4.248, 1.789, 0.981, 0.403, 0.173, 0.034, 0.002  
 """
-    def customsigmas(self, sigmas_string):
+    def customsigmas(self, sigmas_string, interpolate_to_steps):
         sigmas_list = sigmas_string.split(', ')
         sigmas_float_list = [float(sigma) for sigma in sigmas_list]
         sigmas_tensor = torch.tensor(sigmas_float_list)
+        if len(sigmas_tensor) < interpolate_to_steps:
+            sigmas_tensor = self.loglinear_interp(sigmas_tensor, interpolate_to_steps)
+        return (sigmas_tensor,)
+     
+    def loglinear_interp(self, t_steps, num_steps):
+        """
+        Performs log-linear interpolation of a given array of decreasing numbers.
+        """
+        t_steps_np = t_steps.numpy()
+
+        xs = np.linspace(0, 1, len(t_steps_np))
+        ys = np.log(t_steps_np[::-1])
         
-        return (sigmas_tensor,) 
+        new_xs = np.linspace(0, 1, num_steps)
+        new_ys = np.interp(new_xs, xs, ys)
+        
+        interped_ys = np.exp(new_ys)[::-1].copy()
+        interped_ys_tensor = torch.tensor(interped_ys)
+        return interped_ys_tensor
+
  
 class InjectNoiseToLatent:
     @classmethod
