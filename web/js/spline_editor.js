@@ -64,7 +64,7 @@ export const loadScript = (
         font: 12px monospace;
         line-height: 1.5em;
         padding: 10px;
-        z-index: 3;
+        z-index: 0;
         overflow: hidden;
         border-radius: 10px;
         border-style: solid;
@@ -112,18 +112,12 @@ app.registerExtension({
             this.uuid = makeUUID()
             element.id = `spline-editor-${this.uuid}`
 
-
+            var node = this
             var splineEditor = this.addDOMWidget(nodeData.name, "SplineEditorWidget", element, {
             serialize: false,
             hideOnZoom: false,
-            getValue() {
-              return element.value;
-            },
-            setValue(v) {
-                element.value = v;
-            },
-              });
-
+            });
+            
             this.setSize([620, 760])
             splineEditor.parentEl = document.createElement("div");
             splineEditor.parentEl.className = "spline-editor";
@@ -132,15 +126,46 @@ app.registerExtension({
             splineEditor.parentEl.style['height'] = "544px"
             element.appendChild(splineEditor.parentEl);
          
-            this.coordWidget = this.widgets.find(w => w.name === "coordinates");
-            this.interpolationWidget = this.widgets.find(w => w.name === "interpolation");
-            this.pointsWidget = this.widgets.find(w => w.name === "points_to_sample");
+            var coordWidget = this.widgets.find(w => w.name === "coordinates");
+            var interpolationWidget = this.widgets.find(w => w.name === "interpolation");
+            var pointsWidget = this.widgets.find(w => w.name === "points_to_sample");
+            var pointsStoreWidget = this.widgets.find(w => w.name === "points_store");
+
+            
+            chainCallback(this, "onConfigure", function(info) {
+              info.widgets_values = {};
+              if (!this.widgets) {
+                  console.log("object has no widgets, there is nothing to store")
+                  return;
+              }
+              if (info != null){
+                console.log(info)
+                info.points = pointsStoreWidget.value
+              //pointsStoreWidget.value = JSON.stringify(points)
+              }
+            });
+            
             //addElement(nodeData, nodeType, this)
             var w = 512
             var h = 512
             var i = 3
             var segmented = false
+            if (info == null){
+              var info = {}
+            }
+            
+            // console.log("Node: ",node)
+            // console.log("node properties ", node.properties.points)
+            console.log("info points", info["points"])
+            // console.log("node keys ", Object.keys(node))
+          
+
+            if (pointsStoreWidget.value != "") {
+              console.log("stored points: ", pointsStoreWidget.value)
+              var points = JSON.parse(pointsStoreWidget.value)
+            }
             if (points == null) {
+              console.log("Creating random points")
                       var points = pv.range(1, 5).map(i => ({
                         x: i * w / 5,
                         y: 50 + Math.random() * (h - 100)
@@ -162,12 +187,14 @@ app.registerExtension({
                 })
               .event("mouseup", function() {
                 if (this.pathElements !== null) {
-                  console.log(this.pathElements) 
-                    let coords = samplePoints(this.pathElements[0], this.pointsWidget.value);
+                    let coords = samplePoints(pathElements[0], pointsWidget.value);
                     let coordsString = JSON.stringify(coords);
-                    if (this.coordWidget) {
-                      this.coordWidget.value = coordsString;
-                      console.log(this.coordWidget.value)
+                    console.log(points)
+                    pointsStoreWidget.value = JSON.stringify(points);
+                    //node.setProperty("points", points)
+                    if (coordWidget) {
+                      coordWidget.value = coordsString;
+                      console.log("stored points: ", pointsStoreWidget.value)
                     }
                 }
               });
@@ -182,7 +209,7 @@ app.registerExtension({
               .data(() => points)
               .left(d => d.x)
               .top(d => d.y)
-              .interpolate(() => this.interpolationWidget.value)
+              .interpolate(() => interpolationWidget.value)
               .segmented(() => segmented)
               .strokeStyle(pv.Colors.category10().by(pv.index))
               .tension(0.5)
@@ -217,13 +244,12 @@ app.registerExtension({
                   .textStyle("orange")
                 vis.render();
                 var svgElement = vis.canvas();
-                svgElement.style['zIndex'] = "7"
+                svgElement.style['zIndex'] = "2"
                 svgElement.style['position'] = "fixed"
-                vis.id = `spline-editor-vis-${this.uuid}`
+                //vis.id = `spline-editor-vis-${this.uuid}`
                 splineEditor.element.appendChild(svgElement);
-                svgElement.id = `spline-editor-svg-${this.uuid}`
-
-                this.pathElements = svgElement.getElementsByTagName('path'); // Get all path elements
+                //svgElement.id = `spline-editor-svg-${this.uuid}`
+                var pathElements = svgElement.getElementsByTagName('path'); // Get all path elements
             });
               
         }
