@@ -58,18 +58,14 @@ export const loadScript = (
       styleTag.id = tag
       styleTag.innerHTML = `
        .spline-editor {
-        background: var(--comfy-menu-bg);
+
         position: absolute;
-        color: var(--fg-color);
+
         font: 12px monospace;
         line-height: 1.5em;
         padding: 10px;
         z-index: 0;
         overflow: hidden;
-        border-radius: 10px;
-        border-style: solid;
-        border-width: medium;
-        border-color: var(--border-color);
        }
         `
       document.head.appendChild(styleTag)
@@ -102,36 +98,39 @@ function chainCallback(object, property, callback) {
   }
 }
 app.registerExtension({
-    name: 'KJNodes.curves', 
+    name: 'KJNodes.SplineEditor', 
     
     async beforeRegisterNodeDef(nodeType, nodeData) {
         if (nodeData?.name == 'SplineEditor') {
           chainCallback(nodeType.prototype, "onNodeCreated", function () {
             hideWidgetForGood(this, this.widgets.find(w => w.name === "coordinates"))
+
             var element = document.createElement("div");
             this.uuid = makeUUID()
             element.id = `spline-editor-${this.uuid}`
 
-            var node = this
-            var splineEditor = this.addDOMWidget(nodeData.name, "SplineEditorWidget", element, {
+            this.splineEditor = this.addDOMWidget(nodeData.name, "SplineEditorWidget", element, {
             serialize: false,
             hideOnZoom: false,
             });
-            
-            this.setSize([600, 780])
-            splineEditor.parentEl = document.createElement("div");
-            splineEditor.parentEl.className = "spline-editor";
-            splineEditor.parentEl.id = `spline-editor-${this.uuid}`
-            splineEditor.parentEl.style['width'] = "90%"
-            splineEditor.parentEl.style['height'] = "544px"
-            element.appendChild(splineEditor.parentEl);
+            this.addWidget("button", "New spline", null, () => {
+              
+              if (!this.properties || !("points" in this.properties)) {
+                createSplineEditor(this)
+                this.addProperty("points", this.constructor.type, "string");
+              }
+              else {
+                createSplineEditor(this, true)
+              }
+            });
+            this.setSize([550, 800])
+            this.splineEditor.parentEl = document.createElement("div");
+            this.splineEditor.parentEl.className = "spline-editor";
+            this.splineEditor.parentEl.id = `spline-editor-${this.uuid}`
+            element.appendChild(this.splineEditor.parentEl);
 
-            console.log("svgElement: ", Object.keys(node.widgets[6]))
-         
-            const coordWidget = this.widgets.find(w => w.name === "coordinates");
-            const interpolationWidget = this.widgets.find(w => w.name === "interpolation");
-            const pointsWidget = this.widgets.find(w => w.name === "points_to_sample");
-            const pointsStoreWidget = this.widgets.find(w => w.name === "points_store");
+            console.log(this.properties)
+            
 
             //disable context menu on right click
             document.addEventListener('contextmenu', function(e) {
@@ -140,115 +139,134 @@ app.registerExtension({
                   e.stopPropagation();
                 }
             })
-            
             chainCallback(this, "onGraphConfigured", function() {
-              console.log("onGraphConfigured")
-              console.log("pointsStoreWidget ", pointsStoreWidget)
-              
-              if (pointsStoreWidget.value != "") {
-                console.log(pointsStoreWidget.value)
-                points = JSON.parse(pointsStoreWidget.value)
-              }
-
-              var w = 512
-              var h = 512
-              var i = 3
-              var segmented = false
-              if (points == null) {
-                console.log("Creating random points")
-                        var points = pv.range(1, 5).map(i => ({
-                          x: i * w / 5,
-                          y: 50 + Math.random() * (h - 100)
-                        }));
-                      }
-              
-              var vis = new pv.Panel()
-              .width(w)
-              .height(h)
-              .fillStyle("var(--comfy-menu-bg)")
-              .strokeStyle("orange")
-              .lineWidth(0)
-              .antialias(false)
-              .margin(10)
-              .event("mousedown", function() {
-                if (pv.event.shiftKey) { // Use pv.event to access the event object
-                    console.log(this.mouse())
-                    i = points.push(this.mouse()) - 1;
-                    return this;
-                }
-                })
-              .event("mouseup", function() {
-                if (this.pathElements !== null) {
-                    let coords = samplePoints(pathElements[0], pointsWidget.value);
-                    let coordsString = JSON.stringify(coords);
-                    console.log(points)
-                    pointsStoreWidget.value = JSON.stringify(points);
-                    //node.setProperty("points", points)
-                    if (coordWidget) {
-                      coordWidget.value = coordsString;
-                      console.log("stored points: ", pointsStoreWidget.value)
-                    }
-                }
-              });
-        
-              vis.add(pv.Rule)
-                .data(pv.range(0, 8, .5))
-                .bottom(d =>  d * 70 + 9.5)
-                .strokeStyle("gray")
-                .lineWidth(1)
-
-              vis.add(pv.Line)
-                .data(() => points)
-                .left(d => d.x)
-                .top(d => d.y)
-                .interpolate(() => interpolationWidget.value)
-                .segmented(() => segmented)
-                .strokeStyle(pv.Colors.category10().by(pv.index))
-                .tension(0.5)
-                .lineWidth(3)
-
-              vis.add(pv.Dot)
-                .data(() => points)
-                .left(d => d.x)
-                .top(d => d.y)
-                .radius(7)
-                .cursor("move")
-                .strokeStyle(function() { return i == this.index ? "#ff7f0e" : "#1f77b4"; })
-                .fillStyle(function() { return "rgba(100, 100, 100, 0.2)"; })
-                .event("mousedown", pv.Behavior.drag())
-                .event("dragstart", function() {
-                    i = this.index;
-                    if (pv.event.button === 2) {
-                      points.splice(i--, 1);
-                      vis.render();
-                    }
-                    return this;
-                })
-                .event("drag", vis)
-                .anchor("top").add(pv.Label)
-                    .font(d => Math.sqrt(d[2]) * 32 + "px sans-serif")
-                    //.text(d => `(${Math.round(d.x)}, ${Math.round(d.y)})`)
-                    .text(d => {
-                      // Normalize y to range 0.0 to 1.0, considering the inverted y-axis
-                      var normalizedY = 1.0 - (d.y / h);
-                      return `${normalizedY.toFixed(2)}`;
-                  })
-                .textStyle("orange")
-                
-                vis.render();
-                var svgElement = vis.canvas();
-                svgElement.style['zIndex'] = "2"
-                svgElement.style['position'] = "relative"
-                splineEditor.element.appendChild(svgElement);
-                
-                var pathElements = svgElement.getElementsByTagName('path'); // Get all path elements
-
+              createSplineEditor(this)
               });
           }); // onAfterGraphConfigured
         }//node created
       } //before register
 })//register
 
+
+function createSplineEditor(context, reset=false) {
+  console.log("creatingSplineEditor")
+  
+  if (reset && context.splineEditor.element) {
+    context.splineEditor.element.innerHTML = ''; // Clear the container
+ }
+  const coordWidget = context.widgets.find(w => w.name === "coordinates");
+  const interpolationWidget = context.widgets.find(w => w.name === "interpolation");
+  const pointsWidget = context.widgets.find(w => w.name === "points_to_sample");
+  const pointsStoreWidget = context.widgets.find(w => w.name === "points_store");
+  const tensionWidget = context.widgets.find(w => w.name === "tension");
+  const segmentedWidget = context.widgets.find(w => w.name === "segmented");
+  
+ // Initialize or reset points array
+ var w = 512
+ var h = 512
+ var i = 3
+ let points = [];
+ if (!reset && pointsStoreWidget.value != "") {
+    console.log(pointsStoreWidget.value);
+    points = JSON.parse(pointsStoreWidget.value);
+ } else {
+  points = pv.range(1, 4).map((i, index) => {
+    if (index === 0) {
+      // First point at the bottom-left corner
+      return { x: 0, y: h };
+    } else if (index === 2) {
+      // Last point at the top-right corner
+      return { x: w, y: 0 };
+    } else {
+      // Other points remain as they were
+      return {
+        x: i * w / 5,
+        y: 50 + Math.random() * (h - 100)
+      };
+    }
+  });
+    pointsStoreWidget.value = JSON.stringify(points);
+ }
+  
+  var vis = new pv.Panel()
+  .width(w)
+  .height(h)
+  .fillStyle("var(--comfy-menu-bg)")
+  .strokeStyle("gray")
+  .lineWidth(2)
+  .antialias(false)
+  .margin(10)
+  .event("mousedown", function() {
+    if (pv.event.shiftKey) { // Use pv.event to access the event object
+        i = points.push(this.mouse()) - 1;
+        return this;
+    }
+    })
+  .event("mouseup", function() {
+    if (this.pathElements !== null) {
+        let coords = samplePoints(pathElements[0], pointsWidget.value);
+        let coordsString = JSON.stringify(coords);
+        console.log(points)
+        pointsStoreWidget.value = JSON.stringify(points);
+        if (coordWidget) {
+          coordWidget.value = coordsString;
+          console.log("stored points: ", pointsStoreWidget.value)
+        }
+    }
+  });
+
+  vis.add(pv.Rule)
+    .data(pv.range(0, 8, .5))
+    .bottom(d =>  d * 64 + 0)
+    .strokeStyle("gray")
+    .lineWidth(1)
+
+  vis.add(pv.Line)
+    .data(() => points)
+    .left(d => d.x)
+    .top(d => d.y)
+    .interpolate(() => interpolationWidget.value)
+    .tension(() => tensionWidget.value)
+    .segmented(() => segmentedWidget.value)
+    .strokeStyle(pv.Colors.category10().by(pv.index))
+    .lineWidth(3)
+
+  vis.add(pv.Dot)
+    .data(() => points)
+    .left(d => d.x)
+    .top(d => d.y)
+    .radius(8)
+    .cursor("move")
+    .strokeStyle(function() { return i == this.index ? "#ff7f0e" : "#1f77b4"; })
+    .fillStyle(function() { return "rgba(100, 100, 100, 0.2)"; })
+    .event("mousedown", pv.Behavior.drag())
+    .event("dragstart", function() {
+        i = this.index;
+        if (pv.event.button === 2) {
+          points.splice(i--, 1);
+          vis.render();
+        }
+        return this;
+    })
+    .event("drag", vis)
+    .anchor("top").add(pv.Label)
+        .font(d => Math.sqrt(d[2]) * 32 + "px sans-serif")
+        //.text(d => `(${Math.round(d.x)}, ${Math.round(d.y)})`)
+        .text(d => {
+          // Normalize y to range 0.0 to 1.0, considering the inverted y-axis
+          var normalizedY = 1.0 - (d.y / h);
+          return `${normalizedY.toFixed(2)}`;
+      })
+    .textStyle("orange")
+    
+    vis.render();
+    var svgElement = vis.canvas();
+    svgElement.style['zIndex'] = "2"
+    svgElement.style['position'] = "relative"
+    context.splineEditor.element.appendChild(svgElement);
+    var pathElements = svgElement.getElementsByTagName('path'); // Get all path elements  
+ 
+}
 function samplePoints(svgPathElement, numSamples) {
     var pathLength = svgPathElement.getTotalLength();
     var points = [];
