@@ -4626,7 +4626,8 @@ class SplineEditor:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "coordinates": ("STRING", {"multiline": True}),
+                "points_store": ("STRING", {"multiline": False}),
+                "coordinates": ("STRING", {"multiline": False}),
                 "mask_width": ("INT", {"default": 512, "min": 8, "max": MAX_RESOLUTION, "step": 8}),
                 "mask_height": ("INT", {"default": 512, "min": 8, "max": MAX_RESOLUTION, "step": 18}),
                 "points_to_sample": ("INT", {"default": 4, "min": 2, "max": 1000, "step": 1}),
@@ -4638,10 +4639,14 @@ class SplineEditor:
                     'linear',
                     'step-before',
                     'step-after',
+                    'polar',
+                    'polar-reverse',
                 ],
                 {
                 "default": 'cardinal'
                     }),
+                "tension": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.01}),
+                "segmented": ("BOOLEAN", {"default": False}),
             },
         }
 
@@ -4650,8 +4655,8 @@ class SplineEditor:
 
     CATEGORY = "KJNodes/experimental"
 
-    def splinedata(self, mask_width, mask_height, coordinates, interpolation, points_to_sample):
-        
+    def splinedata(self, mask_width, mask_height, coordinates, interpolation, points_to_sample, points_store, tension, segmented):
+        print(coordinates)
         coordinates = json.loads(coordinates)
         print(coordinates)
 
