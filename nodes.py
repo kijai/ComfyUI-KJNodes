@@ -3136,7 +3136,17 @@ class CustomSigmas:
     RETURN_NAMES = ("SIGMAS",)
     CATEGORY = "KJNodes/noise"
     FUNCTION = "customsigmas"
-
+    DESCRIPTION = """
+Creates a sigmas tensor from a string of comma separated values.  
+Examples: 
+   
+Nvidia's optimized AYS 10 step schedule for SD 1.5:  
+14.615, 6.475, 3.861, 2.697, 1.886, 1.396, 0.963, 0.652, 0.399, 0.152, 0.029  
+SDXL:   
+14.615, 6.315, 3.771, 2.181, 1.342, 0.862, 0.555, 0.380, 0.234, 0.113, 0.029  
+SVD:  
+700.00, 54.5, 15.886, 7.977, 4.248, 1.789, 0.981, 0.403, 0.173, 0.034, 0.002  
+"""
     def customsigmas(self, sigmas_string):
         sigmas_list = sigmas_string.split(', ')
         sigmas_float_list = [float(sigma) for sigma in sigmas_list]
