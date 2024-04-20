@@ -236,7 +236,7 @@ function createSplineEditor(context, reset=false) {
     .event("mousedown", pv.Behavior.drag())
     .event("dragstart", function() {
         i = this.index;
-        if (pv.event.button === 2) {
+        if (pv.event.button === 2 && i !== 0 && i !== points.length - 1) {
           points.splice(i--, 1);
           vis.render();
         }
