@@ -129,9 +129,6 @@ app.registerExtension({
             this.splineEditor.parentEl.id = `spline-editor-${this.uuid}`
             element.appendChild(this.splineEditor.parentEl);
 
-            console.log(this.properties)
-            
-
             //disable context menu on right click
             document.addEventListener('contextmenu', function(e) {
               if (e.button === 2) { // Right mouse button
@@ -167,7 +164,6 @@ function createSplineEditor(context, reset=false) {
  var i = 3
  let points = [];
  if (!reset && pointsStoreWidget.value != "") {
-    console.log(pointsStoreWidget.value);
     points = JSON.parse(pointsStoreWidget.value);
  } else {
   points = pv.range(1, 4).map((i, index) => {
@@ -206,11 +202,9 @@ function createSplineEditor(context, reset=false) {
     if (this.pathElements !== null) {
         let coords = samplePoints(pathElements[0], pointsWidget.value);
         let coordsString = JSON.stringify(coords);
-        console.log(points)
         pointsStoreWidget.value = JSON.stringify(points);
         if (coordWidget) {
           coordWidget.value = coordsString;
-          console.log("stored points: ", pointsStoreWidget.value)
         }
     }
   });
