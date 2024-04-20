@@ -3152,7 +3152,7 @@ SVD:
         sigmas_list = sigmas_string.split(', ')
         sigmas_float_list = [float(sigma) for sigma in sigmas_list]
         sigmas_tensor = torch.tensor(sigmas_float_list)
-        if len(sigmas_tensor) < interpolate_to_steps:
+        if len(sigmas_tensor) != interpolate_to_steps:
             sigmas_tensor = self.loglinear_interp(sigmas_tensor, interpolate_to_steps)
         return (sigmas_tensor,)
      
