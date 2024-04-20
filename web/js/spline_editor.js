@@ -118,60 +118,51 @@ app.registerExtension({
             hideOnZoom: false,
             });
             
-            this.setSize([620, 760])
+            this.setSize([600, 780])
             splineEditor.parentEl = document.createElement("div");
             splineEditor.parentEl.className = "spline-editor";
             splineEditor.parentEl.id = `spline-editor-${this.uuid}`
             splineEditor.parentEl.style['width'] = "90%"
             splineEditor.parentEl.style['height'] = "544px"
             element.appendChild(splineEditor.parentEl);
+
+            console.log("svgElement: ", Object.keys(node.widgets[6]))
          
-            var coordWidget = this.widgets.find(w => w.name === "coordinates");
-            var interpolationWidget = this.widgets.find(w => w.name === "interpolation");
-            var pointsWidget = this.widgets.find(w => w.name === "points_to_sample");
-            var pointsStoreWidget = this.widgets.find(w => w.name === "points_store");
+            const coordWidget = this.widgets.find(w => w.name === "coordinates");
+            const interpolationWidget = this.widgets.find(w => w.name === "interpolation");
+            const pointsWidget = this.widgets.find(w => w.name === "points_to_sample");
+            const pointsStoreWidget = this.widgets.find(w => w.name === "points_store");
 
+            //disable context menu on right click
+            document.addEventListener('contextmenu', function(e) {
+              if (e.button === 2) { // Right mouse button
+                  e.preventDefault();
+                  e.stopPropagation();
+                }
+            })
             
-            chainCallback(this, "onConfigure", function(info) {
-              info.widgets_values = {};
-              if (!this.widgets) {
-                  console.log("object has no widgets, there is nothing to store")
-                  return;
+            chainCallback(this, "onGraphConfigured", function() {
+              console.log("onGraphConfigured")
+              console.log("pointsStoreWidget ", pointsStoreWidget)
+              
+              if (pointsStoreWidget.value != "") {
+                console.log(pointsStoreWidget.value)
+                points = JSON.parse(pointsStoreWidget.value)
               }
-              if (info != null){
-                console.log(info)
-                info.points = pointsStoreWidget.value
-              //pointsStoreWidget.value = JSON.stringify(points)
-              }
-            });
-            
-            //addElement(nodeData, nodeType, this)
-            var w = 512
-            var h = 512
-            var i = 3
-            var segmented = false
-            if (info == null){
-              var info = {}
-            }
-            
-            // console.log("Node: ",node)
-            // console.log("node properties ", node.properties.points)
-            console.log("info points", info["points"])
-            // console.log("node keys ", Object.keys(node))
-          
 
-            if (pointsStoreWidget.value != "") {
-              console.log("stored points: ", pointsStoreWidget.value)
-              var points = JSON.parse(pointsStoreWidget.value)
-            }
-            if (points == null) {
-              console.log("Creating random points")
-                      var points = pv.range(1, 5).map(i => ({
-                        x: i * w / 5,
-                        y: 50 + Math.random() * (h - 100)
-                      }));
-                    }
-            let vis = new pv.Panel()
+              var w = 512
+              var h = 512
+              var i = 3
+              var segmented = false
+              if (points == null) {
+                console.log("Creating random points")
+                        var points = pv.range(1, 5).map(i => ({
+                          x: i * w / 5,
+                          y: 50 + Math.random() * (h - 100)
+                        }));
+                      }
+              
+              var vis = new pv.Panel()
               .width(w)
               .height(h)
               .fillStyle("var(--comfy-menu-bg)")
@@ -181,6 +172,7 @@ app.registerExtension({
               .margin(10)
               .event("mousedown", function() {
                 if (pv.event.shiftKey) { // Use pv.event to access the event object
+                    console.log(this.mouse())
                     i = points.push(this.mouse()) - 1;
                     return this;
                 }
@@ -198,70 +190,64 @@ app.registerExtension({
                     }
                 }
               });
-
+        
               vis.add(pv.Rule)
-              .data(pv.range(0, 8, .5))
-              .bottom(d =>  d * 70 + 9.5)
-              .strokeStyle("gray")
-              .lineWidth(1)
+                .data(pv.range(0, 8, .5))
+                .bottom(d =>  d * 70 + 9.5)
+                .strokeStyle("gray")
+                .lineWidth(1)
 
-            vis.add(pv.Line)
-              .data(() => points)
-              .left(d => d.x)
-              .top(d => d.y)
-              .interpolate(() => interpolationWidget.value)
-              .segmented(() => segmented)
-              .strokeStyle(pv.Colors.category10().by(pv.index))
-              .tension(0.5)
-              .lineWidth(3)
+              vis.add(pv.Line)
+                .data(() => points)
+                .left(d => d.x)
+                .top(d => d.y)
+                .interpolate(() => interpolationWidget.value)
+                .segmented(() => segmented)
+                .strokeStyle(pv.Colors.category10().by(pv.index))
+                .tension(0.5)
+                .lineWidth(3)
 
-            vis.add(pv.Dot)
-              .data(() => points)
-              .left(d => d.x)
-              .top(d => d.y)
-              .radius(7)
-              .cursor("move")
-              .strokeStyle(function() { return i == this.index ? "#ff7f0e" : "#1f77b4"; })
-              .fillStyle(function() { return "rgba(100, 100, 100, 0.2)"; })
-              .event("mousedown", pv.Behavior.drag())
-              .event("dragstart", function() {
-                  i = this.index;
-                  if (pv.event.button === 2) {
-                    points.splice(i--, 1);
-                    vis.render();
-                  }
-                  return this;
-              })
-              .event("drag", vis)
-              .anchor("top").add(pv.Label)
-                  .font(d => Math.sqrt(d[2]) * 32 + "px sans-serif")
-                  //.text(d => `(${Math.round(d.x)}, ${Math.round(d.y)})`)
-                  .text(d => {
-                    // Normalize y to range 0.0 to 1.0, considering the inverted y-axis
-                    var normalizedY = 1.0 - (d.y / h);
-                    return `${normalizedY.toFixed(2)}`;
+              vis.add(pv.Dot)
+                .data(() => points)
+                .left(d => d.x)
+                .top(d => d.y)
+                .radius(7)
+                .cursor("move")
+                .strokeStyle(function() { return i == this.index ? "#ff7f0e" : "#1f77b4"; })
+                .fillStyle(function() { return "rgba(100, 100, 100, 0.2)"; })
+                .event("mousedown", pv.Behavior.drag())
+                .event("dragstart", function() {
+                    i = this.index;
+                    if (pv.event.button === 2) {
+                      points.splice(i--, 1);
+                      vis.render();
+                    }
+                    return this;
                 })
-                  .textStyle("orange")
+                .event("drag", vis)
+                .anchor("top").add(pv.Label)
+                    .font(d => Math.sqrt(d[2]) * 32 + "px sans-serif")
+                    //.text(d => `(${Math.round(d.x)}, ${Math.round(d.y)})`)
+                    .text(d => {
+                      // Normalize y to range 0.0 to 1.0, considering the inverted y-axis
+                      var normalizedY = 1.0 - (d.y / h);
+                      return `${normalizedY.toFixed(2)}`;
+                  })
+                .textStyle("orange")
+                
                 vis.render();
                 var svgElement = vis.canvas();
                 svgElement.style['zIndex'] = "2"
-                svgElement.style['position'] = "fixed"
-                //vis.id = `spline-editor-vis-${this.uuid}`
+                svgElement.style['position'] = "relative"
                 splineEditor.element.appendChild(svgElement);
-                //svgElement.id = `spline-editor-svg-${this.uuid}`
+                
                 var pathElements = svgElement.getElementsByTagName('path'); // Get all path elements
-            });
-              
-        }
-        //disable context menu on right click
-        document.addEventListener('contextmenu', function(e) {
-            if (e.button === 2) { // Right mouse button
-                e.preventDefault();
-                e.stopPropagation();
-              }
-          })
-      }
-})
+
+              });
+          }); // onAfterGraphConfigured
+        }//node created
+      } //before register
+})//register
 
 function samplePoints(svgPathElement, numSamples) {
     var pathLength = svgPathElement.getTotalLength();
