@@ -315,9 +315,29 @@ app.registerExtension({
 
 				this.findSetter = function(graph) {
 					const name = this.widgets[0].value;
-					return graph._nodes.find(otherNode => otherNode.type === 'SetNode' && otherNode.widgets[0].value === name && name !== '');
+					const foundNode = graph._nodes.find(otherNode => otherNode.type === 'SetNode' && otherNode.widgets[0].value === name && name !== '');
+					return foundNode;
 				};
 
+				this.goToSetter = function() {
+					const setter = this.findSetter(this.graph);
+					const canvas = app.canvas;
+					console.log(canvas)
+					console.log(canvas.highlighted_links)
+					if (canvas?.ds?.offset) {
+						const nodeCenterX = setter.pos[0] + (setter.size[0] / 2);
+        				const nodeCenterY = setter.pos[1] + (setter.size[1] / 2);
+
+						canvas.ds.offset[0] = -nodeCenterX + canvas.mouse[0];
+        				canvas.ds.offset[1] = -nodeCenterY + canvas.mouse[1];
+					}
+					if (canvas?.ds?.scale != null) {
+						canvas.ds.scale = Number(1);
+					}
+					canvas.selectNode(setter, false)
+					canvas.setDirty(true, true);
+				};
+				
 				// This node is purely frontend and does not impact the resulting prompt so should not be serialized
 				this.isVirtualNode = true;
 			}
@@ -336,6 +356,16 @@ app.registerExtension({
 				}
 			}
 			onAdded(graph) {
+			}
+			getExtraMenuOptions(_, options) {
+				options.unshift(
+					{
+						content: "Go to setter",
+						callback: () => {
+							this.goToSetter();
+						},
+					},
+				);
 			}
 		}
 
