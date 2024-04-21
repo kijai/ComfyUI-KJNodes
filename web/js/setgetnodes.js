@@ -50,6 +50,8 @@ app.registerExtension({
 				this.properties.showOutputText = SetNode.defaultVisibility;
 
 				const node = this;
+				const canvas = app.canvas;
+				const ctx = canvas.ctx
 
 				this.addWidget(
 					"text", 
@@ -201,9 +203,35 @@ app.registerExtension({
 					return graph._nodes.filter(otherNode => otherNode.type === 'GetNode' && otherNode.widgets[0].value === name && name !== '');
 				}
 
+				this.lineToGetters = function() {
+					var scale = canvas.ds.scale;
+					const getterNodes = this.findGetters(this.graph);
+					var setPosX = (this.pos[0] + canvas.ds.offset[0]) * scale;
+					var setPosY = (this.pos[1] + canvas.ds.offset[1]) * scale;
+				
+					getterNodes.forEach((getter) => {
+						var getPosX = (getter.pos[0] + canvas.ds.offset[0]) * scale;
+						var getPosY = (getter.pos[1] + canvas.ds.offset[1]) * scale;
+						console.log(getPosX, getPosY, setPosX, setPosY);
+				
+						canvas.renderLink(
+							ctx,
+							[setPosX, setPosY],
+							[getPosX, getPosY],
+							undefined,
+							true,
+							0,
+							"orange",
+							LiteGraph.RIGHT,
+							LiteGraph.LEFT
+						);
+					});
+				};
+
 				// This node is purely frontend and does not impact the resulting prompt so should not be serialized
 				this.isVirtualNode = true;
 			}
+				
 
 			onRemoved() {
 				const allGetters = this.graph._nodes.filter((otherNode) => otherNode.type == "GetNode");
@@ -213,6 +241,17 @@ app.registerExtension({
 					}
 				})
 			}
+			getExtraMenuOptions(_, options) {
+				options.unshift(
+					{
+						content: "Line to Getters",
+						callback: () => {
+							this.lineToGetters();
+						},
+					},
+				);
+			}
+			
 		}
 
 		LiteGraph.registerNodeType(
@@ -239,7 +278,8 @@ app.registerExtension({
 					this.properties = {};
 				}
 				this.properties.showOutputText = GetNode.defaultVisibility;
-				
+				const canvas = app.canvas;
+				const ctx = canvas.ctx
 				const node = this;
 				this.addWidget(
 					"combo",
@@ -321,9 +361,6 @@ app.registerExtension({
 
 				this.goToSetter = function() {
 					const setter = this.findSetter(this.graph);
-					const canvas = app.canvas;
-					console.log(canvas)
-					console.log(canvas.highlighted_links)
 					if (canvas?.ds?.offset) {
 						const nodeCenterX = setter.pos[0] + (setter.size[0] / 2);
         				const nodeCenterY = setter.pos[1] + (setter.size[1] / 2);
@@ -337,11 +374,37 @@ app.registerExtension({
 					canvas.selectNode(setter, false)
 					canvas.setDirty(true, true);
 				};
+				this.isLineVisible = false;
+
+				this.lineToSetter = function() {
+					this.isLineVisible = !this.isLineVisible;
+					
+					console.log(this)
+					var scale = canvas.ds.scale
+					const setter = this.findSetter(this.graph);
+					var getPosX = (this.pos[0] + canvas.ds.offset[0]) * scale
+					var getPosY = (this.pos[1] + canvas.ds.offset[1]) * scale
+					var setPosX = (setter.pos[0] + canvas.ds.offset[0]) * scale
+					var setPosY = (setter.pos[1] + canvas.ds.offset[1]) * scale
+					console.log(getPosX, getPosY, setPosX, setPosY)
+					
+					canvas.renderLink(
+						ctx,
+						[getPosX, getPosY],
+						[setPosX, setPosY],
+						undefined,
+						true,
+						0,
+						"orange",
+						LiteGraph.RIGHT,
+						LiteGraph.LEFT
+					);
+				};
 				
 				// This node is purely frontend and does not impact the resulting prompt so should not be serialized
 				this.isVirtualNode = true;
 			}
-
+			
 			getInputLink(slot) {
 				const setter = this.findSetter(this.graph);
 			
@@ -363,6 +426,12 @@ app.registerExtension({
 						content: "Go to setter",
 						callback: () => {
 							this.goToSetter();
+						},
+					},
+					{
+						content: "Line to setter",
+						callback: () => {
+							this.lineToSetter();
 						},
 					},
 				);
