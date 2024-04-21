@@ -4629,7 +4629,7 @@ class SplineEditor:
                 "points_store": ("STRING", {"multiline": False}),
                 "coordinates": ("STRING", {"multiline": False}),
                 "mask_width": ("INT", {"default": 512, "min": 8, "max": MAX_RESOLUTION, "step": 8}),
-                "mask_height": ("INT", {"default": 512, "min": 8, "max": MAX_RESOLUTION, "step": 18}),
+                "mask_height": ("INT", {"default": 512, "min": 8, "max": MAX_RESOLUTION, "step": 8}),
                 "points_to_sample": ("INT", {"default": 4, "min": 2, "max": 1000, "step": 1}),
                 "interpolation": (
                 [   
@@ -4647,24 +4647,72 @@ class SplineEditor:
                     }),
                 "tension": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.01}),
                 "segmented": ("BOOLEAN", {"default": False}),
+                "float_output_type": (
+                [   
+                    'list',
+                    'list of lists',
+                    'pandas series',
+                    'tensor',
+                ],
+                {
+                    "default": 'list'
+                }),
             },
         }
 
     RETURN_TYPES = ("MASK", "STRING", "FLOAT")
     FUNCTION = "splinedata"
-
     CATEGORY = "KJNodes/experimental"
+    DESCRIPTION = """
+# WORK IN PROGRESS  
+Do not count on this as part of your workflow yet,  
+probably contains lots of bugs and stability is not  
+guaranteed!!  
+  
+## Graphical editor to create values for various   
+## schedules and/or mask batches.  
 
-    def splinedata(self, mask_width, mask_height, coordinates, interpolation, points_to_sample, points_store, tension, segmented):
-        print(coordinates)
+**points_to_sample** value sets the number of samples  
+returned from the **drawn spline itself**, this is independent from the  
+actual control points, so the interpolation type matters.  
+
+Changing interpolation type and tension value takes effect on  
+interaction with the graph.  
+
+output types:
+ - mask batch  
+        example compatible nodes: anything that takes masks
+ - list of floats
+        example compatible nodes: IPAdapter weights  
+ - list of lists  
+        example compatible nodes: unknown
+ - pandas series
+        example compatible nodes: anything that takes Fizz'  
+        nodes Batch Value Schedule  
+ - torch tensor  
+        example compatible nodes: unknown
+"""
+
+    def splinedata(self, mask_width, mask_height, coordinates, float_output_type, interpolation, points_to_sample, points_store, tension, segmented):
+        
         coordinates = json.loads(coordinates)
-        print(coordinates)
 
         normalized_y_values = [
             1.0 - (point['y'] / 512)
             for point in coordinates
         ]
-
+        if float_output_type == 'list':
+            out_floats = normalized_y_values
+        elif float_output_type == 'list of lists':
+            out_floats = [[value] for value in normalized_y_values],
+        elif float_output_type == 'pandas series':
+            try:
+                import pandas as pd
+            except:
+                raise Exception("MaskOrImageToWeight: pandas is not installed. Please install pandas to use this output_type")
+            out_floats = pd.Series(normalized_y_values),
+        elif float_output_type == 'tensor':
+            out_floats = torch.tensor(normalized_y_values, dtype=torch.float32)
         # Create a color map for grayscale intensities
         color_map = lambda y: torch.full((mask_height, mask_width, 3), y, dtype=torch.float32)
 
@@ -4675,7 +4723,7 @@ class SplineEditor:
         masks_out = torch.stack(image_tensors)
         masks_out = masks_out.mean(dim=-1)
         print(masks_out.shape)
-        return (masks_out, coordinates, normalized_y_values,)
+        return (masks_out, coordinates, out_floats,)
     
 class StabilityAPI_SD3:
 
@@ -4842,6 +4890,7 @@ class MaskOrImageToWeight:
                     'list',
                     'list of lists',
                     'pandas series',
+                    'tensor',
                 ],
                 {
                 "default": 'list'
@@ -4884,6 +4933,8 @@ and returns it as a float value.
             except:
                 raise Exception("MaskOrImageToWeight: pandas is not installed. Please install pandas to use this output_type")
             return pd.Series(mean_values),
+        elif output_type == 'tensor':
+            return torch.tensor(mean_values, dtype=torch.float32)
         else:
             raise ValueError(f"Unsupported output_type: {output_type}")
 class FloatToMask:
