@@ -2462,7 +2462,7 @@ Segments an image or batch of images using CLIPSeg.
             for image in images:
                 image = (image* 255).type(torch.uint8)
                 prompt = text
-                input_prc = processor(text=prompt, images=image, padding="max_length", return_tensors="pt")
+                input_prc = processor(text=prompt, images=image, return_tensors="pt")
                 # Move the processed input to the device
                 for key in input_prc:
                     input_prc[key] = input_prc[key].to(device)
