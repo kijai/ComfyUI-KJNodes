@@ -123,7 +123,7 @@ app.registerExtension({
                 createSplineEditor(this, true)
               }
             });
-            this.setSize([550, 800])
+            this.setSize([550, 850])
             this.splineEditor.parentEl = document.createElement("div");
             this.splineEditor.parentEl.className = "spline-editor";
             this.splineEditor.parentEl.id = `spline-editor-${this.uuid}`
