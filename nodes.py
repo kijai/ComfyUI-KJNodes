@@ -987,7 +987,9 @@ class ColorToMask:
     FUNCTION = "clip"
     CATEGORY = "KJNodes/masking"
     DESCRIPTION = """
-Converts chosen RGB value to a mask
+Converts chosen RGB value to a mask.  
+With batch inputs, the **per_batch**  
+controls the number of images processed at once.
 """
 
     @classmethod
