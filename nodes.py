@@ -4906,7 +4906,8 @@ class MaskOrImageToWeight:
     FUNCTION = "execute"
     CATEGORY = "KJNodes"
     DESCRIPTION = """
-Converts different value lists/series to another type.  
+Gets the mean values from mask or image batch  
+and returns that as the selected output type.   
 """
 
     def execute(self, output_type, images=None, masks=None):
@@ -4961,8 +4962,7 @@ class WeightScheduleConvert:
     FUNCTION = "execute"
     CATEGORY = "KJNodes"
     DESCRIPTION = """
-Gets the mean value of mask or image  
-and returns it as a float value.  
+Converts different value lists/series to another type.  
 """
 
     def detect_input_type(self, input_values):
