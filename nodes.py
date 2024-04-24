@@ -1410,6 +1410,24 @@ Converts any type to a string.
         else:
             return
         return (stringified,)
+    
+class ImagePass:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "image": ("IMAGE",),
+            },
+        }
+    RETURN_TYPES = ("IMAGE",)
+    FUNCTION = "passthrough"
+    CATEGORY = "KJNodes/misc"
+    DESCRIPTION = """
+Passes the image through without modifying it.
+"""
+
+    def passthrough(self, image):
+        return image,
 
 class Sleep:
     @classmethod
@@ -5177,7 +5195,8 @@ NODE_CLASS_MAPPINGS = {
     "MaskOrImageToWeight": MaskOrImageToWeight,
     "WeightScheduleConvert": WeightScheduleConvert,
     "FloatToMask": FloatToMask,
-    "CustomSigmas": CustomSigmas
+    "CustomSigmas": CustomSigmas,
+    "ImagePass": ImagePass
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "INTConstant": "INT Constant",
@@ -5264,4 +5283,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "WeightScheduleConvert": "Weight Schedule Convert",
     "FloatToMask": "Float To Mask",
     "CustomSigmas": "Custom Sigmas",
+    "ImagePass": "ImagePass",
 }
