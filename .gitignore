@@ -5,3 +5,4 @@ __pycache__
 *.pth
 types
 models
+jsconfig.json

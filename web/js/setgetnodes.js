@@ -1,5 +1,5 @@
 import { app } from "../../../scripts/app.js";
-import { ComfyWidgets } from '../../../scripts/widgets.js';
+
 //based on diffus3's SetGet: https://github.com/diffus3/ComfyUI-extensions
 
 // Nodes that allow you to tunnel connections for cleaner graphs
@@ -243,18 +243,10 @@ app.registerExtension({
 						
 						content: `${getter.title} id: ${getter.id}`,
 						callback: () => {
-							if (this.canvas?.ds?.offset) {
-								const nodeCenterX = getter.pos[0] + (getter.size[0] / 2);
-								const nodeCenterY = getter.pos[1] + (getter.size[1] / 2);
-			
-								this.canvas.ds.offset[0] = -nodeCenterX + this.canvas.mouse[0];
-								this.canvas.ds.offset[1] = -nodeCenterY + this.canvas.mouse[1];
-							}
-							if (this.canvas?.ds?.scale != null) {
-								this.canvas.ds.scale = Number(1);
-							}
-							this.canvas.selectNode(getter, false)
+							this.canvas.centerOnNode(getter);
+							this.canvas.selectNode(getter, false);
 							this.canvas.setDirty(true, true);
+							
 						},
 					}));
 			
@@ -437,19 +429,9 @@ app.registerExtension({
 				};
 
 				this.goToSetter = function() {
-					const setter = this.findSetter(this.graph);
-					if (this.canvas?.ds?.offset) {
-						const nodeCenterX = setter.pos[0] + (setter.size[0] / 2);
-        				const nodeCenterY = setter.pos[1] + (setter.size[1] / 2);
-
-						this.canvas.ds.offset[0] = -nodeCenterX + this.canvas.mouse[0];
-        				this.canvas.ds.offset[1] = -nodeCenterY + this.canvas.mouse[1];
-					}
-					if (this.canvas?.ds?.scale != null) {
-						this.canvas.ds.scale = Number(1);
-					}
-					this.canvas.selectNode(setter, false)
-					this.canvas.setDirty(true, true);
+					const setter = this.findSetter(this.graph);	
+					this.canvas.centerOnNode(setter);
+					this.canvas.selectNode(setter, false);
 				};
 				
 				// This node is purely frontend and does not impact the resulting prompt so should not be serialized
