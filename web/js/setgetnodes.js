@@ -21,8 +21,6 @@ function setColorAndBgColor(type) {
     if (colors) {
         this.color = colors.color;
         this.bgcolor = colors.bgcolor;
-    } else {
-        // Handle the default case if needed
     }
 }
 let isAlertShown = false;
@@ -42,6 +40,10 @@ app.registerExtension({
 			defaultVisibility = true;
 			serialize_widgets = true;
 			drawConnection = false;
+			currentGetters = null;
+			slotColor = "#FFF";
+			canvas = app.canvas;
+
 			constructor() {
 				if (!this.properties) {
 					this.properties = {
@@ -51,8 +53,6 @@ app.registerExtension({
 				this.properties.showOutputText = SetNode.defaultVisibility;
 
 				const node = this;
-				const canvas = app.canvas;
-				const ctx = canvas.ctx
 
 				this.addWidget(
 					"text", 
@@ -204,6 +204,7 @@ app.registerExtension({
 					return graph._nodes.filter(otherNode => otherNode.type === 'GetNode' && otherNode.widgets[0].value === name && name !== '');
 				}
 
+				
 				// This node is purely frontend and does not impact the resulting prompt so should not be serialized
 				this.isVirtualNode = true;
 			}
@@ -218,51 +219,112 @@ app.registerExtension({
 				})
 			}
 			getExtraMenuOptions(_, options) {
+				let menuEntry = this.drawConnection ? "Hide connections" : "Show connections";
 				options.unshift(
 					{
-						content: "Show connections",
+						content: menuEntry,
 						callback: () => {
+							this.currentGetters = this.findGetters(this.graph);								
+							if (this.currentGetters.length == 0) return;
+							let linkType = (this.currentGetters[0].outputs[0].type);	
+							this.slotColor = this.canvas.default_connection_color_byType[linkType]
+							menuEntry = this.drawConnection ? "Hide connections" : "Show connections";
 							this.drawConnection = !this.drawConnection;
+							this.canvas.setDirty(true, true);
+							
 						},
 					},
 				);
+				// Dynamically add a submenu for all getters
+				this.currentGetters = this.findGetters(this.graph);
+				if (this.currentGetters) {
+					
+					let gettersSubmenu = this.currentGetters.map(getter => ({
+						
+						content: `${getter.title} id: ${getter.id}`,
+						callback: () => {
+							if (this.canvas?.ds?.offset) {
+								const nodeCenterX = getter.pos[0] + (getter.size[0] / 2);
+								const nodeCenterY = getter.pos[1] + (getter.size[1] / 2);
+			
+								this.canvas.ds.offset[0] = -nodeCenterX + this.canvas.mouse[0];
+								this.canvas.ds.offset[1] = -nodeCenterY + this.canvas.mouse[1];
+							}
+							if (this.canvas?.ds?.scale != null) {
+								this.canvas.ds.scale = Number(1);
+							}
+							this.canvas.selectNode(getter, false)
+							this.canvas.setDirty(true, true);
+						},
+					}));
+			
+					options.unshift({
+						content: "Getters",
+						has_submenu: true,
+						submenu: {
+							title: "GetNodes",
+                            options: gettersSubmenu,
+						}
+					});
+				}
 			}
+			
 			
 			onDrawForeground(ctx, lGraphCanvas) {
 				if (this.drawConnection) {
 					this._drawVirtualLinks(lGraphCanvas, ctx);
 				}
 			}
-			onDrawCollapsed(ctx, lGraphCanvas) {
-				if (this.drawConnection) {
-					this._drawVirtualLinks(lGraphCanvas, ctx);
-				}
-			}
+			// onDrawCollapsed(ctx, lGraphCanvas) {
+			// 	if (this.drawConnection) {
+			// 		this._drawVirtualLinks(lGraphCanvas, ctx);
+			// 	}
+			// }
 			_drawVirtualLinks(lGraphCanvas, ctx) {
-				const getters = this.findGetters(this.graph);
-				if (!getters?.length) return;
-				// draw the virtual connection from SetNode to GetNode
-				let start_node_slotpos = [
-				this.size[0],
-				LiteGraph.NODE_TITLE_HEIGHT * 0.5,
-				];
-				for (const getter of getters) {
-				let end_node_slotpos = this.getConnectionPos(false, 0);
-				end_node_slotpos = [
-					getter.pos[0] - end_node_slotpos[0] + this.size[0],
-					getter.pos[1] - end_node_slotpos[1],
-				];
-				lGraphCanvas.renderLink(
-					ctx,
-					start_node_slotpos,
-					end_node_slotpos,
-					null,
-					false,
-					null,
-					"orange",
-					LiteGraph.RIGHT,
-					LiteGraph.LEFT
-				);
+				if (!this.currentGetters?.length) return;
+				var title = this.getTitle ? this.getTitle() : this.title;
+				var title_width = ctx.measureText(title).width;
+				if (!this.flags.collapsed) {
+					var start_node_slotpos = [
+						this.size[0],
+						LiteGraph.NODE_TITLE_HEIGHT * 0.5,
+						];
+				}
+				else {
+					
+					var start_node_slotpos = [
+						title_width + 55,
+						-15,
+
+						];
+				}
+
+				for (const getter of this.currentGetters) {
+					if (!this.flags.collapsed) {
+					var end_node_slotpos = this.getConnectionPos(false, 0);
+					end_node_slotpos = [
+						getter.pos[0] - end_node_slotpos[0] + this.size[0],
+						getter.pos[1] - end_node_slotpos[1]
+						];
+					}
+					else {
+						var end_node_slotpos = this.getConnectionPos(false, 0);
+						end_node_slotpos = [
+						getter.pos[0] - end_node_slotpos[0] + title_width + 50,
+						getter.pos[1] - end_node_slotpos[1] - 30
+						];
+					}
+					lGraphCanvas.renderLink(
+						ctx,
+						start_node_slotpos,
+						end_node_slotpos,
+						null,
+						false,
+						null,
+						this.slotColor,
+						LiteGraph.RIGHT,
+						LiteGraph.LEFT
+					);
 				}
 			}
 		}
@@ -286,14 +348,15 @@ app.registerExtension({
 			defaultVisibility = true;
 			serialize_widgets = true;
 			drawConnection = false;
+			slotColor = "#FFF";
+			currentSetter = null;
+			canvas = app.canvas;
 
 			constructor() {
 				if (!this.properties) {
 					this.properties = {};
 				}
 				this.properties.showOutputText = GetNode.defaultVisibility;
-				const canvas = app.canvas;
-				const ctx = canvas.ctx
 				const node = this;
 				this.addWidget(
 					"combo",
@@ -375,18 +438,18 @@ app.registerExtension({
 
 				this.goToSetter = function() {
 					const setter = this.findSetter(this.graph);
-					if (canvas?.ds?.offset) {
+					if (this.canvas?.ds?.offset) {
 						const nodeCenterX = setter.pos[0] + (setter.size[0] / 2);
         				const nodeCenterY = setter.pos[1] + (setter.size[1] / 2);
 
-						canvas.ds.offset[0] = -nodeCenterX + canvas.mouse[0];
-        				canvas.ds.offset[1] = -nodeCenterY + canvas.mouse[1];
+						this.canvas.ds.offset[0] = -nodeCenterX + this.canvas.mouse[0];
+        				this.canvas.ds.offset[1] = -nodeCenterY + this.canvas.mouse[1];
 					}
-					if (canvas?.ds?.scale != null) {
-						canvas.ds.scale = Number(1);
+					if (this.canvas?.ds?.scale != null) {
+						this.canvas.ds.scale = Number(1);
 					}
-					canvas.selectNode(setter, false)
-					canvas.setDirty(true, true);
+					this.canvas.selectNode(setter, false)
+					this.canvas.setDirty(true, true);
 				};
 				
 				// This node is purely frontend and does not impact the resulting prompt so should not be serialized
@@ -409,6 +472,8 @@ app.registerExtension({
 			onAdded(graph) {
 			}
 			getExtraMenuOptions(_, options) {
+				let menuEntry = this.drawConnection ? "Hide connections" : "Show connections";
+				
 				options.unshift(
 					{
 						content: "Go to setter",
@@ -417,9 +482,15 @@ app.registerExtension({
 						},
 					},
 					{
-						content: "Show connection",
+						content: menuEntry,
 						callback: () => {
+							this.currentSetter = this.findSetter(this.graph);
+							if (this.currentSetter.length == 0) return;
+							let linkType = (this.currentSetter.inputs[0].type);	
 							this.drawConnection = !this.drawConnection;
+							this.slotColor = this.canvas.default_connection_color_byType[linkType]
+							menuEntry = this.drawConnection ? "Hide connections" : "Show connections";
+							this.canvas.setDirty(true, true);
 						},
 					},
 				);
@@ -430,16 +501,15 @@ app.registerExtension({
 					this._drawVirtualLink(lGraphCanvas, ctx);
 				}
 			}
-			onDrawCollapsed(ctx, lGraphCanvas) {
-				if (this.drawConnection) {
-					this._drawVirtualLink(lGraphCanvas, ctx);
-				}
-			}
+			// onDrawCollapsed(ctx, lGraphCanvas) {
+			// 	if (this.drawConnection) {
+			// 		this._drawVirtualLink(lGraphCanvas, ctx);
+			// 	}
+			// }
 			_drawVirtualLink(lGraphCanvas, ctx) {
-				const setter = this.findSetter(this.graph);
-				if (!setter) return;
-				// draw the virtual connection from SetNode to GetNode
-				let start_node_slotpos = setter.getConnectionPos(false, 0);
+				if (!this.currentSetter) return;
+				
+				let start_node_slotpos = this.currentSetter.getConnectionPos(false, 0);
 				start_node_slotpos = [
 					start_node_slotpos[0] - this.pos[0],
 					start_node_slotpos[1] - this.pos[1],
@@ -452,7 +522,7 @@ app.registerExtension({
 					null,
 					false,
 					null,
-					"orange"
+					this.slotColor
 				);
 			}
 		}
