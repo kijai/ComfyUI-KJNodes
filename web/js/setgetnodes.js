@@ -204,31 +204,6 @@ app.registerExtension({
 					return graph._nodes.filter(otherNode => otherNode.type === 'GetNode' && otherNode.widgets[0].value === name && name !== '');
 				}
 
-				this.lineToGetters = function() {
-					var scale = canvas.ds.scale;
-					const getterNodes = this.findGetters(this.graph);
-					var setPosX = (this.pos[0] + canvas.ds.offset[0]) * scale;
-					var setPosY = (this.pos[1] + canvas.ds.offset[1]) * scale;
-				
-					getterNodes.forEach((getter) => {
-						var getPosX = (getter.pos[0] + canvas.ds.offset[0]) * scale;
-						var getPosY = (getter.pos[1] + canvas.ds.offset[1]) * scale;
-						console.log(getPosX, getPosY, setPosX, setPosY);
-				
-						canvas.renderLink(
-							ctx,
-							[setPosX, setPosY],
-							[getPosX, getPosY],
-							undefined,
-							true,
-							0,
-							"orange",
-							LiteGraph.RIGHT,
-							LiteGraph.LEFT
-						);
-					});
-				};
-
 				// This node is purely frontend and does not impact the resulting prompt so should not be serialized
 				this.isVirtualNode = true;
 			}
@@ -245,20 +220,14 @@ app.registerExtension({
 			getExtraMenuOptions(_, options) {
 				options.unshift(
 					{
-						content: "Line to Getters",
+						content: "Show connections",
 						callback: () => {
-							this.lineToGetters();
+							this.drawConnection = !this.drawConnection;
 						},
 					},
 				);
 			}
 			
-			onSelected() {
-				this.drawConnection = true;
-			}
-			onDeselected() {
-				this.drawConnection = false;
-			}
 			onDrawForeground(ctx, lGraphCanvas) {
 				if (this.drawConnection) {
 					this._drawVirtualLinks(lGraphCanvas, ctx);
@@ -290,7 +259,7 @@ app.registerExtension({
 					null,
 					false,
 					null,
-					"#FFF",
+					"orange",
 					LiteGraph.RIGHT,
 					LiteGraph.LEFT
 				);
@@ -419,32 +388,6 @@ app.registerExtension({
 					canvas.selectNode(setter, false)
 					canvas.setDirty(true, true);
 				};
-				this.isLineVisible = false;
-
-				this.lineToSetter = function() {
-					this.isLineVisible = !this.isLineVisible;
-					
-					console.log(this)
-					var scale = canvas.ds.scale
-					const setter = this.findSetter(this.graph);
-					var getPosX = (this.pos[0] + canvas.ds.offset[0]) * scale
-					var getPosY = (this.pos[1] + canvas.ds.offset[1]) * scale
-					var setPosX = (setter.pos[0] + canvas.ds.offset[0]) * scale
-					var setPosY = (setter.pos[1] + canvas.ds.offset[1]) * scale
-					console.log(getPosX, getPosY, setPosX, setPosY)
-					
-					canvas.renderLink(
-						ctx,
-						[getPosX, getPosY],
-						[setPosX, setPosY],
-						undefined,
-						true,
-						0,
-						"orange",
-						LiteGraph.RIGHT,
-						LiteGraph.LEFT
-					);
-				};
 				
 				// This node is purely frontend and does not impact the resulting prompt so should not be serialized
 				this.isVirtualNode = true;
@@ -474,19 +417,14 @@ app.registerExtension({
 						},
 					},
 					{
-						content: "Line to setter",
+						content: "Show connection",
 						callback: () => {
-							this.lineToSetter();
+							this.drawConnection = !this.drawConnection;
 						},
 					},
 				);
 			}
-			onSelected() {
-				this.drawConnection = true;
-			}
-			onDeselected() {
-				this.drawConnection = false;
-			}
+
 			onDrawForeground(ctx, lGraphCanvas) {
 				if (this.drawConnection) {
 					this._drawVirtualLink(lGraphCanvas, ctx);
@@ -514,7 +452,7 @@ app.registerExtension({
 					null,
 					false,
 					null,
-					"#FFF"
+					"orange"
 				);
 			}
 		}
