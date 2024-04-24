@@ -2,9 +2,17 @@
 
 Various quality of life and masking related -nodes and scripts made by combining functionality of existing nodes for ComfyUI.
 
+I know I'm bad at documentation, especially this project that has grown from random practice nodes to... too many lines in one file.
+I have however started to add descriptions to the nodes themselves, there's a small ? you can click for info what the node does.
+This is still work in progress, like everything else.
+
 # Installation
 1. Clone this repo into `custom_nodes` folder.
-2. Install dependencies: pip install -r requirements.txt
+2. Install dependencies: `pip install -r requirements.txt`
+   or if you use the portable install, run this in ComfyUI_windows_portable -folder:
+
+  `python_embeded\python.exe -m pip install -r ComfyUI\custom_nodes\ComfyUI-KJNodes\requirements.txt`
+   
 
 ## Javascript
 
@@ -16,7 +24,12 @@ Sets the favicon to green circle when not processing anything, sets it to red wh
 ### Set/Get
 
 Javascript nodes to set and get constants to reduce unnecessary lines. Takes in and returns anything, purely visual nodes.
-Could still be buggy, especially when loading workflow with missing nodes, use with precaution.
+On the right click menu of these nodes there's now an options to visualize the paths, as well as option to jump to the corresponding node on the other end.
+
+**Known limitations**:
+  - Will not work with any node that dynamically sets it's outpute, such as reroute or other Set/Get node
+  - Will not work when directly connected to a bypassed node
+  - Other possible conflicts with javascript based nodes.
 
 ### ColorToMask
 
