@@ -171,8 +171,15 @@ function createSplineEditor(context, reset=false) {
 
   tensionWidget.callback = () => {
     tension = tensionWidget.value
+    points_to_sample = pointsWidget.value
+    let coords = samplePoints(pathElements[0], points_to_sample);
+    let coordsString = JSON.stringify(coords);
+    pointsStoreWidget.value = JSON.stringify(points);
+    if (coordWidget) {
+      coordWidget.value = coordsString;
     vis.render();
   }
+}
 
   pointsWidget.callback = () => {
     points_to_sample = pointsWidget.value
