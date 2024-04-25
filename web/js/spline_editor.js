@@ -259,6 +259,9 @@ function createSplineEditor(context, reset=false) {
     .strokeStyle(pv.Colors.category10().by(pv.index))
     .lineWidth(3)
 
+    var hoverIndex = -1;
+    var isDragging
+
   vis.add(pv.Dot)
     .data(() => points)
     .left(d => d.x)
@@ -270,20 +273,41 @@ function createSplineEditor(context, reset=false) {
     .event("mousedown", pv.Behavior.drag())
     .event("dragstart", function() {
         i = this.index;
+        hoverIndex = this.index;
+        isDragging = true;
         if (pv.event.button === 2 && i !== 0 && i !== points.length - 1) {
           points.splice(i--, 1);
           vis.render();
         }
         return this;
     })
+    .event("dragend", function() {
+        isDragging = false;
+    })
     .event("drag", vis)
-    .anchor("top").add(pv.Label)
-        .font(d => Math.sqrt(d[2]) * 32 + "px sans-serif")
-        //.text(d => `(${Math.round(d.x)}, ${Math.round(d.y)})`)
+    .event("mouseover", function() {
+      hoverIndex = this.index; // Set the hover index to the index of the hovered dot
+      vis.render(); // Re-render the visualization
+    })
+    .event("mouseout", function() {
+      !isDragging && (hoverIndex = -1); // Reset the hover index when the mouse leaves the dot
+      vis.render(); // Re-render the visualization
+    })
+    .anchor("center")
+    .add(pv.Label)
+    .visible(function() {
+      return hoverIndex === this.index; // Only show the label for the hovered dot
+    })
+    .left(d => d.x < w / 2 ? d.x + 80 : d.x - 70) // Shift label to right if on left half, otherwise shift to left
+    .top(d => d.y < h / 2 ? d.y + 20 : d.y - 20)  // Shift label down if on top half, otherwise shift up
+    
+        .font(12 + "px Consolas")
         .text(d => {
           // Normalize y to range 0.0 to 1.0, considering the inverted y-axis
           var normalizedY = 1.0 - (d.y / h);
-          return `${normalizedY.toFixed(2)}`;
+          var normalizedX = (d.x / w);
+          var frame = Math.round((d.x / w) * points_to_sample);
+          return `F: ${frame}, X: ${normalizedX.toFixed(2)}, Y: ${normalizedY.toFixed(2)}`;
       })
     .textStyle("orange")
     
