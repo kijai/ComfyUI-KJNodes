@@ -266,7 +266,7 @@ function createSplineEditor(context, reset=false) {
     .data(() => points)
     .left(d => d.x)
     .top(d => d.y)
-    .radius(8)
+    .radius(10)
     .cursor("move")
     .strokeStyle(function() { return i == this.index ? "#ff7f0e" : "#1f77b4"; })
     .fillStyle(function() { return "rgba(100, 100, 100, 0.2)"; })
