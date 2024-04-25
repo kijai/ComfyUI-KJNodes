@@ -4797,6 +4797,10 @@ guaranteed!!
 ## Graphical editor to create values for various   
 ## schedules and/or mask batches.  
 
+Shift + click to add control points.  
+Right click to delete control points.  
+Note that you can't delete from start/end.  
+
 **points_to_sample** value sets the number of samples  
 returned from the **drawn spline itself**, this is independent from the  
 actual control points, so the interpolation type matters.  
