@@ -45,6 +45,7 @@ loadScript('/kjweb_async/purify.min.js').catch((e) => {
   console.log(e)
 })
 
+const categories = ["KJNodes", "SUPIR", "VoiceCraft", "Marigold"];
 app.registerExtension({
 	name: "KJNodes.HelpPopup",
 	async beforeRegisterNodeDef(nodeType, nodeData) {
@@ -52,13 +53,12 @@ app.registerExtension({
   if (app.ui.settings.getSettingValue("KJNodes.helpPopup") === false) {
     return;
     }
-
-  const categories = ["KJNodes", "SUPIR", "VoiceCraft", "Marigold"];
 		try {
 			categories.forEach(category => {
         if (nodeData?.category?.startsWith(category)) {
             addDocumentation(nodeData, nodeType);
         }
+        else return
     });
 		} catch (error) {
 			console.error("Error in registering KJNodes.HelpPopup", error);

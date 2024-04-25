@@ -101,7 +101,7 @@ app.registerExtension({
     name: 'KJNodes.SplineEditor', 
     
     async beforeRegisterNodeDef(nodeType, nodeData) {
-        if (nodeData?.name == 'SplineEditor') {
+        if (nodeData?.name === 'SplineEditor') {
           chainCallback(nodeType.prototype, "onNodeCreated", function () {
             hideWidgetForGood(this, this.widgets.find(w => w.name === "coordinates"))
 
@@ -123,7 +123,7 @@ app.registerExtension({
                 createSplineEditor(this, true)
               }
             });
-            this.setSize([550, 850])
+            this.setSize([550, 840])
             this.splineEditor.parentEl = document.createElement("div");
             this.splineEditor.parentEl.className = "spline-editor";
             this.splineEditor.parentEl.id = `spline-editor-${this.uuid}`
@@ -138,12 +138,11 @@ app.registerExtension({
             })
             chainCallback(this, "onGraphConfigured", function() {
               createSplineEditor(this)
-              this.setSize([550, 800])
+              this.setSize([550, 840])
               });
 
           }); // onAfterGraphConfigured
         }//node created
-        
       } //before register
 })//register
 
