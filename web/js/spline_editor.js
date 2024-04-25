@@ -170,7 +170,7 @@ function createSplineEditor(context, reset=false) {
   const pointsWidget = context.widgets.find(w => w.name === "points_to_sample");
   const pointsStoreWidget = context.widgets.find(w => w.name === "points_store");
   const tensionWidget = context.widgets.find(w => w.name === "tension");
-  const segmentedWidget = context.widgets.find(w => w.name === "segmented");
+  //const segmentedWidget = context.widgets.find(w => w.name === "segmented");
 
   var interpolation = interpolationWidget.value
   var tension = tensionWidget.value
