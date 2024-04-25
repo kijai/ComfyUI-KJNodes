@@ -150,10 +150,21 @@ app.registerExtension({
 
 function createSplineEditor(context, reset=false) {
   console.log("creatingSplineEditor")
+
+  function updatePath() {
+      points_to_sample = pointsWidget.value
+      let coords = samplePoints(pathElements[0], points_to_sample);
+      let coordsString = JSON.stringify(coords);
+      pointsStoreWidget.value = JSON.stringify(points);
+      if (coordWidget) {
+        coordWidget.value = coordsString;
+      }
+      vis.render();
+  }
   
   if (reset && context.splineEditor.element) {
     context.splineEditor.element.innerHTML = ''; // Clear the container
- }
+  }
   const coordWidget = context.widgets.find(w => w.name === "coordinates");
   const interpolationWidget = context.widgets.find(w => w.name === "interpolation");
   const pointsWidget = context.widgets.find(w => w.name === "points_to_sample");
@@ -166,31 +177,16 @@ function createSplineEditor(context, reset=false) {
   var points_to_sample = pointsWidget.value
   interpolationWidget.callback = () => {
     interpolation = interpolationWidget.value
-    vis.render();
   }
 
   tensionWidget.callback = () => {
     tension = tensionWidget.value
-    points_to_sample = pointsWidget.value
-    let coords = samplePoints(pathElements[0], points_to_sample);
-    let coordsString = JSON.stringify(coords);
-    pointsStoreWidget.value = JSON.stringify(points);
-    if (coordWidget) {
-      coordWidget.value = coordsString;
-    vis.render();
+    updatePath();
   }
-}
 
   pointsWidget.callback = () => {
-    points_to_sample = pointsWidget.value
-    let coords = samplePoints(pathElements[0], points_to_sample);
-    let coordsString = JSON.stringify(coords);
-    pointsStoreWidget.value = JSON.stringify(points);
-    if (coordWidget) {
-      coordWidget.value = coordsString;
-    vis.render();
+    updatePath();
   }
-}
   
  // Initialize or reset points array
  var w = 512
@@ -234,12 +230,7 @@ function createSplineEditor(context, reset=false) {
     })
   .event("mouseup", function() {
     if (this.pathElements !== null) {
-        let coords = samplePoints(pathElements[0], points_to_sample);
-        let coordsString = JSON.stringify(coords);
-        pointsStoreWidget.value = JSON.stringify(points);
-        if (coordWidget) {
-          coordWidget.value = coordsString;
-        }
+      updatePath();
     }
   });
 

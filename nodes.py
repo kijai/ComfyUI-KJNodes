@@ -4755,7 +4755,7 @@ class SplineEditor:
                 "coordinates": ("STRING", {"multiline": False}),
                 "mask_width": ("INT", {"default": 512, "min": 8, "max": MAX_RESOLUTION, "step": 8}),
                 "mask_height": ("INT", {"default": 512, "min": 8, "max": MAX_RESOLUTION, "step": 8}),
-                "points_to_sample": ("INT", {"default": 4, "min": 2, "max": 1000, "step": 1}),
+                "points_to_sample": ("INT", {"default": 16, "min": 2, "max": 1000, "step": 1}),
                 "interpolation": (
                 [   
                     'cardinal',
