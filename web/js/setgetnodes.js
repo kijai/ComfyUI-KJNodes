@@ -43,6 +43,7 @@ app.registerExtension({
 			currentGetters = null;
 			slotColor = "#FFF";
 			canvas = app.canvas;
+			menuEntry = "Show connections";
 
 			constructor() {
 				if (!this.properties) {
@@ -219,20 +220,49 @@ app.registerExtension({
 				})
 			}
 			getExtraMenuOptions(_, options) {
-				let menuEntry = this.drawConnection ? "Hide connections" : "Show connections";
+				this.menuEntry = this.drawConnection ? "Hide connections" : "Show connections";
 				options.unshift(
 					{
-						content: menuEntry,
+						content: this.menuEntry,
 						callback: () => {
 							this.currentGetters = this.findGetters(this.graph);								
 							if (this.currentGetters.length == 0) return;
 							let linkType = (this.currentGetters[0].outputs[0].type);	
 							this.slotColor = this.canvas.default_connection_color_byType[linkType]
-							menuEntry = this.drawConnection ? "Hide connections" : "Show connections";
+							this.menuEntry = this.drawConnection ? "Hide connections" : "Show connections";
 							this.drawConnection = !this.drawConnection;
 							this.canvas.setDirty(true, true);
 							
 						},
+						has_submenu: true,
+						submenu: {
+							title: "Color",
+                            options: [ 
+								{
+								content: "Highlight",
+								callback: () => {
+									this.slotColor = "orange"
+									this.canvas.setDirty(true, true);
+									}
+								}
+							],
+						},
+					},
+					{
+						content: "Hide all connections",
+						callback: () => {
+							const allGetters = this.graph._nodes.filter(otherNode => otherNode.type === "GetNode" || otherNode.type === "SetNode");
+							allGetters.forEach(otherNode => {
+								otherNode.drawConnection = false;
+								console.log(otherNode);
+							});
+							
+							this.menuEntry = "Show connections";
+							this.drawConnection = false
+							this.canvas.setDirty(true, true);
+							
+						},
+					
 					},
 				);
 				// Dynamically add a submenu for all getters
