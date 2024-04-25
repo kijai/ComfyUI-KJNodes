@@ -173,10 +173,13 @@ app.registerExtension({
 				};
 			break;
 			
-	}	
+		}	
+		
+	},
+	async setup() {
 		// to keep Set/Get node virtual connections visible when offscreen
 		const originalComputeVisibleNodes = LGraphCanvas.prototype.computeVisibleNodes;
-		LGraphCanvas.prototype.computeVisibleNodes = function (nodes, out) {
+		LGraphCanvas.prototype.computeVisibleNodes = function () {
 			const visibleNodesSet = new Set(originalComputeVisibleNodes.apply(this, arguments));
 			for (const node of this.graph._nodes) {
 				if ((node.type === "SetNode" || node.type === "GetNode") && node.drawConnection) {
@@ -185,5 +188,6 @@ app.registerExtension({
 			}
 			return Array.from(visibleNodesSet);
 		};
-	},
+
+	}
 });
