@@ -160,6 +160,30 @@ function createSplineEditor(context, reset=false) {
   const pointsStoreWidget = context.widgets.find(w => w.name === "points_store");
   const tensionWidget = context.widgets.find(w => w.name === "tension");
   const segmentedWidget = context.widgets.find(w => w.name === "segmented");
+
+  var interpolation = interpolationWidget.value
+  var tension = tensionWidget.value
+  var points_to_sample = pointsWidget.value
+  interpolationWidget.callback = () => {
+    interpolation = interpolationWidget.value
+    vis.render();
+  }
+
+  tensionWidget.callback = () => {
+    tension = tensionWidget.value
+    vis.render();
+  }
+
+  pointsWidget.callback = () => {
+    points_to_sample = pointsWidget.value
+    let coords = samplePoints(pathElements[0], points_to_sample);
+    let coordsString = JSON.stringify(coords);
+    pointsStoreWidget.value = JSON.stringify(points);
+    if (coordWidget) {
+      coordWidget.value = coordsString;
+    vis.render();
+  }
+}
   
  // Initialize or reset points array
  var w = 512
@@ -203,7 +227,7 @@ function createSplineEditor(context, reset=false) {
     })
   .event("mouseup", function() {
     if (this.pathElements !== null) {
-        let coords = samplePoints(pathElements[0], pointsWidget.value);
+        let coords = samplePoints(pathElements[0], points_to_sample);
         let coordsString = JSON.stringify(coords);
         pointsStoreWidget.value = JSON.stringify(points);
         if (coordWidget) {
@@ -222,9 +246,9 @@ function createSplineEditor(context, reset=false) {
     .data(() => points)
     .left(d => d.x)
     .top(d => d.y)
-    .interpolate(() => interpolationWidget.value)
-    .tension(() => tensionWidget.value)
-    .segmented(() => segmentedWidget.value)
+    .interpolate(() => interpolation)
+    .tension(() => tension)
+    .segmented(() => false)
     .strokeStyle(pv.Colors.category10().by(pv.index))
     .lineWidth(3)
 
