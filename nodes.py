@@ -1066,6 +1066,36 @@ Combines multiple conditioning nodes into one
             cond = cond_combine_node.combine(new_cond, cond)[0]
         return (cond, inputcount,)
 
+class ImageBatchMulti:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "inputcount": ("INT", {"default": 2, "min": 2, "max": 1000, "step": 1}),
+                "image_1": ("IMAGE", ),
+                "image_2": ("IMAGE", ),
+            },
+    }
+
+    RETURN_TYPES = ("IMAGE",)
+    RETURN_NAMES = ("images",)
+    FUNCTION = "combine"
+    CATEGORY = "KJNodes/masking/conditioning"
+    DESCRIPTION = """
+Creates an image batch from multiple images.  
+You can set how many inputs the node has,  
+with the **inputcount** and clicking update.
+"""
+
+    def combine(self, inputcount, **kwargs):
+        from nodes import ImageBatch
+        image_batch_node = ImageBatch()
+        image = kwargs["image_1"]
+        for c in range(1, inputcount):
+            new_image = kwargs[f"image_{c + 1}"]
+            image, = image_batch_node.batch(new_image, image)
+        return (image, inputcount,)
+
 class CondPassThrough:
     @classmethod
     def INPUT_TYPES(s):
@@ -5114,6 +5144,7 @@ Each mask is generated with the specified width and height.
 NODE_CLASS_MAPPINGS = {
     "INTConstant": INTConstant,
     "FloatConstant": FloatConstant,
+    "ImageBatchMulti": ImageBatchMulti,
     "ConditioningMultiCombine": ConditioningMultiCombine,
     "ConditioningSetMaskAndCombine": ConditioningSetMaskAndCombine,
     "ConditioningSetMaskAndCombine3": ConditioningSetMaskAndCombine3,
@@ -5201,6 +5232,7 @@ NODE_CLASS_MAPPINGS = {
 NODE_DISPLAY_NAME_MAPPINGS = {
     "INTConstant": "INT Constant",
     "FloatConstant": "Float Constant",
+    "ImageBatchMulti": "Image Batch Multi",
     "ConditioningMultiCombine": "Conditioning Multi Combine",
     "ConditioningSetMaskAndCombine": "ConditioningSetMaskAndCombine",
     "ConditioningSetMaskAndCombine3": "ConditioningSetMaskAndCombine3",
