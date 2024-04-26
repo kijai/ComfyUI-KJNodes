@@ -5220,7 +5220,7 @@ Converts different value lists/series to another type.
                 normalized_values = [(value - min_val) / (max_val - min_val) for value in orig_float_values]
                 # Interpolate the normalized values to the new frame count
                 remapped_float_values = np.interp(np.linspace(0, 1, int(remap_to_frames * value)), np.linspace(0, 1, len(normalized_values)), normalized_values).tolist()
-                interpolated_pattern.append(remapped_float_values)
+                interpolated_pattern.extend(remapped_float_values)
             float_values = interpolated_pattern
         else:
             # Remap float_values to match target_frame_amount
