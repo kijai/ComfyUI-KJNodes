@@ -1036,6 +1036,7 @@ controls the number of images processed at once.
             pbar.update(batch_count)
        
         tensors_out = torch.cat(tensors_out, dim=0)
+        tensors_out = torch.clamp(tensors_out, min=0.0, max=1.0)
         return tensors_out,
       
 class ConditioningMultiCombine:
@@ -4965,7 +4966,6 @@ If no image is provided, mode is set to text-to-image
         if model != "sd3-turbo":
             data["negative_prompt"] = n_prompt
 
-       
         headers={
                 "accept": "image/*"
             }
@@ -5081,8 +5081,6 @@ class WeightScheduleConvert:
                 "default": 'list'
                     }),
              },
-           
-
         }
     RETURN_TYPES = ("FLOAT",)
     FUNCTION = "execute"
