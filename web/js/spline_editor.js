@@ -144,7 +144,7 @@ app.registerExtension({
             this.menuItem2 = document.createElement("a");
             this.menuItem2.href = "#";
             this.menuItem2.id = "menu-item-2";
-            this.menuItem2.textContent = "Placeholder";
+            this.menuItem2.textContent = "Copy coordinates to clipboard";
             styleMenuItem(this.menuItem2);
             // Add hover effect to menu items
             this.menuItem1.addEventListener('mouseover', function() {
@@ -243,8 +243,8 @@ function createSplineEditor(context, reset=false) {
 
   context.menuItem2.addEventListener('click', function(e) {
       e.preventDefault();
-      // Add functionality for menu item 2
-      console.log('Option 2 clicked');
+      navigator.clipboard.writeText(JSON.stringify(points));
+      console.log('Copied coordinates to clipboard');
   });
 
 
@@ -275,6 +275,7 @@ function createSplineEditor(context, reset=false) {
   var points_to_sample = pointsWidget.value
   interpolationWidget.callback = () => {
     interpolation = interpolationWidget.value
+    updatePath();
   }
 
   tensionWidget.callback = () => {
@@ -405,8 +406,7 @@ function createSplineEditor(context, reset=false) {
           return `F: ${frame}, X: ${normalizedX.toFixed(2)}, Y: ${normalizedY.toFixed(2)}`;
       })
     .textStyle("orange")
-    
-    
+  
     vis.render();
     var svgElement = vis.canvas();
     svgElement.style['zIndex'] = "2"

@@ -182,13 +182,16 @@ const create_documentation_stylesheet = () => {
         let startX, startY, startWidth, startHeight
 
         resizeHandle.addEventListener('mousedown', function (e) {
+          e.preventDefault();
           e.stopPropagation();
           isResizing = true;
           startX = e.clientX;
           startY = e.clientY;
           startWidth = parseInt(document.defaultView.getComputedStyle(docElement).width, 10);
           startHeight = parseInt(document.defaultView.getComputedStyle(docElement).height, 10);
-         });
+         },
+         { signal: this.docCtrl.signal },
+         );
 
         // close button
         const closeButton = document.createElement('div');
@@ -208,7 +211,9 @@ const create_documentation_stylesheet = () => {
           this.show_doc = !this.show_doc
           docElement.parentNode.removeChild(docElement)
           docElement = null
-         });
+         },
+         { signal: this.docCtrl.signal },
+         );
          
         document.addEventListener('mousemove', function (e) {
           if (!isResizing) return;
@@ -216,11 +221,15 @@ const create_documentation_stylesheet = () => {
           const newHeight = startHeight + e.clientY - startY;
           docElement.style.width = `${newWidth}px`;
           docElement.style.height = `${newHeight}px`;
-         });
+         },
+         { signal: this.docCtrl.signal },
+         );
 
         document.addEventListener('mouseup', function () {
           isResizing = false
-        })
+        },
+        { signal: this.docCtrl.signal },
+        )
 
         document.body.appendChild(docElement)
       }
@@ -282,6 +291,11 @@ const create_documentation_stylesheet = () => {
           this.show_doc = true
         } else {
           this.show_doc = !this.show_doc
+        }
+        if (this.show_doc) {
+          this.docCtrl = new AbortController()
+        } else {
+          this.docCtrl.abort()
         }
         return true;
       }

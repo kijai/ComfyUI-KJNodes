@@ -4,6 +4,9 @@ import { app } from "../../../scripts/app.js";
 app.registerExtension({
     name: "KJNodes.browserstatus",
     setup() {
+        if (!app.ui.settings.getSettingValue("KJNodes.browserStatus")) {
+            return;
+        }
         api.addEventListener("status", ({ detail }) => {
             let title = "ComfyUI";
             let favicon = "green";
@@ -11,7 +14,6 @@ app.registerExtension({
 
             if (queueRemaining) {
                 favicon = "red";
-                
                 title = `00% - ${queueRemaining} | ${title}`;
             } 
             let link = document.querySelector("link[rel~='icon']");
@@ -22,9 +24,8 @@ app.registerExtension({
             }
             link.href = new URL(`../${favicon}.png`, import.meta.url);
             document.title = title;
-
         });
-//add progress to the title
+        //add progress to the title
         api.addEventListener("progress", ({ detail }) => {
 			const { value, max } = detail;
 			const progress = Math.floor((value / max) * 100);
@@ -34,8 +35,19 @@ app.registerExtension({
 				const paddedProgress = String(progress).padStart(2, '0');
 				title = `${paddedProgress}% ${title.replace(/^\d+%\s/, '')}`;
 			}
-		
 			document.title = title;
 		});
+    },
+    init() {
+        if (!app.ui.settings.getSettingValue("KJNodes.browserStatus")) {
+            return;
+        }
+        const pythongossFeed = app.extensions.find(
+            (e) => e.name === 'pysssss.FaviconStatus',
+          )
+          if (pythongossFeed) {
+            console.warn("KJNodes - Overriding pysssss.FaviconStatus")
+            app.extensions = app.extensions.filter(item => item !== pythongossFeed);
+          }
     },
 });
