@@ -144,7 +144,7 @@ app.registerExtension({
             this.menuItem2 = document.createElement("a");
             this.menuItem2.href = "#";
             this.menuItem2.id = "menu-item-2";
-            this.menuItem2.textContent = "Copy coordinates to clipboard";
+            this.menuItem2.textContent = "Display sample points";
             styleMenuItem(this.menuItem2);
             // Add hover effect to menu items
             this.menuItem1.addEventListener('mouseover', function() {
@@ -243,15 +243,39 @@ function createSplineEditor(context, reset=false) {
 
   context.menuItem2.addEventListener('click', function(e) {
       e.preventDefault();
-      navigator.clipboard.writeText(JSON.stringify(points));
-      console.log('Copied coordinates to clipboard');
+      drawSamplePoints = !drawSamplePoints;
+      
+      updatePath();
   });
 
-
+  var drawSamplePoints = false;
 
   function updatePath() {
       points_to_sample = pointsWidget.value
       let coords = samplePoints(pathElements[0], points_to_sample);
+      if (drawSamplePoints) {
+      if (pointsLayer) {
+        // Update the data of the existing points layer
+        pointsLayer.data(coords);
+      } else {
+          // Create the points layer if it doesn't exist
+          pointsLayer = vis.add(pv.Dot)
+              .data(coords)
+              .left(function(d) { return d.x; })
+              .top(function(d) { return d.y; })
+              .radius(5) // Adjust the radius as needed
+              .fillStyle("red") // Change the color as needed
+              .strokeStyle("black") // Change the stroke color as needed
+              .lineWidth(1); // Adjust the line width as needed
+          }
+      }
+      else {
+          if (pointsLayer) {
+              // Remove the points layer
+              pointsLayer.data([]);
+              vis.render();
+          }
+      }
       let coordsString = JSON.stringify(coords);
       pointsStoreWidget.value = JSON.stringify(points);
       if (coordWidget) {
@@ -273,6 +297,8 @@ function createSplineEditor(context, reset=false) {
   var interpolation = interpolationWidget.value
   var tension = tensionWidget.value
   var points_to_sample = pointsWidget.value
+  var pointsLayer = null;
+  
   interpolationWidget.callback = () => {
     interpolation = interpolationWidget.value
     updatePath();
@@ -357,7 +383,7 @@ function createSplineEditor(context, reset=false) {
 
     var hoverIndex = -1;
     var isDragging
-
+  
   vis.add(pv.Dot)
     .data(() => points)
     .left(d => d.x)
@@ -406,6 +432,7 @@ function createSplineEditor(context, reset=false) {
           return `F: ${frame}, X: ${normalizedX.toFixed(2)}, Y: ${normalizedY.toFixed(2)}`;
       })
     .textStyle("orange")
+    
   
     vis.render();
     var svgElement = vis.canvas();
