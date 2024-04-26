@@ -113,6 +113,58 @@ app.registerExtension({
             serialize: false,
             hideOnZoom: false,
             });
+
+            // context menu
+            
+            this.contextMenu = document.createElement("div");
+            this.contextMenu.id = "context-menu";
+            this.contextMenu.style.display = "none";
+            this.contextMenu.style.position = "absolute";
+            this.contextMenu.style.backgroundColor = "#202020";
+            this.contextMenu.style.minWidth = "100px";
+            this.contextMenu.style.boxShadow = "0px 8px 16px 0px rgba(0,0,0,0.2)";
+            this.contextMenu.style.zIndex = "100";
+            this.contextMenu.style.padding = "5px";
+
+            function styleMenuItem(menuItem) {
+              menuItem.style.display = "block";
+              menuItem.style.padding = "5px";
+              menuItem.style.color = "#FFF";
+              menuItem.style.fontFamily = "Arial, sans-serif";
+              menuItem.style.fontSize = "16px";
+              menuItem.style.textDecoration = "none";
+              menuItem.style.marginBottom = "5px";
+            }
+            this.menuItem1 = document.createElement("a");
+            this.menuItem1.href = "#";
+            this.menuItem1.id = "menu-item-1";
+            this.menuItem1.textContent = "Toggle handles";
+            styleMenuItem(this.menuItem1);
+
+            this.menuItem2 = document.createElement("a");
+            this.menuItem2.href = "#";
+            this.menuItem2.id = "menu-item-2";
+            this.menuItem2.textContent = "Placeholder";
+            styleMenuItem(this.menuItem2);
+            // Add hover effect to menu items
+            this.menuItem1.addEventListener('mouseover', function() {
+              this.style.backgroundColor = "gray";
+            });
+            this.menuItem1.addEventListener('mouseout', function() {
+              this.style.backgroundColor = "#202020";
+            });
+
+            this.menuItem2.addEventListener('mouseover', function() {
+              this.style.backgroundColor = "gray";
+            });
+            this.menuItem2.addEventListener('mouseout', function() {
+              this.style.backgroundColor = "#202020";
+            });
+
+            this.contextMenu.appendChild(this.menuItem1);
+            this.contextMenu.appendChild(this.menuItem2);
+
+            document.body.appendChild( this.contextMenu);
             this.addWidget("button", "New spline", null, () => {
               
               if (!this.properties || !("points" in this.properties)) {
@@ -129,17 +181,19 @@ app.registerExtension({
             this.splineEditor.parentEl.id = `spline-editor-${this.uuid}`
             element.appendChild(this.splineEditor.parentEl);
 
-            //disable context menu on right click
-            document.addEventListener('contextmenu', function(e) {
-              if (e.button === 2) { // Right mouse button
-                  e.preventDefault();
-                  e.stopPropagation();
-                }
-            })
             chainCallback(this, "onGraphConfigured", function() {
+              console.log('onGraphConfigured');
               createSplineEditor(this)
               this.setSize([550, 840])
               });
+
+            //disable context menu on right click
+            // document.addEventListener('contextmenu', function(e) {
+            //   if (e.button === 2) { // Right mouse button
+            //       e.preventDefault();
+            //       e.stopPropagation();
+            //     }
+            // })
 
           }); // onAfterGraphConfigured
         }//node created
@@ -149,6 +203,51 @@ app.registerExtension({
 
 function createSplineEditor(context, reset=false) {
   console.log("creatingSplineEditor")
+
+  document.addEventListener('contextmenu', function(e) {
+    e.preventDefault();
+  });
+
+  document.addEventListener('click', function(e) {
+    if (!context.contextMenu.contains(e.target)) {
+      context.contextMenu.style.display = 'none';
+    }
+  });
+
+  context.menuItem1.addEventListener('click', function(e) {
+    e.preventDefault();
+    if (!drawHandles) {
+      drawHandles = true
+      vis.add(pv.Line)
+      .data(() => points.map((point, index) => ({
+          start: point,
+          end: [index]
+      })))
+      .left(d => d.start.x)
+      .top(d => d.start.y)
+      .interpolate("linear")
+      .tension(0) // Straight lines
+      .strokeStyle("#ff7f0e") // Same color as control points
+      .lineWidth(1)
+      .visible(() => drawHandles);
+      vis.render();
+      
+   
+    } else {
+      drawHandles = false
+      vis.render();
+    }
+    context.contextMenu.style.display = 'none';
+  
+  });
+
+  context.menuItem2.addEventListener('click', function(e) {
+      e.preventDefault();
+      // Add functionality for menu item 2
+      console.log('Option 2 clicked');
+  });
+
+
 
   function updatePath() {
       points_to_sample = pointsWidget.value
@@ -188,6 +287,7 @@ function createSplineEditor(context, reset=false) {
   }
   
  // Initialize or reset points array
+ var drawHandles = false
  var w = 512
  var h = 512
  var i = 3
@@ -226,6 +326,11 @@ function createSplineEditor(context, reset=false) {
         i = points.push(this.mouse()) - 1;
         return this;
     }
+    else if (pv.event.button === 2) {
+      context.contextMenu.style.display = 'block';
+      context.contextMenu.style.left = `${pv.event.clientX}px`;
+      context.contextMenu.style.top = `${pv.event.clientY}px`;
+    }
     })
   .event("mouseup", function() {
     if (this.pathElements !== null) {
@@ -237,7 +342,7 @@ function createSplineEditor(context, reset=false) {
     .data(pv.range(0, 8, .5))
     .bottom(d =>  d * 64 + 0)
     .strokeStyle("gray")
-    .lineWidth(1)
+    .lineWidth(2)
 
   vis.add(pv.Line)
     .data(() => points)
@@ -291,7 +396,7 @@ function createSplineEditor(context, reset=false) {
     .left(d => d.x < w / 2 ? d.x + 80 : d.x - 70) // Shift label to right if on left half, otherwise shift to left
     .top(d => d.y < h / 2 ? d.y + 20 : d.y - 20)  // Shift label down if on top half, otherwise shift up
     
-        .font(12 + "px Consolas")
+        .font(12 + "px sans-serif")
         .text(d => {
           // Normalize y to range 0.0 to 1.0, considering the inverted y-axis
           var normalizedY = 1.0 - (d.y / h);
@@ -300,6 +405,7 @@ function createSplineEditor(context, reset=false) {
           return `F: ${frame}, X: ${normalizedX.toFixed(2)}, Y: ${normalizedY.toFixed(2)}`;
       })
     .textStyle("orange")
+    
     
     vis.render();
     var svgElement = vis.canvas();

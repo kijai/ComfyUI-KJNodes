@@ -2851,7 +2851,7 @@ Grow value is the amount to grow the shape on each frame, creating animated mask
             image = pil2tensor(image)
             mask = image[:, :, :, 0]
             out.append(mask)
-            outstack = torch.cat(out, dim=0)
+        outstack = torch.cat(out, dim=0)
         return (outstack, 1.0 - outstack,)
     
 class CreateVoronoiMask:
@@ -4826,6 +4826,9 @@ output types:
     def splinedata(self, mask_width, mask_height, coordinates, float_output_type, interpolation, points_to_sample, points_store, tension, repeat_output):
         
         coordinates = json.loads(coordinates)
+        for coord in coordinates:
+            coord['x'] = int(round(coord['x']))
+            coord['y'] = int(round(coord['y']))
         normalized_y_values = [
             1.0 - (point['y'] / 512)
             for point in coordinates
@@ -4851,7 +4854,87 @@ output types:
         masks_out = masks_out.repeat(repeat_output, 1, 1, 1)
         masks_out = masks_out.mean(dim=-1)
         return (masks_out, str(coordinates), out_floats,)
+
+class CreateShapeMaskOnPath:
     
+    RETURN_TYPES = ("MASK", "MASK",)
+    RETURN_NAMES = ("mask", "mask_inverted",)
+    FUNCTION = "createshapemask"
+    CATEGORY = "KJNodes/masking/generate"
+    DESCRIPTION = """
+Creates a mask or batch of masks with the specified shape.  
+Locations are center locations.  
+Grow value is the amount to grow the shape on each frame, creating animated masks.
+"""
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "shape": (
+            [   'circle',
+                'square',
+                'triangle',
+            ],
+            {
+            "default": 'circle'
+             }),
+                "coordinates": ("STRING", {"forceInput": True}),
+                "grow": ("INT", {"default": 0, "min": -512, "max": 512, "step": 1}),
+                "frame_width": ("INT", {"default": 512,"min": 16, "max": 4096, "step": 1}),
+                "frame_height": ("INT", {"default": 512,"min": 16, "max": 4096, "step": 1}),
+                "shape_width": ("INT", {"default": 128,"min": 8, "max": 4096, "step": 1}),
+                "shape_height": ("INT", {"default": 128,"min": 8, "max": 4096, "step": 1}),
+        },
+    } 
+
+    def createshapemask(self, coordinates, frame_width, frame_height, shape_width, shape_height, grow, shape):
+        # Define the number of images in the batch
+        coordinates = coordinates.replace("'", '"')
+        coordinates = json.loads(coordinates)
+        for coord in coordinates:
+            print(coord)
+
+        batch_size = len(coordinates)
+        print(batch_size)
+        out = []
+        color = "white"
+        
+        for i, coord in enumerate(coordinates):
+            image = Image.new("RGB", (frame_width, frame_height), "black")
+            draw = ImageDraw.Draw(image)
+
+            # Calculate the size for this frame and ensure it's not less than 0
+            current_width = max(0, shape_width + i*grow)
+            current_height = max(0, shape_height + i*grow)
+
+            location_x = coord['x']
+            location_y = coord['y']
+
+            if shape == 'circle' or shape == 'square':
+                # Define the bounding box for the shape
+                left_up_point = (location_x - current_width // 2, location_y - current_height // 2)
+                right_down_point = (location_x + current_width // 2, location_y + current_height // 2)
+                two_points = [left_up_point, right_down_point]
+
+                if shape == 'circle':
+                    draw.ellipse(two_points, fill=color)
+                elif shape == 'square':
+                    draw.rectangle(two_points, fill=color)
+                    
+            elif shape == 'triangle':
+                # Define the points for the triangle
+                left_up_point = (location_x - current_width // 2, location_y + current_height // 2) # bottom left
+                right_down_point = (location_x + current_width // 2, location_y + current_height // 2) # bottom right
+                top_point = (location_x, location_y - current_height // 2) # top point
+                draw.polygon([top_point, left_up_point, right_down_point], fill=color)
+
+            image = pil2tensor(image)
+            mask = image[:, :, :, 0]
+            out.append(mask)
+        outstack = torch.cat(out, dim=0)
+        return (outstack, 1.0 - outstack,)
+
 class StabilityAPI_SD3:
 
     @classmethod
@@ -5072,6 +5155,7 @@ class WeightScheduleConvert:
                 "input_values": ("FLOAT", {"default": 0.0, "forceInput": True}),
                 "output_type": (
                 [   
+                    'match_input',
                     'list',
                     'list of lists',
                     'pandas series',
@@ -5080,7 +5164,14 @@ class WeightScheduleConvert:
                 {
                 "default": 'list'
                     }),
+                "invert": ("BOOLEAN", {"default": False}),
+                "repeat": ("INT", {"default": 1,"min": 1, "max": 255, "step": 1}),
              },
+             "optional": {
+                "remap_to_frames": ("INT", {"default": 0}),
+                "interpolation_curve": ("FLOAT", {"forceInput": True}),
+             },
+             
         }
     RETURN_TYPES = ("FLOAT",)
     FUNCTION = "execute"
@@ -5102,9 +5193,8 @@ Converts different value lists/series to another type.
         else:
             raise ValueError("Unsupported input type")
 
-    def execute(self, input_values, output_type):
+    def execute(self, input_values, output_type, invert, repeat, remap_to_frames=0, interpolation_curve=None):
         import pandas as pd
-        # Detect the input type
         input_type = self.detect_input_type(input_values)
 
         # Convert input_values to a list of floats
@@ -5117,6 +5207,35 @@ Converts different value lists/series to another type.
         else:
             float_values = input_values
 
+        if invert:
+            float_values = [1 - value for value in float_values]
+
+        if interpolation_curve is not None:
+            interpolated_pattern = []
+            orig_float_values = float_values
+            for value in interpolation_curve:
+                print(value)
+                min_val = min(orig_float_values)
+                max_val = max(orig_float_values)
+                # Normalize the values to [0, 1]
+                normalized_values = [(value - min_val) / (max_val - min_val) for value in orig_float_values]
+                # Interpolate the normalized values to the new frame count
+                remapped_float_values = np.interp(np.linspace(0, 1, int(remap_to_frames * value)), np.linspace(0, 1, len(normalized_values)), normalized_values).tolist()
+                interpolated_pattern.append(remapped_float_values)
+                print(interpolated_pattern)
+            float_values = interpolated_pattern
+        else:
+            # Remap float_values to match target_frame_amount
+            if remap_to_frames > 0 and remap_to_frames != len(float_values):
+                min_val = min(float_values)
+                max_val = max(float_values)
+                # Normalize the values to [0, 1]
+                normalized_values = [(value - min_val) / (max_val - min_val) for value in float_values]
+                # Interpolate the normalized values to the new frame count
+                float_values = np.interp(np.linspace(0, 1, remap_to_frames), np.linspace(0, 1, len(normalized_values)), normalized_values).tolist()
+       
+            float_values = float_values * repeat
+
         if output_type == 'list':
             return float_values,
         elif output_type == 'list of lists':
@@ -5126,6 +5245,8 @@ Converts different value lists/series to another type.
         elif output_type == 'tensor':
             if input_type == 'pandas series':
                 return torch.tensor(input_values.values, dtype=torch.float32),
+        elif output_type == 'match_input':
+            return float_values,
         else:
             raise ValueError(f"Unsupported output_type: {output_type}")
 
@@ -5257,7 +5378,8 @@ NODE_CLASS_MAPPINGS = {
     "WeightScheduleConvert": WeightScheduleConvert,
     "FloatToMask": FloatToMask,
     "CustomSigmas": CustomSigmas,
-    "ImagePass": ImagePass
+    "ImagePass": ImagePass,
+    "CreateShapeMaskOnPath": CreateShapeMaskOnPath
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "INTConstant": "INT Constant",
@@ -5347,4 +5469,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "FloatToMask": "Float To Mask",
     "CustomSigmas": "Custom Sigmas",
     "ImagePass": "ImagePass",
+    "CreateShapeMaskOnPath": "CreateShapeMaskOnPath",
 }
