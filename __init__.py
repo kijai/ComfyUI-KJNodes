@@ -88,7 +88,8 @@ NODE_CLASS_MAPPINGS = {
     "CustomSigmas": CustomSigmas,
     "ImagePass": ImagePass,
     "SplineEditor": SplineEditor,
-    "CreateShapeMaskOnPath": CreateShapeMaskOnPath
+    "CreateShapeMaskOnPath": CreateShapeMaskOnPath,
+    "WeightScheduleExtend": WeightScheduleExtend
 
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -179,7 +180,8 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "CustomSigmas": "Custom Sigmas",
     "ImagePass": "ImagePass",
     "SplineEditor": "Spline Editor",
-    "CreateShapeMaskOnPath": "Create Shape Mask On Path"
+    "CreateShapeMaskOnPath": "Create Shape Mask On Path",
+    "WeightScheduleExtend": "Weight Schedule Extend"
 }
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS", "WEB_DIRECTORY"]
 
