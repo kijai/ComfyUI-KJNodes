@@ -447,7 +447,8 @@ function createSplineEditor(context, reset=false) {
     svgElement.style['zIndex'] = "2"
     svgElement.style['position'] = "relative"
     context.splineEditor.element.appendChild(svgElement);
-    var pathElements = svgElement.getElementsByTagName('path'); // Get all path elements  
+    var pathElements = svgElement.getElementsByTagName('path'); // Get all path elements
+    updatePath();
  
 }
 function samplePoints(svgPathElement, numSamples) {
