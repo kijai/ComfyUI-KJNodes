@@ -423,7 +423,7 @@ class WeightScheduleExtend:
     FUNCTION = "execute"
     CATEGORY = "KJNodes"
     DESCRIPTION = """
-Converts different value lists/series to another type.  
+Extends, and converts if needed, different value lists/series  
 """
 
     def detect_input_type(self, input_values):
