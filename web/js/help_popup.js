@@ -247,7 +247,7 @@ const create_documentation_stylesheet = () => {
         const transform = new DOMMatrix()
         .scaleSelf(scaleX, scaleY)
         .multiplySelf(ctx.getTransform())
-        .translateSelf(this.size[0] * scaleX, 0)
+        .translateSelf(this.size[0] * scaleX * window.devicePixelRatio, 0)
         .translateSelf(10, -32)
         
         const scale = new DOMMatrix()
