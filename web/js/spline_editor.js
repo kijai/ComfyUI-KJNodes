@@ -175,7 +175,7 @@ app.registerExtension({
                 createSplineEditor(this, true)
               }
             });
-            this.setSize([550, 840])
+            this.setSize([550, 870])
             this.splineEditor.parentEl = document.createElement("div");
             this.splineEditor.parentEl.className = "spline-editor";
             this.splineEditor.parentEl.id = `spline-editor-${this.uuid}`
@@ -184,7 +184,7 @@ app.registerExtension({
             chainCallback(this, "onGraphConfigured", function() {
               console.log('onGraphConfigured');
               createSplineEditor(this)
-              this.setSize([550, 840])
+              this.setSize([550, 870])
               });
 
             //disable context menu on right click
@@ -292,11 +292,15 @@ function createSplineEditor(context, reset=false) {
   const pointsWidget = context.widgets.find(w => w.name === "points_to_sample");
   const pointsStoreWidget = context.widgets.find(w => w.name === "points_store");
   const tensionWidget = context.widgets.find(w => w.name === "tension");
+  const minValueWidget = context.widgets.find(w => w.name === "min_value");
+  const maxValueWidget = context.widgets.find(w => w.name === "max_value");
   //const segmentedWidget = context.widgets.find(w => w.name === "segmented");
 
   var interpolation = interpolationWidget.value
   var tension = tensionWidget.value
   var points_to_sample = pointsWidget.value
+  var rangeMin = minValueWidget.value
+  var rangeMax = maxValueWidget.value
   var pointsLayer = null;
   
   interpolationWidget.callback = () => {
@@ -309,7 +313,10 @@ function createSplineEditor(context, reset=false) {
     updatePath();
   }
 
-  pointsWidget.callback = () => {
+  minValueWidget.callback = () => {
+    updatePath();
+  }
+  maxValueWidget.callback = () => {
     updatePath();
   }
   
@@ -319,6 +326,7 @@ function createSplineEditor(context, reset=false) {
  var h = 512
  var i = 3
  let points = [];
+ 
  if (!reset && pointsStoreWidget.value != "") {
     points = JSON.parse(pointsStoreWidget.value);
  } else {
@@ -426,9 +434,9 @@ function createSplineEditor(context, reset=false) {
         .font(12 + "px sans-serif")
         .text(d => {
           // Normalize y to range 0.0 to 1.0, considering the inverted y-axis
-          var normalizedY = 1.0 - (d.y / h);
-          var normalizedX = (d.x / w);
-          var frame = Math.round((d.x / w) * points_to_sample);
+          let normalizedY = (1.0 - (d.y / h) - 0.0) * (rangeMax - rangeMin) + rangeMin;
+          let normalizedX = (d.x / w);
+          let frame = Math.round((d.x / w) * points_to_sample);
           return `F: ${frame}, X: ${normalizedX.toFixed(2)}, Y: ${normalizedY.toFixed(2)}`;
       })
     .textStyle("orange")
