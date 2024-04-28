@@ -2,7 +2,7 @@ import torch
 import json
 from PIL import Image, ImageDraw
 import numpy as np
-from .utility import pil2tensor
+from ..utility.utility import pil2tensor
 
 class SplineEditor:
 
@@ -307,7 +307,6 @@ Converts different value lists/series to another type.
         import pandas as pd
         input_type = self.detect_input_type(input_values)
 
-        # Convert input_values to a list of floats
         if input_type == 'list of lists':
             float_values = [item for sublist in input_values for item in sublist]
         elif input_type == 'pandas series':

@@ -211,6 +211,10 @@ const create_documentation_stylesheet = () => {
           this.show_doc = !this.show_doc
           docElement.parentNode.removeChild(docElement)
           docElement = null
+          if (contentWrapper) {
+            contentWrapper.remove()
+            contentWrapper = null
+          }
          },
          { signal: this.docCtrl.signal },
          );
@@ -247,7 +251,7 @@ const create_documentation_stylesheet = () => {
         const transform = new DOMMatrix()
         .scaleSelf(scaleX, scaleY)
         .multiplySelf(ctx.getTransform())
-        .translateSelf(this.size[0] * scaleX * window.devicePixelRatio, 0)
+        .translateSelf(this.size[0] * scaleX * Math.max(1.0,window.devicePixelRatio) , 0)
         .translateSelf(10, -32)
         
         const scale = new DOMMatrix()
@@ -300,5 +304,21 @@ const create_documentation_stylesheet = () => {
         return true;
       }
       return r;
+    }
+    const onRem = nodeType.prototype.onRemoved
+
+    nodeType.prototype.onRemoved = function () {
+      const r = onRem ? onRem.apply(this, []) : undefined
+  
+      if (docElement) {
+        docElement.remove()
+        docElement = null
+      }
+  
+      if (contentWrapper) {
+        contentWrapper.remove()
+        contentWrapper = null
+      }
+      return r
     }
 }
