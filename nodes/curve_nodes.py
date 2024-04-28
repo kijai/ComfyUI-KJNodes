@@ -15,6 +15,14 @@ class SplineEditor:
                 "mask_width": ("INT", {"default": 512, "min": 8, "max": 4096, "step": 8}),
                 "mask_height": ("INT", {"default": 512, "min": 8, "max": 4096, "step": 8}),
                 "points_to_sample": ("INT", {"default": 16, "min": 2, "max": 1000, "step": 1}),
+                "sampling_method": (
+                [   
+                    'path',
+                    'time',
+                ],
+                {
+                    "default": 'time'
+                }),
                 "interpolation": (
                 [   
                     'cardinal',
@@ -59,20 +67,26 @@ guaranteed!!
 ## Graphical editor to create values for various   
 ## schedules and/or mask batches.  
 
-Shift + click to add control points.  
-Right click to delete control points.  
+**Shift + click** to add control point at end.
+**Ctrl + click** to add control point (subdivide) between two points.  
+**Right click on a point** to delete it.    
 Note that you can't delete from start/end.  
+  
+Right click on canvas for context menu:  
+These are purely visual options, doesn't affect the output:  
+ - Toggle handles visibility
+ - Display sample points: display the points to be returned.  
 
 **points_to_sample** value sets the number of samples  
 returned from the **drawn spline itself**, this is independent from the  
 actual control points, so the interpolation type matters.  
-
-Changing interpolation type and tension value takes effect on  
-interaction with the graph.  
+sampling_method: 
+ - time: samples along the time axis, used for schedules  
+ - path: samples along the path itself, useful for coordinates  
 
 output types:
  - mask batch  
-        example compatible nodes: anything that takes masks
+        example compatible nodes: anything that takes masks  
  - list of floats
         example compatible nodes: IPAdapter weights  
  - pandas series
@@ -83,7 +97,7 @@ output types:
 """
 
     def splinedata(self, mask_width, mask_height, coordinates, float_output_type, interpolation, 
-                   points_to_sample, points_store, tension, repeat_output, min_value=0.0, max_value=1.0):
+                   points_to_sample, sampling_method, points_store, tension, repeat_output, min_value=0.0, max_value=1.0):
         
         coordinates = json.loads(coordinates)
         for coord in coordinates:
@@ -151,11 +165,8 @@ Grow value is the amount to grow the shape on each frame, creating animated mask
         # Define the number of images in the batch
         coordinates = coordinates.replace("'", '"')
         coordinates = json.loads(coordinates)
-        for coord in coordinates:
-            print(coord)
 
         batch_size = len(coordinates)
-        print(batch_size)
         out = []
         color = "white"
         

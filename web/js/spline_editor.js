@@ -116,7 +116,6 @@ app.registerExtension({
             });
 
             // context menu
-            
             this.contextMenu = document.createElement("div");
             this.contextMenu.id = "context-menu";
             this.contextMenu.style.display = "none";
@@ -148,13 +147,13 @@ app.registerExtension({
             this.menuItem2.textContent = "Display sample points";
             styleMenuItem(this.menuItem2);
 
-            this.menuItem3 = document.createElement("a");
-            this.menuItem3.href = "#";
-            this.menuItem3.id = "menu-item-2";
-            this.menuItem3.textContent = "Switch sampling method";
-            styleMenuItem(this.menuItem3);
+            // this.menuItem3 = document.createElement("a");
+            // this.menuItem3.href = "#";
+            // this.menuItem3.id = "menu-item-2";
+            // this.menuItem3.textContent = "Switch sampling method";
+            // styleMenuItem(this.menuItem3);
 
-            const menuItems = [this.menuItem1, this.menuItem2, this.menuItem3];
+            const menuItems = [this.menuItem1, this.menuItem2];
 
             menuItems.forEach(menuItem => {
             menuItem.addEventListener('mouseover', function() {
@@ -173,7 +172,6 @@ app.registerExtension({
             document.body.appendChild( this.contextMenu);
 
             this.addWidget("button", "New spline", null, () => {
-              
               if (!this.properties || !("points" in this.properties)) {
                 createSplineEditor(this)
                 this.addProperty("points", this.constructor.type, "string");
@@ -183,7 +181,7 @@ app.registerExtension({
               }
             });
             
-            this.setSize([550, 870]);
+            this.setSize([550, 900]);
             this.resizable = false;
             this.splineEditor.parentEl = document.createElement("div");
             this.splineEditor.parentEl.className = "spline-editor";
@@ -191,9 +189,8 @@ app.registerExtension({
             element.appendChild(this.splineEditor.parentEl);
 
             chainCallback(this, "onGraphConfigured", function() {
-              console.log('onGraphConfigured');
               createSplineEditor(this);
-              this.setSize([550, 870]);
+              this.setSize([550, 900]);
               });
               
           }); // onAfterGraphConfigured
@@ -248,51 +245,50 @@ function createSplineEditor(context, reset=false) {
       updatePath();
   });
 
-  context.menuItem3.addEventListener('click', function(e) {
-    e.preventDefault();
-    if (pointSamplingMethod == samplePointsTime) {
-      pointSamplingMethod = samplePointsPath
-    }
-    else {
-    pointSamplingMethod = samplePointsTime
-    }
-    updatePath();
-});
+//   context.menuItem3.addEventListener('click', function(e) {
+//     e.preventDefault();
+//     if (pointSamplingMethod == samplePointsTime) {
+//       pointSamplingMethod = samplePointsPath
+//     }
+//     else {
+//     pointSamplingMethod = samplePointsTime
+//     }
+//     updatePath();
+// });
 
   var drawSamplePoints = false;
-  var pointSamplingMethod = samplePointsTime
+  //var pointSamplingMethod = samplePointsTime
 
   function updatePath() {
-      points_to_sample = pointsWidget.value
-      let coords = pointSamplingMethod(pathElements[0], points_to_sample);
+      let coords = samplePoints(pathElements[0], points_to_sample, samplingMethod);
+
       if (drawSamplePoints) {
-      if (pointsLayer) {
-        // Update the data of the existing points layer
-        pointsLayer.data(coords);
-      } else {
-          // Create the points layer if it doesn't exist
-          pointsLayer = vis.add(pv.Dot)
-              .data(coords)
-              .left(function(d) { return d.x; })
-              .top(function(d) { return d.y; })
-              .radius(5) // Adjust the radius as needed
-              .fillStyle("red") // Change the color as needed
-              .strokeStyle("black") // Change the stroke color as needed
-              .lineWidth(1); // Adjust the line width as needed
+        if (pointsLayer) {
+          // Update the data of the existing points layer
+          pointsLayer.data(coords);
+        } else {
+            // Create the points layer if it doesn't exist
+            pointsLayer = vis.add(pv.Dot)
+                .data(coords)
+                .left(function(d) { return d.x; })
+                .top(function(d) { return d.y; })
+                .radius(5) // Adjust the radius as needed
+                .fillStyle("red") // Change the color as needed
+                .strokeStyle("black") // Change the stroke color as needed
+                .lineWidth(1); // Adjust the line width as needed
           }
-      }
-      else {
+      } else {
           if (pointsLayer) {
-              // Remove the points layer
-              pointsLayer.data([]);
-              vis.render();
+            // Remove the points layer
+            pointsLayer.data([]);
+            vis.render();
           }
       }
       let coordsString = JSON.stringify(coords);
       pointsStoreWidget.value = JSON.stringify(points);
       if (coordWidget) {
         coordWidget.value = coordsString;
-      }
+        }
       vis.render();
   }
   
@@ -306,6 +302,7 @@ function createSplineEditor(context, reset=false) {
   const tensionWidget = context.widgets.find(w => w.name === "tension");
   const minValueWidget = context.widgets.find(w => w.name === "min_value");
   const maxValueWidget = context.widgets.find(w => w.name === "max_value");
+  const samplingMethodWidget = context.widgets.find(w => w.name === "sampling_method");
   //const segmentedWidget = context.widgets.find(w => w.name === "segmented");
 
   var interpolation = interpolationWidget.value
@@ -314,12 +311,16 @@ function createSplineEditor(context, reset=false) {
   var rangeMin = minValueWidget.value
   var rangeMax = maxValueWidget.value
   var pointsLayer = null;
+  var samplingMethod = samplingMethodWidget.value
   
   interpolationWidget.callback = () => {
     interpolation = interpolationWidget.value
     updatePath();
   }
-
+  samplingMethodWidget.callback = () => {
+    samplingMethod = samplingMethodWidget.value
+    updatePath();
+  }
   tensionWidget.callback = () => {
     tension = tensionWidget.value
     updatePath();
@@ -328,7 +329,6 @@ function createSplineEditor(context, reset=false) {
     points_to_sample = pointsWidget.value
     updatePath();
   }
-
   minValueWidget.callback = () => {
     rangeMin = minValueWidget.value
     updatePath();
@@ -376,8 +376,33 @@ function createSplineEditor(context, reset=false) {
   .margin(10)
   .event("mousedown", function() {
     if (pv.event.shiftKey) { // Use pv.event to access the event object
-        i = points.push(this.mouse()) - 1;
+        let scaledMouse = {
+        x: this.mouse().x / app.canvas.ds.scale,
+        y: this.mouse().y / app.canvas.ds.scale
+        };
+        i = points.push(scaledMouse) - 1;
         return this;
+    }
+    else if (pv.event.ctrlKey) {
+       // Capture the clicked location
+       let clickedPoint = {
+        x: this.mouse().x / app.canvas.ds.scale,
+        y: this.mouse().y / app.canvas.ds.scale
+        };
+
+        // Find the two closest points to the clicked location
+        let { point1Index, point2Index } = findClosestPoints(points, clickedPoint);
+
+        // Calculate the midpoint between the two closest points
+        let midpoint = {
+            x: (points[point1Index].x + points[point2Index].x) / 2,
+            y: (points[point1Index].y + points[point2Index].y) / 2
+        };
+
+        // Insert the midpoint into the array
+        points.splice(point2Index, 0, midpoint);
+        i = point2Index;
+        updatePath();
     }
     else if (pv.event.button === 2) {
       context.contextMenu.style.display = 'block';
@@ -388,9 +413,15 @@ function createSplineEditor(context, reset=false) {
 
   vis.add(pv.Rule)
     .data(pv.range(0, 8, .5))
-    .bottom(d =>  d * 64 + 0)
+    .bottom(d =>  d * 64)
     .strokeStyle("gray")
-    .lineWidth(2)
+    .lineWidth(3)
+
+  // vis.add(pv.Rule)
+  //   .data(pv.range(0, points_to_sample, 1))
+  //   .left(d =>  d * 512 / (points_to_sample - 1))
+  //   .strokeStyle("gray")
+  //   .lineWidth(2)
 
   vis.add(pv.Line)
     .data(() => points)
@@ -475,43 +506,49 @@ function createSplineEditor(context, reset=false) {
     context.splineEditor.element.appendChild(svgElement);
     var pathElements = svgElement.getElementsByTagName('path'); // Get all path elements
     updatePath();
- 
-}
-function samplePointsPath(svgPathElement, numSamples) {
-    var pathLength = svgPathElement.getTotalLength();
-    var points = [];
-
-    for (var i = 0; i < numSamples; i++) {
-        // Calculate the distance along the path for the current sample
-        var distance = (pathLength / (numSamples - 1)) * i;
-        console.log(distance)
-
-        // Get the point at the current distance
-        var point = svgPathElement.getPointAtLength(distance);
-
-        // Add the point to the array of points
-        points.push({ x: point.x, y: point.y });
-    }
-    console.log(points);
-    return points;
 }
 
-function samplePointsTime(svgPathElement, numSamples) {
+function samplePoints(svgPathElement, numSamples, samplingMethod) {
   var svgWidth = 512; // Fixed width of the SVG element
   var pathLength = svgPathElement.getTotalLength();
   var points = [];
 
   for (var i = 0; i < numSamples; i++) {
-      // Calculate the x-coordinate for the current sample based on the SVG's width
-      var x = (svgWidth / (numSamples - 1)) * i;
-
-      // Find the point on the path that intersects the vertical line at the calculated x-coordinate
-      var point = findPointAtX(svgPathElement, x, pathLength);
+      if (samplingMethod === "time") {
+        // Calculate the x-coordinate for the current sample based on the SVG's width
+        var x = (svgWidth / (numSamples - 1)) * i;
+        // Find the point on the path that intersects the vertical line at the calculated x-coordinate
+        var point = findPointAtX(svgPathElement, x, pathLength);
+        }
+      else if (samplingMethod === "path") {
+        // Calculate the distance along the path for the current sample
+        var distance = (pathLength / (numSamples - 1)) * i;
+        // Get the point at the current distance
+        var point = svgPathElement.getPointAtLength(distance);
+      }
 
       // Add the point to the array of points
       points.push({ x: point.x, y: point.y });
   }
   return points;
+}
+
+function findClosestPoints(points, clickedPoint) {
+  // Calculate distances from clickedPoint to each point in the array
+  let distances = points.map(point => {
+      let dx = clickedPoint.x - point.x;
+      let dy = clickedPoint.y - point.y;
+      return { index: points.indexOf(point), distance: Math.sqrt(dx * dx + dy * dy) };
+  });
+  // Sort distances and get the indices of the two closest points
+  let sortedDistances = distances.sort((a, b) => a.distance - b.distance);
+  let closestPoint1Index = sortedDistances[0].index;
+  let closestPoint2Index = sortedDistances[1].index;
+   // Ensure point1Index is always the smaller index
+ if (closestPoint1Index > closestPoint2Index) {
+  [closestPoint1Index, closestPoint2Index] = [closestPoint2Index, closestPoint1Index];
+  }
+  return { point1Index: closestPoint1Index, point2Index: closestPoint2Index };
 }
 
 function findPointAtX(svgPathElement, targetX, pathLength) {
