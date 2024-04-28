@@ -93,6 +93,7 @@ NODE_CLASS_MAPPINGS = {
     "MaskOrImageToWeight": MaskOrImageToWeight,
     "WeightScheduleConvert": WeightScheduleConvert,
     "FloatToMask": FloatToMask,
+    "FloatToSigmas": FloatToSigmas,
     #experimental
     "StabilityAPI_SD3": StabilityAPI_SD3,
     "SoundReactive": SoundReactive,
@@ -189,6 +190,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "MaskOrImageToWeight": "Mask Or Image To Weight",
     "WeightScheduleConvert": "Weight Schedule Convert",
     "FloatToMask": "Float To Mask",
+    "FloatToSigmas": "Float To Sigmas",
     "CustomSigmas": "Custom Sigmas",
     "ImagePass": "ImagePass",
     #curve nodes

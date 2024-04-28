@@ -148,23 +148,27 @@ app.registerExtension({
             this.menuItem2.textContent = "Display sample points";
             styleMenuItem(this.menuItem2);
 
-            // Add hover effect to menu items
-            this.menuItem1.addEventListener('mouseover', function() {
-              this.style.backgroundColor = "gray";
+            this.menuItem3 = document.createElement("a");
+            this.menuItem3.href = "#";
+            this.menuItem3.id = "menu-item-2";
+            this.menuItem3.textContent = "Switch sampling method";
+            styleMenuItem(this.menuItem3);
+
+            const menuItems = [this.menuItem1, this.menuItem2, this.menuItem3];
+
+            menuItems.forEach(menuItem => {
+            menuItem.addEventListener('mouseover', function() {
+                this.style.backgroundColor = "gray";
             });
-            this.menuItem1.addEventListener('mouseout', function() {
-              this.style.backgroundColor = "#202020";
+            menuItem.addEventListener('mouseout', function() {
+                this.style.backgroundColor = "#202020";
+            });
             });
 
-            this.menuItem2.addEventListener('mouseover', function() {
-              this.style.backgroundColor = "gray";
+            // Append menu items to the context menu
+            menuItems.forEach(menuItem => {
+            this.contextMenu.appendChild(menuItem);
             });
-            this.menuItem2.addEventListener('mouseout', function() {
-              this.style.backgroundColor = "#202020";
-            });
-
-            this.contextMenu.appendChild(this.menuItem1);
-            this.contextMenu.appendChild(this.menuItem2);
 
             document.body.appendChild( this.contextMenu);
 
@@ -241,15 +245,26 @@ function createSplineEditor(context, reset=false) {
   context.menuItem2.addEventListener('click', function(e) {
       e.preventDefault();
       drawSamplePoints = !drawSamplePoints;
-      
       updatePath();
   });
 
+  context.menuItem3.addEventListener('click', function(e) {
+    e.preventDefault();
+    if (pointSamplingMethod == samplePointsTime) {
+      pointSamplingMethod = samplePointsPath
+    }
+    else {
+    pointSamplingMethod = samplePointsTime
+    }
+    updatePath();
+});
+
   var drawSamplePoints = false;
+  var pointSamplingMethod = samplePointsTime
 
   function updatePath() {
       points_to_sample = pointsWidget.value
-      let coords = samplePoints(pathElements[0], points_to_sample);
+      let coords = pointSamplingMethod(pathElements[0], points_to_sample);
       if (drawSamplePoints) {
       if (pointsLayer) {
         // Update the data of the existing points layer
@@ -315,9 +330,11 @@ function createSplineEditor(context, reset=false) {
   }
 
   minValueWidget.callback = () => {
+    rangeMin = minValueWidget.value
     updatePath();
   }
   maxValueWidget.callback = () => {
+    rangeMax = maxValueWidget.value
     updatePath();
   }
   
@@ -444,7 +461,6 @@ function createSplineEditor(context, reset=false) {
     
         .font(12 + "px sans-serif")
         .text(d => {
-          // Normalize y to range 0.0 to 1.0, considering the inverted y-axis
           let normalizedY = (1.0 - (d.y / h) - 0.0) * (rangeMax - rangeMin) + rangeMin;
           let normalizedX = (d.x / w);
           let frame = Math.round((d.x / w) * points_to_sample);
@@ -461,13 +477,14 @@ function createSplineEditor(context, reset=false) {
     updatePath();
  
 }
-function samplePoints(svgPathElement, numSamples) {
+function samplePointsPath(svgPathElement, numSamples) {
     var pathLength = svgPathElement.getTotalLength();
     var points = [];
 
     for (var i = 0; i < numSamples; i++) {
         // Calculate the distance along the path for the current sample
         var distance = (pathLength / (numSamples - 1)) * i;
+        console.log(distance)
 
         // Get the point at the current distance
         var point = svgPathElement.getPointAtLength(distance);
@@ -475,8 +492,55 @@ function samplePoints(svgPathElement, numSamples) {
         // Add the point to the array of points
         points.push({ x: point.x, y: point.y });
     }
-    //console.log(points);
+    console.log(points);
     return points;
+}
+
+function samplePointsTime(svgPathElement, numSamples) {
+  var svgWidth = 512; // Fixed width of the SVG element
+  var pathLength = svgPathElement.getTotalLength();
+  var points = [];
+
+  for (var i = 0; i < numSamples; i++) {
+      // Calculate the x-coordinate for the current sample based on the SVG's width
+      var x = (svgWidth / (numSamples - 1)) * i;
+
+      // Find the point on the path that intersects the vertical line at the calculated x-coordinate
+      var point = findPointAtX(svgPathElement, x, pathLength);
+
+      // Add the point to the array of points
+      points.push({ x: point.x, y: point.y });
+  }
+  return points;
+}
+
+function findPointAtX(svgPathElement, targetX, pathLength) {
+  let low = 0;
+  let high = pathLength;
+  let bestPoint = svgPathElement.getPointAtLength(0);
+
+  while (low <= high) {
+      let mid = low + (high - low) / 2;
+      let point = svgPathElement.getPointAtLength(mid);
+
+      if (Math.abs(point.x - targetX) < 1) {
+          return point; // The point is close enough to the target
+      }
+
+      if (point.x < targetX) {
+          low = mid + 1;
+      } else {
+          high = mid - 1;
+      }
+
+      // Keep track of the closest point found so far
+      if (Math.abs(point.x - targetX) < Math.abs(bestPoint.x - targetX)) {
+          bestPoint = point;
+      }
+  }
+
+  // Return the closest point found
+  return bestPoint;
 }
 
 //from melmass

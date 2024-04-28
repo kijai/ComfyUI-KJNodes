@@ -34,7 +34,6 @@ class SplineEditor:
                 "float_output_type": (
                 [   
                     'list',
-                    'list of lists',
                     'pandas series',
                     'tensor',
                 ],
@@ -76,8 +75,6 @@ output types:
         example compatible nodes: anything that takes masks
  - list of floats
         example compatible nodes: IPAdapter weights  
- - list of lists  
-        example compatible nodes: unknown
  - pandas series
         example compatible nodes: anything that takes Fizz'  
         nodes Batch Value Schedule  
@@ -92,14 +89,13 @@ output types:
         for coord in coordinates:
             coord['x'] = int(round(coord['x']))
             coord['y'] = int(round(coord['y']))
+            
         normalized_y_values = [
             (1.0 - (point['y'] / 512) - 0.0) * (max_value - min_value) + min_value
             for point in coordinates
         ]
         if float_output_type == 'list':
             out_floats = normalized_y_values * repeat_output
-        elif float_output_type == 'list of lists':
-            out_floats = ([[value] for value in normalized_y_values] * repeat_output),
         elif float_output_type == 'pandas series':
             try:
                 import pandas as pd
@@ -207,7 +203,6 @@ class MaskOrImageToWeight:
                 "output_type": (
                 [   
                     'list',
-                    'list of lists',
                     'pandas series',
                     'tensor',
                 ],
@@ -243,8 +238,6 @@ and returns that as the selected output type.
         # Convert mean_values to the specified output_type
         if output_type == 'list':
             return mean_values,
-        elif output_type == 'list of lists':
-            return [[value] for value in mean_values],
         elif output_type == 'pandas series':
             try:
                 import pandas as pd
@@ -267,7 +260,6 @@ class WeightScheduleConvert:
                 [   
                     'match_input',
                     'list',
-                    'list of lists',
                     'pandas series',
                     'tensor',
                 ],
@@ -298,8 +290,6 @@ Converts different value lists/series to another type.
             return 'pandas series'
         elif isinstance(input_values, torch.Tensor):
             return 'tensor'
-        elif isinstance(input_values, list) and all(isinstance(sub, list) for sub in input_values):
-            return 'list of lists'
         else:
             raise ValueError("Unsupported input type")
 
@@ -307,9 +297,7 @@ Converts different value lists/series to another type.
         import pandas as pd
         input_type = self.detect_input_type(input_values)
 
-        if input_type == 'list of lists':
-            float_values = [item for sublist in input_values for item in sublist]
-        elif input_type == 'pandas series':
+        if input_type == 'pandas series':
             float_values = input_values.tolist()
         elif input_type == 'tensor':
             float_values = input_values
@@ -345,13 +333,13 @@ Converts different value lists/series to another type.
 
         if output_type == 'list':
             return float_values,
-        elif output_type == 'list of lists':
-            return [[value] for value in float_values],
         elif output_type == 'pandas series':
             return pd.Series(float_values),
         elif output_type == 'tensor':
             if input_type == 'pandas series':
-                return torch.tensor(input_values.values, dtype=torch.float32),
+                return torch.tensor(float_values.values, dtype=torch.float32),
+            else:   
+                return torch.tensor(float_values, dtype=torch.float32),
         elif output_type == 'match_input':
             return float_values,
         else:
@@ -408,7 +396,6 @@ class WeightScheduleExtend:
                 [   
                     'match_input',
                     'list',
-                    'list of lists',
                     'pandas series',
                     'tensor',
                 ],
@@ -433,8 +420,6 @@ Extends, and converts if needed, different value lists/series
             return 'pandas series'
         elif isinstance(input_values, torch.Tensor):
             return 'tensor'
-        elif isinstance(input_values, list) and all(isinstance(sub, list) for sub in input_values):
-            return 'list of lists'
         else:
             raise ValueError("Unsupported input type")
 
@@ -445,10 +430,7 @@ Extends, and converts if needed, different value lists/series
         # Convert input_values_2 to the same format as input_values_1 if they do not match
         if not input_type_1 == input_type_2:
             print("Converting input_values_2 to the same format as input_values_1")
-            if input_type_1 == 'list of lists':
-                # Assuming input_values_2 is a flat list, convert it to a list of lists
-                float_values_2 = [[item] for item in input_values_2]
-            elif input_type_1 == 'pandas series':
+            if input_type_1 == 'pandas series':
                 # Convert input_values_2 to a pandas Series
                 float_values_2 = pd.Series(input_values_2)
             elif input_type_1 == 'tensor':
@@ -463,14 +445,33 @@ Extends, and converts if needed, different value lists/series
  
         if output_type == 'list':
             return float_values,
-        elif output_type == 'list of lists':
-            return [[value] for value in float_values],
         elif output_type == 'pandas series':
             return pd.Series(float_values),
         elif output_type == 'tensor':
             if input_type_1 == 'pandas series':
-                return torch.tensor(input_values_1.values, dtype=torch.float32),
+                return torch.tensor(float_values.values, dtype=torch.float32),
+            else:
+                return torch.tensor(float_values, dtype=torch.float32),
         elif output_type == 'match_input':
             return float_values,
         else:
             raise ValueError(f"Unsupported output_type: {output_type}")
+        
+class FloatToSigmas:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required":
+                    {
+                     "float_list": ("FLOAT", {"default": 0.0, "forceInput": True}),
+                     }
+                }
+    RETURN_TYPES = ("SIGMAS",)
+    RETURN_NAMES = ("SIGMAS",)
+    CATEGORY = "KJNodes/noise"
+    FUNCTION = "customsigmas"
+    DESCRIPTION = """
+Creates a sigmas tensor from list of float values.  
+
+"""
+    def customsigmas(self, float_list):
+        return torch.tensor(float_list, dtype=torch.float32),
