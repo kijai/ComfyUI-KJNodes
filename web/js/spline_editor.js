@@ -371,11 +371,6 @@ function createSplineEditor(context, reset=false) {
       context.contextMenu.style.top = `${pv.event.clientY}px`;
     }
     })
-  .event("mouseup", function() {
-    if (this.pathElements !== null) {
-      updatePath();
-    }
-  });
 
   vis.add(pv.Rule)
     .data(pv.range(0, 8, .5))
@@ -416,6 +411,9 @@ function createSplineEditor(context, reset=false) {
         return this;
     })
     .event("dragend", function() {
+      if (this.pathElements !== null) {
+        updatePath();
+      }
         isDragging = false;
     })
     .event("drag", vis)
