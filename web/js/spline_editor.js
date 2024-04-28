@@ -312,6 +312,10 @@ function createSplineEditor(context, reset=false) {
     tension = tensionWidget.value
     updatePath();
   }
+  pointsWidget.callback = () => {
+    points_to_sample = pointsWidget.value
+    updatePath();
+  }
 
   minValueWidget.callback = () => {
     updatePath();
