@@ -221,8 +221,9 @@ const create_documentation_stylesheet = () => {
          
         document.addEventListener('mousemove', function (e) {
           if (!isResizing) return;
-          const newWidth = startWidth + e.clientX - startX;
-          const newHeight = startHeight + e.clientY - startY;
+          const scale = app.canvas.ds.scale;
+          const newWidth = startWidth + (e.clientX - startX) / scale;
+          const newHeight = startHeight + (e.clientY - startY) / scale;;
           docElement.style.width = `${newWidth}px`;
           docElement.style.height = `${newHeight}px`;
          },

@@ -103,6 +103,7 @@ app.registerExtension({
     async beforeRegisterNodeDef(nodeType, nodeData) {
         if (nodeData?.name === 'SplineEditor') {
           chainCallback(nodeType.prototype, "onNodeCreated", function () {
+            
             hideWidgetForGood(this, this.widgets.find(w => w.name === "coordinates"))
 
             var element = document.createElement("div");
@@ -146,6 +147,7 @@ app.registerExtension({
             this.menuItem2.id = "menu-item-2";
             this.menuItem2.textContent = "Display sample points";
             styleMenuItem(this.menuItem2);
+
             // Add hover effect to menu items
             this.menuItem1.addEventListener('mouseover', function() {
               this.style.backgroundColor = "gray";
@@ -165,6 +167,7 @@ app.registerExtension({
             this.contextMenu.appendChild(this.menuItem2);
 
             document.body.appendChild( this.contextMenu);
+
             this.addWidget("button", "New spline", null, () => {
               
               if (!this.properties || !("points" in this.properties)) {
@@ -175,7 +178,9 @@ app.registerExtension({
                 createSplineEditor(this, true)
               }
             });
-            this.setSize([550, 870])
+            
+            this.setSize([550, 870]);
+            this.resizable = false;
             this.splineEditor.parentEl = document.createElement("div");
             this.splineEditor.parentEl.className = "spline-editor";
             this.splineEditor.parentEl.id = `spline-editor-${this.uuid}`
@@ -183,18 +188,10 @@ app.registerExtension({
 
             chainCallback(this, "onGraphConfigured", function() {
               console.log('onGraphConfigured');
-              createSplineEditor(this)
-              this.setSize([550, 870])
+              createSplineEditor(this);
+              this.setSize([550, 870]);
               });
-
-            //disable context menu on right click
-            // document.addEventListener('contextmenu', function(e) {
-            //   if (e.button === 2) { // Right mouse button
-            //       e.preventDefault();
-            //       e.stopPropagation();
-            //     }
-            // })
-
+              
           }); // onAfterGraphConfigured
         }//node created
       } //before register
@@ -416,7 +413,19 @@ function createSplineEditor(context, reset=false) {
       }
         isDragging = false;
     })
-    .event("drag", vis)
+    .event("drag", function() {
+      let adjustedX = this.mouse().x / app.canvas.ds.scale; // Adjust the new X position by the inverse of the scale factor
+      let adjustedY = this.mouse().y / app.canvas.ds.scale; // Adjust the new Y position by the inverse of the scale factor
+       // Determine the bounds of the vis.Panel
+      const panelWidth = vis.width();
+      const panelHeight = vis.height();
+
+      // Adjust the new position if it would place the dot outside the bounds of the vis.Panel
+      adjustedX = Math.max(0, Math.min(panelWidth, adjustedX));
+      adjustedY = Math.max(0, Math.min(panelHeight, adjustedY));
+      points[this.index] = { x: adjustedX, y: adjustedY }; // Update the point's position
+      vis.render(); // Re-render the visualization to reflect the new position
+   })
     .event("mouseover", function() {
       hoverIndex = this.index; // Set the hover index to the index of the hovered dot
       vis.render(); // Re-render the visualization
@@ -443,7 +452,6 @@ function createSplineEditor(context, reset=false) {
       })
     .textStyle("orange")
     
-  
     vis.render();
     var svgElement = vis.canvas();
     svgElement.style['zIndex'] = "2"
