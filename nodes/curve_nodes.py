@@ -517,9 +517,9 @@ Experimental, does not function yet as ComfyUI base changes are needed
         c = []
         cond, cond_pooled = clip.encode_from_tokens(clip.tokenize(text), return_pooled=True)
 
-        image_height = latents['samples'].shape[-1] * 8
-        image_width = latents['samples'].shape[-2] * 8
-        plot_image_tensor = self.plot_coordinates_to_tensor(coordinates, image_height, image_width, height)
+        image_height = latents['samples'].shape[-2] * 8
+        image_width = latents['samples'].shape[-1] * 8
+        plot_image_tensor = self.plot_coordinates_to_tensor(coordinates, image_height, image_width, height, text)
 
         for t in conditioning_to:
             n = [t[0], t[1].copy()]
@@ -544,7 +544,7 @@ Experimental, does not function yet as ComfyUI base changes are needed
         
         return (c, plot_image_tensor,)
     
-    def plot_coordinates_to_tensor(self, coordinates, height, width, box_size):
+    def plot_coordinates_to_tensor(self, coordinates, height, width, box_size, prompt):
         import matplotlib
         matplotlib.use('Agg')
         from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
@@ -579,7 +579,7 @@ Experimental, does not function yet as ComfyUI base changes are needed
         ax.set_ylabel('y', color='#999999')
         for text in ax.get_xticklabels() + ax.get_yticklabels():
             text.set_color('#999999')
-        ax.set_title('Gligen positions')
+        ax.set_title('Gligen pos for: ' + prompt)
         ax.set_xlabel('X Coordinate')
         ax.set_ylabel('Y Coordinate')
         ax.legend().remove()
