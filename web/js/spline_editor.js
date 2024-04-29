@@ -181,7 +181,7 @@ app.registerExtension({
               }
             });
             
-            this.setSize([550, 900]);
+            this.setSize([550, 920]);
             this.resizable = false;
             this.splineEditor.parentEl = document.createElement("div");
             this.splineEditor.parentEl.className = "spline-editor";
@@ -190,7 +190,7 @@ app.registerExtension({
 
             chainCallback(this, "onGraphConfigured", function() {
               createSplineEditor(this);
-              this.setSize([550, 900]);
+              this.setSize([550, 920]);
               });
               
           }); // onAfterGraphConfigured

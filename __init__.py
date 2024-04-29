@@ -102,6 +102,7 @@ NODE_CLASS_MAPPINGS = {
     "LoadResAdapterNormalization": LoadResAdapterNormalization,
     "Superprompt": Superprompt,
     "GLIGENTextBoxApplyBatch": GLIGENTextBoxApplyBatch,
+    "GLIGENTextBoxApplyBatchCoords": GLIGENTextBoxApplyBatchCoords,
     "Intrinsic_lora_sampling": Intrinsic_lora_sampling,
 
 }
