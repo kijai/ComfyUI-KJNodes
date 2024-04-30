@@ -22,7 +22,7 @@ import comfy.sample
 import folder_paths
 from ..utility.utility import tensor2pil, pil2tensor
 
-script_directory = os.path.dirname(os.path.abspath(__file__))
+script_directory = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 folder_paths.add_model_folder_path("kjnodes_fonts", os.path.join(script_directory, "fonts"))
 
 class AnyType(str):

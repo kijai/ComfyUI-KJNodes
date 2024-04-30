@@ -56,7 +56,7 @@ class SplineEditor:
         }
 
     RETURN_TYPES = ("MASK", "STRING", "FLOAT", "INT")
-    RETURN_NAMES = ("mask", "string", "float", "count")
+    RETURN_NAMES = ("mask", "coord_str", "float", "count")
     FUNCTION = "splinedata"
     CATEGORY = "KJNodes/experimental"
     DESCRIPTION = """
