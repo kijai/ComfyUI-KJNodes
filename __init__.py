@@ -175,7 +175,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "ImageTransformByNormalizedAmplitude": "ImageTransformByNormalizedAmplitude",
     "GetLatentsFromBatchIndexed": "GetLatentsFromBatchIndexed",
     "StringConstant": "StringConstant",
-    "GLIGENTextBoxApplyBatch": "GLIGENTextBoxApplyBatch",
+    "GLIGENTextBoxApplyBatch": "GLIGENTextBoxApplyBatch (deprecated)",
     "CondPassThrough": "CondPassThrough",
     "ImageUpscaleWithModelBatched": "ImageUpscaleWithModelBatched",
     "ScaleBatchPromptSchedule": "ScaleBatchPromptSchedule",

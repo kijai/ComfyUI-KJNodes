@@ -2545,7 +2545,7 @@ class GLIGENTextBoxApplyBatch:
     FUNCTION = "append"
     CATEGORY = "KJNodes/experimental"
     DESCRIPTION = """
-Experimental, does not function yet as ComfyUI base changes are needed
+Experimental, deprecated, check the GLIGENTextBoxApplyBatchCoords instead.
 """
 
     def append(self, latents, conditioning_to, clip, gligen_textbox_model, text, width, height, coordinates, interpolation):
@@ -2580,12 +2580,10 @@ Experimental, does not function yet as ComfyUI base changes are needed
             # Concatenate prev and position_params_batch, ensuring both are lists of lists
             # and each sublist corresponds to a batch item
             combined_position_params = [prev_item + batch_item for prev_item, batch_item in zip(prev, position_params_batch)]
-            n[1]['gligen'] = ("position", gligen_textbox_model, combined_position_params)
+            n[1]['gligen'] = ("position_batched", gligen_textbox_model, combined_position_params)
             c.append(n)
         
         return (c, plot_image_tensor,)
-
-
 
 folder_paths.add_model_folder_path("intristic_loras", os.path.join(script_directory, "intristic_loras"))
 

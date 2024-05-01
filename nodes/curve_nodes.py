@@ -497,38 +497,61 @@ class GLIGENTextBoxApplyBatchCoords:
                               "gligen_textbox_model": ("GLIGEN", ),
                               "coordinates": ("STRING", {"forceInput": True}),
                               "text": ("STRING", {"multiline": True}),
-                              "width": ("INT", {"default": 64, "min": 8, "max": 4096, "step": 8}),
-                              "height": ("INT", {"default": 64, "min": 8, "max": 4096, "step": 8}),
+                              "width": ("INT", {"default": 128, "min": 8, "max": 4096, "step": 8}),
+                              "height": ("INT", {"default": 128, "min": 8, "max": 4096, "step": 8}),
                             },
+                "optional": {"size_multiplier": ("FLOAT", {"default": [1.0], "forceInput": True})},
                 }
     RETURN_TYPES = ("CONDITIONING", "IMAGE", )
+    RETURN_NAMES = ("conditioning", "coord_preview", )
     FUNCTION = "append"
     CATEGORY = "KJNodes/experimental"
     DESCRIPTION = """
-Experimental, does not function yet as ComfyUI base changes are needed
+This node allows scheduling GLIGEN text box positions in a batch,  
+to be used with AnimateDiff-Evolved. Intended to pair with the  
+Spline Editor -node.  
+
+GLIGEN model can be downloaded through the Manage's "Install Models" menu.  
+Or directly from here:  
+https://huggingface.co/comfyanonymous/GLIGEN_pruned_safetensors/tree/main  
+  
+Inputs:  
+- **latents** input is used to calculate batch size  
+- **clip** is your standard text encoder, use same as for the main prompt  
+- **gligen_textbox_model** connects to GLIGEN Loader  
+- **coordinates** takes a json string of points, directly compatible  
+with the spline editor node.
+- **text** is the part of the prompt to set position for  
+- **width** and **height** are the size of the GLIGEN bounding box  
+  
+Outputs:
+- **conditioning** goes between to clip text encode and the sampler  
+- **coord_preview** is an optional preview of the coordinates and  
+bounding boxes.
+
 """
 
-    def append(self, latents, coordinates, conditioning_to, clip, gligen_textbox_model, text, width, height):
+    def append(self, latents, coordinates, conditioning_to, clip, gligen_textbox_model, text, width, height, size_multiplier=[1.0]):
         coordinates = json.loads(coordinates.replace("'", '"'))
         coordinates = [(coord['x'], coord['y']) for coord in coordinates]
 
         batch_size = sum(tensor.size(0) for tensor in latents.values())
-        assert len(coordinates) == batch_size, "The number of coordinates does not match the number of latents"
-        c = []
-        cond, cond_pooled = clip.encode_from_tokens(clip.tokenize(text), return_pooled=True)
+        if len(coordinates) != batch_size:
+            print("GLIGENTextBoxApplyBatchCoords WARNING: The number of coordinates does not match the number of latents")
 
-        image_height = latents['samples'].shape[-2] * 8
-        image_width = latents['samples'].shape[-1] * 8
-        plot_image_tensor = self.plot_coordinates_to_tensor(coordinates, image_height, image_width, height, text)
+        c = []
+        _, cond_pooled = clip.encode_from_tokens(clip.tokenize(text), return_pooled=True)
 
         for t in conditioning_to:
             n = [t[0], t[1].copy()]
             
             position_params_batch = [[] for _ in range(batch_size)]  # Initialize a list of empty lists for each batch item
-            
+            if len(size_multiplier) != batch_size:
+                size_multiplier = size_multiplier * (batch_size // len(size_multiplier)) + size_multiplier[:batch_size % len(size_multiplier)]
+
             for i in range(batch_size):
-                x_position, y_position = coordinates[i] 
-                position_param = (cond_pooled, height // 8, width // 8, y_position // 8, x_position // 8)
+                x_position, y_position = coordinates[i]
+                position_param = (cond_pooled, int((height // 8) * size_multiplier[i]), int((width // 8) * size_multiplier[i]), y_position // 8, x_position // 8)
                 position_params_batch[i].append(position_param)  # Append position_param to the correct sublist
 
             prev = []
@@ -541,35 +564,41 @@ Experimental, does not function yet as ComfyUI base changes are needed
             combined_position_params = [prev_item + batch_item for prev_item, batch_item in zip(prev, position_params_batch)]
             n[1]['gligen'] = ("position_batched", gligen_textbox_model, combined_position_params)
             c.append(n)
+
+        image_height = latents['samples'].shape[-2] * 8
+        image_width = latents['samples'].shape[-1] * 8
+        plot_image_tensor = self.plot_coordinates_to_tensor(coordinates, image_height, image_width, height, size_multiplier, text)
         
         return (c, plot_image_tensor,)
     
-    def plot_coordinates_to_tensor(self, coordinates, height, width, box_size, prompt):
+    def plot_coordinates_to_tensor(self, coordinates, height, width, bbox_height, size_multiplier, prompt):
         import matplotlib
         matplotlib.use('Agg')
         from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 
-        # Convert coordinates to separate x and y lists
-        #x_coords, y_coords = zip(*coordinates)
-
         fig, ax = matplotlib.pyplot.subplots(figsize=(width/100, height/100), dpi=100)
-        #ax.scatter(x_coords, y_coords, color='yellow', label='_nolegend_')
 
+        cmap = matplotlib.pyplot.get_cmap('rainbow')
         # Draw a box at each coordinate
-        for x, y in coordinates:
+        for i, ((x, y), size) in enumerate(zip(coordinates, size_multiplier)):
+            color_index = i / (len(coordinates) - 1)
+            color = cmap(color_index)
+            box_size = bbox_height * size
             rect = matplotlib.patches.Rectangle((x - box_size/2, y - box_size/2), box_size, box_size,
-                                    linewidth=1, edgecolor='green', facecolor='none', alpha=0.5)
+                                    linewidth=1, edgecolor=color, facecolor='none', alpha=0.5)
             ax.add_patch(rect)
 
-         # Draw arrows from one point to another to indicate direction
+        # Draw arrows from one point to another to indicate direction
         for i in range(len(coordinates) - 1):
+            color_index = i / (len(coordinates) - 1)
+            color = cmap(color_index)
             x1, y1 = coordinates[i]
             x2, y2 = coordinates[i + 1]
             ax.annotate("", xy=(x2, y2), xytext=(x1, y1),
                         arrowprops=dict(arrowstyle="->",
                                         linestyle="-",
                                         lw=1,
-                                        color='orange',
+                                        color=color,
                                         mutation_scale=10))
         matplotlib.pyplot.rcParams['text.color'] = '#999999'
         fig.patch.set_facecolor('#353535')
