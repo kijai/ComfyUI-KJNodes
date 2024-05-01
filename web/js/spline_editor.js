@@ -147,13 +147,13 @@ app.registerExtension({
             this.menuItem2.textContent = "Display sample points";
             styleMenuItem(this.menuItem2);
 
-            // this.menuItem3 = document.createElement("a");
-            // this.menuItem3.href = "#";
-            // this.menuItem3.id = "menu-item-2";
-            // this.menuItem3.textContent = "Switch sampling method";
-            // styleMenuItem(this.menuItem3);
+            this.menuItem3 = document.createElement("a");
+            this.menuItem3.href = "#";
+            this.menuItem3.id = "menu-item-2";
+            this.menuItem3.textContent = "Switch point shape";
+            styleMenuItem(this.menuItem3);
 
-            const menuItems = [this.menuItem1, this.menuItem2];
+            const menuItems = [this.menuItem1, this.menuItem2, this.menuItem3];
 
             menuItems.forEach(menuItem => {
             menuItem.addEventListener('mouseover', function() {
@@ -190,7 +190,6 @@ app.registerExtension({
 
             chainCallback(this, "onGraphConfigured", function() {
               createSplineEditor(this);
-              this.setSize([550, 920]);
               });
               
           }); // onAfterGraphConfigured
@@ -245,22 +244,22 @@ function createSplineEditor(context, reset=false) {
       updatePath();
   });
 
-//   context.menuItem3.addEventListener('click', function(e) {
-//     e.preventDefault();
-//     if (pointSamplingMethod == samplePointsTime) {
-//       pointSamplingMethod = samplePointsPath
-//     }
-//     else {
-//     pointSamplingMethod = samplePointsTime
-//     }
-//     updatePath();
-// });
-
+  context.menuItem3.addEventListener('click', function(e) {
+    e.preventDefault();
+    if (dotShape == "circle"){
+      dotShape = "triangle"
+    }
+    else {
+      dotShape = "circle"
+    }
+    console.log(dotShape)
+    updatePath();
+});
+  var dotShape = "circle";
   var drawSamplePoints = false;
-  //var pointSamplingMethod = samplePointsTime
 
   function updatePath() {
-      let coords = samplePoints(pathElements[0], points_to_sample, samplingMethod);
+      let coords = samplePoints(pathElements[0], points_to_sample, samplingMethod, w);
 
       if (drawSamplePoints) {
         if (pointsLayer) {
@@ -303,6 +302,8 @@ function createSplineEditor(context, reset=false) {
   const minValueWidget = context.widgets.find(w => w.name === "min_value");
   const maxValueWidget = context.widgets.find(w => w.name === "max_value");
   const samplingMethodWidget = context.widgets.find(w => w.name === "sampling_method");
+  const widthWidget = context.widgets.find(w => w.name === "mask_width");
+  const heightWidget = context.widgets.find(w => w.name === "mask_height");
   //const segmentedWidget = context.widgets.find(w => w.name === "segmented");
 
   var interpolation = interpolationWidget.value
@@ -337,12 +338,26 @@ function createSplineEditor(context, reset=false) {
     rangeMax = maxValueWidget.value
     updatePath();
   }
+  widthWidget.callback = () => {
+    w = widthWidget.value
+    vis.width(w)
+    context.setSize([w + 45, context.size[1]]);
+    updatePath();
+  }
+  heightWidget.callback = () => {
+    h = heightWidget.value
+    vis.height(h)
+    context.setSize([context.size[0], h + 410]);
+    updatePath();
+  }
   
  // Initialize or reset points array
- var drawHandles = false
- var w = 512
- var h = 512
- var i = 3
+ var drawHandles = false;
+ var hoverIndex = -1;
+ var isDragging = false;
+ var w = widthWidget.value;
+ var h = heightWidget.value;
+ var i = 3;
  let points = [];
  
  if (!reset && pointsStoreWidget.value != "") {
@@ -408,12 +423,12 @@ function createSplineEditor(context, reset=false) {
       context.contextMenu.style.display = 'block';
       context.contextMenu.style.left = `${pv.event.clientX}px`;
       context.contextMenu.style.top = `${pv.event.clientY}px`;
-    }
+      }
     })
-
+  
   vis.add(pv.Rule)
-    .data(pv.range(0, 8, .5))
-    .bottom(d =>  d * 64)
+    .data(pv.range(0, h, 64))
+    .bottom(d =>  d)
     .strokeStyle("gray")
     .lineWidth(3)
 
@@ -432,15 +447,42 @@ function createSplineEditor(context, reset=false) {
     .segmented(() => false)
     .strokeStyle(pv.Colors.category10().by(pv.index))
     .lineWidth(3)
-
-    var hoverIndex = -1;
-    var isDragging
-  
+    
   vis.add(pv.Dot)
     .data(() => points)
     .left(d => d.x)
     .top(d => d.y)
     .radius(10)
+    .shape(function() {
+      return dotShape;
+   })
+   .angle(function() {
+    const index = this.index;
+    let angle = 0;
+
+    if (dotShape === "triangle") {
+      let dxNext = 0, dyNext = 0;
+      if (index < points.length - 1) {
+        dxNext = points[index + 1].x - points[index].x;
+        dyNext = points[index + 1].y - points[index].y;
+      }
+
+      let dxPrev = 0, dyPrev = 0;
+      if (index > 0) {
+        dxPrev = points[index].x - points[index - 1].x;
+        dyPrev = points[index].y - points[index - 1].y;
+      }
+
+      const dx = (dxNext + dxPrev) / 2;
+      const dy = (dyNext + dyPrev) / 2;
+
+      angle = Math.atan2(dy, dx);
+      angle -= Math.PI / 2;
+      angle = (angle + 2 * Math.PI) % (2 * Math.PI);
+    }
+
+    return angle;
+ })
     .cursor("move")
     .strokeStyle(function() { return i == this.index ? "#ff7f0e" : "#1f77b4"; })
     .fillStyle(function() { return "rgba(100, 100, 100, 0.2)"; })
@@ -498,7 +540,7 @@ function createSplineEditor(context, reset=false) {
           return `F: ${frame}, X: ${normalizedX.toFixed(2)}, Y: ${normalizedY.toFixed(2)}`;
       })
     .textStyle("orange")
-    
+ 
     vis.render();
     var svgElement = vis.canvas();
     svgElement.style['zIndex'] = "2"
@@ -508,8 +550,8 @@ function createSplineEditor(context, reset=false) {
     updatePath();
 }
 
-function samplePoints(svgPathElement, numSamples, samplingMethod) {
-  var svgWidth = 512; // Fixed width of the SVG element
+function samplePoints(svgPathElement, numSamples, samplingMethod, width) {
+  var svgWidth = width; // Fixed width of the SVG element
   var pathLength = svgPathElement.getTotalLength();
   var points = [];
 

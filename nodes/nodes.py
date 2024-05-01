@@ -1393,6 +1393,28 @@ Segments an image or batch of images using CLIPSeg.
         
         return results,
 
+class GetMaskSize:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": {
+            "mask": ("MASK",),
+        }}
+
+    RETURN_TYPES = ("MASK","INT", "INT", )
+    RETURN_NAMES = ("mask", "width", "height",)
+    FUNCTION = "getsize"
+    CATEGORY = "KJNodes/masking"
+    DESCRIPTION = """
+Returns the width and height of the mask,  
+and passes through the mask unchanged.  
+
+"""
+
+    def getsize(self, mask):
+        width = mask.shape[2]
+        height = mask.shape[1]
+        return (mask, width, height,)
+    
 class RoundMask:
     @classmethod
     def INPUT_TYPES(s):

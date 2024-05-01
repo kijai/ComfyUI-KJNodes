@@ -106,7 +106,7 @@ output types:
             coord['y'] = int(round(coord['y']))
             
         normalized_y_values = [
-            (1.0 - (point['y'] / 512) - 0.0) * (max_value - min_value) + min_value
+            (1.0 - (point['y'] / mask_height) - 0.0) * (max_value - min_value) + min_value
             for point in coordinates
         ]
         if float_output_type == 'list':
@@ -539,7 +539,7 @@ Experimental, does not function yet as ComfyUI base changes are needed
             # Concatenate prev and position_params_batch, ensuring both are lists of lists
             # and each sublist corresponds to a batch item
             combined_position_params = [prev_item + batch_item for prev_item, batch_item in zip(prev, position_params_batch)]
-            n[1]['gligen'] = ("position", gligen_textbox_model, combined_position_params)
+            n[1]['gligen'] = ("position_batched", gligen_textbox_model, combined_position_params)
             c.append(n)
         
         return (c, plot_image_tensor,)

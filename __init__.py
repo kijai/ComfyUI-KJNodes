@@ -34,6 +34,7 @@ NODE_CLASS_MAPPINGS = {
     "CreateVoronoiMask": CreateVoronoiMask,
     "CreateMagicMask": CreateMagicMask,
     "RemapMaskRange": RemapMaskRange,
+    "GetMaskSize": GetMaskSize,
     #images
     "ImageBatchMulti": ImageBatchMulti,
     "ColorMatch": ColorMatch,
