@@ -56,6 +56,8 @@ NODE_CLASS_MAPPINGS = {
     "ImagePass": ImagePass,
     "ImagePadForOutpaintMasked": ImagePadForOutpaintMasked,
     "ImageAndMaskPreview": ImageAndMaskPreview,
+    "SplitImageChannels": SplitImageChannels,
+    "MergeImageChannels": MergeImageChannels,
     #batch cropping
     "BatchCropFromMask": BatchCropFromMask,
     "BatchCropFromMaskAdvanced": BatchCropFromMaskAdvanced,
@@ -194,6 +196,8 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "FloatToSigmas": "Float To Sigmas",
     "CustomSigmas": "Custom Sigmas",
     "ImagePass": "ImagePass",
+    "SplitImageChannels": "Split Image Channels",
+    "MergeImageChannels": "Merge Image Channels",
     #curve nodes
     "SplineEditor": "Spline Editor",
     "CreateShapeMaskOnPath": "Create Shape Mask On Path",
