@@ -1095,7 +1095,7 @@ with the **inputcount** and clicking update.
         image = kwargs["image_1"]
         for c in range(1, inputcount):
             new_image = kwargs[f"image_{c + 1}"]
-            image, = image_batch_node.batch(new_image, image)
+            image, = image_batch_node.batch(image, new_image)
         return (image,)
 
 class MaskBatchMulti:
