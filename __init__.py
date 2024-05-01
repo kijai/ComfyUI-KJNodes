@@ -2,6 +2,7 @@ from .nodes.nodes import *
 from .nodes.curve_nodes import *
 from .nodes.batchcrop_nodes import *
 from .nodes.audioscheduler_nodes import *
+from .nodes.image_nodes import *
 NODE_CLASS_MAPPINGS = {
     #constants
     "INTConstant": INTConstant,
@@ -80,6 +81,7 @@ NODE_CLASS_MAPPINGS = {
     "ScaleBatchPromptSchedule": ScaleBatchPromptSchedule,
     "CameraPoseVisualizer": CameraPoseVisualizer,
     "JoinStrings": JoinStrings,
+    "JoinStringMulti": JoinStringMulti,
     "Sleep": Sleep,
     "VRAM_Debug" : VRAM_Debug,
     "SomethingToString" : SomethingToString,

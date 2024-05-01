@@ -217,6 +217,7 @@ class MaskOrImageToWeight:
                     'list',
                     'pandas series',
                     'tensor',
+                    'string'
                 ],
                 {
                 "default": 'list'
@@ -228,7 +229,7 @@ class MaskOrImageToWeight:
             },
 
         }
-    RETURN_TYPES = ("FLOAT",)
+    RETURN_TYPES = ("FLOAT", "STRING",)
     FUNCTION = "execute"
     CATEGORY = "KJNodes"
     DESCRIPTION = """
@@ -249,18 +250,17 @@ and returns that as the selected output type.
                   
         # Convert mean_values to the specified output_type
         if output_type == 'list':
-            return mean_values,
+            out = mean_values,
         elif output_type == 'pandas series':
             try:
                 import pandas as pd
             except:
                 raise Exception("MaskOrImageToWeight: pandas is not installed. Please install pandas to use this output_type")
-            return pd.Series(mean_values),
+            out = pd.Series(mean_values),
         elif output_type == 'tensor':
-            return torch.tensor(mean_values, dtype=torch.float32),
-        else:
-            raise ValueError(f"Unsupported output_type: {output_type}")
-
+            out = torch.tensor(mean_values, dtype=torch.float32),
+        return (out, [str(value) for value in mean_values],)
+    
 class WeightScheduleConvert:
 
     @classmethod
@@ -287,7 +287,7 @@ class WeightScheduleConvert:
              },
              
         }
-    RETURN_TYPES = ("FLOAT",)
+    RETURN_TYPES = ("FLOAT", "STRING",)
     FUNCTION = "execute"
     CATEGORY = "KJNodes"
     DESCRIPTION = """
@@ -344,18 +344,18 @@ Converts different value lists/series to another type.
             float_values = float_values * repeat
 
         if output_type == 'list':
-            return float_values,
+            out = float_values,
         elif output_type == 'pandas series':
-            return pd.Series(float_values),
+            out = pd.Series(float_values),
         elif output_type == 'tensor':
             if input_type == 'pandas series':
-                return torch.tensor(float_values.values, dtype=torch.float32),
+                out = torch.tensor(float_values.values, dtype=torch.float32),
             else:   
-                return torch.tensor(float_values, dtype=torch.float32),
+                out = torch.tensor(float_values, dtype=torch.float32),
         elif output_type == 'match_input':
-            return float_values,
-        else:
-            raise ValueError(f"Unsupported output_type: {output_type}")
+            out = float_values,
+        return (out, [str(value) for value in float_values],)
+        
 
 class FloatToMask:
 
