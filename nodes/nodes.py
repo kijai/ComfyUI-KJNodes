@@ -2195,9 +2195,10 @@ class StableZero123_BatchSchedule:
     CATEGORY = "KJNodes/experimental"
 
     def encode(self, clip_vision, init_image, vae, width, height, batch_size, azimuth_points_string, elevation_points_string, interpolation):
+        from comfy.utils import common_upscale
         output = clip_vision.encode_image(init_image)
         pooled = output.image_embeds.unsqueeze(0)
-        pixels = comfy.utils.common_upscale(init_image.movedim(-1,1), width, height, "bilinear", "center").movedim(1,-1)
+        pixels = common_upscale(init_image.movedim(-1,1), width, height, "bilinear", "center").movedim(1,-1)
         encode_pixels = pixels[:,:,:,:3]
         t = vae.encode(encode_pixels)
 
@@ -2488,9 +2489,10 @@ class LoadResAdapterNormalization:
             raise Exception("Invalid model path")
         else:
             print("ResAdapter: Loading ResAdapter normalization weights")
+            from comfy.utils import load_torch_file
             prefix_to_remove = 'diffusion_model.'
             model_clone = model.clone()
-            norm_state_dict = comfy.utils.load_torch_file(resadapter_full_path)
+            norm_state_dict = load_torch_file(resadapter_full_path)
             new_values = {key[len(prefix_to_remove):]: value for key, value in norm_state_dict.items() if key.startswith(prefix_to_remove)}
             print("ResAdapter: Attempting to add patches with ResAdapter weights")
             try:

@@ -2,7 +2,7 @@ import folder_paths
 import os
 import torch
 import torch.nn.functional as F
-from comfy.utils import ProgressBar
+from comfy.utils import ProgressBar, load_torch_file
 import comfy.sample
 from nodes import CLIPTextEncode
 
@@ -82,7 +82,7 @@ with this node pack.
         #load lora
         model_clone = model.clone()
         lora_path = folder_paths.get_full_path("intristic_loras", lora_name)        
-        lora = comfy.utils.load_torch_file(lora_path, safe_load=True)
+        lora = load_torch_file(lora_path, safe_load=True)
         self.loaded_lora = (lora_path, lora)
 
         model_clone_with_lora = comfy.sd.load_lora_for_models(model_clone, None, lora, 1.0, 0)[0]
