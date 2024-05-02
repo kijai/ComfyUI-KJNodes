@@ -18,6 +18,7 @@ from nodes import MAX_RESOLUTION
 
 import folder_paths
 from ..utility.utility import tensor2pil, pil2tensor
+from comfy.utils import ProgressBar
 
 script_directory = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 folder_paths.add_model_folder_path("kjnodes_fonts", os.path.join(script_directory, "fonts"))
@@ -751,7 +752,7 @@ controls the number of images processed at once.
             black, white = white, black
 
         steps = images.shape[0]
-        pbar = comfy.utils.ProgressBar(steps)
+        pbar = ProgressBar(steps)
         tensors_out = []
         
         for start_idx in range(0, images.shape[0], per_batch):
@@ -1345,15 +1346,15 @@ Segments an image or batch of images using CLIPSeg.
             device = torch.device("cuda")
         else:
             device = torch.device("cpu")
-        dtype = comfy.model_management.unet_dtype()
+        dtype = model_management.unet_dtype()
         model = CLIPSegForImageSegmentation.from_pretrained("CIDAS/clipseg-rd64-refined")
         model.to(dtype)
         model.to(device)
         images = images.to(device)
         processor = CLIPSegProcessor.from_pretrained("CIDAS/clipseg-rd64-refined")
-        pbar = comfy.utils.ProgressBar(images.shape[0])
-        autocast_condition = (dtype != torch.float32) and not comfy.model_management.is_device_mps(device)
-        with torch.autocast(comfy.model_management.get_autocast_device(device), dtype=dtype) if autocast_condition else nullcontext():
+        pbar = ProgressBar(images.shape[0])
+        autocast_condition = (dtype != torch.float32) and not model_management.is_device_mps(device)
+        with torch.autocast(model_management.get_autocast_device(device), dtype=dtype) if autocast_condition else nullcontext():
             for image in images:
                 image = (image* 255).type(torch.uint8)
                 prompt = text
