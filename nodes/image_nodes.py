@@ -649,6 +649,10 @@ class ImagePadForOutpaintMasked:
     CATEGORY = "image"
 
     def expand_image(self, image, left, top, right, bottom, feathering, mask=None):
+        if mask is not None:
+            if torch.allclose(mask, torch.zeros_like(mask)):
+                    print("Warning: The incoming mask is fully black. Handling it as None.")
+                    mask = None
         B, H, W, C = image.size()
 
         new_image = torch.ones(
