@@ -582,8 +582,26 @@ bounding boxes.
         bg_color = '#353535'
         matplotlib.pyplot.rcParams['text.color'] = text_color
         fig, ax = matplotlib.pyplot.subplots(figsize=(width/100, height/100), dpi=100)
+        fig.patch.set_facecolor(bg_color)
+        ax.set_facecolor(bg_color)
+        ax.grid(color=text_color, linestyle='-', linewidth=0.5)
+        ax.set_xlabel('x', color=text_color)
+        ax.set_ylabel('y', color=text_color)
+        for text in ax.get_xticklabels() + ax.get_yticklabels():
+            text.set_color(text_color)
+        ax.set_title('Gligen pos for: ' + prompt)
+        ax.set_xlabel('X Coordinate')
+        ax.set_ylabel('Y Coordinate')
+        #ax.legend().remove()
+        ax.set_xlim(0, width) # Set the x-axis to match the input latent width
+        ax.set_ylim(height, 0) # Set the y-axis to match the input latent height, with (0,0) at top-left
+        # Adjust the margins of the subplot
+        matplotlib.pyplot.subplots_adjust(left=0.08, right=0.95, bottom=0.05, top=0.95, wspace=0.2, hspace=0.2)
 
         cmap = matplotlib.pyplot.get_cmap('rainbow')
+        image_batch = []
+        canvas = FigureCanvas(fig)
+        width, height = fig.get_size_inches() * fig.get_dpi()
         # Draw a box at each coordinate
         for i, ((x, y), size) in enumerate(zip(coordinates, size_multiplier)):
             color_index = i / (len(coordinates) - 1)
@@ -603,30 +621,13 @@ bounding boxes.
                                             lw=1,
                                             color=color,
                                             mutation_scale=10))
-        
-        fig.patch.set_facecolor(bg_color)
-        ax.set_facecolor(bg_color)
-        ax.grid(color=text_color, linestyle='-', linewidth=0.5)
-        ax.set_xlabel('x', color=text_color)
-        ax.set_ylabel('y', color=text_color)
-        for text in ax.get_xticklabels() + ax.get_yticklabels():
-            text.set_color(text_color)
-        ax.set_title('Gligen pos for: ' + prompt)
-        ax.set_xlabel('X Coordinate')
-        ax.set_ylabel('Y Coordinate')
-        ax.legend().remove()
-        ax.set_xlim(0, width) # Set the x-axis to match the input latent width
-        ax.set_ylim(height, 0) # Set the y-axis to match the input latent height, with (0,0) at top-left
-        # Adjust the margins of the subplot
-        matplotlib.pyplot.subplots_adjust(left=0.08, right=0.95, bottom=0.05, top=0.95, wspace=0.2, hspace=0.2)
-        canvas = FigureCanvas(fig)
-        canvas.draw()
+            canvas.draw()
+            image_np = np.frombuffer(canvas.tostring_rgb(), dtype='uint8').reshape(int(height), int(width), 3).copy()
+            image_tensor = torch.from_numpy(image_np).float() / 255.0
+            image_tensor = image_tensor.unsqueeze(0)
+            image_batch.append(image_tensor)
+            
         matplotlib.pyplot.close(fig)
+        image_batch_tensor = torch.cat(image_batch, dim=0)
 
-        width, height = fig.get_size_inches() * fig.get_dpi()        
-
-        image_np = np.frombuffer(canvas.tostring_rgb(), dtype='uint8').reshape(int(height), int(width), 3)
-        image_tensor = torch.from_numpy(image_np).float() / 255.0
-        image_tensor = image_tensor.unsqueeze(0)
-
-        return image_tensor
+        return image_batch_tensor
