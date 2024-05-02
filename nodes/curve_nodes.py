@@ -290,7 +290,7 @@ class WeightScheduleConvert:
              },
              
         }
-    RETURN_TYPES = ("FLOAT", "STRING",)
+    RETURN_TYPES = ("FLOAT", "STRING", "INT",)
     FUNCTION = "execute"
     CATEGORY = "KJNodes"
     DESCRIPTION = """
@@ -357,7 +357,7 @@ Converts different value lists/series to another type.
                 out = torch.tensor(float_values, dtype=torch.float32),
         elif output_type == 'match_input':
             out = float_values,
-        return (out, [str(value) for value in float_values],)
+        return (out, [str(value) for value in float_values], [int(value) for value in float_values])
         
 
 class FloatToMask:
