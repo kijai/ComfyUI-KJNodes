@@ -697,10 +697,10 @@ class ImagePadForOutpaintMasked:
                         t[:, top + i, left + j] = v * v
         
         if mask is None:
-            mask = new_mask
-            mask[:, top:top + H, left:left + W] = t
-
-        return (new_image, mask,)
+            new_mask[:, top:top + H, left:left + W] = t
+            return (new_image, new_mask,)
+        else:
+            return (new_image, mask,)
     
 class ImageAndMaskPreview(SaveImage):
     def __init__(self):
