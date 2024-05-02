@@ -636,7 +636,7 @@ class ImagePadForOutpaintMasked:
                 "top": ("INT", {"default": 0, "min": 0, "max": MAX_RESOLUTION, "step": 8}),
                 "right": ("INT", {"default": 0, "min": 0, "max": MAX_RESOLUTION, "step": 8}),
                 "bottom": ("INT", {"default": 0, "min": 0, "max": MAX_RESOLUTION, "step": 8}),
-                "feathering": ("INT", {"default": 40, "min": 0, "max": MAX_RESOLUTION, "step": 1}),
+                "feathering": ("INT", {"default": 0, "min": 0, "max": MAX_RESOLUTION, "step": 1}),
             },
             "optional": {
                 "mask": ("MASK",),
@@ -697,9 +697,8 @@ class ImagePadForOutpaintMasked:
                         t[:, top + i, left + j] = v * v
         
         if mask is None:
-            mask = new_mask.squeeze(0)
+            mask = new_mask
             mask[:, top:top + H, left:left + W] = t
-            #mask = mask.unsqueeze(0)
 
         return (new_image, mask,)
     
