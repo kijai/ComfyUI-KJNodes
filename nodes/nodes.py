@@ -14,9 +14,8 @@ import os
 import io
 
 import model_management
-from nodes import MAX_RESOLUTION, CLIPTextEncode
+from nodes import MAX_RESOLUTION
 
-import comfy.sample
 import folder_paths
 from ..utility.utility import tensor2pil, pil2tensor
 
@@ -178,12 +177,7 @@ class CreateFluidMask:
         return (torch.cat(out, dim=0),torch.cat(masks, dim=0),)
 
 class CreateAudioMask:
-    def __init__(self):
-        try:
-            import librosa
-            self.librosa = librosa
-        except ImportError:
-            print("Can not import librosa. Install it with 'pip install librosa'")
+       
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "createaudiomask"
     CATEGORY = "KJNodes/deprecated"
@@ -202,14 +196,17 @@ class CreateAudioMask:
     } 
 
     def createaudiomask(self, frames, width, height, invert, audio_path, scale):
-             # Define the number of images in the batch
+        try:
+            import librosa
+        except ImportError:
+            raise Exception("Can not import librosa. Install it with 'pip install librosa'")
         batch_size = frames
         out = []
         masks = []
         if audio_path == "audio.wav": #I don't know why relative path won't work otherwise...
             audio_path = os.path.join(script_directory, audio_path)
-        audio, sr = self.librosa.load(audio_path)
-        spectrogram = np.abs(self.librosa.stft(audio))
+        audio, sr = librosa.load(audio_path)
+        spectrogram = np.abs(librosa.stft(audio))
         
         for i in range(batch_size):
            image = Image.new("RGB", (width, height), "black")
@@ -2432,265 +2429,6 @@ https://huggingface.co/stabilityai/sv3d
 
         latent = torch.zeros([batch_size, 4, height // 8, width // 8])
         return (final_positive, final_negative, {"samples": latent})
-    
-
-
-def parse_coordinates(coordinates_str):
-    coordinates = {}
-    pattern = r'(\d+):\((\d+),(\d+)\)'
-    matches = re.findall(pattern, coordinates_str)
-    for match in matches:
-        index, x, y = map(int, match)
-        coordinates[index] = (x, y)
-    return coordinates
-
-def interpolate_coordinates(coordinates_dict, batch_size):
-    sorted_coords = sorted(coordinates_dict.items())
-    interpolated = {}
-
-    for i, ((index1, (x1, y1)), (index2, (x2, y2))) in enumerate(zip(sorted_coords, sorted_coords[1:])):
-        distance = index2 - index1
-        x_step = (x2 - x1) / distance
-        y_step = (y2 - y1) / distance
-
-        for j in range(distance):
-            interpolated_x = round(x1 + j * x_step)
-            interpolated_y = round(y1 + j * y_step)
-            interpolated[index1 + j] = (interpolated_x, interpolated_y)
-    interpolated[sorted_coords[-1][0]] = sorted_coords[-1][1]
-
-    # Ensure we have coordinates for all indices in the batch
-    last_index, last_coords = sorted_coords[-1]
-    for i in range(last_index + 1, batch_size):
-        interpolated[i] = last_coords
-
-    return interpolated
-
-def interpolate_coordinates_with_curves(coordinates_dict, batch_size):
-    from scipy.interpolate import CubicSpline
-    sorted_coords = sorted(coordinates_dict.items())
-    x_coords, y_coords = zip(*[coord for index, coord in sorted_coords])
-
-    # Create the spline curve functions
-    indices = np.array([index for index, coord in sorted_coords])
-    cs_x = CubicSpline(indices, x_coords)
-    cs_y = CubicSpline(indices, y_coords)
-
-    # Generate interpolated coordinates using the spline functions
-    interpolated_indices = np.arange(0, batch_size)
-    interpolated_x = cs_x(interpolated_indices)
-    interpolated_y = cs_y(interpolated_indices)
-
-    # Round the interpolated coordinates and create the dictionary
-    interpolated = {i: (round(x), round(y)) for i, (x, y) in enumerate(zip(interpolated_x, interpolated_y))}
-    return interpolated
-
-def plot_to_tensor(coordinates_dict, interpolated_dict, height, width, box_size):
-    from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
-    import matplotlib.patches as patches
-
-    original_x, original_y = zip(*coordinates_dict.values())
-    interpolated_x, interpolated_y = zip(*interpolated_dict.values())
-
-    fig, ax = plt.subplots(figsize=(width/100, height/100), dpi=100)
-    ax.scatter(original_x, original_y, color='blue', label='Original Points')
-    ax.scatter(interpolated_x, interpolated_y, color='red', alpha=0.5, label='Interpolated Points')
-    ax.plot(interpolated_x, interpolated_y, color='grey', linestyle='--', linewidth=0.5)
-    # Draw a box at each interpolated coordinate
-    for x, y in interpolated_dict.values():
-        rect = patches.Rectangle((x - box_size/2, y - box_size/2), box_size, box_size,
-                                 linewidth=1, edgecolor='green', facecolor='none')
-        ax.add_patch(rect)
-    ax.set_title('Interpolated Coordinates')
-    ax.set_xlabel('X Coordinate')
-    ax.set_ylabel('Y Coordinate')
-    ax.legend()
-    ax.set_xlim(0, width)  # Set the x-axis to match the input latent width
-    ax.set_ylim(height, 0)  # Set the y-axis to match the input latent height, with (0,0) at top-left
-
-    canvas = FigureCanvas(fig)
-    canvas.draw()
-
-    width, height = fig.get_size_inches() * fig.get_dpi()
-    image_np = np.frombuffer(canvas.tostring_rgb(), dtype='uint8').reshape(int(height), int(width), 3)
-
-    image_tensor = torch.from_numpy(image_np).float() / 255.0
-    image_tensor = image_tensor.unsqueeze(0)
-
-    plt.close(fig)
-
-    return image_tensor
-
-class GLIGENTextBoxApplyBatch:
-    @classmethod
-    def INPUT_TYPES(s):
-        return {"required": {"conditioning_to": ("CONDITIONING", ),
-                              "latents": ("LATENT", ),
-                              "clip": ("CLIP", ),
-                              "gligen_textbox_model": ("GLIGEN", ),
-                              "text": ("STRING", {"multiline": True}),
-                              "width": ("INT", {"default": 64, "min": 8, "max": MAX_RESOLUTION, "step": 8}),
-                              "height": ("INT", {"default": 64, "min": 8, "max": MAX_RESOLUTION, "step": 8}),
-                              "coordinates": ("STRING", {"multiline": True}),
-                              "interpolation": (
-                                [   
-                                    'straight',
-                                    'CubicSpline',
-                                ],
-                                {
-                                "default": 'CubicSpline'
-                                 }),
-                             }}
-    RETURN_TYPES = ("CONDITIONING", "IMAGE",)
-    FUNCTION = "append"
-    CATEGORY = "KJNodes/experimental"
-    DESCRIPTION = """
-Experimental, deprecated, check the GLIGENTextBoxApplyBatchCoords instead.
-"""
-
-    def append(self, latents, conditioning_to, clip, gligen_textbox_model, text, width, height, coordinates, interpolation):
-
-        coordinates_dict = parse_coordinates(coordinates)
-        batch_size = sum(tensor.size(0) for tensor in latents.values())
-        c = []
-        cond, cond_pooled = clip.encode_from_tokens(clip.tokenize(text), return_pooled=True)
-
-        # Interpolate coordinates for the entire batch
-        if interpolation == 'CubicSpline':
-            interpolated_coords = interpolate_coordinates_with_curves(coordinates_dict, batch_size)
-        if interpolation == 'straight':
-            interpolated_coords = interpolate_coordinates(coordinates_dict, batch_size)
-
-        plot_image_tensor = plot_to_tensor(coordinates_dict, interpolated_coords, 512, 512, height)
-        for t in conditioning_to:
-            n = [t[0], t[1].copy()]
-            
-            position_params_batch = [[] for _ in range(batch_size)]  # Initialize a list of empty lists for each batch item
-            
-            for i in range(batch_size):
-                x_position, y_position = interpolated_coords[i] 
-                position_param = (cond_pooled, height // 8, width // 8, y_position // 8, x_position // 8)
-                position_params_batch[i].append(position_param)  # Append position_param to the correct sublist
-                print("x ",x_position, "y ", y_position)
-            prev = []
-            if "gligen" in n[1]:
-                prev = n[1]['gligen'][2]
-            else:
-                prev = [[] for _ in range(batch_size)]
-            # Concatenate prev and position_params_batch, ensuring both are lists of lists
-            # and each sublist corresponds to a batch item
-            combined_position_params = [prev_item + batch_item for prev_item, batch_item in zip(prev, position_params_batch)]
-            n[1]['gligen'] = ("position_batched", gligen_textbox_model, combined_position_params)
-            c.append(n)
-        
-        return (c, plot_image_tensor,)
-
-folder_paths.add_model_folder_path("intristic_loras", os.path.join(script_directory, "intristic_loras"))
-
-class Intrinsic_lora_sampling:
-    def __init__(self):
-        self.loaded_lora = None
-        
-    @classmethod
-    def INPUT_TYPES(s):
-        return {"required": { "model": ("MODEL",),
-                "lora_name": (folder_paths.get_filename_list("intristic_loras"), ),
-                "task": (
-                [   
-                    'depth map',
-                    'surface normals',
-                    'albedo',
-                    'shading',
-                ],
-                {
-                "default": 'depth map'
-                    }),
-                "text": ("STRING", {"multiline": True, "default": ""}),
-                "clip": ("CLIP", ),
-                "vae": ("VAE", ),
-                "per_batch": ("INT", {"default": 16, "min": 1, "max": 4096, "step": 1}),
-        },
-            "optional": {
-            "image": ("IMAGE",),
-            "optional_latent": ("LATENT",),
-            },
-        }
-
-    RETURN_TYPES = ("IMAGE", "LATENT",)
-    FUNCTION = "onestepsample"
-    CATEGORY = "KJNodes"
-    DESCRIPTION = """
-Sampler to use the intrinsic loras:  
-https://github.com/duxiaodan/intrinsic-lora  
-These LoRAs are tiny and thus included  
-with this node pack.
-"""
-
-    def onestepsample(self, model, lora_name, clip, vae, text, task, per_batch, image=None, optional_latent=None):
-        pbar = comfy.utils.ProgressBar(3)
-
-        if optional_latent is None:
-            image_list = []
-            for start_idx in range(0, image.shape[0], per_batch):
-                sub_pixels = vae.vae_encode_crop_pixels(image[start_idx:start_idx+per_batch])
-                image_list.append(vae.encode(sub_pixels[:,:,:,:3]))
-            sample = torch.cat(image_list, dim=0)
-        else:
-            sample = optional_latent["samples"]
-        noise = torch.zeros(sample.size(), dtype=sample.dtype, layout=sample.layout, device="cpu")
-        prompt = task + "," + text
-        positive, = CLIPTextEncode.encode(self, clip, prompt)
-        negative = positive #negative shouldn't do anything in this scenario
-
-        pbar.update(1)
-     
-        #custom model sampling to pass latent through as it is
-        class X0_PassThrough(comfy.model_sampling.EPS):
-            def calculate_denoised(self, sigma, model_output, model_input):
-                return model_output
-            def calculate_input(self, sigma, noise):
-                return noise
-        sampling_base = comfy.model_sampling.ModelSamplingDiscrete
-        sampling_type = X0_PassThrough
-
-        class ModelSamplingAdvanced(sampling_base, sampling_type):
-            pass
-        model_sampling = ModelSamplingAdvanced(model.model.model_config)
-
-        #load lora
-        model_clone = model.clone()
-        lora_path = folder_paths.get_full_path("intristic_loras", lora_name)        
-        lora = comfy.utils.load_torch_file(lora_path, safe_load=True)
-        self.loaded_lora = (lora_path, lora)
-
-        model_clone_with_lora = comfy.sd.load_lora_for_models(model_clone, None, lora, 1.0, 0)[0]
-
-        model_clone_with_lora.add_object_patch("model_sampling", model_sampling)
-
-        samples = {"samples": comfy.sample.sample(model_clone_with_lora, noise, 1, 1.0, "euler", "simple", positive, negative, sample,
-                                  denoise=1.0, disable_noise=True, start_step=0, last_step=1,
-                                  force_full_denoise=True, noise_mask=None, callback=None, disable_pbar=True, seed=None)}
-        pbar.update(1)
-
-        decoded = []
-        for start_idx in range(0, samples["samples"].shape[0], per_batch):
-            decoded.append(vae.decode(samples["samples"][start_idx:start_idx+per_batch]))
-        image_out = torch.cat(decoded, dim=0)
-
-        pbar.update(1)
-
-        if task == 'depth map':
-            imax = image_out.max()
-            imin = image_out.min()
-            image_out = (image_out-imin)/(imax-imin)
-            image_out = torch.max(image_out, dim=3, keepdim=True)[0].repeat(1, 1, 1, 3)
-        elif task == 'surface normals':
-            image_out = F.normalize(image_out * 2 - 1, dim=3) / 2 + 0.5
-            image_out = 1.0 - image_out
-        else:
-            image_out = image_out.clamp(-1.,1.)
-            
-        return (image_out, samples,)
 
 class RemapMaskRange:
     @classmethod
@@ -2842,7 +2580,6 @@ or a .txt file with RealEstate camera intrinsics and coordinates, in a 3D plot.
     def plot(self, pose_file_path, scale, base_xval, zval, use_exact_fx, relative_c2w, use_viewer, cameractrl_poses=None):
         import matplotlib as mpl
         import matplotlib.pyplot as plt
-        import io
         from torchvision.transforms import ToTensor
 
         x_min = -2.0 * scale
@@ -3052,7 +2789,6 @@ If no image is provided, mode is set to text-to-image
             args.disable_metadata = False
         
         import requests
-        from io import BytesIO
         from torchvision import transforms
         
         data = {
@@ -3068,7 +2804,7 @@ If no image is provided, mode is set to text-to-image
             to_pil = transforms.ToPILImage()
             pil_image = to_pil(image)
             # Save the PIL Image to a BytesIO object
-            buffer = BytesIO()
+            buffer = io.BytesIO()
             pil_image.save(buffer, format='PNG')
             buffer.seek(0)
             files = {"image": ("image.png", buffer, "image/png")}
@@ -3105,7 +2841,7 @@ If no image is provided, mode is set to text-to-image
 
         if response.status_code == 200:
             # Convert the response content to a PIL Image
-            image = Image.open(BytesIO(response.content))
+            image = Image.open(io.BytesIO(response.content))
             # Convert the PIL Image to a PyTorch tensor
             transform = transforms.ToTensor()
             tensor_image = transform(image)

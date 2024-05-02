@@ -3,6 +3,7 @@ from .nodes.curve_nodes import *
 from .nodes.batchcrop_nodes import *
 from .nodes.audioscheduler_nodes import *
 from .nodes.image_nodes import *
+from .nodes.intrinsic_lora_nodes import *
 NODE_CLASS_MAPPINGS = {
     #constants
     "INTConstant": INTConstant,
@@ -106,7 +107,6 @@ NODE_CLASS_MAPPINGS = {
     "SV3D_BatchSchedule": SV3D_BatchSchedule,
     "LoadResAdapterNormalization": LoadResAdapterNormalization,
     "Superprompt": Superprompt,
-    "GLIGENTextBoxApplyBatch": GLIGENTextBoxApplyBatch,
     "GLIGENTextBoxApplyBatchCoords": GLIGENTextBoxApplyBatchCoords,
     "Intrinsic_lora_sampling": Intrinsic_lora_sampling,
 
@@ -175,7 +175,6 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "ImageTransformByNormalizedAmplitude": "ImageTransformByNormalizedAmplitude",
     "GetLatentsFromBatchIndexed": "GetLatentsFromBatchIndexed",
     "StringConstant": "StringConstant",
-    "GLIGENTextBoxApplyBatch": "GLIGENTextBoxApplyBatch (deprecated)",
     "CondPassThrough": "CondPassThrough",
     "ImageUpscaleWithModelBatched": "ImageUpscaleWithModelBatched",
     "ScaleBatchPromptSchedule": "ScaleBatchPromptSchedule",

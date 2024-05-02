@@ -660,12 +660,12 @@ class ImagePadForOutpaintMasked:
 
         if mask is None:
             new_mask = torch.ones(
-                (H + top + bottom, W + left + right),
+                (B, H + top + bottom, W + left + right),
                 dtype=torch.float32,
             )
 
             t = torch.zeros(
-            (H, W),
+            (B, H, W),
             dtype=torch.float32
             )
         else:
@@ -673,8 +673,6 @@ class ImagePadForOutpaintMasked:
             mask = F.pad(mask, (left, right, top, bottom), mode='constant', value=0)
             mask = 1 - mask
             t = torch.zeros_like(mask)
-
-        
         
         if feathering > 0 and feathering * 2 < H and feathering * 2 < W:
 
@@ -694,14 +692,14 @@ class ImagePadForOutpaintMasked:
                     v = (feathering - d) / feathering
 
                     if mask is None:
-                        t[i, j] = v * v
+                        t[:, i, j] = v * v
                     else:
                         t[:, top + i, left + j] = v * v
         
         if mask is None:
             mask = new_mask.squeeze(0)
-            mask[top:top + H, left:left + W] = t
-            mask = mask.unsqueeze(0)
+            mask[:, top:top + H, left:left + W] = t
+            #mask = mask.unsqueeze(0)
 
         return (new_image, mask,)
     
