@@ -468,7 +468,7 @@ class GetImageSizeAndCount:
     FUNCTION = "getsize"
     CATEGORY = "KJNodes/masking"
     DESCRIPTION = """
-Returns the width and height of the image,  
+Returns width, height and batch size of the image,  
 and passes it through unchanged.  
 
 """

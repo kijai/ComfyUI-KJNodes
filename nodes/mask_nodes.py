@@ -835,7 +835,7 @@ class GetMaskSizeAndCount:
     FUNCTION = "getsize"
     CATEGORY = "KJNodes/masking"
     DESCRIPTION = """
-Returns the width and height of the mask,  
+Returns the width, height and batch size of the mask,  
 and passes it through unchanged.  
 
 """
