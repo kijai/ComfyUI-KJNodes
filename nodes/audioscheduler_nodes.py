@@ -95,6 +95,27 @@ Creates masks based on the normalized amplitude.
             out.append(mask)
         
         return (torch.cat(out, dim=0),)
+    
+class NormalizedAmplitudeToFloatList:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": {
+                    "normalized_amp": ("NORMALIZED_AMPLITUDE",),
+                     },}
+
+    CATEGORY = "KJNodes/audio"
+    RETURN_TYPES = ("FLOAT",)
+    FUNCTION = "convert"
+    DESCRIPTION = """
+Works as a bridge to the AudioScheduler -nodes:  
+https://github.com/a1lazydog/ComfyUI-AudioScheduler  
+Creates a list of floats from the normalized amplitude.
+"""
+
+    def convert(self, normalized_amp):
+        # Ensure normalized_amp is an array and within the range [0, 1]
+        normalized_amp = np.clip(normalized_amp, 0.0, 1.0)
+        return (normalized_amp.tolist(),)
 
 class OffsetMaskByNormalizedAmplitude:
     @classmethod

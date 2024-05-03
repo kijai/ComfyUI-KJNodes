@@ -89,6 +89,7 @@ NODE_CONFIG = {
     "EmptyLatentImagePresets": {"class": EmptyLatentImagePresets, "name": "Empty Latent Image Presets"},
     #audioscheduler stuff
     "NormalizedAmplitudeToMask": {"class": NormalizedAmplitudeToMask},
+    "NormalizedAmplitudeToFloatList": {"class": NormalizedAmplitudeToFloatList},
     "OffsetMaskByNormalizedAmplitude": {"class": OffsetMaskByNormalizedAmplitude},
     "ImageTransformByNormalizedAmplitude": {"class": ImageTransformByNormalizedAmplitude},
     #curve nodes
