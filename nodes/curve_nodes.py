@@ -287,6 +287,9 @@ class WeightScheduleConvert:
              "optional": {
                 "remap_to_frames": ("INT", {"default": 0}),
                 "interpolation_curve": ("FLOAT", {"forceInput": True}),
+                "remap_values": ("BOOLEAN", {"default": False}),
+                "remap_min": ("FLOAT", {"default": 0.0, "min": -100000, "max": 100000.0, "step": 0.01}),
+                "remap_max": ("FLOAT", {"default": 1.0, "min": -100000, "max": 100000.0, "step": 0.01}),
              },
              
         }
@@ -308,7 +311,7 @@ Converts different value lists/series to another type.
         else:
             raise ValueError("Unsupported input type")
 
-    def execute(self, input_values, output_type, invert, repeat, remap_to_frames=0, interpolation_curve=None):
+    def execute(self, input_values, output_type, invert, repeat, remap_to_frames=0, interpolation_curve=None, remap_min=0.0, remap_max=1.0, remap_values=False):
         import pandas as pd
         input_type = self.detect_input_type(input_values)
 
@@ -345,6 +348,8 @@ Converts different value lists/series to another type.
                 float_values = np.interp(np.linspace(0, 1, remap_to_frames), np.linspace(0, 1, len(normalized_values)), normalized_values).tolist()
        
             float_values = float_values * repeat
+            if remap_values:
+                float_values = self.remap_values(float_values, remap_min, remap_max)
 
         if output_type == 'list':
             out = float_values,
@@ -358,6 +363,20 @@ Converts different value lists/series to another type.
         elif output_type == 'match_input':
             out = float_values,
         return (out, [str(value) for value in float_values], [int(value) for value in float_values])
+    
+    def remap_values(self, values, target_min, target_max):
+        # Determine the current range
+        current_min = min(values)
+        current_max = max(values)
+        current_range = current_max - current_min
+        
+        # Determine the target range
+        target_range = target_max - target_min
+        
+        # Perform the linear interpolation for each value
+        remapped_values = [(value - current_min) / current_range * target_range + target_min for value in values]
+        
+        return remapped_values
         
 
 class FloatToMask:
