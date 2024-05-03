@@ -4,6 +4,98 @@ from PIL import Image, ImageDraw
 import numpy as np
 from ..utility.utility import pil2tensor
 
+def plot_coordinates_to_tensor(coordinates, height, width, bbox_height, bbox_width, size_multiplier, prompt):
+        import matplotlib
+        matplotlib.use('Agg')
+        from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
+        text_color = '#999999'
+        bg_color = '#353535'
+        matplotlib.pyplot.rcParams['text.color'] = text_color
+        fig, ax = matplotlib.pyplot.subplots(figsize=(width/100, height/100), dpi=100)
+        fig.patch.set_facecolor(bg_color)
+        ax.set_facecolor(bg_color)
+        ax.grid(color=text_color, linestyle='-', linewidth=0.5)
+        ax.set_xlabel('x', color=text_color)
+        ax.set_ylabel('y', color=text_color)
+        for text in ax.get_xticklabels() + ax.get_yticklabels():
+            text.set_color(text_color)
+        ax.set_title('position for: ' + prompt)
+        ax.set_xlabel('X Coordinate')
+        ax.set_ylabel('Y Coordinate')
+        #ax.legend().remove()
+        ax.set_xlim(0, width) # Set the x-axis to match the input latent width
+        ax.set_ylim(height, 0) # Set the y-axis to match the input latent height, with (0,0) at top-left
+        # Adjust the margins of the subplot
+        matplotlib.pyplot.subplots_adjust(left=0.08, right=0.95, bottom=0.05, top=0.95, wspace=0.2, hspace=0.2)
+
+        cmap = matplotlib.pyplot.get_cmap('rainbow')
+        image_batch = []
+        canvas = FigureCanvas(fig)
+        width, height = fig.get_size_inches() * fig.get_dpi()
+        # Draw a box at each coordinate
+        for i, ((x, y), size) in enumerate(zip(coordinates, size_multiplier)):
+            color_index = i / (len(coordinates) - 1)
+            color = cmap(color_index)
+            draw_height = bbox_height * size
+            draw_width = bbox_width * size
+            rect = matplotlib.patches.Rectangle((x - draw_width/2, y - draw_height/2), draw_width, draw_height,
+                                            linewidth=1, edgecolor=color, facecolor='none', alpha=0.5)
+            ax.add_patch(rect)
+
+            # Check if there is a next coordinate to draw an arrow to
+            if i < len(coordinates) - 1:
+                x1, y1 = coordinates[i]
+                x2, y2 = coordinates[i + 1]
+                ax.annotate("", xy=(x2, y2), xytext=(x1, y1),
+                            arrowprops=dict(arrowstyle="->",
+                                            linestyle="-",
+                                            lw=1,
+                                            color=color,
+                                            mutation_scale=20))
+            canvas.draw()
+            image_np = np.frombuffer(canvas.tostring_rgb(), dtype='uint8').reshape(int(height), int(width), 3).copy()
+            image_tensor = torch.from_numpy(image_np).float() / 255.0
+            image_tensor = image_tensor.unsqueeze(0)
+            image_batch.append(image_tensor)
+            
+        matplotlib.pyplot.close(fig)
+        image_batch_tensor = torch.cat(image_batch, dim=0)
+
+        return image_batch_tensor
+
+class PlotCoordinates:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": {
+                              "coordinates": ("STRING", {"forceInput": True}),
+                              "text": ("STRING", {"default": 'title', "multiline": False}),
+                              "width": ("INT", {"default": 512, "min": 8, "max": 4096, "step": 8}),
+                              "height": ("INT", {"default": 512, "min": 8, "max": 4096, "step": 8}),
+                              "bbox_width": ("INT", {"default": 128, "min": 8, "max": 4096, "step": 8}),
+                              "bbox_height": ("INT", {"default": 128, "min": 8, "max": 4096, "step": 8}),
+                            },
+                "optional": {"size_multiplier": ("FLOAT", {"default": [1.0], "forceInput": True})},
+                }
+    RETURN_TYPES = ("IMAGE", )
+    RETURN_NAMES = ("images", )
+    FUNCTION = "append"
+    CATEGORY = "KJNodes/experimental"
+    DESCRIPTION = """
+Plots coordinates to sequence of images using Matplotlib.  
+
+"""
+
+    def append(self, coordinates, text, width, height, bbox_width, bbox_height, size_multiplier=[1.0]):
+        coordinates = json.loads(coordinates.replace("'", '"'))
+        coordinates = [(coord['x'], coord['y']) for coord in coordinates]
+        batch_size = len(coordinates)    
+        if len(size_multiplier) != batch_size:
+            size_multiplier = size_multiplier * (batch_size // len(size_multiplier)) + size_multiplier[:batch_size % len(size_multiplier)]
+
+        plot_image_tensor = plot_coordinates_to_tensor(coordinates, height, width, bbox_height, bbox_width, size_multiplier, text)
+        
+        return (plot_image_tensor,)
+    
 class SplineEditor:
 
     @classmethod
@@ -58,7 +150,7 @@ class SplineEditor:
     RETURN_TYPES = ("MASK", "STRING", "FLOAT", "INT")
     RETURN_NAMES = ("mask", "coord_str", "float", "count")
     FUNCTION = "splinedata"
-    CATEGORY = "KJNodes/experimental"
+    CATEGORY = "KJNodes/weights"
     DESCRIPTION = """
 # WORK IN PROGRESS  
 Do not count on this as part of your workflow yet,  
@@ -234,7 +326,7 @@ class MaskOrImageToWeight:
         }
     RETURN_TYPES = ("FLOAT", "STRING",)
     FUNCTION = "execute"
-    CATEGORY = "KJNodes"
+    CATEGORY = "KJNodes/weights"
     DESCRIPTION = """
 Gets the mean values from mask or image batch  
 and returns that as the selected output type.   
@@ -295,7 +387,7 @@ class WeightScheduleConvert:
         }
     RETURN_TYPES = ("FLOAT", "STRING", "INT",)
     FUNCTION = "execute"
-    CATEGORY = "KJNodes"
+    CATEGORY = "KJNodes/weights"
     DESCRIPTION = """
 Converts different value lists/series to another type.  
 """
@@ -392,7 +484,7 @@ class FloatToMask:
         }
     RETURN_TYPES = ("MASK",)
     FUNCTION = "execute"
-    CATEGORY = "KJNodes"
+    CATEGORY = "KJNodes/masking/generate"
     DESCRIPTION = """
 Generates a batch of masks based on the input float values.
 The batch size is determined by the length of the input float values.
@@ -441,7 +533,7 @@ class WeightScheduleExtend:
         }
     RETURN_TYPES = ("FLOAT",)
     FUNCTION = "execute"
-    CATEGORY = "KJNodes"
+    CATEGORY = "KJNodes/weights"
     DESCRIPTION = """
 Extends, and converts if needed, different value lists/series  
 """
@@ -589,65 +681,62 @@ bounding boxes.
 
         image_height = latents['samples'].shape[-2] * 8
         image_width = latents['samples'].shape[-1] * 8
-        plot_image_tensor = self.plot_coordinates_to_tensor(coordinates, image_height, image_width, height, width, size_multiplier, text)
+        plot_image_tensor = plot_coordinates_to_tensor(coordinates, image_height, image_width, height, width, size_multiplier, text)
         
         return (c, plot_image_tensor,)
     
-    def plot_coordinates_to_tensor(self, coordinates, height, width, bbox_height, bbox_width, size_multiplier, prompt):
-        import matplotlib
-        matplotlib.use('Agg')
-        from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
-        text_color = '#999999'
-        bg_color = '#353535'
-        matplotlib.pyplot.rcParams['text.color'] = text_color
-        fig, ax = matplotlib.pyplot.subplots(figsize=(width/100, height/100), dpi=100)
-        fig.patch.set_facecolor(bg_color)
-        ax.set_facecolor(bg_color)
-        ax.grid(color=text_color, linestyle='-', linewidth=0.5)
-        ax.set_xlabel('x', color=text_color)
-        ax.set_ylabel('y', color=text_color)
-        for text in ax.get_xticklabels() + ax.get_yticklabels():
-            text.set_color(text_color)
-        ax.set_title('Gligen pos for: ' + prompt)
-        ax.set_xlabel('X Coordinate')
-        ax.set_ylabel('Y Coordinate')
-        #ax.legend().remove()
-        ax.set_xlim(0, width) # Set the x-axis to match the input latent width
-        ax.set_ylim(height, 0) # Set the y-axis to match the input latent height, with (0,0) at top-left
-        # Adjust the margins of the subplot
-        matplotlib.pyplot.subplots_adjust(left=0.08, right=0.95, bottom=0.05, top=0.95, wspace=0.2, hspace=0.2)
+class CreateInstanceDiffusionTracking:
+    
+    RETURN_TYPES = ("TRACKING",)
+    RETURN_NAMES = ("TRACKING",)
+    FUNCTION = "tracking"
+    CATEGORY = "KJNodes/experimental"
+    DESCRIPTION = """
+Creates tracking data to be used with InstanceDiffusion:  
+https://github.com/logtd/ComfyUI-InstanceDiffusion  
+  
+InstanceDiffusion prompt format:  
+"class_id.class_name": "prompt",  
+for example:  
+"1.head": "((head))",  
+"""
 
-        cmap = matplotlib.pyplot.get_cmap('rainbow')
-        image_batch = []
-        canvas = FigureCanvas(fig)
-        width, height = fig.get_size_inches() * fig.get_dpi()
-        # Draw a box at each coordinate
-        for i, ((x, y), size) in enumerate(zip(coordinates, size_multiplier)):
-            color_index = i / (len(coordinates) - 1)
-            color = cmap(color_index)
-            draw_height = bbox_height * size
-            draw_width = bbox_width * size
-            rect = matplotlib.patches.Rectangle((x - draw_width/2, y - draw_height/2), draw_width, draw_height,
-                                            linewidth=1, edgecolor=color, facecolor='none', alpha=0.5)
-            ax.add_patch(rect)
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "coordinates": ("STRING", {"forceInput": True}),
+                "width": ("INT", {"default": 512,"min": 16, "max": 4096, "step": 1}),
+                "height": ("INT", {"default": 512,"min": 16, "max": 4096, "step": 1}),
+                "bbox_width": ("INT", {"default": 512,"min": 16, "max": 4096, "step": 1}),
+                "bbox_height": ("INT", {"default": 512,"min": 16, "max": 4096, "step": 1}),
 
-            # Check if there is a next coordinate to draw an arrow to
-            if i < len(coordinates) - 1:
-                x1, y1 = coordinates[i]
-                x2, y2 = coordinates[i + 1]
-                ax.annotate("", xy=(x2, y2), xytext=(x1, y1),
-                            arrowprops=dict(arrowstyle="->",
-                                            linestyle="-",
-                                            lw=1,
-                                            color=color,
-                                            mutation_scale=20))
-            canvas.draw()
-            image_np = np.frombuffer(canvas.tostring_rgb(), dtype='uint8').reshape(int(height), int(width), 3).copy()
-            image_tensor = torch.from_numpy(image_np).float() / 255.0
-            image_tensor = image_tensor.unsqueeze(0)
-            image_batch.append(image_tensor)
-            
-        matplotlib.pyplot.close(fig)
-        image_batch_tensor = torch.cat(image_batch, dim=0)
+                "class_name": ("STRING", {"default": "class_id"}),
+                "class_id": ("INT", {"default": 0,"min": 0, "max": 255, "step": 1}),
+        },
+        "optional": {
+            "size_multiplier": ("FLOAT", {"default": [1.0], "forceInput": True}),
+        }
+    } 
 
-        return image_batch_tensor
+    def tracking(self, coordinates, class_name, class_id, width, height, bbox_width, bbox_height, size_multiplier=[1.0]):
+        # Define the number of images in the batch
+        coordinates = coordinates.replace("'", '"')
+        coordinates = json.loads(coordinates)
+
+        tracked = {}
+        tracked[class_name] = {}
+
+        # Initialize a list to hold the coordinates for the current ID
+        id_coordinates = []
+
+        for detection in coordinates:
+            # Append the 'x' and 'y' coordinates along with bbox width/height and frame width/height to the list for the current ID
+            id_coordinates.append([detection['x'], detection['y'], bbox_width, bbox_height, width, height])
+
+        # Assign the list of coordinates to the specified ID within the class_id dictionary
+        tracked[class_name][class_id] = id_coordinates
+
+
+        print(tracked)
+        return (tracked, )

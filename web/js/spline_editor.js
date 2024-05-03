@@ -396,6 +396,7 @@ function createSplineEditor(context, reset=false) {
         y: this.mouse().y / app.canvas.ds.scale
         };
         i = points.push(scaledMouse) - 1;
+        updatePath();
         return this;
     }
     else if (pv.event.ctrlKey) {

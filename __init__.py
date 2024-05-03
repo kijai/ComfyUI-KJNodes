@@ -100,6 +100,7 @@ NODE_CONFIG = {
     "WeightScheduleConvert": {"class": WeightScheduleConvert, "name": "Weight Schedule Convert"},
     "FloatToMask": {"class": FloatToMask, "name": "Float To Mask"},
     "FloatToSigmas": {"class": FloatToSigmas, "name": "Float To Sigmas"},
+    "PlotCoordinates": {"class": PlotCoordinates, "name": "Plot Coordinates"},
     #experimental
     "StabilityAPI_SD3": {"class": StabilityAPI_SD3, "name": "Stability API SD3"},
     "SoundReactive": {"class": SoundReactive, "name": "Sound Reactive"},
@@ -109,6 +110,7 @@ NODE_CONFIG = {
     "Superprompt": {"class": Superprompt, "name": "Superprompt"},
     "GLIGENTextBoxApplyBatchCoords": {"class": GLIGENTextBoxApplyBatchCoords},
     "Intrinsic_lora_sampling": {"class": Intrinsic_lora_sampling, "name": "Intrinsic Lora Sampling"},
+    "CreateInstanceDiffusionTracking": {"class": CreateInstanceDiffusionTracking},
 }
 
 def generate_node_mappings(node_config):
