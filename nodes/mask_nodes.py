@@ -823,7 +823,7 @@ class CreateVoronoiMask:
 
         return (torch.stack(out, dim=0), 1.0 - torch.stack(out, dim=0),)
     
-class GetMaskSize:
+class GetMaskSizeAndCount:
     @classmethod
     def INPUT_TYPES(s):
         return {"required": {
@@ -836,7 +836,7 @@ class GetMaskSize:
     CATEGORY = "KJNodes/masking"
     DESCRIPTION = """
 Returns the width and height of the mask,  
-and passes through the mask unchanged.  
+and passes it through unchanged.  
 
 """
 

@@ -28,7 +28,7 @@ class ImagePass:
         }
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "passthrough"
-    CATEGORY = "KJNodes/misc"
+    CATEGORY = "KJNodes/image"
     DESCRIPTION = """
 Passes the image through without modifying it.
 """
@@ -455,7 +455,33 @@ ComfyUI/custom_nodes/ComfyUI-KJNodes/fonts
             combined_images = processed_batch
         
         return (combined_images,)
+    
+class GetImageSizeAndCount:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": {
+            "image": ("IMAGE",),
+        }}
 
+    RETURN_TYPES = ("IMAGE","INT", "INT", "INT",)
+    RETURN_NAMES = ("image", "width", "height", "count",)
+    FUNCTION = "getsize"
+    CATEGORY = "KJNodes/masking"
+    DESCRIPTION = """
+Returns the width and height of the image,  
+and passes it through unchanged.  
+
+"""
+
+    def getsize(self, image):
+        width = image.shape[2]
+        height = image.shape[1]
+        count = image.shape[0]
+        return {"ui": {
+            "text": [f"{count}x{width}x{height}"]}, 
+            "result": (image, width, height, count) 
+        }
+    
 class ImageBatchRepeatInterleaving:
     
     RETURN_TYPES = ("IMAGE",)
@@ -527,7 +553,7 @@ class ImageNormalize_Neg1_To_1:
                               }}
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "normalize"
-    CATEGORY = "KJNodes/misc"
+    CATEGORY = "KJNodes/image"
     DESCRIPTION = """
 Normalize the images to be in the range [-1, 1]  
 """

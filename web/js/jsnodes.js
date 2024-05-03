@@ -74,18 +74,38 @@ app.registerExtension({
 					}
 					break;
 
-			case "GetMaskSize":
-				const onConnectInput = nodeType.prototype.onConnectInput;
+			case "GetMaskSizeAndCount":
+				const onGetMaskSizeConnectInput = nodeType.prototype.onConnectInput;
 				nodeType.prototype.onConnectInput = function (targetSlot, type, output, originNode, originSlot) {
-					const v = onConnectInput?.(this, arguments);
+					const v = onGetMaskSizeConnectInput?.(this, arguments);
 					targetSlot.outputs[1]["name"] = "width"
 					targetSlot.outputs[2]["name"] = "height" 
 					targetSlot.outputs[3]["name"] = "count"
 					return v;
 				}
-				const onExecuted = nodeType.prototype.onExecuted;
+				const onGetMaskSizeExecuted = nodeType.prototype.onExecuted;
 				nodeType.prototype.onExecuted = function(message) {
-					const r = onExecuted? onExecuted.apply(this,arguments): undefined
+					const r = onGetMaskSizeExecuted? onGetMaskSizeExecuted.apply(this,arguments): undefined
+					let values = message["text"].toString().split('x').map(Number);
+					this.outputs[1]["name"] = values[1] + " width"
+					this.outputs[2]["name"] = values[2] + " height" 
+					this.outputs[3]["name"] = values[0] + " count" 
+					return r
+				}
+				break;
+			
+			case "GetImageSizeAndCount":
+				const onGetImageSizeConnectInput = nodeType.prototype.onConnectInput;
+				nodeType.prototype.onConnectInput = function (targetSlot, type, output, originNode, originSlot) {
+					const v = onGetImageSizeConnectInput?.(this, arguments);
+					targetSlot.outputs[1]["name"] = "width"
+					targetSlot.outputs[2]["name"] = "height" 
+					targetSlot.outputs[3]["name"] = "count"
+					return v;
+				}
+				const onGetImageSizeExecuted = nodeType.prototype.onExecuted;
+				nodeType.prototype.onExecuted = function(message) {
+					const r = onGetImageSizeExecuted? onGetImageSizeExecuted.apply(this,arguments): undefined
 					let values = message["text"].toString().split('x').map(Number);
 					this.outputs[1]["name"] = values[1] + " width"
 					this.outputs[2]["name"] = values[2] + " height" 
