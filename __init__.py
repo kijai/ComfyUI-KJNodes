@@ -101,6 +101,7 @@ NODE_CONFIG = {
     "FloatToMask": {"class": FloatToMask, "name": "Float To Mask"},
     "FloatToSigmas": {"class": FloatToSigmas, "name": "Float To Sigmas"},
     "PlotCoordinates": {"class": PlotCoordinates, "name": "Plot Coordinates"},
+    "InterpolateCoords": {"class": InterpolateCoords, "name": "Interpolate Coords"},
     #experimental
     "StabilityAPI_SD3": {"class": StabilityAPI_SD3, "name": "Stability API SD3"},
     "SoundReactive": {"class": SoundReactive, "name": "Sound Reactive"},

@@ -740,3 +740,68 @@ for example:
 
         print(tracked)
         return (tracked, )
+    
+class InterpolateCoords:
+    
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("coordinates",)
+    FUNCTION = "interpolate"
+    CATEGORY = "KJNodes/experimental"
+    DESCRIPTION = """
+Interpolates coordinates based on a curve.   
+"""
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "coordinates": ("STRING", {"forceInput": True}),
+                "interpolation_curve": ("FLOAT", {"forceInput": True}),
+                
+        },
+    } 
+
+    def interpolate(self, coordinates, interpolation_curve):
+         # Parse the JSON string to get the list of coordinates
+        coordinates = json.loads(coordinates.replace("'", '"'))
+
+        # Convert the list of dictionaries to a list of (x, y) tuples for easier processing
+        coordinates = [(coord['x'], coord['y']) for coord in coordinates]
+
+        # Calculate the total length of the original path
+        path_length = sum(np.linalg.norm(np.array(coordinates[i]) - np.array(coordinates[i-1])) for i in range(1, len(coordinates)))
+
+        # Normalize the interpolation curve
+        normalized_curve = [x / path_length for x in interpolation_curve]
+
+        # Initialize variables for interpolation
+        interpolated_coords = []
+        current_length = 0
+        current_index = 1
+
+        # Iterate over the normalized curve
+        for target_length in normalized_curve:
+            target_length *= path_length # Convert back to the original scale
+            while current_length < target_length and current_index < len(coordinates):
+                segment_length = np.linalg.norm(np.array(coordinates[current_index]) - np.array(coordinates[current_index-1]))
+                current_length += segment_length
+                current_index += 1
+
+            # Interpolate between the last two points
+            if current_index == 1:
+                interpolated_coords.append(coordinates[0])
+            else:
+                p1, p2 = np.array(coordinates[current_index-2]), np.array(coordinates[current_index-1])
+                segment_length = np.linalg.norm(p2 - p1)
+                if segment_length > 0:
+                    t = (target_length - (current_length - segment_length)) / segment_length
+                    interpolated_point = p1 + t * (p2 - p1)
+                    interpolated_coords.append(interpolated_point.tolist())
+                else:
+                    interpolated_coords.append(p1.tolist())
+
+        # Convert back to string format if necessary
+        interpolated_coords_str = "[" + ", ".join([f"{{'x': {round(coord[0])}, 'y': {round(coord[1])}}}" for coord in interpolated_coords]) + "]"
+
+        return (interpolated_coords_str, )
+    
