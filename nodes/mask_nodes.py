@@ -830,8 +830,8 @@ class GetMaskSize:
             "mask": ("MASK",),
         }}
 
-    RETURN_TYPES = ("MASK","INT", "INT", )
-    RETURN_NAMES = ("mask", "width", "height",)
+    RETURN_TYPES = ("MASK","INT", "INT", "INT",)
+    RETURN_NAMES = ("mask", "width", "height", "count",)
     FUNCTION = "getsize"
     CATEGORY = "KJNodes/masking"
     DESCRIPTION = """
@@ -843,9 +843,10 @@ and passes through the mask unchanged.
     def getsize(self, mask):
         width = mask.shape[2]
         height = mask.shape[1]
+        count = mask.shape[0]
         return {"ui": {
-            "text": [f"{width}x{height}"]}, 
-            "result": (mask, width, height) 
+            "text": [f"{count}x{width}x{height}"]}, 
+            "result": (mask, width, height, count) 
         }
 
 class GrowMaskWithBlur:

@@ -40,6 +40,7 @@ NODE_CONFIG = {
     #images
     "ColorMatch": {"class": ColorMatch, "name": "Color Match"},
     "AddLabel": {"class": AddLabel, "name": "Add Label"},
+    "ImageAndMaskPreview": {"class": ImageAndMaskPreview},
     "ImageBatchMulti": {"class": ImageBatchMulti, "name": "Image Batch Multi"},
     "ImageBatchTestPattern": {"class": ImageBatchTestPattern, "name": "Image Batch Test Pattern"},
     "ImageConcanate": {"class": ImageConcanate, "name": "Image Concanate"},
