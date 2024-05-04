@@ -314,12 +314,19 @@ function createSplineEditor(context, reset=false) {
   var pointsLayer = null;
   var samplingMethod = samplingMethodWidget.value
   
+  if (samplingMethod == "path") {
+    dotShape = "triangle"
+  }
+  
   interpolationWidget.callback = () => {
     interpolation = interpolationWidget.value
     updatePath();
   }
   samplingMethodWidget.callback = () => {
     samplingMethod = samplingMethodWidget.value
+    if (samplingMethod == "path") {
+      dotShape = "triangle"
+    }
     updatePath();
   }
   tensionWidget.callback = () => {
@@ -359,7 +366,7 @@ function createSplineEditor(context, reset=false) {
  var h = heightWidget.value;
  var i = 3;
  let points = [];
- 
+
  if (!reset && pointsStoreWidget.value != "") {
     points = JSON.parse(pointsStoreWidget.value);
  } else {
