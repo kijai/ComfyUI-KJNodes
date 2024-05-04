@@ -76,8 +76,8 @@ class PlotCoordinates:
                             },
                 "optional": {"size_multiplier": ("FLOAT", {"default": [1.0], "forceInput": True})},
                 }
-    RETURN_TYPES = ("IMAGE", )
-    RETURN_NAMES = ("images", )
+    RETURN_TYPES = ("IMAGE", "INT", "INT", "INT", "INT",)
+    RETURN_NAMES = ("images", "width", "height", "bbox_width", "bbox_height",)
     FUNCTION = "append"
     CATEGORY = "KJNodes/experimental"
     DESCRIPTION = """
@@ -94,7 +94,7 @@ Plots coordinates to sequence of images using Matplotlib.
 
         plot_image_tensor = plot_coordinates_to_tensor(coordinates, height, width, bbox_height, bbox_width, size_multiplier, text)
         
-        return (plot_image_tensor,)
+        return (plot_image_tensor, width, height, bbox_width, bbox_height)
     
 class SplineEditor:
 
@@ -665,7 +665,7 @@ bounding boxes.
 
             for i in range(batch_size):
                 x_position, y_position = coordinates[i]
-                position_param = (cond_pooled, int((height // 8) * size_multiplier[i]), int((width // 8) * size_multiplier[i]), (y_position - height / 2) // 8, (x_position - width / 2) // 8)
+                position_param = (cond_pooled, int((height // 8) * size_multiplier[i]), int((width // 8) * size_multiplier[i]), (y_position - height // 2) // 8, (x_position - width // 2) // 8)
                 position_params_batch[i].append(position_param)  # Append position_param to the correct sublist
 
             prev = []
@@ -687,8 +687,8 @@ bounding boxes.
     
 class CreateInstanceDiffusionTracking:
     
-    RETURN_TYPES = ("TRACKING",)
-    RETURN_NAMES = ("TRACKING",)
+    RETURN_TYPES = ("TRACKING", "INT", "INT", "INT", "INT",)
+    RETURN_NAMES = ("tracking", "width", "height", "bbox_width", "bbox_height",)
     FUNCTION = "tracking"
     CATEGORY = "KJNodes/experimental"
     DESCRIPTION = """
@@ -710,8 +710,7 @@ for example:
                 "height": ("INT", {"default": 512,"min": 16, "max": 4096, "step": 1}),
                 "bbox_width": ("INT", {"default": 512,"min": 16, "max": 4096, "step": 1}),
                 "bbox_height": ("INT", {"default": 512,"min": 16, "max": 4096, "step": 1}),
-
-                "class_name": ("STRING", {"default": "class_id"}),
+                "class_name": ("STRING", {"default": "class_name"}),
                 "class_id": ("INT", {"default": 0,"min": 0, "max": 255, "step": 1}),
         },
         "optional": {
@@ -730,16 +729,28 @@ for example:
         # Initialize a list to hold the coordinates for the current ID
         id_coordinates = []
 
-        for detection in coordinates:
-            # Append the 'x' and 'y' coordinates along with bbox width/height and frame width/height to the list for the current ID
-            id_coordinates.append([detection['x'], detection['y'], bbox_width, bbox_height, width, height])
+        for coord in coordinates:
+            x = coord['x']
+            y = coord['y']
+            # Calculate the top left and bottom right coordinates
+            top_left_x = x - bbox_width // 2
+            top_left_y = y - bbox_height // 2
+            bottom_right_x = x + bbox_width // 2
+            bottom_right_y = y + bbox_height // 2
 
+            # Append the top left and bottom right coordinates to the list for the current ID
+            id_coordinates.append([top_left_x, top_left_y, bottom_right_x, bottom_right_y, width, height])
+           
+            # Append the 'x' and 'y' coordinates along with bbox width/height and frame width/height to the list for the current ID
+            #id_coordinates.append([coord['x'] - bbox_width // 2 , coord['y'] - bbox_height // 2, bbox_width, bbox_height, width, height])
+          
+        class_id = int(class_id)
+        print(class_id)
         # Assign the list of coordinates to the specified ID within the class_id dictionary
         tracked[class_name][class_id] = id_coordinates
-
-
         print(tracked)
-        return (tracked, )
+
+        return (tracked, width, height, bbox_width, bbox_height,)
 
 class AppendInstanceDiffusionTracking:
     
