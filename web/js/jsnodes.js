@@ -113,6 +113,23 @@ app.registerExtension({
 					return r
 				}
 				break;
+			case "VRAM_Debug":
+				const onVRAM_DebugConnectInput = nodeType.prototype.onConnectInput;
+				nodeType.prototype.onConnectInput = function (targetSlot, type, output, originNode, originSlot) {
+					const v = onVRAM_DebugConnectInput?.(this, arguments);
+					targetSlot.outputs[3]["name"] = "freemem_before"
+					targetSlot.outputs[4]["name"] = "freemem_after" 
+					return v;
+				}
+				const onVRAM_DebugExecuted = nodeType.prototype.onExecuted;
+				nodeType.prototype.onExecuted = function(message) {
+					const r = onVRAM_DebugExecuted? onVRAM_DebugExecuted.apply(this,arguments): undefined
+					let values = message["text"].toString().split('x');
+					this.outputs[3]["name"] = values[0] + "   freemem_before"
+					this.outputs[4]["name"] = values[1] + "      freemem_after" 
+					return r
+				}
+				break;
 
 			case "JoinStringMulti":
 				nodeType.prototype.onNodeCreated = function () {

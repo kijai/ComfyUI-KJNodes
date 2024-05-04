@@ -558,9 +558,9 @@ and performs comfy model management functions and garbage collection,
 reports free VRAM before and after the operations.
 """
 
-    def VRAMdebug(self, gc_collect,empty_cache, unload_all_models, image_pass=None, model_pass=None, any_input=None):
+    def VRAMdebug(self, gc_collect, empty_cache, unload_all_models, image_pass=None, model_pass=None, any_input=None):
         freemem_before = model_management.get_free_memory()
-        print("VRAMdebug: free memory before: ", freemem_before)
+        print("VRAMdebug: free memory before: ", f"{freemem_before:,.0f}")
         if empty_cache:
             model_management.soft_empty_cache()
         if unload_all_models:
@@ -569,9 +569,12 @@ reports free VRAM before and after the operations.
             import gc
             gc.collect()
         freemem_after = model_management.get_free_memory()
-        print("VRAMdebug: free memory after: ", freemem_after)
-        print("VRAMdebug: freed memory: ", freemem_after - freemem_before)
-        return (any_input, image_pass, model_pass, freemem_before, freemem_after)
+        print("VRAMdebug: free memory after: ", f"{freemem_after:,.0f}")
+        print("VRAMdebug: freed memory: ", f"{freemem_after - freemem_before:,.0f}")
+        return {"ui": {
+            "text": [f"{freemem_before:,.0f}x{freemem_after:,.0f}"]}, 
+            "result": (any_input, image_pass, model_pass, freemem_before, freemem_after) 
+        }
 
 class SomethingToString:
     @classmethod
