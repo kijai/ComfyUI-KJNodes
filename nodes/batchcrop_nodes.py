@@ -6,6 +6,23 @@ from torchvision.transforms import Resize, CenterCrop, InterpolationMode
 import math
 
 #based on nodes from mtb https://github.com/melMass/comfy_mtb
+
+def bbox_to_region(bbox, target_size=None):
+    bbox = bbox_check(bbox, target_size)
+    return (bbox[0], bbox[1], bbox[0] + bbox[2], bbox[1] + bbox[3])
+
+def bbox_check(bbox, target_size=None):
+    if not target_size:
+        return bbox
+
+    new_bbox = (
+        bbox[0],
+        bbox[1],
+        min(target_size[0] - bbox[0], bbox[2]),
+        min(target_size[1] - bbox[1], bbox[3]),
+    )
+    return new_bbox
+
 class BatchCropFromMask:
 
     @classmethod
@@ -135,23 +152,6 @@ class BatchCropFromMask:
         cropped_out = torch.stack(cropped_images, dim=0)
         
         return (original_images, cropped_out, bounding_boxes, self.max_bbox_width, self.max_bbox_height, )
-
-
-def bbox_to_region(bbox, target_size=None):
-    bbox = bbox_check(bbox, target_size)
-    return (bbox[0], bbox[1], bbox[0] + bbox[2], bbox[1] + bbox[3])
-
-def bbox_check(bbox, target_size=None):
-    if not target_size:
-        return bbox
-
-    new_bbox = (
-        bbox[0],
-        bbox[1],
-        min(target_size[0] - bbox[0], bbox[2]),
-        min(target_size[1] - bbox[1], bbox[3]),
-    )
-    return new_bbox
 
 class BatchUncrop:
 
@@ -532,22 +532,6 @@ Returns:
 
         return (images_after_insert, )
 
-def bbox_to_region(bbox, target_size=None):
-    bbox = bbox_check(bbox, target_size)
-    return (bbox[0], bbox[1], bbox[0] + bbox[2], bbox[1] + bbox[3])
-
-def bbox_check(bbox, target_size=None):
-    if not target_size:
-        return bbox
-
-    new_bbox = (
-        bbox[0],
-        bbox[1],
-        min(target_size[0] - bbox[0], bbox[2]),
-        min(target_size[1] - bbox[1], bbox[3]),
-    )
-    return new_bbox
-
 class BatchUncropAdvanced:
 
     @classmethod
@@ -675,3 +659,79 @@ Splits the specified bbox list at the given index into two lists.
         bboxes_b = bboxes[index:]  # Sub-list from the index to the end of bboxes
 
         return (bboxes_a, bboxes_b,)
+    
+class BboxToInt:
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "bboxes": ("BBOX",),
+                "index": ("INT", {"default": 0,"min": 0, "max": 99999999, "step": 1}),
+            },
+        }
+
+    RETURN_TYPES = ("INT","INT","INT","INT","INT","INT",)
+    RETURN_NAMES = ("x_min","y_min","width","height", "center_x","center_y",)
+    FUNCTION = "bboxtoint"
+    CATEGORY = "KJNodes/masking"
+    DESCRIPTION = """
+Returns selected index from bounding box list as integers.
+"""
+    def bboxtoint(self, bboxes, index):
+        x_min, y_min, width, height = bboxes[index]
+        center_x = int(x_min + width / 2)
+        center_y = int(y_min + height / 2)
+        
+        return (x_min, y_min, width, height, center_x, center_y,)
+
+class BboxVisualize:
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "images": ("IMAGE",),
+                "bboxes": ("BBOX",),
+                "line_width": ("INT", {"default": 1,"min": 1, "max": 10, "step": 1}),
+            },
+        }
+
+    RETURN_TYPES = ("IMAGE",)
+    RETURN_NAMES = ("images",)
+    FUNCTION = "visualizebbox"
+    DESCRIPTION = """
+Visualizes the specified bbox on the image.
+"""
+
+    CATEGORY = "KJNodes/masking"
+
+    def visualizebbox(self, bboxes, images, line_width):
+        image_list = []
+        for image, bbox in zip(images, bboxes):
+            x_min, y_min, width, height = bbox
+            image = image.permute(2, 0, 1)
+
+            img_with_bbox = image.clone()
+            
+            # Define the color for the bbox, e.g., red
+            color = torch.tensor([1, 0, 0], dtype=torch.float32)
+            
+            # Draw lines for each side of the bbox with the specified line width
+            for lw in range(line_width):
+                # Top horizontal line
+                img_with_bbox[:, y_min + lw, x_min:x_min + width] = color[:, None]
+                
+                # Bottom horizontal line
+                img_with_bbox[:, y_min + height - lw, x_min:x_min + width] = color[:, None]
+                
+                # Left vertical line
+                img_with_bbox[:, y_min:y_min + height, x_min + lw] = color[:, None]
+                
+                # Right vertical line
+                img_with_bbox[:, y_min:y_min + height, x_min + width - lw] = color[:, None]
+        
+            img_with_bbox = img_with_bbox.permute(1, 2, 0).unsqueeze(0)
+            image_list.append(img_with_bbox)
+
+        return (torch.cat(image_list, dim=0),)
