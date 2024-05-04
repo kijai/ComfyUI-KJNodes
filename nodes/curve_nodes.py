@@ -740,7 +740,41 @@ for example:
 
         print(tracked)
         return (tracked, )
+
+class AppendInstanceDiffusionTracking:
     
+    RETURN_TYPES = ("TRACKING",)
+    RETURN_NAMES = ("tracking",)
+    FUNCTION = "append"
+    CATEGORY = "KJNodes/experimental"
+    DESCRIPTION = """
+Appends tracking data to be used with InstanceDiffusion:  
+https://github.com/logtd/ComfyUI-InstanceDiffusion  
+
+"""
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "tracking_1": ("TRACKING", {"forceInput": True}),
+                "tracking_2": ("TRACKING", {"forceInput": True}),
+        },
+    } 
+
+    def append(self, tracking_1, tracking_2):
+        tracking_copy = tracking_1.copy()
+        # Check for existing class names and class IDs, and raise an error if they exist
+        for class_name, class_data in tracking_2.items():
+            if class_name in tracking_copy:
+                for class_id in class_data.keys():
+                    if class_id in tracking_copy[class_name]:
+                        raise ValueError(f"Class ID {class_id} already exists for class name {class_name}. Cannot append tracking data.")
+            # If class name does not exist, add it
+            tracking_copy[class_name] = class_data
+
+        return (tracking_copy, )
+        
 class InterpolateCoords:
     
     RETURN_TYPES = ("STRING",)

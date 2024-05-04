@@ -114,6 +114,7 @@ NODE_CONFIG = {
     "GLIGENTextBoxApplyBatchCoords": {"class": GLIGENTextBoxApplyBatchCoords},
     "Intrinsic_lora_sampling": {"class": Intrinsic_lora_sampling, "name": "Intrinsic Lora Sampling"},
     "CreateInstanceDiffusionTracking": {"class": CreateInstanceDiffusionTracking},
+    "AppendInstanceDiffusionTracking": {"class": AppendInstanceDiffusionTracking, "name": "Append Diffusion Tracking"},
 }
 
 def generate_node_mappings(node_config):
