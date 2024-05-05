@@ -415,22 +415,40 @@ ComfyUI/custom_nodes/ComfyUI-KJNodes/fonts
         def process_image(input_image, caption_text):
             if direction == 'overlay':
                 pil_image = Image.fromarray((input_image.cpu().numpy() * 255).astype(np.uint8))
-                draw = ImageDraw.Draw(pil_image)
-                font = ImageFont.truetype(font_path, font_size)
-                try:
-                    draw.text((text_x, text_y), caption_text, font=font, fill=font_color, features=['-liga'])
-                except:
-                    draw.text((text_x, text_y), caption_text, font=font, fill=font_color)
-                processed_image = torch.from_numpy(np.array(pil_image).astype(np.float32) / 255.0).unsqueeze(0)
             else:
                 label_image = Image.new("RGB", (width, height), label_color)
-                draw = ImageDraw.Draw(label_image)
+                pil_image = label_image
+                
+                draw = ImageDraw.Draw(pil_image)
                 font = ImageFont.truetype(font_path, font_size)
-                try:
-                    draw.text((text_x, text_y), caption_text, font=font, fill=font_color, features=['-liga'])
-                except:
-                    draw.text((text_x, text_y), caption_text, font=font, fill=font_color)
-                processed_image = torch.from_numpy(np.array(label_image).astype(np.float32) / 255.0)[None, :, :, :]
+                
+                words = caption_text.split()
+                
+                lines = []
+                current_line = []
+                current_line_width = 0
+                for word in words:
+                    word_width = font.getbbox(word)[2]
+                    if current_line_width + word_width <= width - 2 * text_x:
+                        current_line.append(word)
+                        current_line_width += word_width + font.getbbox(" ")[2] # Add space width
+                    else:
+                        lines.append(" ".join(current_line))
+                        current_line = [word]
+                        current_line_width = word_width
+                
+                if current_line:
+                    lines.append(" ".join(current_line))
+                
+                y_offset = text_y
+                for line in lines:
+                    try:
+                        draw.text((text_x, y_offset), line, font=font, fill=font_color, features=['-liga'])
+                    except:
+                        draw.text((text_x, y_offset), line, font=font, fill=font_color)
+                    y_offset += font_size # Move to the next line
+                
+                processed_image = torch.from_numpy(np.array(pil_image).astype(np.float32) / 255.0).unsqueeze(0)
             return processed_image
         
         if caption == "":
