@@ -114,7 +114,6 @@ to a different frame count.
     } 
     
     def scaleschedule(self, old_frame_count, input_str, new_frame_count):
-        print("input_str:", input_str)
         pattern = r'"(\d+)"\s*:\s*"(.*?)"(?:,|\Z)'
         frame_strings = dict(re.findall(pattern, input_str))
         
@@ -134,7 +133,6 @@ to a different frame count.
         
         # Format the output string
         output_str = ', '.join([f'"{k}":"{v}"' for k, v in sorted(new_frame_strings.items())])
-        print(output_str)
         return (output_str,)
 
 
@@ -601,7 +599,6 @@ Converts any type to a string.
         if isinstance(input, (int, float, bool)):
             stringified = str(input)
         elif isinstance(input, list):
-            print("input is a list")
             stringified = ', '.join(str(item) for item in input)
         else:
             return
@@ -712,10 +709,8 @@ To see node id's, enable node id display from Manager badge menu.
 
     def get_widget_value(self, id, widget_name, extra_pnginfo, prompt, return_all=False):
         workflow = extra_pnginfo["workflow"]
-        print(workflow)
         results = []
         for node in workflow["nodes"]:
-            print(node)
             node_id = node["id"]
 
             if node_id != id:
@@ -1236,8 +1231,8 @@ https://huggingface.co/stabilityai/sv3d
             azimuths.append(interpolated_azimuth)
             elevations.append(interpolated_elevation)
 
-        print("azimuths", azimuths)
-        print("elevations", elevations)
+        #print("azimuths", azimuths)
+        #print("elevations", elevations)
 
         # Structure the final output
         final_positive = [[pooled, {"concat_latent_image": t, "elevation": elevations, "azimuth": azimuths}]]
@@ -1320,13 +1315,12 @@ https://huggingface.co/roborovski/superprompt-v1
         model = T5ForConditionalGeneration.from_pretrained(checkpoint_path, device_map=device)
         model.to(device)
         input_text = instruction_prompt + ": " + prompt
-        print(input_text)
+  
         input_ids = tokenizer(input_text, return_tensors="pt").input_ids.to(device)
         outputs = model.generate(input_ids,  max_new_tokens=max_new_tokens)
         out = (tokenizer.decode(outputs[0]))
         out = out.replace('<pad>', '')
         out = out.replace('</s>', '')
-        print(out)
         
         return (out, )
 
@@ -1391,7 +1385,7 @@ or a .txt file with RealEstate camera intrinsics and coordinates, in a 3D plot.
                 poses = f.readlines()
                 w2cs = [np.asarray([float(p) for p in pose.strip().split(' ')[7:]]).reshape(3, 4) for pose in poses[1:]]
                 fxs = [float(pose.strip().split(' ')[1]) for pose in poses[1:]]
-                print(poses)
+                #print(poses)
         elif cameractrl_poses is not None:
             poses = cameractrl_poses
             w2cs = [np.array(pose[7:]).reshape(3, 4) for pose in cameractrl_poses]

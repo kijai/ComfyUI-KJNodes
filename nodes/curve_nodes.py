@@ -761,8 +761,6 @@ for example:
         # Remove the last comma and newline
         prompt_string = prompt_string.rstrip(",\n")
 
-        print(prompt_string)
-
         return (tracked, prompt_string, width, height, bbox_width, bbox_height)
 
 class AppendInstanceDiffusionTracking:
@@ -894,7 +892,6 @@ CreateInstanceDiffusionTracking -node.
 
     def draw(self, image, tracking, box_line_width, draw_text, font, font_size):
         import matplotlib.cm as cm
-        print(image.shape)
 
         modified_images = []
         

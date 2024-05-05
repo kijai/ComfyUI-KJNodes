@@ -794,7 +794,6 @@ nodes for example.
             mask_image = mask.reshape((-1, 1, mask.shape[-2], mask.shape[-1])).movedim(1, -1).expand(-1, -1, -1, 3).clone()
 
             color_list = list(map(int, mask_color.split(', ')))
-            print(color_list[0])
             mask_image[:, :, :, 0] = color_list[0] // 255 # Red channel
             mask_image[:, :, :, 1] = color_list[1] // 255 # Green channel
             mask_image[:, :, :, 2] = color_list[2] // 255 # Blue channel
