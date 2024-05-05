@@ -187,8 +187,8 @@ app.registerExtension({
             this.splineEditor.parentEl.className = "spline-editor";
             this.splineEditor.parentEl.id = `spline-editor-${this.uuid}`
             element.appendChild(this.splineEditor.parentEl);
-
-            chainCallback(this, "onGraphConfigured", function() {
+            
+            chainCallback(this, "onConfigure", function() {
               createSplineEditor(this);
               });
               
@@ -392,6 +392,10 @@ function createSplineEditor(context, reset=false) {
     h = heightWidget.value
     vis.height(h)
     context.setSize([context.size[0], h + 410]);
+    updatePath();
+  }
+  pointsStoreWidget.callback = () => {
+    points = JSON.parse(pointsStoreWidget.value);
     updatePath();
   }
   
