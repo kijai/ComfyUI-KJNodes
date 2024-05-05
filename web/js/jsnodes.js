@@ -3,10 +3,12 @@ import { app } from "../../../scripts/app.js";
 app.registerExtension({
 	name: "KJNodes.jsnodes",
 	async beforeRegisterNodeDef(nodeType, nodeData, app) {
+		if(!nodeData?.category?.startsWith("KJNodes")) {
+			return;
+		  }
 		switch (nodeData.name) {
 			case "ConditioningMultiCombine":
 				nodeType.prototype.onNodeCreated = function () {
-				//this.inputs_offset = nodeData.name.includes("selective")?1:0
 				this.cond_type = "CONDITIONING"
 				this.inputs_offset = nodeData.name.includes("selective")?1:0
 				this.addWidget("button", "Update inputs", null, () => {
@@ -24,9 +26,133 @@ app.registerExtension({
 						    for(let i = this.inputs.length+1-this.inputs_offset; i <= target_number_of_inputs; ++i)
 						    	this.addInput(`conditioning_${i}`, this.cond_type)
                         }
-				});
+					});
 				}
 				break;
+			case "ImageBatchMulti":
+				nodeType.prototype.onNodeCreated = function () {
+				this._type = "IMAGE"
+				this.inputs_offset = nodeData.name.includes("selective")?1:0
+				this.addWidget("button", "Update inputs", null, () => {
+					if (!this.inputs) {
+						this.inputs = [];
+					}
+					const target_number_of_inputs = this.widgets.find(w => w.name === "inputcount")["value"];
+						if(target_number_of_inputs===this.inputs.length)return; // already set, do nothing
+
+						if(target_number_of_inputs < this.inputs.length){
+							for(let i = this.inputs.length; i>=this.inputs_offset+target_number_of_inputs; i--)
+									this.removeInput(i)
+						}
+						else{
+							for(let i = this.inputs.length+1-this.inputs_offset; i <= target_number_of_inputs; ++i)
+								this.addInput(`image_${i}`, this._type)
+						}
+					});
+				}
+				break;
+			case "MaskBatchMulti":
+				nodeType.prototype.onNodeCreated = function () {
+				this._type = "MASK"
+				this.inputs_offset = nodeData.name.includes("selective")?1:0
+				this.addWidget("button", "Update inputs", null, () => {
+					if (!this.inputs) {
+						this.inputs = [];
+					}
+					const target_number_of_inputs = this.widgets.find(w => w.name === "inputcount")["value"];
+						if(target_number_of_inputs===this.inputs.length)return; // already set, do nothing
+
+						if(target_number_of_inputs < this.inputs.length){
+							for(let i = this.inputs.length; i>=this.inputs_offset+target_number_of_inputs; i--)
+									this.removeInput(i)
+						}
+						else{
+							for(let i = this.inputs.length+1-this.inputs_offset; i <= target_number_of_inputs; ++i)
+								this.addInput(`mask_${i}`, this._type)
+							}
+						});
+					}
+					break;
+
+			case "GetMaskSizeAndCount":
+				const onGetMaskSizeConnectInput = nodeType.prototype.onConnectInput;
+				nodeType.prototype.onConnectInput = function (targetSlot, type, output, originNode, originSlot) {
+					const v = onGetMaskSizeConnectInput?.(this, arguments);
+					targetSlot.outputs[1]["name"] = "width"
+					targetSlot.outputs[2]["name"] = "height" 
+					targetSlot.outputs[3]["name"] = "count"
+					return v;
+				}
+				const onGetMaskSizeExecuted = nodeType.prototype.onExecuted;
+				nodeType.prototype.onExecuted = function(message) {
+					const r = onGetMaskSizeExecuted? onGetMaskSizeExecuted.apply(this,arguments): undefined
+					let values = message["text"].toString().split('x').map(Number);
+					this.outputs[1]["name"] = values[1] + " width"
+					this.outputs[2]["name"] = values[2] + " height" 
+					this.outputs[3]["name"] = values[0] + " count" 
+					return r
+				}
+				break;
+			
+			case "GetImageSizeAndCount":
+				const onGetImageSizeConnectInput = nodeType.prototype.onConnectInput;
+				nodeType.prototype.onConnectInput = function (targetSlot, type, output, originNode, originSlot) {
+					const v = onGetImageSizeConnectInput?.(this, arguments);
+					targetSlot.outputs[1]["name"] = "width"
+					targetSlot.outputs[2]["name"] = "height" 
+					targetSlot.outputs[3]["name"] = "count"
+					return v;
+				}
+				const onGetImageSizeExecuted = nodeType.prototype.onExecuted;
+				nodeType.prototype.onExecuted = function(message) {
+					const r = onGetImageSizeExecuted? onGetImageSizeExecuted.apply(this,arguments): undefined
+					let values = message["text"].toString().split('x').map(Number);
+					this.outputs[1]["name"] = values[1] + " width"
+					this.outputs[2]["name"] = values[2] + " height" 
+					this.outputs[3]["name"] = values[0] + " count" 
+					return r
+				}
+				break;
+			case "VRAM_Debug":
+				const onVRAM_DebugConnectInput = nodeType.prototype.onConnectInput;
+				nodeType.prototype.onConnectInput = function (targetSlot, type, output, originNode, originSlot) {
+					const v = onVRAM_DebugConnectInput?.(this, arguments);
+					targetSlot.outputs[3]["name"] = "freemem_before"
+					targetSlot.outputs[4]["name"] = "freemem_after" 
+					return v;
+				}
+				const onVRAM_DebugExecuted = nodeType.prototype.onExecuted;
+				nodeType.prototype.onExecuted = function(message) {
+					const r = onVRAM_DebugExecuted? onVRAM_DebugExecuted.apply(this,arguments): undefined
+					let values = message["text"].toString().split('x');
+					this.outputs[3]["name"] = values[0] + "   freemem_before"
+					this.outputs[4]["name"] = values[1] + "      freemem_after" 
+					return r
+				}
+				break;
+
+			case "JoinStringMulti":
+				nodeType.prototype.onNodeCreated = function () {
+				this._type = "STRING"
+				this.inputs_offset = nodeData.name.includes("selective")?1:0
+				this.addWidget("button", "Update inputs", null, () => {
+					if (!this.inputs) {
+						this.inputs = [];
+					}
+					const target_number_of_inputs = this.widgets.find(w => w.name === "inputcount")["value"];
+						if(target_number_of_inputs===this.inputs.length)return; // already set, do nothing
+
+						if(target_number_of_inputs < this.inputs.length){
+							for(let i = this.inputs.length; i>=this.inputs_offset+target_number_of_inputs; i--)
+									this.removeInput(i)
+						}
+						else{
+							for(let i = this.inputs.length+1-this.inputs_offset; i <= target_number_of_inputs; ++i)
+								this.addInput(`string_${i}`, this._type)
+							}
+						});
+					}
+					break;
 			case "SoundReactive":
 				nodeType.prototype.onNodeCreated = function () {
 					let audioContext;
@@ -130,6 +256,21 @@ app.registerExtension({
 				};
 			break;
 			
-	}
+		}	
+		
 	},
+	async setup() {
+		// to keep Set/Get node virtual connections visible when offscreen
+		const originalComputeVisibleNodes = LGraphCanvas.prototype.computeVisibleNodes;
+		LGraphCanvas.prototype.computeVisibleNodes = function () {
+			const visibleNodesSet = new Set(originalComputeVisibleNodes.apply(this, arguments));
+			for (const node of this.graph._nodes) {
+				if ((node.type === "SetNode" || node.type === "GetNode") && node.drawConnection) {
+					visibleNodesSet.add(node);
+				}
+			}
+			return Array.from(visibleNodesSet);
+		};
+
+	}
 });

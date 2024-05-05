@@ -1,7 +1,5 @@
 import { app } from "../../../scripts/app.js";
 
-
-var nodeAutoColor = true
 // Adds context menu entries, code partly from pyssssscustom-scripts
 
 function addMenuHandler(nodeType, cb) {
@@ -45,13 +43,9 @@ app.registerExtension({
 					content: "Add SetNode",
 					callback: () => {addNode("SetNode", this, { side:"right", offset: 30 });
 					},
-					
 				});
 			});
-				
 		}
-		
-
 	},
 		async setup(app) {
 			const onChange = (value) => {
@@ -137,6 +131,16 @@ app.registerExtension({
 			app.ui.settings.addSetting({
 				id: "KJNodes.disablePrefix",
 				name: "🦛 KJNodes: Disable automatic Set_ and Get_ prefix",
+				defaultValue: false,
+				type: "boolean",
+				options: (value) => [
+					{ value: true, text: "On", selected: value === true },
+					{ value: false, text: "Off", selected: value === false },
+				],
+			});
+			app.ui.settings.addSetting({
+				id: "KJNodes.browserStatus",
+				name: "🦛 KJNodes: 🟢 Stoplight browser status icon 🔴",
 				defaultValue: false,
 				type: "boolean",
 				options: (value) => [

@@ -45,6 +45,7 @@ loadScript('/kjweb_async/purify.min.js').catch((e) => {
   console.log(e)
 })
 
+const categories = ["KJNodes", "SUPIR", "VoiceCraft", "Marigold"];
 app.registerExtension({
 	name: "KJNodes.HelpPopup",
 	async beforeRegisterNodeDef(nodeType, nodeData) {
@@ -52,13 +53,12 @@ app.registerExtension({
   if (app.ui.settings.getSettingValue("KJNodes.helpPopup") === false) {
     return;
     }
-
-  const categories = ["KJNodes", "SUPIR", "VoiceCraft", "Marigold"];
 		try {
 			categories.forEach(category => {
         if (nodeData?.category?.startsWith(category)) {
             addDocumentation(nodeData, nodeType);
         }
+        else return
     });
 		} catch (error) {
 			console.error("Error in registering KJNodes.HelpPopup", error);
@@ -182,13 +182,16 @@ const create_documentation_stylesheet = () => {
         let startX, startY, startWidth, startHeight
 
         resizeHandle.addEventListener('mousedown', function (e) {
+          e.preventDefault();
           e.stopPropagation();
           isResizing = true;
           startX = e.clientX;
           startY = e.clientY;
           startWidth = parseInt(document.defaultView.getComputedStyle(docElement).width, 10);
           startHeight = parseInt(document.defaultView.getComputedStyle(docElement).height, 10);
-         });
+         },
+         { signal: this.docCtrl.signal },
+         );
 
         // close button
         const closeButton = document.createElement('div');
@@ -208,19 +211,30 @@ const create_documentation_stylesheet = () => {
           this.show_doc = !this.show_doc
           docElement.parentNode.removeChild(docElement)
           docElement = null
-         });
+          if (contentWrapper) {
+            contentWrapper.remove()
+            contentWrapper = null
+          }
+         },
+         { signal: this.docCtrl.signal },
+         );
          
         document.addEventListener('mousemove', function (e) {
           if (!isResizing) return;
-          const newWidth = startWidth + e.clientX - startX;
-          const newHeight = startHeight + e.clientY - startY;
+          const scale = app.canvas.ds.scale;
+          const newWidth = startWidth + (e.clientX - startX) / scale;
+          const newHeight = startHeight + (e.clientY - startY) / scale;;
           docElement.style.width = `${newWidth}px`;
           docElement.style.height = `${newHeight}px`;
-         });
+         },
+         { signal: this.docCtrl.signal },
+         );
 
         document.addEventListener('mouseup', function () {
           isResizing = false
-        })
+        },
+        { signal: this.docCtrl.signal },
+        )
 
         document.body.appendChild(docElement)
       }
@@ -238,7 +252,7 @@ const create_documentation_stylesheet = () => {
         const transform = new DOMMatrix()
         .scaleSelf(scaleX, scaleY)
         .multiplySelf(ctx.getTransform())
-        .translateSelf(this.size[0] * scaleX, 0)
+        .translateSelf(this.size[0] * scaleX * Math.max(1.0,window.devicePixelRatio) , 0)
         .translateSelf(10, -32)
         
         const scale = new DOMMatrix()
@@ -283,8 +297,29 @@ const create_documentation_stylesheet = () => {
         } else {
           this.show_doc = !this.show_doc
         }
+        if (this.show_doc) {
+          this.docCtrl = new AbortController()
+        } else {
+          this.docCtrl.abort()
+        }
         return true;
       }
       return r;
+    }
+    const onRem = nodeType.prototype.onRemoved
+
+    nodeType.prototype.onRemoved = function () {
+      const r = onRem ? onRem.apply(this, []) : undefined
+  
+      if (docElement) {
+        docElement.remove()
+        docElement = null
+      }
+  
+      if (contentWrapper) {
+        contentWrapper.remove()
+        contentWrapper = null
+      }
+      return r
     }
 }

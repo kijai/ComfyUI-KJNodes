@@ -1,5 +1,5 @@
 import { app } from "../../../scripts/app.js";
-import { ComfyWidgets } from '../../../scripts/widgets.js';
+
 //based on diffus3's SetGet: https://github.com/diffus3/ComfyUI-extensions
 
 // Nodes that allow you to tunnel connections for cleaner graphs
@@ -21,8 +21,6 @@ function setColorAndBgColor(type) {
     if (colors) {
         this.color = colors.color;
         this.bgcolor = colors.bgcolor;
-    } else {
-        // Handle the default case if needed
     }
 }
 let isAlertShown = false;
@@ -41,6 +39,12 @@ app.registerExtension({
 		class SetNode {
 			defaultVisibility = true;
 			serialize_widgets = true;
+			drawConnection = false;
+			currentGetters = null;
+			slotColor = "#FFF";
+			canvas = app.canvas;
+			menuEntry = "Show connections";
+
 			constructor() {
 				if (!this.properties) {
 					this.properties = {
@@ -201,9 +205,11 @@ app.registerExtension({
 					return graph._nodes.filter(otherNode => otherNode.type === 'GetNode' && otherNode.widgets[0].value === name && name !== '');
 				}
 
+				
 				// This node is purely frontend and does not impact the resulting prompt so should not be serialized
 				this.isVirtualNode = true;
 			}
+				
 
 			onRemoved() {
 				const allGetters = this.graph._nodes.filter((otherNode) => otherNode.type == "GetNode");
@@ -212,6 +218,136 @@ app.registerExtension({
 						otherNode.setComboValues([this]);
 					}
 				})
+			}
+			getExtraMenuOptions(_, options) {
+				this.menuEntry = this.drawConnection ? "Hide connections" : "Show connections";
+				options.unshift(
+					{
+						content: this.menuEntry,
+						callback: () => {
+							this.currentGetters = this.findGetters(this.graph);								
+							if (this.currentGetters.length == 0) return;
+							let linkType = (this.currentGetters[0].outputs[0].type);	
+							this.slotColor = this.canvas.default_connection_color_byType[linkType]
+							this.menuEntry = this.drawConnection ? "Hide connections" : "Show connections";
+							this.drawConnection = !this.drawConnection;
+							this.canvas.setDirty(true, true);
+							
+						},
+						has_submenu: true,
+						submenu: {
+							title: "Color",
+                            options: [ 
+								{
+								content: "Highlight",
+								callback: () => {
+									this.slotColor = "orange"
+									this.canvas.setDirty(true, true);
+									}
+								}
+							],
+						},
+					},
+					{
+						content: "Hide all connections",
+						callback: () => {
+							const allGetters = this.graph._nodes.filter(otherNode => otherNode.type === "GetNode" || otherNode.type === "SetNode");
+							allGetters.forEach(otherNode => {
+								otherNode.drawConnection = false;
+								console.log(otherNode);
+							});
+							
+							this.menuEntry = "Show connections";
+							this.drawConnection = false
+							this.canvas.setDirty(true, true);
+							
+						},
+					
+					},
+				);
+				// Dynamically add a submenu for all getters
+				this.currentGetters = this.findGetters(this.graph);
+				if (this.currentGetters) {
+					
+					let gettersSubmenu = this.currentGetters.map(getter => ({
+						
+						content: `${getter.title} id: ${getter.id}`,
+						callback: () => {
+							this.canvas.centerOnNode(getter);
+							this.canvas.selectNode(getter, false);
+							this.canvas.setDirty(true, true);
+							
+						},
+					}));
+			
+					options.unshift({
+						content: "Getters",
+						has_submenu: true,
+						submenu: {
+							title: "GetNodes",
+                            options: gettersSubmenu,
+						}
+					});
+				}
+			}
+			
+			
+			onDrawForeground(ctx, lGraphCanvas) {
+				if (this.drawConnection) {
+					this._drawVirtualLinks(lGraphCanvas, ctx);
+				}
+			}
+			// onDrawCollapsed(ctx, lGraphCanvas) {
+			// 	if (this.drawConnection) {
+			// 		this._drawVirtualLinks(lGraphCanvas, ctx);
+			// 	}
+			// }
+			_drawVirtualLinks(lGraphCanvas, ctx) {
+				if (!this.currentGetters?.length) return;
+				var title = this.getTitle ? this.getTitle() : this.title;
+				var title_width = ctx.measureText(title).width;
+				if (!this.flags.collapsed) {
+					var start_node_slotpos = [
+						this.size[0],
+						LiteGraph.NODE_TITLE_HEIGHT * 0.5,
+						];
+				}
+				else {
+					
+					var start_node_slotpos = [
+						title_width + 55,
+						-15,
+
+						];
+				}
+
+				for (const getter of this.currentGetters) {
+					if (!this.flags.collapsed) {
+					var end_node_slotpos = this.getConnectionPos(false, 0);
+					end_node_slotpos = [
+						getter.pos[0] - end_node_slotpos[0] + this.size[0],
+						getter.pos[1] - end_node_slotpos[1]
+						];
+					}
+					else {
+						var end_node_slotpos = this.getConnectionPos(false, 0);
+						end_node_slotpos = [
+						getter.pos[0] - end_node_slotpos[0] + title_width + 50,
+						getter.pos[1] - end_node_slotpos[1] - 30
+						];
+					}
+					lGraphCanvas.renderLink(
+						ctx,
+						start_node_slotpos,
+						end_node_slotpos,
+						null,
+						false,
+						null,
+						this.slotColor,
+						LiteGraph.RIGHT,
+						LiteGraph.LEFT
+					);
+				}
 			}
 		}
 
@@ -233,13 +369,16 @@ app.registerExtension({
 
 			defaultVisibility = true;
 			serialize_widgets = true;
+			drawConnection = false;
+			slotColor = "#FFF";
+			currentSetter = null;
+			canvas = app.canvas;
 
 			constructor() {
 				if (!this.properties) {
 					this.properties = {};
 				}
 				this.properties.showOutputText = GetNode.defaultVisibility;
-				
 				const node = this;
 				this.addWidget(
 					"combo",
@@ -266,7 +405,7 @@ app.registerExtension({
 				) {
 					this.validateLinks();	
 				}
-			
+
 				this.setName = function(name) {
 					node.widgets[0].value = name;
 					node.onRename();
@@ -315,13 +454,20 @@ app.registerExtension({
 
 				this.findSetter = function(graph) {
 					const name = this.widgets[0].value;
-					return graph._nodes.find(otherNode => otherNode.type === 'SetNode' && otherNode.widgets[0].value === name && name !== '');
+					const foundNode = graph._nodes.find(otherNode => otherNode.type === 'SetNode' && otherNode.widgets[0].value === name && name !== '');
+					return foundNode;
 				};
 
+				this.goToSetter = function() {
+					const setter = this.findSetter(this.graph);	
+					this.canvas.centerOnNode(setter);
+					this.canvas.selectNode(setter, false);
+				};
+				
 				// This node is purely frontend and does not impact the resulting prompt so should not be serialized
 				this.isVirtualNode = true;
 			}
-
+			
 			getInputLink(slot) {
 				const setter = this.findSetter(this.graph);
 			
@@ -336,6 +482,60 @@ app.registerExtension({
 				}
 			}
 			onAdded(graph) {
+			}
+			getExtraMenuOptions(_, options) {
+				let menuEntry = this.drawConnection ? "Hide connections" : "Show connections";
+				
+				options.unshift(
+					{
+						content: "Go to setter",
+						callback: () => {
+							this.goToSetter();
+						},
+					},
+					{
+						content: menuEntry,
+						callback: () => {
+							this.currentSetter = this.findSetter(this.graph);
+							if (this.currentSetter.length == 0) return;
+							let linkType = (this.currentSetter.inputs[0].type);	
+							this.drawConnection = !this.drawConnection;
+							this.slotColor = this.canvas.default_connection_color_byType[linkType]
+							menuEntry = this.drawConnection ? "Hide connections" : "Show connections";
+							this.canvas.setDirty(true, true);
+						},
+					},
+				);
+			}
+
+			onDrawForeground(ctx, lGraphCanvas) {
+				if (this.drawConnection) {
+					this._drawVirtualLink(lGraphCanvas, ctx);
+				}
+			}
+			// onDrawCollapsed(ctx, lGraphCanvas) {
+			// 	if (this.drawConnection) {
+			// 		this._drawVirtualLink(lGraphCanvas, ctx);
+			// 	}
+			// }
+			_drawVirtualLink(lGraphCanvas, ctx) {
+				if (!this.currentSetter) return;
+				
+				let start_node_slotpos = this.currentSetter.getConnectionPos(false, 0);
+				start_node_slotpos = [
+					start_node_slotpos[0] - this.pos[0],
+					start_node_slotpos[1] - this.pos[1],
+				];
+				let end_node_slotpos = [0, -LiteGraph.NODE_TITLE_HEIGHT * 0.5];
+				lGraphCanvas.renderLink(
+					ctx,
+					start_node_slotpos,
+					end_node_slotpos,
+					null,
+					false,
+					null,
+					this.slotColor
+				);
 			}
 		}
 
