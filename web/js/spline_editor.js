@@ -260,15 +260,23 @@ function createSplineEditor(context, reset=false) {
 
   function updatePath() {
       let coords = samplePoints(pathElements[0], points_to_sample, samplingMethod, w);
-
+      let linkedInputEditor = context.getInputNode(0)
+      let linkedInputEditorCoords = null
+      
+      if (linkedInputEditor != null) {
+        console.log(linkedInputEditor.widgets)
+        linkedInputEditorCoords = JSON.parse(linkedInputEditor.widgets.find(w => w.name === "coordinates").value)
+        console.log(linkedInputEditorCoords)
+      }
+      
       if (drawSamplePoints) {
         if (pointsLayer) {
           // Update the data of the existing points layer
-          pointsLayer.data(coords);
+          pointsLayer.data(linkedInputEditorCoords);
         } else {
             // Create the points layer if it doesn't exist
             pointsLayer = vis.add(pv.Dot)
-                .data(coords)
+                .data(linkedInputEditorCoords)
                 .left(function(d) { return d.x; })
                 .top(function(d) { return d.y; })
                 .radius(5) // Adjust the radius as needed
@@ -304,11 +312,27 @@ function createSplineEditor(context, reset=false) {
   const samplingMethodWidget = context.widgets.find(w => w.name === "sampling_method");
   const widthWidget = context.widgets.find(w => w.name === "mask_width");
   const heightWidget = context.widgets.find(w => w.name === "mask_height");
-  //const segmentedWidget = context.widgets.find(w => w.name === "segmented");
-
+  
+  let linkedInputEditorPointsToSample = null
+  let linkedOutputEditorPointsToSample = null
+  let linkedInputEditor = context.getInputNode(0)
+  let linkedOutputEditor = context.getOutputNodes(4)
+  
+  if (linkedOutputEditor != null) {
+    linkedOutputEditorPointsToSample = linkedOutputEditor[0].widgets.find(w => w.name === "points_to_sample")
+    linkedOutputEditorPointsToSample.value = pointsWidget.value
+    console.log(linkedOutputEditorPointsToSample)
+  }
+  if (linkedInputEditor != null) {
+    linkedInputEditorPointsToSample = linkedInputEditor.widgets.find(w => w.name === "points_to_sample").value
+    pointsWidget.value = linkedInputEditorPointsToSample
+    console.log(linkedInputEditorPointsToSample)
+  }else {
+    var points_to_sample = pointsWidget.value
+  }
+     
   var interpolation = interpolationWidget.value
   var tension = tensionWidget.value
-  var points_to_sample = pointsWidget.value
   var rangeMin = minValueWidget.value
   var rangeMax = maxValueWidget.value
   var pointsLayer = null;
@@ -334,7 +358,20 @@ function createSplineEditor(context, reset=false) {
     updatePath();
   }
   pointsWidget.callback = () => {
-    points_to_sample = pointsWidget.value
+  let linkedInputEditor = context.getInputNode(0)
+  let linkedOutputEditor = context.getOutputNodes(4)
+    if (linkedOutputEditor != null) {
+      linkedOutputEditorPointsToSample = linkedOutputEditor[0].widgets.find(w => w.name === "points_to_sample")
+      linkedOutputEditorPointsToSample.value = pointsWidget.value
+      console.log(linkedOutputEditorPointsToSample)
+    }
+    if (linkedInputEditor != null) {
+      linkedInputEditorPointsToSample = linkedInputEditor.widgets.find(w => w.name === "points_to_sample").value
+      pointsWidget.value = linkedInputEditorPointsToSample
+      console.log(linkedInputEditorPointsToSample)
+    }else {
+      points_to_sample = pointsWidget.value
+    }
     updatePath();
   }
   minValueWidget.callback = () => {
