@@ -391,7 +391,7 @@ function createSplineEditor(context, reset=false) {
   var vis = new pv.Panel()
   .width(w)
   .height(h)
-  .fillStyle("var(--comfy-menu-bg)")
+  .fillStyle("var(--comfy-input-bg)")
   .strokeStyle("gray")
   .lineWidth(2)
   .antialias(false)
