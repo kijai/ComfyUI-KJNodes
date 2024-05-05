@@ -189,7 +189,6 @@ app.registerExtension({
             element.appendChild(this.splineEditor.parentEl);
             
             chainCallback(this, "onConfigure", function() {
-              console.log(this)
               createSplineEditor(this);
               });
               
