@@ -493,7 +493,7 @@ function createSplineEditor(context, reset=false) {
  })
     .cursor("move")
     .strokeStyle(function() { return i == this.index ? "#ff7f0e" : "#1f77b4"; })
-    .fillStyle(function() { return "rgba(100, 100, 100, 0.2)"; })
+    .fillStyle(function() { return "rgba(100, 100, 100, 0.3)"; })
     .event("mousedown", pv.Behavior.drag())
     .event("dragstart", function() {
         i = this.index;
@@ -539,13 +539,16 @@ function createSplineEditor(context, reset=false) {
     })
     .left(d => d.x < w / 2 ? d.x + 80 : d.x - 70) // Shift label to right if on left half, otherwise shift to left
     .top(d => d.y < h / 2 ? d.y + 20 : d.y - 20)  // Shift label down if on top half, otherwise shift up
-    
-        .font(12 + "px sans-serif")
-        .text(d => {
+    .font(12 + "px sans-serif")
+    .text(d => {
+      if (samplingMethod == "path") {
+        return `X: ${Math.round(d.x)}, Y: ${Math.round(d.y)}`;
+      } else {
+          let frame = Math.round((d.x / w) * points_to_sample);
           let normalizedY = (1.0 - (d.y / h) - 0.0) * (rangeMax - rangeMin) + rangeMin;
           let normalizedX = (d.x / w);
-          let frame = Math.round((d.x / w) * points_to_sample);
           return `F: ${frame}, X: ${normalizedX.toFixed(2)}, Y: ${normalizedY.toFixed(2)}`;
+      }
       })
     .textStyle("orange")
  
