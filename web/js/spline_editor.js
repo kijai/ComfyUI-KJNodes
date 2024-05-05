@@ -187,8 +187,9 @@ app.registerExtension({
             this.splineEditor.parentEl.className = "spline-editor";
             this.splineEditor.parentEl.id = `spline-editor-${this.uuid}`
             element.appendChild(this.splineEditor.parentEl);
-
-            chainCallback(this, "onGraphConfigured", function() {
+            
+            chainCallback(this, "onConfigure", function() {
+              console.log(this)
               createSplineEditor(this);
               });
               
