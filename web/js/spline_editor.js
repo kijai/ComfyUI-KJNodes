@@ -181,7 +181,7 @@ app.registerExtension({
               }
             });
             
-            this.setSize([550, 920]);
+            this.setSize([550, 950]);
             this.resizable = false;
             this.splineEditor.parentEl = document.createElement("div");
             this.splineEditor.parentEl.className = "spline-editor";
@@ -265,18 +265,40 @@ function createSplineEditor(context, reset=false) {
       
       if (linkedInputEditor != null) {
         console.log(linkedInputEditor.widgets)
-        linkedInputEditorCoords = JSON.parse(linkedInputEditor.widgets.find(w => w.name === "coordinates").value)
+        linkedInputEditorCoords = JSON.parse(linkedInputEditor.widgets.find(w => w.name === "points_store").value)
         console.log(linkedInputEditorCoords)
+        if (extraLineLayer) {
+          // Update the data of the existing points layer
+          extraLineLayer.data(linkedInputEditorCoords);
+        } else {
+            // Create the points layer if it doesn't exist
+            extraLineLayer = vis.add(pv.Line)
+              .data(() => linkedInputEditorCoords)
+              .left(d => d.x)
+              .top(d => d.y)
+              .interpolate(() => interpolation)
+              .tension(() => tension)
+              .segmented(() => false)
+              .strokeStyle(linkedInputEditor.properties.spline_color["color"])
+              .lineWidth(3)
+          }
+      } else {
+          if (extraLineLayer) {
+            // Remove the points layer
+            extraLineLayer.data([]);
+            vis.render();
+          }
+       
       }
       
       if (drawSamplePoints) {
         if (pointsLayer) {
           // Update the data of the existing points layer
-          pointsLayer.data(linkedInputEditorCoords);
+          pointsLayer.data(coords);
         } else {
             // Create the points layer if it doesn't exist
             pointsLayer = vis.add(pv.Dot)
-                .data(linkedInputEditorCoords)
+                .data(coords)
                 .left(function(d) { return d.x; })
                 .top(function(d) { return d.y; })
                 .radius(5) // Adjust the radius as needed
@@ -336,6 +358,7 @@ function createSplineEditor(context, reset=false) {
   var rangeMin = minValueWidget.value
   var rangeMax = maxValueWidget.value
   var pointsLayer = null;
+  var extraLineLayer = null;
   var samplingMethod = samplingMethodWidget.value
   
   if (samplingMethod == "path") {
@@ -406,10 +429,13 @@ function createSplineEditor(context, reset=false) {
  var w = widthWidget.value;
  var h = heightWidget.value;
  var i = 3;
- let points = [];
+ let points = []; 
+ let splineColor = null;
 
  if (!reset && pointsStoreWidget.value != "") {
     points = JSON.parse(pointsStoreWidget.value);
+    splineColor = context.properties.spline_color["color"]
+    console.log(splineColor["color"])
  } else {
   points = pv.range(1, 4).map((i, index) => {
     if (index === 0) {
@@ -426,8 +452,20 @@ function createSplineEditor(context, reset=false) {
       };
     }
   });
-    pointsStoreWidget.value = JSON.stringify(points);
- }
+    pointsStoreWidget.value = JSON.stringify(points)
+    
+    context.properties.points = JSON.stringify(points)
+    if (!splineColor) {
+      let colors = pv.Colors.category10().range()
+      splineColor = colors[Math.floor(Math.random() * pv.Colors.category10().range().length)]
+      context.addProperty("spline_color", splineColor, pv.Colors)
+    }
+    else{
+      splineColor = context.properties.spline_color
+      console.log(splineColor["color"])
+    }
+    console.log(context)
+  }
   
   var vis = new pv.Panel()
   .width(w)
@@ -494,7 +532,7 @@ function createSplineEditor(context, reset=false) {
     .interpolate(() => interpolation)
     .tension(() => tension)
     .segmented(() => false)
-    .strokeStyle(pv.Colors.category10().by(pv.index))
+    .strokeStyle(splineColor)
     .lineWidth(3)
     
   vis.add(pv.Dot)

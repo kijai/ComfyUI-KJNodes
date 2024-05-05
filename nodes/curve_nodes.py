@@ -146,11 +146,12 @@ class SplineEditor:
             "optional": {
                 "min_value": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
                 "max_value": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
+                "editor_link": ("EDITORLINK",),
             }
         }
 
-    RETURN_TYPES = ("MASK", "STRING", "FLOAT", "INT")
-    RETURN_NAMES = ("mask", "coord_str", "float", "count")
+    RETURN_TYPES = ("MASK", "STRING", "FLOAT", "INT", "EDITORLINK",)
+    RETURN_NAMES = ("mask", "coord_str", "float", "count", "editor_link",)
     FUNCTION = "splinedata"
     CATEGORY = "KJNodes/weights"
     DESCRIPTION = """
@@ -192,7 +193,7 @@ output types:
 """
 
     def splinedata(self, mask_width, mask_height, coordinates, float_output_type, interpolation, 
-                   points_to_sample, sampling_method, points_store, tension, repeat_output, min_value=0.0, max_value=1.0):
+                   points_to_sample, sampling_method, points_store, tension, repeat_output, min_value=0.0, max_value=1.0, editor_link=None):
         
         coordinates = json.loads(coordinates)
         for coord in coordinates:
@@ -221,7 +222,7 @@ output types:
         masks_out = torch.stack(mask_tensors)
         masks_out = masks_out.repeat(repeat_output, 1, 1, 1)
         masks_out = masks_out.mean(dim=-1)
-        return (masks_out, str(coordinates), out_floats, len(out_floats))
+        return (masks_out, str(coordinates), out_floats, len(out_floats), editor_link,)
 
 class CreateShapeMaskOnPath:
     
