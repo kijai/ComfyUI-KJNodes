@@ -9,6 +9,7 @@ import json, re, os, io, time
 import model_management
 import folder_paths
 from nodes import MAX_RESOLUTION
+from comfy.utils import common_upscale
 
 script_directory = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 folder_paths.add_model_folder_path("kjnodes_fonts", os.path.join(script_directory, "fonts"))
@@ -1009,7 +1010,6 @@ class StableZero123_BatchSchedule:
     CATEGORY = "KJNodes/experimental"
 
     def encode(self, clip_vision, init_image, vae, width, height, batch_size, azimuth_points_string, elevation_points_string, interpolation):
-        from comfy.utils import common_upscale
         output = clip_vision.encode_image(init_image)
         pooled = output.image_embeds.unsqueeze(0)
         pixels = common_upscale(init_image.movedim(-1,1), width, height, "bilinear", "center").movedim(1,-1)
@@ -1150,7 +1150,7 @@ https://huggingface.co/stabilityai/sv3d
     def encode(self, clip_vision, init_image, vae, width, height, batch_size, azimuth_points_string, elevation_points_string, interpolation):
         output = clip_vision.encode_image(init_image)
         pooled = output.image_embeds.unsqueeze(0)
-        pixels = comfy.utils.common_upscale(init_image.movedim(-1,1), width, height, "bilinear", "center").movedim(1,-1)
+        pixels = common_upscale(init_image.movedim(-1,1), width, height, "bilinear", "center").movedim(1,-1)
         encode_pixels = pixels[:,:,:,:3]
         t = vae.encode(encode_pixels)
 
