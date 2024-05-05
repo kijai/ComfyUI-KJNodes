@@ -357,6 +357,10 @@ function createSplineEditor(context, reset=false) {
     context.setSize([context.size[0], h + 410]);
     updatePath();
   }
+  pointsStoreWidget.callback = () => {
+    points = JSON.parse(pointsStoreWidget.value);
+    updatePath();
+  }
   
  // Initialize or reset points array
  var drawHandles = false;
