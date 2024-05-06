@@ -898,7 +898,7 @@ CreateInstanceDiffusionTracking -node.
         colormap = cm.get_cmap('rainbow', len(tracking))
         if draw_text:
             #font = ImageFont.load_default()
-            font = ImageFont.truetype("arial.ttf", font_size)
+            font = ImageFont.truetype(font, font_size)
 
         # Iterate over each image in the batch
         for i in range(image.shape[0]):
