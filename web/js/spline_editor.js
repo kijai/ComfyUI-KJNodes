@@ -197,7 +197,6 @@ app.registerExtension({
               console.log("INPUT CONNECTED")
               console.log(this.editor)
               this.editor.syncEditors(this);
-              //this.splineEditorWidget.syncEditors();
               
               });
               
@@ -626,8 +625,10 @@ class SplineEditor {
   }
   syncEditors(context) {
     console.log(context)
-    let linkedInputEditor = context.getInputNode(0)
+    let linkedInputEditor = context.getInputLink(0)
+    let linkedOutputEditor = context.getOutputNodes(4)
     console.log("linkedInputEditor: ",linkedInputEditor)
+    console.log("linkedOutputEditor: ",linkedOutputEditor)
     let extraLineLayer = null
     if (linkedInputEditor != null) {
       let linkedInputPointsWidget = linkedInputEditor.widgets.find(w => w.name === "points_store")
@@ -657,8 +658,6 @@ class SplineEditor {
           this.vis.render();
         }
       }
-
-    let linkedOutputEditor = this.context.getOutputNodes(4)
 
       if (linkedOutputEditor != null) {
         let linkedOutputPointsWidget = linkedOutputEditor[0].widgets.find(w => w.name === "points_store")
