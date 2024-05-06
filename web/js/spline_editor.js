@@ -170,14 +170,16 @@ app.registerExtension({
             });
 
             document.body.appendChild( this.contextMenu);
+            this.editor = new SplineEditor(this);
 
             this.addWidget("button", "New spline", null, () => {
               if (!this.properties || !("points" in this.properties)) {
-                createSplineEditor(this)
+                
+                this.editor.createEditor(false);
                 this.addProperty("points", this.constructor.type, "string");
               }
               else {
-                createSplineEditor(this, true)
+                this.editor.createEditor(true);
               }
             });
             
@@ -187,9 +189,16 @@ app.registerExtension({
             this.splineEditor.parentEl.className = "spline-editor";
             this.splineEditor.parentEl.id = `spline-editor-${this.uuid}`
             element.appendChild(this.splineEditor.parentEl);
-            
-            chainCallback(this, "onConfigure", function() {
-              createSplineEditor(this);
+            console.log(this)
+            chainCallback(this, "onGraphConfigured", function() {
+                this.editor.createEditor();
+              });
+            chainCallback(this, "onConnectInput", function() {
+              console.log("INPUT CONNECTED")
+              console.log(this.editor)
+              this.editor.syncEditors(this);
+              //this.splineEditorWidget.syncEditors();
+              
               });
               
           }); // onAfterGraphConfigured
@@ -197,8 +206,13 @@ app.registerExtension({
       } //before register
 })//register
 
-
-function createSplineEditor(context, reset=false) {
+class SplineEditor {
+  constructor(context) {
+     this.context = context;
+     this.vis = null;
+  }
+  createEditor(reset=false) {
+  var context = this.context
   console.log("creatingSplineEditor")
 
   document.addEventListener('contextmenu', function(e) {
@@ -259,38 +273,8 @@ function createSplineEditor(context, reset=false) {
   var drawSamplePoints = false;
 
   function updatePath() {
-      let coords = samplePoints(pathElements[0], points_to_sample, samplingMethod, w);
-      let linkedInputEditor = context.getInputNode(0)
-      let linkedInputEditorCoords = null
-      
-      if (linkedInputEditor != null) {
-        console.log(linkedInputEditor.widgets)
-        linkedInputEditorCoords = JSON.parse(linkedInputEditor.widgets.find(w => w.name === "points_store").value)
-        console.log(linkedInputEditorCoords)
-        if (extraLineLayer) {
-          // Update the data of the existing points layer
-          extraLineLayer.data(linkedInputEditorCoords);
-        } else {
-            // Create the points layer if it doesn't exist
-            extraLineLayer = vis.add(pv.Line)
-              .data(() => linkedInputEditorCoords)
-              .left(d => d.x)
-              .top(d => d.y)
-              .interpolate(() => interpolation)
-              .tension(() => tension)
-              .segmented(() => false)
-              .strokeStyle(linkedInputEditor.properties.spline_color["color"])
-              .lineWidth(3)
-          }
-      } else {
-          if (extraLineLayer) {
-            // Remove the points layer
-            extraLineLayer.data([]);
-            vis.render();
-          }
-       
-      }
-      
+      let coords = samplePoints(pathElements[0], points_to_sample, samplingMethod, w);     
+
       if (drawSamplePoints) {
         if (pointsLayer) {
           // Update the data of the existing points layer
@@ -318,6 +302,7 @@ function createSplineEditor(context, reset=false) {
       if (coordWidget) {
         coordWidget.value = coordsString;
         }
+      //syncEditors();
       vis.render();
   }
   
@@ -386,13 +371,12 @@ function createSplineEditor(context, reset=false) {
     if (linkedOutputEditor != null) {
       linkedOutputEditorPointsToSample = linkedOutputEditor[0].widgets.find(w => w.name === "points_to_sample")
       linkedOutputEditorPointsToSample.value = pointsWidget.value
-      console.log(linkedOutputEditorPointsToSample)
     }
     if (linkedInputEditor != null) {
-      linkedInputEditorPointsToSample = linkedInputEditor.widgets.find(w => w.name === "points_to_sample").value
-      pointsWidget.value = linkedInputEditorPointsToSample
-      console.log(linkedInputEditorPointsToSample)
-    }else {
+      linkedInputEditorPointsToSample = linkedInputEditor.widgets.find(w => w.name === "points_to_sample")
+      linkedInputEditorPointsToSample.value = pointsWidget.value
+    }
+    else {
       points_to_sample = pointsWidget.value
     }
     updatePath();
@@ -638,8 +622,72 @@ function createSplineEditor(context, reset=false) {
     context.splineEditor.element.appendChild(svgElement);
     var pathElements = svgElement.getElementsByTagName('path'); // Get all path elements
     updatePath();
-}
+    this.vis = vis
+  }
+  syncEditors(context) {
+    console.log(context)
+    let linkedInputEditor = context.getInputNode(0)
+    console.log("linkedInputEditor: ",linkedInputEditor)
+    let extraLineLayer = null
+    if (linkedInputEditor != null) {
+      let linkedInputPointsWidget = linkedInputEditor.widgets.find(w => w.name === "points_store")
+      let linkedInputEditorCoords = JSON.parse(linkedInputPointsWidget.value)
+      //console.log("linkedInputEditorCoords",linkedInputEditorCoords)
+      if (extraLineLayer) {
+        console.log("extraLineLayer exists",extraLineLayer)
+        // Update the data of the existing layer
+        extraLineLayer.data(linkedInputEditorCoords);
+      } else {
+          // Create the points layer if it doesn't exist
+          extraLineLayer = this.vis.add(pv.Line)
+            .data(() => linkedInputEditorCoords)
+            .left(d => d.x)
+            .top(d => d.y)
+            .interpolate(() => linkedInputEditor.widgets.find(w => w.name === "interpolation").value)
+            .tension(() => tension)
+            .segmented(() => false)
+            .strokeStyle(linkedInputEditor.properties.spline_color["color"])
+            .lineWidth(3)
+            console.log("extraLineLayer",extraLineLayer)
+        }
+    } else {
+        if (extraLineLayer) {
+          // Remove the points layer
+          extraLineLayer.data([]);
+          this.vis.render();
+        }
+      }
 
+    let linkedOutputEditor = this.context.getOutputNodes(4)
+
+      if (linkedOutputEditor != null) {
+        let linkedOutputPointsWidget = linkedOutputEditor[0].widgets.find(w => w.name === "points_store")
+        let linkedOutputEditorCoords = JSON.parse(linkedOutputPointsWidget.value)
+        //console.log(linkedInputEditorCoords)
+        if (extraLineLayer) {
+          // Update the data of the existing layer
+          extraLineLayer.data(linkedOutputEditorCoords);
+        } else {
+            // Create the points layer if it doesn't exist
+            extraLineLayer = this.vis.add(pv.Line)
+              .data(() => linkedOutputEditorCoords)
+              .left(d => d.x)
+              .top(d => d.y)
+              .interpolate(() => linkedOutputEditor[0].widgets.find(w => w.name === "interpolation").value)
+              .tension(() => tension)
+              .segmented(() => false)
+              .strokeStyle(linkedOutputEditor[0].properties.spline_color["color"])
+              .lineWidth(3)
+          }
+      } else {
+          // if (extraLineLayer) {
+          //   // Remove the points layer
+          //   extraLineLayer.data([]);
+          //   vis.render();
+          // }       
+    }
+    }
+}
 function samplePoints(svgPathElement, numSamples, samplingMethod, width) {
   var svgWidth = width; // Fixed width of the SVG element
   var pathLength = svgPathElement.getTotalLength();
@@ -713,7 +761,7 @@ function findPointAtX(svgPathElement, targetX, pathLength) {
 }
 
 //from melmass
-export function hideWidgetForGood(node, widget, suffix = '') {
+function hideWidgetForGood(node, widget, suffix = '') {
   widget.origType = widget.type
   widget.origComputeSize = widget.computeSize
   widget.origSerializeValue = widget.serializeValue
