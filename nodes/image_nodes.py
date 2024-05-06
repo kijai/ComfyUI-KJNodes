@@ -104,7 +104,10 @@ https://github.com/hahnec/color-matcher/
                 print(f"Error occurred during transfer: {e}")
                 break
             out.append(torch.from_numpy(image_result))
-        return (torch.stack(out, dim=0).to(torch.float32), )
+            
+        out = torch.stack(out, dim=0).to(torch.float32)
+        out.clamp_(0, 1)
+        return (out,)
     
 class SaveImageWithAlpha:
     def __init__(self):
