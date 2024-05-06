@@ -207,97 +207,101 @@ app.registerExtension({
 function createSplineEditor(context, reset=false) {
   console.log("creatingSplineEditor")
 
-  document.addEventListener('contextmenu', function(e) {
-    e.preventDefault();
-  });
-
-  document.addEventListener('click', function(e) {
-    if (!context.contextMenu.contains(e.target)) {
-      context.contextMenu.style.display = 'none';
-    }
-  });
-
-  context.menuItem1.addEventListener('click', function(e) {
-    e.preventDefault();
-    if (!drawHandles) {
-      drawHandles = true
-      vis.add(pv.Line)
-      .data(() => points.map((point, index) => ({
-          start: point,
-          end: [index]
-      })))
-      .left(d => d.start.x)
-      .top(d => d.start.y)
-      .interpolate("linear")
-      .tension(0) // Straight lines
-      .strokeStyle("#ff7f0e") // Same color as control points
-      .lineWidth(1)
-      .visible(() => drawHandles);
-      vis.render();
-      
-   
-    } else {
-      drawHandles = false
-      vis.render();
-    }
-    context.contextMenu.style.display = 'none';
-  
-  });
-
-  context.menuItem2.addEventListener('click', function(e) {
+  // context menu
+  function createContextMenu() {
+    document.addEventListener('contextmenu', function(e) {
       e.preventDefault();
-      drawSamplePoints = !drawSamplePoints;
+    });
+
+    document.addEventListener('click', function(e) {
+      if (!context.contextMenu.contains(e.target)) {
+        context.contextMenu.style.display = 'none';
+      }
+    });
+
+    context.menuItem1.addEventListener('click', function(e) {
+      e.preventDefault();
+      if (!drawHandles) {
+        drawHandles = true
+        vis.add(pv.Line)
+        .data(() => points.map((point, index) => ({
+            start: point,
+            end: [index]
+        })))
+        .left(d => d.start.x)
+        .top(d => d.start.y)
+        .interpolate("linear")
+        .tension(0) // Straight lines
+        .strokeStyle("#ff7f0e") // Same color as control points
+        .lineWidth(1)
+        .visible(() => drawHandles);
+        vis.render();
+        
+    
+      } else {
+        drawHandles = false
+        vis.render();
+      }
+      context.contextMenu.style.display = 'none';
+    
+    });
+
+    context.menuItem2.addEventListener('click', function(e) {
+        e.preventDefault();
+        drawSamplePoints = !drawSamplePoints;
+        updatePath();
+    });
+
+    context.menuItem3.addEventListener('click', function(e) {
+      e.preventDefault();
+      if (dotShape == "circle"){
+        dotShape = "triangle"
+      }
+      else {
+        dotShape = "circle"
+      }
+      console.log(dotShape)
       updatePath();
-  });
+    });
 
-  context.menuItem3.addEventListener('click', function(e) {
-    e.preventDefault();
-    if (dotShape == "circle"){
-      dotShape = "triangle"
-    }
-    else {
-      dotShape = "circle"
-    }
-    console.log(dotShape)
-    updatePath();
-});
+    context.menuItem4.addEventListener('click', function(e) {
+      // Create file input element
+      const fileInput = document.createElement('input');
+      fileInput.type = 'file';
+      fileInput.accept = 'image/*'; // Accept only image files
 
-context.menuItem4.addEventListener('click', function(e) {
-  // Create file input element
-  const fileInput = document.createElement('input');
-  fileInput.type = 'file';
-  fileInput.accept = 'image/*'; // Accept only image files
+      // Listen for file selection
+      fileInput.addEventListener('change', function(event) {
+        const file = event.target.files[0]; // Get the selected file
 
-  // Listen for file selection
-  fileInput.addEventListener('change', function(event) {
-    const file = event.target.files[0]; // Get the selected file
+        if (file) {
+          // Create a URL for the selected file
+          const imageUrl = URL.createObjectURL(file);
+          
+          // Set the backgroundImage with the new URL and make it visible
+          backgroundImage
+            .url(imageUrl)
+            .visible(true)
+            .root.render();
+        }
+      });
 
-    if (file) {
-      // Create a URL for the selected file
-      const imageUrl = URL.createObjectURL(file);
-      
-      // Set the backgroundImage with the new URL and make it visible
-      backgroundImage
-        .url(imageUrl)
-        .visible(true)
+      // If the backgroundImage is already visible, hide it. Otherwise, show file input.
+      if (backgroundImage.visible()) {
+        backgroundImage.visible(false)
         .root.render();
-    }
-  });
-
-  // If the backgroundImage is already visible, hide it. Otherwise, show file input.
-  if (backgroundImage.visible()) {
-    backgroundImage.visible(false)
-    .root.render();
-  } else {
-    // Trigger the file input dialog
-    fileInput.click();
+      } else {
+        // Trigger the file input dialog
+        fileInput.click();
+      }
+      context.contextMenu.style.display = 'none';
+    });
   }
-  context.contextMenu.style.display = 'none';
-});
 
   var dotShape = "circle";
   var drawSamplePoints = false;
-
+  
+  createContextMenu();
   function updatePath() {
       let coords = samplePoints(pathElements[0], points_to_sample, samplingMethod, w);
 
@@ -478,6 +482,7 @@ context.menuItem4.addEventListener('click', function(e) {
       }
     })
   var backgroundImage = vis.add(pv.Image)
+    .visible(false)
   vis.add(pv.Rule)
     .data(pv.range(0, h, 64))
     .bottom(d =>  d)
