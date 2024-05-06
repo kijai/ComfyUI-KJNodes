@@ -149,11 +149,17 @@ app.registerExtension({
 
             this.menuItem3 = document.createElement("a");
             this.menuItem3.href = "#";
-            this.menuItem3.id = "menu-item-2";
+            this.menuItem3.id = "menu-item-3";
             this.menuItem3.textContent = "Switch point shape";
             styleMenuItem(this.menuItem3);
 
-            const menuItems = [this.menuItem1, this.menuItem2, this.menuItem3];
+            this.menuItem4 = document.createElement("a");
+            this.menuItem4.href = "#";
+            this.menuItem4.id = "menu-item-4";
+            this.menuItem4.textContent = "Background image";
+            styleMenuItem(this.menuItem4);
+
+            const menuItems = [this.menuItem1, this.menuItem2, this.menuItem3, this.menuItem4];
 
             menuItems.forEach(menuItem => {
             menuItem.addEventListener('mouseover', function() {
@@ -215,63 +221,101 @@ class SplineEditor {
   var context = this.context
   console.log("creatingSplineEditor")
 
-  document.addEventListener('contextmenu', function(e) {
-    e.preventDefault();
-  });
-
-  document.addEventListener('click', function(e) {
-    if (!context.contextMenu.contains(e.target)) {
-      context.contextMenu.style.display = 'none';
-    }
-  });
-
-  context.menuItem1.addEventListener('click', function(e) {
-    e.preventDefault();
-    if (!drawHandles) {
-      drawHandles = true
-      vis.add(pv.Line)
-      .data(() => points.map((point, index) => ({
-          start: point,
-          end: [index]
-      })))
-      .left(d => d.start.x)
-      .top(d => d.start.y)
-      .interpolate("linear")
-      .tension(0) // Straight lines
-      .strokeStyle("#ff7f0e") // Same color as control points
-      .lineWidth(1)
-      .visible(() => drawHandles);
-      vis.render();
-      
-   
-    } else {
-      drawHandles = false
-      vis.render();
-    }
-    context.contextMenu.style.display = 'none';
-  
-  });
-
-  context.menuItem2.addEventListener('click', function(e) {
+  // context menu
+  function createContextMenu() {
+    document.addEventListener('contextmenu', function(e) {
       e.preventDefault();
-      drawSamplePoints = !drawSamplePoints;
-      updatePath();
-  });
+    });
 
-  context.menuItem3.addEventListener('click', function(e) {
-    e.preventDefault();
-    if (dotShape == "circle"){
-      dotShape = "triangle"
-    }
-    else {
-      dotShape = "circle"
-    }
-    console.log(dotShape)
-    updatePath();
-});
+    document.addEventListener('click', function(e) {
+      if (!context.contextMenu.contains(e.target)) {
+        context.contextMenu.style.display = 'none';
+      }
+    });
+
+    context.menuItem1.addEventListener('click', function(e) {
+      e.preventDefault();
+      if (!drawHandles) {
+        drawHandles = true
+        vis.add(pv.Line)
+        .data(() => points.map((point, index) => ({
+            start: point,
+            end: [index]
+        })))
+        .left(d => d.start.x)
+        .top(d => d.start.y)
+        .interpolate("linear")
+        .tension(0) // Straight lines
+        .strokeStyle("#ff7f0e") // Same color as control points
+        .lineWidth(1)
+        .visible(() => drawHandles);
+        vis.render();
+        
+    
+      } else {
+        drawHandles = false
+        vis.render();
+      }
+      context.contextMenu.style.display = 'none';
+    
+    });
+
+    context.menuItem2.addEventListener('click', function(e) {
+        e.preventDefault();
+        drawSamplePoints = !drawSamplePoints;
+        updatePath();
+    });
+
+    context.menuItem3.addEventListener('click', function(e) {
+      e.preventDefault();
+      if (dotShape == "circle"){
+        dotShape = "triangle"
+      }
+      else {
+        dotShape = "circle"
+      }
+      console.log(dotShape)
+      updatePath();
+    });
+
+    context.menuItem4.addEventListener('click', function(e) {
+      // Create file input element
+      const fileInput = document.createElement('input');
+      fileInput.type = 'file';
+      fileInput.accept = 'image/*'; // Accept only image files
+
+      // Listen for file selection
+      fileInput.addEventListener('change', function(event) {
+        const file = event.target.files[0]; // Get the selected file
+
+        if (file) {
+          // Create a URL for the selected file
+          const imageUrl = URL.createObjectURL(file);
+          
+          // Set the backgroundImage with the new URL and make it visible
+          backgroundImage
+            .url(imageUrl)
+            .visible(true)
+            .root.render();
+        }
+      });
+
+      // If the backgroundImage is already visible, hide it. Otherwise, show file input.
+      if (backgroundImage.visible()) {
+        backgroundImage.visible(false)
+        .root.render();
+      } else {
+        // Trigger the file input dialog
+        fileInput.click();
+      }
+      context.contextMenu.style.display = 'none';
+    });
+  }
+
   var dotShape = "circle";
   var drawSamplePoints = false;
-
+  
+  createContextMenu();
   function updatePath() {
       let coords = samplePoints(pathElements[0], points_to_sample, samplingMethod, w);     
 
@@ -496,7 +540,8 @@ class SplineEditor {
       context.contextMenu.style.top = `${pv.event.clientY}px`;
       }
     })
-  
+  var backgroundImage = vis.add(pv.Image)
+    .visible(false)
   vis.add(pv.Rule)
     .data(pv.range(0, h, 64))
     .bottom(d =>  d)

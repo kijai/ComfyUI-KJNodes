@@ -719,10 +719,11 @@ for example:
         },
         "optional": {
             "size_multiplier": ("FLOAT", {"default": [1.0], "forceInput": True}),
+            "fit_in_frame": ("BOOLEAN", {"default": True}),
         }
     } 
 
-    def tracking(self, coordinates, class_name, class_id, width, height, bbox_width, bbox_height, prompt, size_multiplier=[1.0]):
+    def tracking(self, coordinates, class_name, class_id, width, height, bbox_width, bbox_height, prompt, size_multiplier=[1.0], fit_in_frame=True):
         # Define the number of images in the batch
         coordinates = coordinates.replace("'", '"')
         coordinates = json.loads(coordinates)
@@ -745,9 +746,16 @@ for example:
             bottom_right_x = x + adjusted_bbox_width // 2
             bottom_right_y = y + adjusted_bbox_height // 2
 
+            if fit_in_frame:
+                # Clip the coordinates to the frame boundaries
+                top_left_x = max(0, top_left_x)
+                top_left_y = max(0, top_left_y)
+                bottom_right_x = min(width, bottom_right_x)
+                bottom_right_y = min(height, bottom_right_y)
+
             # Append the top left and bottom right coordinates to the list for the current ID
             id_coordinates.append([top_left_x, top_left_y, bottom_right_x, bottom_right_y, width, height])
-          
+        
         class_id = int(class_id)
         # Assign the list of coordinates to the specified ID within the class_id dictionary
         tracked[class_name][class_id] = id_coordinates
@@ -898,13 +906,12 @@ CreateInstanceDiffusionTracking -node.
         
         colormap = cm.get_cmap('rainbow', len(tracking))
         if draw_text:
-            #font = ImageFont.load_default()
-            font = ImageFont.truetype(font, font_size)
+            font_path = folder_paths.get_full_path("kjnodes_fonts", font)
+            font = ImageFont.truetype(font_path, font_size)
 
         # Iterate over each image in the batch
         for i in range(image.shape[0]):
             # Extract the current image and convert it to a PIL image
-            # Adjust the tensor to (C, H, W) for ToPILImage
             current_image = image[i, :, :, :].permute(2, 0, 1)
             pil_image = transforms.ToPILImage()(current_image)
             
