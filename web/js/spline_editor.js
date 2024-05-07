@@ -200,13 +200,18 @@ app.registerExtension({
                 this.editor.createEditor();
               });
             chainCallback(this, "onConnectInput", function(targetSlot, type, output, originNode, originSlot) {
-              console.log("INPUT CONNECTED")
-              console.log(targetSlot, type, output, originNode, originSlot)
-              console.log("ORIGINNODE: ",originNode)
-              this.editor.syncEditors(originNode);
-              
+              // console.log("INPUT CONNECTED")
+              // console.log(targetSlot, type, output, originNode, originSlot)
+              // console.log("ORIGINNODE: ",originNode)
+              this.editor.syncEditors(originNode, "input");
               });
-              
+            chainCallback(this, "onConnectOutput", function(slot, type, input, target_node, target_slot) {
+              // console.log("OUTPUT CONNECTED")
+              // console.log(slot, type, input, target_node, target_slot)
+              // console.log("TARGETNODE: ",target_node)
+              this.editor.syncEditors(target_node, "output");
+              });
+
           }); // onAfterGraphConfigured
         }//node created
       } //before register
@@ -216,6 +221,7 @@ class SplineEditor {
   constructor(context) {
      this.context = context;
      this.vis = null;
+     this.extraLineLayers = {};
   }
   createEditor(reset=false) {
   var context = this.context
@@ -317,7 +323,7 @@ class SplineEditor {
   
   createContextMenu();
   function updatePath() {
-      let coords = samplePoints(pathElements[0], points_to_sample, samplingMethod, w);     
+      let coords = samplePoints(pathElements[0], points_to_sample, samplingMethod, w);   
 
       if (drawSamplePoints) {
         if (pointsLayer) {
@@ -346,7 +352,7 @@ class SplineEditor {
       if (coordWidget) {
         coordWidget.value = coordsString;
         }
-      //syncEditors();
+      
       vis.render();
   }
   
@@ -480,7 +486,8 @@ class SplineEditor {
       splineColor = context.properties.spline_color
       console.log(splineColor["color"])
     }
-    console.log(context)
+    
+
   }
   
   var vis = new pv.Panel()
@@ -603,7 +610,13 @@ class SplineEditor {
     })
     .event("dragend", function() {
       if (this.pathElements !== null) {
+        context.editor.syncEditors(context.getInputNode(0))
+        let outputEditor = context.getOutputNodes(4);
+        if (outputEditor !== null){
+        context.editor.syncEditors(outputEditor[0]) }
         updatePath();
+        
+
       }
         isDragging = false;
     })
@@ -654,74 +667,50 @@ class SplineEditor {
     svgElement.style['position'] = "relative"
     context.splineEditor.element.appendChild(svgElement);
     var pathElements = svgElement.getElementsByTagName('path'); // Get all path elements
+    
     updatePath();
     this.vis = vis
+    
   }
-  syncEditors(originNode, targetNode) {
-    console.log(originNode)
-    let linkedInputEditor = originNode
-    let linkedOutputEditor = originNode.outputs[4]
-    console.log(originNode.graph.links.filter(item => item.type === "EDITORLINK"))
-    console.log("linkedInputEditor: ",linkedInputEditor)
-    console.log("linkedOutputEditor: ",linkedOutputEditor)
-    let extraLineLayer = null
-    if (linkedInputEditor != null) {
-      let linkedInputPointsWidget = linkedInputEditor.widgets.find(w => w.name === "points_store")
-      let linkedInputEditorCoords = JSON.parse(linkedInputPointsWidget.value)
 
-      //console.log("linkedInputEditorCoords",linkedInputEditorCoords)
-      if (extraLineLayer) {
-        console.log("extraLineLayer exists",extraLineLayer)
-        // Update the data of the existing layer
-        extraLineLayer.data(linkedInputEditorCoords);
-      } else {
-          // Create the points layer if it doesn't exist
-          extraLineLayer = this.vis.add(pv.Line)
-            .data(() => linkedInputEditorCoords)
-            .left(d => d.x)
-            .top(d => d.y)
-            .interpolate(() => linkedInputEditor.widgets.find(w => w.name === "interpolation").value)
-            .tension(() => linkedInputEditor.widgets.find(w => w.name === "tension").value)
-            .segmented(() => false)
-            .strokeStyle(linkedInputEditor.properties.spline_color["color"])
-            .lineWidth(3)
-            console.log("extraLineLayer",extraLineLayer)
-        }
-    } else {
-        if (extraLineLayer) {
-          // Remove the points layer
-          extraLineLayer.data([]);
-          this.vis.render();
-        }
+  syncEditors(node, connectionType) {
+    if (node == null) return
+    let linkedEditor = node
+    
+    if (linkedEditor != null) {
+      let linkedPointsWidget = linkedEditor.widgets.find(w => w.name === "points_store")
+      let linkedCoords = JSON.parse(linkedPointsWidget.value)
+      
+       // Initialize linkedNodes if it doesn't already exist
+      if (!node.hasOwnProperty("linkedNodes")) {
+          node["linkedNodes"] = {};
       }
 
-    //   if (linkedOutputEditor != null) {
-    //     let linkedOutputPointsWidget = linkedOutputEditor[0].widgets.find(w => w.name === "points_store")
-    //     let linkedOutputEditorCoords = JSON.parse(linkedOutputPointsWidget.value)
-    //     //console.log(linkedInputEditorCoords)
-    //     if (extraLineLayer) {
-    //       // Update the data of the existing layer
-    //       extraLineLayer.data(linkedOutputEditorCoords);
-    //     } else {
-    //         // Create the points layer if it doesn't exist
-    //         extraLineLayer = this.vis.add(pv.Line)
-    //           .data(() => linkedOutputEditorCoords)
-    //           .left(d => d.x)
-    //           .top(d => d.y)
-    //           .interpolate(() => linkedOutputEditor[0].widgets.find(w => w.name === "interpolation").value)
-    //           .tension(() => linkedOutputEditor[0].widgets.find(w => w.name === "tension").value)
-    //           .segmented(() => false)
-    //           .strokeStyle(linkedOutputEditor[0].properties.spline_color["color"])
-    //           .lineWidth(3)
-    //       }
-    //   } else {
-    //       // if (extraLineLayer) {
-    //       //   // Remove the points layer
-    //       //   extraLineLayer.data([]);
-    //       //   vis.render();
-    //       // }       
-    // }
+      node["linkedNodes"][this.context.id] = linkedCoords;
+
+      if (Array.isArray(linkedCoords)) {
+        // Check if a layer for this node ID already exists
+        if (!this.extraLineLayers.hasOwnProperty(node.id)) {
+            // Create a new layer for this node ID if it doesn't exist
+            this.extraLineLayers[node.id] = this.vis.add(pv.Line)
+                .data(linkedCoords)
+                .left(d => d.x)
+                .top(d => d.y)
+                .interpolate(() => node.widgets.find(w => w.name === "interpolation").value)
+                .tension(() => node.widgets.find(w => w.name === "tension").value)
+                .segmented(() => false)
+                .strokeStyle(node.properties.spline_color["color"])
+                .lineWidth(3);
+        } else {
+            // If the layer already exists, update its data
+            this.extraLineLayers[node.id].data(linkedCoords);
+            }
+        } 
+        this.vis.render()
     }
+  }//syncEditors
+
+
 }
 function samplePoints(svgPathElement, numSamples, samplingMethod, width) {
   var svgWidth = width; // Fixed width of the SVG element
