@@ -232,7 +232,6 @@ class CreateShapeMaskOnPath:
     DESCRIPTION = """
 Creates a mask or batch of masks with the specified shape.  
 Locations are center locations.  
-Grow value is the amount to grow the shape on each frame, creating animated masks.
 """
 
     @classmethod
@@ -302,6 +301,93 @@ Grow value is the amount to grow the shape on each frame, creating animated mask
             out.append(mask)
         outstack = torch.cat(out, dim=0)
         return (outstack, 1.0 - outstack,)
+    
+class CreateTextOnPath:
+    
+    RETURN_TYPES = ("IMAGE", "MASK", "MASK",)
+    RETURN_NAMES = ("image", "mask", "mask_inverted",)
+    FUNCTION = "createtextmask"
+    CATEGORY = "KJNodes/masking/generate"
+    DESCRIPTION = """
+Creates a mask or batch of masks with the specified text.  
+Locations are center locations.  
+"""
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "coordinates": ("STRING", {"forceInput": True}),
+                "text": ("STRING", {"default": 'text', "multiline": True}),
+                "frame_width": ("INT", {"default": 512,"min": 16, "max": 4096, "step": 1}),
+                "frame_height": ("INT", {"default": 512,"min": 16, "max": 4096, "step": 1}),
+                "font": (folder_paths.get_filename_list("kjnodes_fonts"), ),
+                "font_size": ("INT", {"default": 42}),
+                 "alignment": (
+                [   'left',
+                    'center',
+                    'right'
+                ],
+                {"default": 'center'}
+                ),
+                "text_color": ("STRING", {"default": 'white'}),
+        },
+        "optional": {
+            "size_multiplier": ("FLOAT", {"default": [1.0], "forceInput": True}),
+        }
+    } 
+
+    def createtextmask(self, coordinates, frame_width, frame_height, font, font_size, text, text_color, alignment, size_multiplier=[1.0]):
+        coordinates = coordinates.replace("'", '"')
+        coordinates = json.loads(coordinates)
+
+        batch_size = len(coordinates)
+        mask_list = []
+        image_list = []
+        color = text_color
+        font_path = folder_paths.get_full_path("kjnodes_fonts", font)
+
+        if len(size_multiplier) != batch_size:
+            size_multiplier = size_multiplier * (batch_size // len(size_multiplier)) + size_multiplier[:batch_size % len(size_multiplier)]
+        
+        for i, coord in enumerate(coordinates):
+            image = Image.new("RGB", (frame_width, frame_height), "black")
+            draw = ImageDraw.Draw(image)
+            lines = text.split('\n')  # Split the text into lines
+            # Apply the size multiplier to the font size for this iteration
+            current_font_size = int(font_size * size_multiplier[i])
+            current_font = ImageFont.truetype(font_path, current_font_size)
+            line_heights = [current_font.getbbox(line)[3] for line in lines]  # List of line heights
+            total_text_height = sum(line_heights)  # Total height of text block
+
+            # Calculate the starting Y position to center the block of text
+            start_y = coord['y'] - total_text_height // 2
+            for j, line in enumerate(lines):
+                text_width, text_height = current_font.getbbox(line)[2], line_heights[j]
+                if alignment == 'left':
+                    location_x = coord['x']
+                elif alignment == 'center':
+                    location_x = int(coord['x'] - text_width // 2)
+                elif alignment == 'right':
+                    location_x = int(coord['x'] - text_width)
+                
+                location_y = int(start_y + sum(line_heights[:j]))
+                text_position = (location_x, location_y)
+                # Draw the text
+                try:
+                    draw.text(text_position, line, fill=color, font=current_font, features=['-liga'])
+                except:
+                    draw.text(text_position, line, fill=color, font=current_font)
+            
+            image = pil2tensor(image)
+            non_black_pixels = (image > 0).any(dim=-1)
+            mask = non_black_pixels.to(image.dtype)
+            mask_list.append(mask)
+            image_list.append(image)
+
+        out_images = torch.cat(image_list, dim=0).cpu().float()
+        out_masks = torch.cat(mask_list, dim=0)
+        return (out_images, out_masks, 1.0 - out_masks,)
     
 class MaskOrImageToWeight:
 
