@@ -751,6 +751,13 @@ for example:
                 top_left_y = max(0, top_left_y)
                 bottom_right_x = min(width, bottom_right_x)
                 bottom_right_y = min(height, bottom_right_y)
+                # Ensure width and height are positive
+                adjusted_bbox_width = max(1, bottom_right_x - top_left_x)
+                adjusted_bbox_height = max(1, bottom_right_y - top_left_y)
+
+                # Update the coordinates with the new width and height
+                bottom_right_x = top_left_x + adjusted_bbox_width
+                bottom_right_y = top_left_y + adjusted_bbox_height
 
             # Append the top left and bottom right coordinates to the list for the current ID
             id_coordinates.append([top_left_x, top_left_y, bottom_right_x, bottom_right_y, width, height])
@@ -830,48 +837,51 @@ Interpolates coordinates based on a curve.
     } 
 
     def interpolate(self, coordinates, interpolation_curve):
-         # Parse the JSON string to get the list of coordinates
+        # Parse the JSON string to get the list of coordinates
         coordinates = json.loads(coordinates.replace("'", '"'))
 
         # Convert the list of dictionaries to a list of (x, y) tuples for easier processing
         coordinates = [(coord['x'], coord['y']) for coord in coordinates]
 
         # Calculate the total length of the original path
-        path_length = sum(np.linalg.norm(np.array(coordinates[i]) - np.array(coordinates[i-1])) for i in range(1, len(coordinates)))
-
-        # Normalize the interpolation curve
-        normalized_curve = [x / path_length for x in interpolation_curve]
+        path_length = sum(np.linalg.norm(np.array(coordinates[i]) - np.array(coordinates[i-1])) 
+                        for i in range(1, len(coordinates)))
 
         # Initialize variables for interpolation
         interpolated_coords = []
         current_length = 0
-        current_index = 1
+        current_index = 0
 
         # Iterate over the normalized curve
-        for target_length in normalized_curve:
-            target_length *= path_length # Convert back to the original scale
-            while current_length < target_length and current_index < len(coordinates):
-                segment_length = np.linalg.norm(np.array(coordinates[current_index]) - np.array(coordinates[current_index-1]))
+        for normalized_length in interpolation_curve:
+            target_length = normalized_length * path_length # Convert to the original scale
+            while current_index < len(coordinates) - 1:
+                segment_start, segment_end = np.array(coordinates[current_index]), np.array(coordinates[current_index + 1])
+                segment_length = np.linalg.norm(segment_end - segment_start)
+                if current_length + segment_length >= target_length:
+                    break
                 current_length += segment_length
                 current_index += 1
 
             # Interpolate between the last two points
-            if current_index == 1:
-                interpolated_coords.append(coordinates[0])
-            else:
-                p1, p2 = np.array(coordinates[current_index-2]), np.array(coordinates[current_index-1])
+            if current_index < len(coordinates) - 1:
+                p1, p2 = np.array(coordinates[current_index]), np.array(coordinates[current_index + 1])
                 segment_length = np.linalg.norm(p2 - p1)
                 if segment_length > 0:
-                    t = (target_length - (current_length - segment_length)) / segment_length
+                    t = (target_length - current_length) / segment_length
                     interpolated_point = p1 + t * (p2 - p1)
                     interpolated_coords.append(interpolated_point.tolist())
                 else:
                     interpolated_coords.append(p1.tolist())
+            else:
+                # If the target_length is at or beyond the end of the path, add the last coordinate
+                interpolated_coords.append(coordinates[-1])
 
         # Convert back to string format if necessary
         interpolated_coords_str = "[" + ", ".join([f"{{'x': {round(coord[0])}, 'y': {round(coord[1])}}}" for coord in interpolated_coords]) + "]"
+        print(interpolated_coords_str)
 
-        return (interpolated_coords_str, )
+        return (interpolated_coords_str,)
     
 class DrawInstanceDiffusionTracking:
     
