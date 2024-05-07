@@ -113,6 +113,23 @@ app.registerExtension({
 					return r
 				}
 				break;
+
+			case "PreviewAnimation":
+				const onPreviewAnimationConnectInput = nodeType.prototype.onConnectInput;
+				nodeType.prototype.onConnectInput = function (targetSlot, type, output, originNode, originSlot) {
+					const v = onPreviewAnimationConnectInput?.(this, arguments);
+					targetSlot.title = "Preview Animation"
+					return v;
+				}
+				const onPreviewAnimationExecuted = nodeType.prototype.onExecuted;
+				nodeType.prototype.onExecuted = function(message) {
+					const r = onPreviewAnimationExecuted? onPreviewAnimationExecuted.apply(this,arguments): undefined
+					let values = message["text"].toString();
+					this.title = "Preview Animation " + values
+					return r
+				}
+				break;
+
 			case "VRAM_Debug":
 				const onVRAM_DebugConnectInput = nodeType.prototype.onConnectInput;
 				nodeType.prototype.onConnectInput = function (targetSlot, type, output, originNode, originSlot) {

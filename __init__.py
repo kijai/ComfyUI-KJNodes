@@ -57,6 +57,7 @@ NODE_CONFIG = {
     "ImageUpscaleWithModelBatched": {"class": ImageUpscaleWithModelBatched, "name": "Image Upscale With Model Batched"},
     "InsertImagesToBatchIndexed": {"class": InsertImagesToBatchIndexed, "name": "Insert Images To Batch Indexed"},
     "MergeImageChannels": {"class": MergeImageChannels, "name": "Merge Image Channels"},
+    "PreviewAnimation": {"class": PreviewAnimation, "name": "Preview Animation"},
     "RemapImageRange": {"class": RemapImageRange, "name": "Remap Image Range"},
     "ReverseImageBatch": {"class": ReverseImageBatch, "name": "Reverse Image Batch"},
     "ReplaceImagesInBatch": {"class": ReplaceImagesInBatch, "name": "Replace Images In Batch"},
@@ -97,7 +98,6 @@ NODE_CONFIG = {
     #curve nodes
     "SplineEditor": {"class": SplineEditor, "name": "Spline Editor"},
     "CreateShapeMaskOnPath": {"class": CreateShapeMaskOnPath, "name": "Create Shape Mask On Path"},
-    "CreateTextOnPath": {"class": CreateTextOnPath, "name": "Create Text On Path"},
     "WeightScheduleExtend": {"class": WeightScheduleExtend, "name": "Weight Schedule Extend"},
     "MaskOrImageToWeight": {"class": MaskOrImageToWeight, "name": "Mask Or Image To Weight"},
     "WeightScheduleConvert": {"class": WeightScheduleConvert, "name": "Weight Schedule Convert"},
