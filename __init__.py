@@ -57,6 +57,7 @@ NODE_CONFIG = {
     "ImageUpscaleWithModelBatched": {"class": ImageUpscaleWithModelBatched, "name": "Image Upscale With Model Batched"},
     "InsertImagesToBatchIndexed": {"class": InsertImagesToBatchIndexed, "name": "Insert Images To Batch Indexed"},
     "MergeImageChannels": {"class": MergeImageChannels, "name": "Merge Image Channels"},
+    "PreviewAnimation": {"class": PreviewAnimation, "name": "Preview Animation"},
     "RemapImageRange": {"class": RemapImageRange, "name": "Remap Image Range"},
     "ReverseImageBatch": {"class": ReverseImageBatch, "name": "Reverse Image Batch"},
     "ReplaceImagesInBatch": {"class": ReplaceImagesInBatch, "name": "Replace Images In Batch"},
