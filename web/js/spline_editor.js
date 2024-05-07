@@ -366,22 +366,8 @@ class SplineEditor {
   
   let linkedInputEditorPointsToSample = null
   let linkedOutputEditorPointsToSample = null
-  let linkedInputEditor = context.getInputNode(0)
-  let linkedOutputEditor = context.getOutputNodes(4)
-  
-  if (linkedOutputEditor != null) {
-    linkedOutputEditorPointsToSample = linkedOutputEditor[0].widgets.find(w => w.name === "points_to_sample")
-    linkedOutputEditorPointsToSample.value = pointsWidget.value
-    console.log(linkedOutputEditorPointsToSample)
-  }
-  if (linkedInputEditor != null) {
-    linkedInputEditorPointsToSample = linkedInputEditor.widgets.find(w => w.name === "points_to_sample").value
-    pointsWidget.value = linkedInputEditorPointsToSample
-    console.log(linkedInputEditorPointsToSample)
-  }else {
-    var points_to_sample = pointsWidget.value
-  }
-     
+ 
+  var points_to_sample = pointsWidget.value
   var interpolation = interpolationWidget.value
   var tension = tensionWidget.value
   var rangeMin = minValueWidget.value
@@ -415,10 +401,12 @@ class SplineEditor {
     if (linkedOutputEditor != null) {
       linkedOutputEditorPointsToSample = linkedOutputEditor[0].widgets.find(w => w.name === "points_to_sample")
       linkedOutputEditorPointsToSample.value = pointsWidget.value
+      points_to_sample = pointsWidget.value
     }
     if (linkedInputEditor != null) {
       linkedInputEditorPointsToSample = linkedInputEditor.widgets.find(w => w.name === "points_to_sample")
       linkedInputEditorPointsToSample.value = pointsWidget.value
+      points_to_sample = pointsWidget.value
     }
     else {
       points_to_sample = pointsWidget.value
