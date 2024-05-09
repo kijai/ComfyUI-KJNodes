@@ -478,7 +478,7 @@ app.registerExtension({
 				} else {
 					const errorMessage = "No SetNode found for " + this.widgets[0].value + "(" + this.type + ")";
 					showAlertWithThrottle(errorMessage, 5000);
-					throw new Error(errorMessage);
+					//throw new Error(errorMessage);
 				}
 			}
 			onAdded(graph) {
