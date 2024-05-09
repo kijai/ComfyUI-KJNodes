@@ -280,6 +280,27 @@ class CondPassThrough:
     def passthrough(self, positive, negative):
         return (positive, negative,)
 
+class ModelPassThrough:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "model": ("MODEL", ),
+            }, 
+    }
+
+    RETURN_TYPES = ("MODEL", )
+    RETURN_NAMES = ("model",)
+    FUNCTION = "passthrough"
+    CATEGORY = "KJNodes/misc"
+    DESCRIPTION = """
+    Simply passes through the model,
+    workaround for Set node not allowing bypassed inputs.
+"""
+
+    def passthrough(self, model):
+        return (model,)
+
 def append_helper(t, mask, c, set_area_to_bounds, strength):
         n = [t[0], t[1].copy()]
         _, h, w = mask.shape
