@@ -1644,6 +1644,15 @@ class LoadICLightUnet:
     RETURN_TYPES = ("MODEL",)
     FUNCTION = "load"
     CATEGORY = "KJNodes/experimental"
+    DESCRIPTION = """
+LoadICLightUnet: Loads an ICLightUnet model. (Experimental)
+WORK IN PROGRESS  
+Very hacky (but currently working) way to load the converted IC-Light model available here:  
+https://huggingface.co/Kijai/iclight-comfy/blob/main/iclight_fc_converted.safetensors  
+
+Used with InstructPixToPixConditioning -node
+
+"""
 
     def load(self, model, model_path):
         print("LoadICLightUnet: Checking LoadICLightUnet path")
