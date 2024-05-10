@@ -91,6 +91,9 @@ Segments an image or batch of images using CLIPSeg.
         if binary_mask:
             results = results.round()
 
+        del outputs, tensor, tensor_thresholded, tensor_normalized, resized_tensor, images
+        torch.cuda.empty_cache()
+
         return results,
 
 class CreateTextMask:
