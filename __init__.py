@@ -101,6 +101,9 @@ NODE_CONFIG = {
     #curve nodes
     "SplineEditor": {"class": SplineEditor, "name": "Spline Editor"},
     "CreateShapeMaskOnPath": {"class": CreateShapeMaskOnPath, "name": "Create Shape Mask On Path"},
+    "CreateTextOnPath": {"class": CreateTextOnPath, "name": "Create Text On Path"},
+    "CreateGradientFromCoords": {"class": CreateGradientFromCoords, "name": "Create Gradient From Coords"},
+    "GradientToFloat": {"class": GradientToFloat, "name": "Gradient To Float"},
     "WeightScheduleExtend": {"class": WeightScheduleExtend, "name": "Weight Schedule Extend"},
     "MaskOrImageToWeight": {"class": MaskOrImageToWeight, "name": "Mask Or Image To Weight"},
     "WeightScheduleConvert": {"class": WeightScheduleConvert, "name": "Weight Schedule Convert"},
