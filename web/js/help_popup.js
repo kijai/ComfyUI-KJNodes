@@ -45,7 +45,7 @@ loadScript('/kjweb_async/purify.min.js').catch((e) => {
   console.log(e)
 })
 
-const categories = ["KJNodes", "SUPIR", "VoiceCraft", "Marigold"];
+const categories = ["KJNodes", "SUPIR", "VoiceCraft", "Marigold", "IC-Light"];
 app.registerExtension({
 	name: "KJNodes.HelpPopup",
 	async beforeRegisterNodeDef(nodeType, nodeData) {
