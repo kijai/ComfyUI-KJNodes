@@ -494,9 +494,6 @@ Calculates list of floats from image.
         w_values = w_sampled.mean(dim=0).tolist()
         h_values = h_sampled.mean(dim=1).tolist()
 
-        print("Sampled width axis values:", w_values)
-        print("Sampled height axis values:", h_values)
-
         return (w_values, h_values)
     
 class MaskOrImageToWeight:
