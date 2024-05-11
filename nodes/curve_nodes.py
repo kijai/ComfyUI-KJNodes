@@ -149,8 +149,8 @@ class SplineEditor:
             }
         }
 
-    RETURN_TYPES = ("MASK", "STRING", "FLOAT", "INT")
-    RETURN_NAMES = ("mask", "coord_str", "float", "count")
+    RETURN_TYPES = ("MASK", "STRING", "FLOAT", "INT", "STRING",)
+    RETURN_NAMES = ("mask", "coord_str", "float", "count", "normalized_str",)
     FUNCTION = "splinedata"
     CATEGORY = "KJNodes/weights"
     DESCRIPTION = """
@@ -195,14 +195,15 @@ output types:
                    points_to_sample, sampling_method, points_store, tension, repeat_output, min_value=0.0, max_value=1.0):
         
         coordinates = json.loads(coordinates)
+        normalized = []
+        normalized_y_values = []
         for coord in coordinates:
             coord['x'] = int(round(coord['x']))
             coord['y'] = int(round(coord['y']))
-            
-        normalized_y_values = [
-            (1.0 - (point['y'] / mask_height) - 0.0) * (max_value - min_value) + min_value
-            for point in coordinates
-        ]
+            norm_x = (1.0 - (coord['x'] / mask_height) - 0.0) * (max_value - min_value) + min_value
+            norm_y = (1.0 - (coord['y'] / mask_height) - 0.0) * (max_value - min_value) + min_value
+            normalized_y_values.append(norm_y)
+            normalized.append({'x':norm_x, 'y':norm_y})
         if float_output_type == 'list':
             out_floats = normalized_y_values * repeat_output
         elif float_output_type == 'pandas series':
@@ -221,7 +222,7 @@ output types:
         masks_out = torch.stack(mask_tensors)
         masks_out = masks_out.repeat(repeat_output, 1, 1, 1)
         masks_out = masks_out.mean(dim=-1)
-        return (masks_out, str(coordinates), out_floats, len(out_floats))
+        return (masks_out, json.dumps(coordinates), out_floats, len(out_floats) , json.dumps(normalized))
 
 class CreateShapeMaskOnPath:
     

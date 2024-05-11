@@ -187,7 +187,7 @@ app.registerExtension({
               }
             });
             
-            this.setSize([550, 920]);
+            this.setSize([550, 950]);
             this.resizable = false;
             this.splineEditor.parentEl = document.createElement("div");
             this.splineEditor.parentEl.className = "spline-editor";
@@ -392,7 +392,6 @@ function createSplineEditor(context, reset=false) {
   widthWidget.callback = () => {
     w = widthWidget.value;
     if (w > 256) {
-
         context.setSize([w + 45, context.size[1]]);
     }
     vis.width(w);
@@ -401,7 +400,7 @@ function createSplineEditor(context, reset=false) {
   heightWidget.callback = () => {
     h = heightWidget.value
     vis.height(h)
-    context.setSize([context.size[0], h + 410]);
+    context.setSize([context.size[0], h + 430]);
     updatePath();
   }
   pointsStoreWidget.callback = () => {
@@ -610,6 +609,11 @@ function createSplineEditor(context, reset=false) {
     svgElement.style['position'] = "relative"
     context.splineEditor.element.appendChild(svgElement);
     var pathElements = svgElement.getElementsByTagName('path'); // Get all path elements
+
+    if (w > 256) {
+      context.setSize([w + 45, context.size[1]]);
+    }
+    context.setSize([context.size[0], h + 430]);
     updatePath();
 }
 
