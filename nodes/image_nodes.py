@@ -12,7 +12,7 @@ from PIL import ImageGrab, ImageDraw, ImageFont, Image
 from nodes import MAX_RESOLUTION, SaveImage
 from comfy_extras.nodes_mask import ImageCompositeMasked
 from comfy.cli_args import args
-from comfy.utils import ProgressBar
+from comfy.utils import ProgressBar, common_upscale
 import folder_paths
 import model_management
 
@@ -752,6 +752,64 @@ class ImagePadForOutpaintMasked:
             return (new_image, new_mask,)
         else:
             return (new_image, mask,)
+
+class ImagePadForOutpaintTargetSize:
+    upscale_methods = ["nearest-exact", "bilinear", "area", "bicubic", "lanczos"]
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "image": ("IMAGE",),
+                "target_width": ("INT", {"default": 0, "min": 0, "max": MAX_RESOLUTION, "step": 8}),
+                "target_height": ("INT", {"default": 0, "min": 0, "max": MAX_RESOLUTION, "step": 8}),
+                "feathering": ("INT", {"default": 0, "min": 0, "max": MAX_RESOLUTION, "step": 1}),
+                "upscale_method": (s.upscale_methods,),
+            },
+            "optional": {
+                "mask": ("MASK",),
+            }
+        }
+
+    RETURN_TYPES = ("IMAGE", "MASK")
+    FUNCTION = "expand_image"
+
+    CATEGORY = "image"
+
+    def expand_image(self, image, target_width, target_height, feathering, upscale_method, mask=None):
+        B, H, W, C = image.size()
+        new_height = 0
+        new_width = 0
+         # Calculate the scaling factor while maintaining aspect ratio
+        scaling_factor = min(target_width / W, target_height / H)
+        
+        # Check if the image needs to be downscaled
+        if scaling_factor < 1:
+            image = image.movedim(-1,1)
+            # Calculate the new width and height after downscaling
+            new_width = int(W * scaling_factor)
+            new_height = int(H * scaling_factor)
+            
+            # Downscale the image
+            image_scaled = common_upscale(image, new_width, new_height, upscale_method, "disabled").movedim(1,-1)
+            if mask is not None:
+                mask_scaled = mask.unsqueeze(0)  # Add an extra dimension for batch size
+                mask_scaled = F.interpolate(mask_scaled, size=(new_height, new_width), mode="nearest")
+                mask_scaled = mask_scaled.squeeze(0)  # Remove the extra dimension after interpolation
+            else:
+                mask_scaled = mask
+        else:
+            # If downscaling is not needed, use the original image dimensions
+            image_scaled = image
+            mask_scaled = mask
+
+        # Calculate how much padding is needed to reach the target dimensions
+        pad_top = max(0, (target_height - new_height) // 2)
+        pad_bottom = max(0, target_height - new_height - pad_top)
+        pad_left = max(0, (target_width - new_width) // 2)
+        pad_right = max(0, target_width - new_width - pad_left)
+
+        # Now call the original expand_image with the calculated padding
+        return ImagePadForOutpaintMasked.expand_image(self, image_scaled, pad_left, pad_top, pad_right, pad_bottom, feathering, mask_scaled)
     
 class ImageAndMaskPreview(SaveImage):
     def __init__(self):

@@ -396,7 +396,6 @@ function createSplineEditor(context, reset=false) {
         context.setSize([w + 45, context.size[1]]);
     }
     vis.width(w);
-    
     updatePath();
 }
   heightWidget.callback = () => {
