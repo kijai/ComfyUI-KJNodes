@@ -101,6 +101,7 @@ NODE_CONFIG = {
     "ImageTransformByNormalizedAmplitude": {"class": ImageTransformByNormalizedAmplitude},
     #curve nodes
     "SplineEditor": {"class": SplineEditor, "name": "Spline Editor"},
+    "CreateShapeImageOnPath": {"class": CreateShapeImageOnPath, "name": "Create Shape Image On Path"},
     "CreateShapeMaskOnPath": {"class": CreateShapeMaskOnPath, "name": "Create Shape Mask On Path"},
     "CreateTextOnPath": {"class": CreateTextOnPath, "name": "Create Text On Path"},
     "CreateGradientFromCoords": {"class": CreateGradientFromCoords, "name": "Create Gradient From Coords"},
