@@ -45,6 +45,7 @@ NODE_CONFIG = {
     "GetImageRangeFromBatch": {"class": GetImageRangeFromBatch, "name": "Get Image Range From Batch"},
     "GetImageSizeAndCount": {"class": GetImageSizeAndCount, "name": "Get Image Size & Count"},
     "ImageAndMaskPreview": {"class": ImageAndMaskPreview},
+    "ImageAddMulti": {"class": ImageAddMulti, "name": "Image Add Multi"},
     "ImageBatchMulti": {"class": ImageBatchMulti, "name": "Image Batch Multi"},
     "ImageBatchRepeatInterleaving": {"class": ImageBatchRepeatInterleaving},
     "ImageBatchTestPattern": {"class": ImageBatchTestPattern, "name": "Image Batch Test Pattern"},

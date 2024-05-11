@@ -1134,6 +1134,50 @@ with the **inputcount** and clicking update.
         for c in range(1, inputcount):
             new_image = kwargs[f"image_{c + 1}"]
             image, = image_batch_node.batch(image, new_image)
+        return (image,)
+
+class ImageAddMulti:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "inputcount": ("INT", {"default": 2, "min": 2, "max": 1000, "step": 1}),
+                "image_1": ("IMAGE", ),
+                "image_2": ("IMAGE", ),
+                "blending": (
+                [   'add',
+                    'subtract',
+                    'multiply',
+                    'difference',
+                ],
+                {
+                "default": 'add'
+                }),
+            },
+    }
+
+    RETURN_TYPES = ("IMAGE",)
+    RETURN_NAMES = ("images",)
+    FUNCTION = "add"
+    CATEGORY = "KJNodes/image"
+    DESCRIPTION = """
+Add blends multiple images together.    
+You can set how many inputs the node has,  
+with the **inputcount** and clicking update.
+"""
+
+    def add(self, inputcount, blending, **kwargs):
+        image = kwargs["image_1"]
+        for c in range(1, inputcount):
+            new_image = kwargs[f"image_{c + 1}"]
+            if blending == "add":
+                image = torch.add(image * 0.5, new_image * 0.5)
+            elif blending == "subtract":
+                image = torch.sub(image * 0.5, new_image * 0.5)
+            elif blending == "multiply":
+                image = torch.mul(image * 0.5, new_image * 0.5)
+            elif blending == "difference":
+                image = torch.sub(image, new_image)
         return (image,)    
 
 class PreviewAnimation:
