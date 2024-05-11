@@ -135,44 +135,38 @@ app.registerExtension({
               menuItem.style.textDecoration = "none";
               menuItem.style.marginBottom = "5px";
             }
-            this.menuItem1 = document.createElement("a");
-            this.menuItem1.href = "#";
-            this.menuItem1.id = "menu-item-1";
-            this.menuItem1.textContent = "Toggle handles";
-            styleMenuItem(this.menuItem1);
-
-            this.menuItem2 = document.createElement("a");
-            this.menuItem2.href = "#";
-            this.menuItem2.id = "menu-item-2";
-            this.menuItem2.textContent = "Display sample points";
-            styleMenuItem(this.menuItem2);
-
-            this.menuItem3 = document.createElement("a");
-            this.menuItem3.href = "#";
-            this.menuItem3.id = "menu-item-3";
-            this.menuItem3.textContent = "Switch point shape";
-            styleMenuItem(this.menuItem3);
-
-            this.menuItem4 = document.createElement("a");
-            this.menuItem4.href = "#";
-            this.menuItem4.id = "menu-item-4";
-            this.menuItem4.textContent = "Background image";
-            styleMenuItem(this.menuItem4);
-
-            const menuItems = [this.menuItem1, this.menuItem2, this.menuItem3, this.menuItem4];
-
-            menuItems.forEach(menuItem => {
-            menuItem.addEventListener('mouseover', function() {
+            function createMenuItem(id, textContent) {
+              let menuItem = document.createElement("a");
+              menuItem.href = "#";
+              menuItem.id = `menu-item-${id}`;
+              menuItem.textContent = textContent;
+              styleMenuItem(menuItem);
+              return menuItem;
+            }
+            
+            // Create an array of menu items using the createMenuItem function
+            this.menuItems = [
+              createMenuItem(1, "Toggle handles"),
+              createMenuItem(2, "Display sample points"),
+              createMenuItem(3, "Switch point shape"),
+              createMenuItem(4, "Background image"),
+              createMenuItem(5, "Invert point order")
+            ];
+            
+            // Add mouseover and mouseout event listeners to each menu item for styling
+            this.menuItems.forEach(menuItem => {
+              menuItem.addEventListener('mouseover', function() {
                 this.style.backgroundColor = "gray";
-            });
-            menuItem.addEventListener('mouseout', function() {
+              });
+            
+              menuItem.addEventListener('mouseout', function() {
                 this.style.backgroundColor = "#202020";
+              });
             });
-            });
-
-            // Append menu items to the context menu
-            menuItems.forEach(menuItem => {
-            this.contextMenu.appendChild(menuItem);
+            
+            // Append each menu item to the context menu
+            this.menuItems.forEach(menuItem => {
+              this.contextMenu.appendChild(menuItem);
             });
 
             document.body.appendChild( this.contextMenu);
@@ -219,82 +213,88 @@ function createSplineEditor(context, reset=false) {
       }
     });
 
-    context.menuItem1.addEventListener('click', function(e) {
-      e.preventDefault();
-      if (!drawHandles) {
-        drawHandles = true
-        vis.add(pv.Line)
-        .data(() => points.map((point, index) => ({
-            start: point,
-            end: [index]
-        })))
-        .left(d => d.start.x)
-        .top(d => d.start.y)
-        .interpolate("linear")
-        .tension(0) // Straight lines
-        .strokeStyle("#ff7f0e") // Same color as control points
-        .lineWidth(1)
-        .visible(() => drawHandles);
-        vis.render();
-        
-    
-      } else {
-        drawHandles = false
-        vis.render();
-      }
-      context.contextMenu.style.display = 'none';
-    
-    });
-
-    context.menuItem2.addEventListener('click', function(e) {
+    context.menuItems.forEach((menuItem, index) => {
+      menuItem.addEventListener('click', function(e) {
         e.preventDefault();
-        drawSamplePoints = !drawSamplePoints;
-        updatePath();
-    });
+        // Logic specific to each menu item based on its index or id
+        switch (index) {
+          case 0:
+            e.preventDefault();
+            if (!drawHandles) {
+              drawHandles = true
+              vis.add(pv.Line)
+              .data(() => points.map((point, index) => ({
+                  start: point,
+                  end: [index]
+              })))
+              .left(d => d.start.x)
+              .top(d => d.start.y)
+              .interpolate("linear")
+              .tension(0) // Straight lines
+              .strokeStyle("#ff7f0e") // Same color as control points
+              .lineWidth(1)
+              .visible(() => drawHandles);
+              vis.render();
+            } else {
+              drawHandles = false
+              vis.render();
+            }
+            context.contextMenu.style.display = 'none';
+            break;
+          case 1:
+            e.preventDefault();
+            drawSamplePoints = !drawSamplePoints;
+            updatePath();
+            break;
+          case 2:
+            e.preventDefault();
+            if (dotShape == "circle"){
+              dotShape = "triangle"
+            }
+            else {
+              dotShape = "circle"
+            }
+            console.log(dotShape)
+            updatePath();
+            break;
+          case 3:
+            // Create file input element
+            const fileInput = document.createElement('input');
+            fileInput.type = 'file';
+            fileInput.accept = 'image/*'; // Accept only image files
 
-    context.menuItem3.addEventListener('click', function(e) {
-      e.preventDefault();
-      if (dotShape == "circle"){
-        dotShape = "triangle"
-      }
-      else {
-        dotShape = "circle"
-      }
-      console.log(dotShape)
-      updatePath();
-    });
+            // Listen for file selection
+            fileInput.addEventListener('change', function(event) {
+              const file = event.target.files[0]; // Get the selected file
 
-    context.menuItem4.addEventListener('click', function(e) {
-      // Create file input element
-      const fileInput = document.createElement('input');
-      fileInput.type = 'file';
-      fileInput.accept = 'image/*'; // Accept only image files
+              if (file) {
+                // Create a URL for the selected file
+                const imageUrl = URL.createObjectURL(file);
+                
+                // Set the backgroundImage with the new URL and make it visible
+                backgroundImage
+                  .url(imageUrl)
+                  .visible(true)
+                  .root.render();
+              }
+            });
 
-      // Listen for file selection
-      fileInput.addEventListener('change', function(event) {
-        const file = event.target.files[0]; // Get the selected file
-
-        if (file) {
-          // Create a URL for the selected file
-          const imageUrl = URL.createObjectURL(file);
-          
-          // Set the backgroundImage with the new URL and make it visible
-          backgroundImage
-            .url(imageUrl)
-            .visible(true)
-            .root.render();
+            // If the backgroundImage is already visible, hide it. Otherwise, show file input.
+            if (backgroundImage.visible()) {
+              backgroundImage.visible(false)
+              .root.render();
+            } else {
+              // Trigger the file input dialog
+              fileInput.click();
+            }
+            context.contextMenu.style.display = 'none';
+            break;
+          case 4:
+            e.preventDefault();
+            points.reverse();
+            updatePath();
         }
       });
-
-      // If the backgroundImage is already visible, hide it. Otherwise, show file input.
-      if (backgroundImage.visible()) {
-        backgroundImage.visible(false)
-        .root.render();
-      } else {
-        // Trigger the file input dialog
-        fileInput.click();
-      }
-      context.contextMenu.style.display = 'none';
     });
   }
 
