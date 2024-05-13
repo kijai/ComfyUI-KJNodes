@@ -4,3 +4,4 @@ pillow>=10.3.0
 scipy
 color-matcher
 matplotlib
+huggingface_hub
