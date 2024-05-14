@@ -58,6 +58,7 @@ NODE_CONFIG = {
     "ImagePass": {"class": ImagePass},
     "ImagePadForOutpaintMasked": {"class": ImagePadForOutpaintMasked, "name": "Image Pad For Outpaint Masked"},
     "ImagePadForOutpaintTargetSize": {"class": ImagePadForOutpaintTargetSize, "name": "Image Pad For Outpaint Target Size"},
+    "ImageResizeKJ": {"class": ImageResizeKJ, "name": "Resize Image"},
     "ImageUpscaleWithModelBatched": {"class": ImageUpscaleWithModelBatched, "name": "Image Upscale With Model Batched"},
     "InsertImagesToBatchIndexed": {"class": InsertImagesToBatchIndexed, "name": "Insert Images To Batch Indexed"},
     "MergeImageChannels": {"class": MergeImageChannels, "name": "Merge Image Channels"},

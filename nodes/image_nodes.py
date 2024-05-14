@@ -1263,3 +1263,60 @@ class PreviewAnimation:
 
         animated = num_frames != 1
         return { "ui": { "images": results, "animated": (animated,), "text": [f"{num_frames}x{pil_images[0].size[0]}x{pil_images[0].size[1]}"] } }
+    
+class ImageResizeKJ:
+    upscale_methods = ["nearest-exact", "bilinear", "area", "bicubic", "lanczos"]
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "image": ("IMAGE",),
+                "width": ("INT", { "default": 512, "min": 0, "max": MAX_RESOLUTION, "step": 8, }),
+                "height": ("INT", { "default": 512, "min": 0, "max": MAX_RESOLUTION, "step": 8, }),
+                "upscale_method": (s.upscale_methods,),
+                "keep_proportion": ("BOOLEAN", { "default": False }),
+                "divisible_by": ("INT", { "default": 2, "min": 0, "max": 512, "step": 1, }),
+            },
+            "optional" : {
+                "width_input": ("INT", { "forceInput": True}),
+                "height_input": ("INT", { "forceInput": True}),
+                "get_image_size": ("IMAGE",),
+            }
+        }
+
+    RETURN_TYPES = ("IMAGE", "INT", "INT",)
+    RETURN_NAMES = ("IMAGE", "width", "height",)
+    FUNCTION = "resize"
+    CATEGORY = "KJNodes/image"
+    DESCRIPTION = """
+Resizes the image to the specified width and height.  
+"""
+
+    def resize(self, image, width, height, keep_proportion, upscale_method, divisible_by, width_input=None, height_input=None, get_image_size=None):
+        B, H, W, C = image.shape
+        if width_input:
+            width = width_input
+        if height_input:
+            height = height_input
+        if get_image_size is not None:
+            _, width, height, _ = get_image_size.shape
+
+        if keep_proportion:
+            ratio = min(width / W, height / H)
+            width = round(W * ratio)
+            height = round(H * ratio)
+        else:
+            if width == 0:
+                width = W
+            if height == 0:
+                height = H
+
+        if divisible_by > 1:
+            width = width - (width % divisible_by)
+            height = height - (height % divisible_by)
+
+        image = image.movedim(-1,1)
+        scaled = common_upscale(image, width, height, upscale_method, 'disabled')
+        scaled = scaled.movedim(1,-1)
+
+        return(scaled, scaled.shape[2], scaled.shape[1],)
