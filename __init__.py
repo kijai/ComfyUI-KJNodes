@@ -126,7 +126,7 @@ NODE_CONFIG = {
     "Superprompt": {"class": Superprompt, "name": "Superprompt"},
     "GLIGENTextBoxApplyBatchCoords": {"class": GLIGENTextBoxApplyBatchCoords},
     "Intrinsic_lora_sampling": {"class": Intrinsic_lora_sampling, "name": "Intrinsic Lora Sampling"},
-    "LoadICLightUnet": {"class": LoadICLightUnet},
+
     #instance diffusion
     "CreateInstanceDiffusionTracking": {"class": CreateInstanceDiffusionTracking},
     "AppendInstanceDiffusionTracking": {"class": AppendInstanceDiffusionTracking},
