@@ -1200,7 +1200,7 @@ Resizes the mask or batch of masks to the specified width and height.
 
     def resize(self, mask, width, height, keep_proportions):
         if keep_proportions:
-            _, oh, ow, _ = mask.shape
+            _, oh, ow = mask.shape
             width = ow if width == 0 else width
             height = oh if height == 0 else height
             ratio = min(width / ow, height / oh)
