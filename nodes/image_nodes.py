@@ -16,7 +16,6 @@ from comfy.cli_args import args
 from comfy.utils import ProgressBar, common_upscale
 import folder_paths
 import model_management
-import node_helpers
 
 script_directory = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -1357,7 +1356,8 @@ class LoadAndResizeImage:
 
     def load_image(self, image, resize, width, height, repeat, keep_proportion, divisible_by, mask_channel):
         image_path = folder_paths.get_annotated_filepath(image)
-        
+
+        import node_helpers
         img = node_helpers.pillow(Image.open, image_path)
         
         output_images = []
