@@ -361,7 +361,7 @@ class CreateFluidMask:
         return {
             "required": {
                  "invert": ("BOOLEAN", {"default": False}),
-                 "frames": ("INT", {"default": 0,"min": 0, "max": 255, "step": 1}),
+                 "frames": ("INT", {"default": 1,"min": 1, "max": 4096, "step": 1}),
                  "width": ("INT", {"default": 256,"min": 16, "max": 4096, "step": 1}),
                  "height": ("INT", {"default": 256,"min": 16, "max": 4096, "step": 1}),
                  "inflow_count": ("INT", {"default": 3,"min": 0, "max": 255, "step": 1}),
@@ -374,7 +374,10 @@ class CreateFluidMask:
     #using code from https://github.com/GregTJ/stable-fluids
     def createfluidmask(self, frames, width, height, invert, inflow_count, inflow_velocity, inflow_radius, inflow_padding, inflow_duration):
         from ..utility.fluid import Fluid
-        from scipy.spatial import erf
+        try:
+            from scipy.special import erf
+        except:
+            from scipy.spatial import erf
         out = []
         masks = []
         RESOLUTION = width, height
