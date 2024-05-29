@@ -1315,15 +1315,24 @@ highest dimension.
             _, width, height, _ = get_image_size.shape
 
         if keep_proportion:
-            ratio = min(width / W, height / H)
-            width = round(W * ratio)
-            height = round(H * ratio)
+            # If one of the dimensions is zero, calculate it to maintain the aspect ratio
+            if width == 0 and height != 0:
+                ratio = height / H
+                width = round(W * ratio)
+            elif height == 0 and width != 0:
+                ratio = width / W
+                height = round(H * ratio)
+            elif width != 0 and height != 0:
+                # Scale based on which dimension is smaller in proportion to the desired dimensions
+                ratio = min(width / W, height / H)
+                width = round(W * ratio)
+                height = round(H * ratio)
         else:
             if width == 0:
                 width = W
             if height == 0:
                 height = H
-
+    
         if divisible_by > 1:
             width = width - (width % divisible_by)
             height = height - (height % divisible_by)
