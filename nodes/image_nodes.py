@@ -1325,9 +1325,9 @@ highest dimension.
         if height_input:
             height = height_input
         if get_image_size is not None:
-            _, width, height, _ = get_image_size.shape
+            _, height, width, _ = get_image_size.shape
 
-        if keep_proportion:
+        if keep_proportion and get_image_size is None:
             # If one of the dimensions is zero, calculate it to maintain the aspect ratio
             if width == 0 and height != 0:
                 ratio = height / H
@@ -1346,7 +1346,7 @@ highest dimension.
             if height == 0:
                 height = H
     
-        if divisible_by > 1:
+        if divisible_by > 1 and get_image_size is None:
             width = width - (width % divisible_by)
             height = height - (height % divisible_by)
 
