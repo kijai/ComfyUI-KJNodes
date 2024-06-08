@@ -837,10 +837,11 @@ SVD:
     def customsigmas(self, sigmas_string, interpolate_to_steps):
         sigmas_list = sigmas_string.split(', ')
         sigmas_float_list = [float(sigma) for sigma in sigmas_list]
-        sigmas_tensor = torch.tensor(sigmas_float_list)
-        if len(sigmas_tensor) != interpolate_to_steps:
-            sigmas_tensor = self.loglinear_interp(sigmas_tensor, interpolate_to_steps)
-        return (sigmas_tensor,)
+        sigmas_tensor = torch.FloatTensor(sigmas_float_list)
+        if len(sigmas_tensor) != interpolate_to_steps + 1:
+            sigmas_tensor = self.loglinear_interp(sigmas_tensor, interpolate_to_steps + 1)
+        sigmas_tensor[-1] = 0
+        return (sigmas_tensor.float(),)
      
     def loglinear_interp(self, t_steps, num_steps):
         """
