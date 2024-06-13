@@ -209,11 +209,11 @@ class ImageConcanate:
 Concatenates the image2 to image1 in the specified direction.
 """
 
-    def concanate(self, image1, image2, direction, match_image_size):
+    def concanate(self, image1, image2, direction, match_image_size, first_image_shape=None):
         # Check if the batch sizes are different
         batch_size1 = image1.size(0)
         batch_size2 = image2.size(0)
-        
+
         if batch_size1 != batch_size2:
             # Calculate the number of repetitions needed
             max_batch_size = max(batch_size1, batch_size2)
@@ -224,15 +224,18 @@ Concatenates the image2 to image1 in the specified direction.
             image1 = image1.repeat(repeats1, 1, 1, 1)
             image2 = image2.repeat(repeats2, 1, 1, 1)
         if match_image_size:
-            image2 = torch.nn.functional.interpolate(image2, size=(image1.shape[2], image1.shape[3]), mode="bilinear")
+            image2_resized = image2.movedim(-1,1)
+            image2_resized = common_upscale(image2_resized, first_image_shape[2], first_image_shape[1], "lanczos", "disabled").movedim(1,-1)
+        else:
+            image2_resized = image2
         if direction == 'right':
-            row = torch.cat((image1, image2), dim=2)
+            row = torch.cat((image1, image2_resized), dim=2)
         elif direction == 'down':
-            row = torch.cat((image1, image2), dim=1)
+            row = torch.cat((image1, image2_resized), dim=1)
         elif direction == 'left':
-            row = torch.cat((image2, image1), dim=2)
+            row = torch.cat((image2_resized, image1), dim=2)
         elif direction == 'up':
-            row = torch.cat((image2, image1), dim=1)
+            row = torch.cat((image2_resized, image1), dim=1)
         return (row,)
     
 class ImageGridComposite2x2:
@@ -1197,6 +1200,48 @@ with the **inputcount** and clicking update.
             elif blending == "difference":
                 image = torch.sub(image, new_image)
         return (image,)    
+
+class ImageConcatMulti:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "inputcount": ("INT", {"default": 2, "min": 2, "max": 1000, "step": 1}),
+                "image_1": ("IMAGE", ),
+                "image_2": ("IMAGE", ),
+                "direction": (
+                [   'right',
+                    'down',
+                    'left',
+                    'up',
+                ],
+            {
+            "default": 'right'
+             }),
+            "match_image_size": ("BOOLEAN", {"default": False}),
+            },
+    }
+
+    RETURN_TYPES = ("IMAGE",)
+    RETURN_NAMES = ("images",)
+    FUNCTION = "combine"
+    CATEGORY = "KJNodes/image"
+    DESCRIPTION = """
+Creates an image from multiple images.  
+You can set how many inputs the node has,  
+with the **inputcount** and clicking update.
+"""
+
+    def combine(self, inputcount, direction, match_image_size, **kwargs):
+        image = kwargs["image_1"]
+        first_image_shape = None
+        if first_image_shape is None:
+            first_image_shape = image.shape
+        for c in range(1, inputcount):
+            new_image = kwargs[f"image_{c + 1}"]
+            image, = ImageConcanate.concanate(self, image, new_image, direction, match_image_size, first_image_shape=first_image_shape)
+        first_image_shape = None
+        return (image,)
 
 class PreviewAnimation:
     def __init__(self):

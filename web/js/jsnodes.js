@@ -31,6 +31,7 @@ app.registerExtension({
 				break;
 			case "ImageBatchMulti":
 			case "ImageAddMulti":
+			case "ImageConcatMulti":
 				nodeType.prototype.onNodeCreated = function () {
 				this._type = "IMAGE"
 				this.inputs_offset = nodeData.name.includes("selective")?1:0
