@@ -224,6 +224,7 @@ Concatenates the image2 to image1 in the specified direction.
             image1 = image1.repeat(repeats1, 1, 1, 1)
             image2 = image2.repeat(repeats2, 1, 1, 1)
         if match_image_size:
+            first_image_shape = first_image_shape if first_image_shape is not None else image1.shape
             image2_resized = image2.movedim(-1,1)
             image2_resized = common_upscale(image2_resized, first_image_shape[2], first_image_shape[1], "lanczos", "disabled").movedim(1,-1)
         else:
@@ -563,14 +564,14 @@ but allows setting sub-batches for reduced VRAM usage.
         
         device = model_management.get_torch_device()
         upscale_model.to(device)
-        in_img = images.movedim(-1,-3).to(device)
+        in_img = images.movedim(-1,-3)
         
         steps = in_img.shape[0]
         pbar = ProgressBar(steps)
         t = []
         
         for start_idx in range(0, in_img.shape[0], per_batch):
-            sub_images = upscale_model(in_img[start_idx:start_idx+per_batch])
+            sub_images = upscale_model(in_img[start_idx:start_idx+per_batch].to(device))
             t.append(sub_images.cpu())
             # Calculate the number of images processed in this batch
             batch_count = sub_images.shape[0]

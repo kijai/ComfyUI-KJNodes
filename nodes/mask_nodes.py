@@ -990,7 +990,7 @@ class GrowMaskWithBlur:
         previous_output = None
         current_expand = expand
         for m in growmask:
-            output = m.numpy()
+            output = m.numpy().astype(np.float32)
             for _ in range(abs(round(current_expand))):
                 if current_expand < 0:
                     output = scipy.ndimage.grey_erosion(output, footprint=kernel)
