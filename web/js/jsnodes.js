@@ -80,9 +80,9 @@ app.registerExtension({
 				const onGetMaskSizeConnectInput = nodeType.prototype.onConnectInput;
 				nodeType.prototype.onConnectInput = function (targetSlot, type, output, originNode, originSlot) {
 					const v = onGetMaskSizeConnectInput?.(this, arguments);
-					targetSlot.outputs[1]["name"] = "width"
-					targetSlot.outputs[2]["name"] = "height" 
-					targetSlot.outputs[3]["name"] = "count"
+					this.outputs[1]["name"] = "width"
+					this.outputs[2]["name"] = "height" 
+					this.outputs[3]["name"] = "count"
 					return v;
 				}
 				const onGetMaskSizeExecuted = nodeType.prototype.onExecuted;
@@ -100,9 +100,9 @@ app.registerExtension({
 				const onGetImageSizeConnectInput = nodeType.prototype.onConnectInput;
 				nodeType.prototype.onConnectInput = function (targetSlot, type, output, originNode, originSlot) {
 					const v = onGetImageSizeConnectInput?.(this, arguments);
-					targetSlot.outputs[1]["name"] = "width"
-					targetSlot.outputs[2]["name"] = "height" 
-					targetSlot.outputs[3]["name"] = "count"
+					this.outputs[1]["name"] = "width"
+					this.outputs[2]["name"] = "height" 
+					this.outputs[3]["name"] = "count"
 					return v;
 				}
 				const onGetImageSizeExecuted = nodeType.prototype.onExecuted;
@@ -120,7 +120,7 @@ app.registerExtension({
 				const onPreviewAnimationConnectInput = nodeType.prototype.onConnectInput;
 				nodeType.prototype.onConnectInput = function (targetSlot, type, output, originNode, originSlot) {
 					const v = onPreviewAnimationConnectInput?.(this, arguments);
-					targetSlot.title = "Preview Animation"
+					this.title = "Preview Animation"
 					return v;
 				}
 				const onPreviewAnimationExecuted = nodeType.prototype.onExecuted;
@@ -136,8 +136,8 @@ app.registerExtension({
 				const onVRAM_DebugConnectInput = nodeType.prototype.onConnectInput;
 				nodeType.prototype.onConnectInput = function (targetSlot, type, output, originNode, originSlot) {
 					const v = onVRAM_DebugConnectInput?.(this, arguments);
-					targetSlot.outputs[3]["name"] = "freemem_before"
-					targetSlot.outputs[4]["name"] = "freemem_after" 
+					this.outputs[3]["name"] = "freemem_before"
+					this.outputs[4]["name"] = "freemem_after" 
 					return v;
 				}
 				const onVRAM_DebugExecuted = nodeType.prototype.onExecuted;
