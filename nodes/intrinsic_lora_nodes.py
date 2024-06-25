@@ -7,7 +7,7 @@ import comfy.sample
 from nodes import CLIPTextEncode
 
 script_directory = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-folder_paths.add_model_folder_path("intristic_loras", os.path.join(script_directory, "intristic_loras"))
+folder_paths.add_model_folder_path("intrinsic_loras", os.path.join(script_directory, "intrinsic_loras"))
 
 class Intrinsic_lora_sampling:
     def __init__(self):
@@ -16,7 +16,7 @@ class Intrinsic_lora_sampling:
     @classmethod
     def INPUT_TYPES(s):
         return {"required": { "model": ("MODEL",),
-                "lora_name": (folder_paths.get_filename_list("intristic_loras"), ),
+                "lora_name": (folder_paths.get_filename_list("intrinsic_loras"), ),
                 "task": (
                 [   
                     'depth map',
@@ -81,7 +81,7 @@ with this node pack.
 
         #load lora
         model_clone = model.clone()
-        lora_path = folder_paths.get_full_path("intristic_loras", lora_name)        
+        lora_path = folder_paths.get_full_path("intrinsic_loras", lora_name)        
         lora = load_torch_file(lora_path, safe_load=True)
         self.loaded_lora = (lora_path, lora)
 

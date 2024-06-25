@@ -872,10 +872,14 @@ nodes for example.
             mask_adjusted = mask * mask_opacity
             mask_image = mask.reshape((-1, 1, mask.shape[-2], mask.shape[-1])).movedim(1, -1).expand(-1, -1, -1, 3).clone()
 
-            color_list = list(map(int, mask_color.split(', ')))
-            mask_image[:, :, :, 0] = color_list[0] // 255 # Red channel
-            mask_image[:, :, :, 1] = color_list[1] // 255 # Green channel
-            mask_image[:, :, :, 2] = color_list[2] // 255 # Blue channel
+            if ',' in mask_color:
+                color_list = np.clip([int(channel) for channel in mask_color.split(',')], 0, 255) # RGB format
+            else:
+                mask_color = mask_color.lstrip('#')
+                color_list = [int(mask_color[i:i+2], 16) for i in (0, 2, 4)] # Hex format
+            mask_image[:, :, :, 0] = color_list[0] / 255 # Red channel
+            mask_image[:, :, :, 1] = color_list[1] / 255 # Green channel
+            mask_image[:, :, :, 2] = color_list[2] / 255 # Blue channel
             
             preview, = ImageCompositeMasked.composite(self, image, mask_image, 0, 0, True, mask_adjusted)
         if pass_through:
