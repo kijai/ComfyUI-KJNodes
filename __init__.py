@@ -43,7 +43,7 @@ NODE_CONFIG = {
     "ColorMatch": {"class": ColorMatch, "name": "Color Match"},
     "CrossFadeImages": {"class": CrossFadeImages, "name": "Cross Fade Images"},
     "GetImagesFromBatchIndexed": {"class": GetImagesFromBatchIndexed, "name": "Get Images From Batch Indexed"},
-    "GetImageRangeFromBatch": {"class": GetImageRangeFromBatch, "name": "Get Image Range From Batch"},
+    "GetImageRangeFromBatch": {"class": GetImageRangeFromBatch, "name": "Get Image or Mask Range From Batch"},
     "GetImageSizeAndCount": {"class": GetImageSizeAndCount, "name": "Get Image Size & Count"},
     "ImageAndMaskPreview": {"class": ImageAndMaskPreview},
     "ImageAddMulti": {"class": ImageAddMulti, "name": "Image Add Multi"},

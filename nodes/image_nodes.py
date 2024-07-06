@@ -988,25 +988,42 @@ batch, starting from start_index.
     def INPUT_TYPES(s):
         return {
             "required": {
-                 "images": ("IMAGE",),
                  "start_index": ("INT", {"default": 0,"min": -1, "max": 4096, "step": 1}),
                  "num_frames": ("INT", {"default": 1,"min": 1, "max": 4096, "step": 1}),
         },
         "optional": {
+            "images": ("IMAGE",),
             "masks": ("MASK",),
         }
     } 
     
-    def imagesfrombatch(self, images, start_index, num_frames, masks=None):
-        if start_index == -1:
-            start_index = len(images) - num_frames
-        if start_index < 0 or start_index >= len(images):
-            raise ValueError("GetImageRangeFromBatch: Start index is out of range")
-        end_index = start_index + num_frames
-        if end_index > len(images):
-            raise ValueError("GetImageRangeFromBatch: End index is out of range")
-        chosen_images = images[start_index:end_index]
-        chosen_masks = masks[start_index:end_index] if masks is not None else None
+    def imagesfrombatch(self, start_index, num_frames, images=None, masks=None):
+
+        chosen_images = None
+        chosen_masks = None
+
+        # Process images if provided
+        if images is not None:
+            if start_index == -1:
+                start_index = len(images) - num_frames
+            if start_index < 0 or start_index >= len(images):
+                raise ValueError("Start index is out of range")
+            end_index = start_index + num_frames
+            if end_index > len(images):
+                raise ValueError("End index is out of range")
+            chosen_images = images[start_index:end_index]
+
+        # Process masks if provided
+        if masks is not None:
+            if start_index == -1:
+                start_index = len(masks) - num_frames
+            if start_index < 0 or start_index >= len(masks):
+                raise ValueError("Start index is out of range for masks")
+            end_index = start_index + num_frames
+            if end_index > len(masks):
+                raise ValueError("End index is out of range for masks")
+            chosen_masks = masks[start_index:end_index]
+
         return (chosen_images, chosen_masks,)
     
 class GetImagesFromBatchIndexed:
