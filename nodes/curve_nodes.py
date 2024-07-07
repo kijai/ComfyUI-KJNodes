@@ -632,7 +632,7 @@ and returns that as the selected output type.
                   
         # Convert mean_values to the specified output_type
         if output_type == 'list':
-            out = mean_values,
+            out = mean_values
         elif output_type == 'pandas series':
             try:
                 import pandas as pd
