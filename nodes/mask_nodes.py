@@ -151,9 +151,7 @@ class DownloadAndLoadCLIPSeg:
                     [   'Kijai/clipseg-rd64-refined-fp16',
                         'CIDAS/clipseg-rd64-refined',
                     ],
-                    {
-                    "default": 'clipseg-rd64-refined-fp16'
-                    }),
+                    ),
                      },
                 }
 
