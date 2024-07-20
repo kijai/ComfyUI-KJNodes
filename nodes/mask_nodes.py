@@ -166,11 +166,11 @@ to ComfyUI/models/clip_seg
 
     def segment_image(self, model):
         from transformers import CLIPSegProcessor, CLIPSegForImageSegmentation
-        checkpoint_path = os.path.join(folder_paths.models_dir,'clip_seg', model)
+        checkpoint_path = os.path.join(folder_paths.models_dir,'clip_seg', os.path.basename(model))
         if not hasattr(self, "model"):
             if not os.path.exists(checkpoint_path):
                 from huggingface_hub import snapshot_download
-                snapshot_download(repo_id=model, local_dir=checkpoint_path.split("/")[-1], local_dir_use_symlinks=False)
+                snapshot_download(repo_id=model, local_dir=checkpoint_path, local_dir_use_symlinks=False)
             self.model = CLIPSegForImageSegmentation.from_pretrained(checkpoint_path)
 
         processor = CLIPSegProcessor.from_pretrained(checkpoint_path)
