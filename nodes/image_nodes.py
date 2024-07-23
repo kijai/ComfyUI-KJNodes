@@ -395,21 +395,70 @@ Can be used for realtime diffusion with autoqueue.
     } 
 
     def screencap(self, x, y, width, height, num_frames, delay):
+        start_time = time.time()
         captures = []
         bbox = (x, y, x + width, y + height)
         
         for _ in range(num_frames):
             # Capture screen
             screen_capture = ImageGrab.grab(bbox=bbox)
-            screen_capture_torch = torch.tensor(np.array(screen_capture), dtype=torch.float32) / 255.0
-            screen_capture_torch = screen_capture_torch.unsqueeze(0)
+            screen_capture_torch = torch.from_numpy(np.array(screen_capture, dtype=np.float32) / 255.0).unsqueeze(0)
             captures.append(screen_capture_torch)
             
             # Wait for a short delay if more than one frame is to be captured
             if num_frames > 1:
                 time.sleep(delay)
+
+        elapsed_time = time.time() - start_time
+        print(f"screengrab took {elapsed_time} seconds.")
         
         return (torch.cat(captures, dim=0),)
+    
+class Screencap_mss:
+
+    @classmethod
+    def IS_CHANGED(cls):
+
+        return
+
+    RETURN_TYPES = ("IMAGE",)
+    RETURN_NAMES = ("image",)
+    FUNCTION = "screencap"
+    CATEGORY = "KJNodes/experimental"
+    DESCRIPTION = """
+Captures an area specified by screen coordinates.  
+Can be used for realtime diffusion with autoqueue.
+"""
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                 "x": ("INT", {"default": 0,"min": 0, "max": 4096, "step": 1}),
+                 "y": ("INT", {"default": 0,"min": 0, "max": 4096, "step": 1}),
+                 "width": ("INT", {"default": 512,"min": 0, "max": 4096, "step": 1}),
+                 "height": ("INT", {"default": 512,"min": 0, "max": 4096, "step": 1}),
+                 "num_frames": ("INT", {"default": 1,"min": 1, "max": 255, "step": 1}),
+                 "delay": ("FLOAT", {"default": 0.1,"min": 0.0, "max": 10.0, "step": 0.01}),
+        },
+    } 
+
+    def screencap(self, x, y, width, height, num_frames, delay):
+        from mss import mss
+        captures = []
+        with mss() as sct:
+            bbox = {'top': y, 'left': x, 'width': width, 'height': height}
+            
+            for _ in range(num_frames):
+                sct_img = sct.grab(bbox)
+                img_np = np.array(sct_img)
+                img_torch = torch.from_numpy(img_np[..., [2, 1, 0]]).float() / 255.0
+                captures.append(img_torch)
+                
+                if num_frames > 1:
+                    time.sleep(delay)
+        
+        return (torch.stack(captures, 0),)
     
 class AddLabel:
     @classmethod
