@@ -87,7 +87,7 @@ NODE_CONFIG = {
     "CustomSigmas": {"class": CustomSigmas, "name": "Custom Sigmas"},
     #utility
     "WidgetToString": {"class": WidgetToString, "name": "Widget To String"},
-    "DummyLatentOut": {"class": DummyLatentOut, "name": "Dummy Latent Out"},
+    "DummyOut": {"class": DummyOut, "name": "Dummy Out"},
     "GetLatentsFromBatchIndexed": {"class": GetLatentsFromBatchIndexed, "name": "Get Latents From Batch Indexed"},
     "ScaleBatchPromptSchedule": {"class": ScaleBatchPromptSchedule, "name": "Scale Batch Prompt Schedule"},
     "CameraPoseVisualizer": {"class": CameraPoseVisualizer, "name": "Camera Pose Visualizer"},

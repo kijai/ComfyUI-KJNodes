@@ -750,17 +750,17 @@ To see node id's, enable node id display from Manager badge menu.
             raise NameError(f"Node not found: {id}")
         return (', '.join(results).strip(', '), )
 
-class DummyLatentOut:
+class DummyOut:
 
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
-            "latent": ("LATENT",),
+            "any_input": (any, {}),
             }
         }
 
-    RETURN_TYPES = ("LATENT",)
+    RETURN_TYPES = (any,)
     FUNCTION = "dummy"
     CATEGORY = "KJNodes/misc"
     OUTPUT_NODE = True
@@ -769,8 +769,8 @@ Does nothing, used to trigger generic workflow output.
 A way to get previews in the UI without saving anything to disk.
 """
 
-    def dummy(self, latent):
-        return (latent,)
+    def dummy(self, any_input):
+        return (any_input,)
     
 class FlipSigmasAdjusted:
     @classmethod
