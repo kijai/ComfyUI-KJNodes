@@ -740,7 +740,7 @@ class MergeImageChannels:
             
             },
             "optional": {
-                "mask": ("MASK", {"default": None}),
+                "alpha": ("MASK", {"default": None}),
                 },
             }
     
@@ -760,7 +760,7 @@ Merges channel data into an image.
         ], dim=-1)
         image = image.squeeze(-2)
         if alpha is not None:
-            image = torch.cat([image, alpha], dim=-1)
+            image = torch.cat([image, alpha.unsqueeze(-1)], dim=-1)
         return (image,)
 
 class ImagePadForOutpaintMasked:
