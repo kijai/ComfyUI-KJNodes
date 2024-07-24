@@ -490,24 +490,27 @@ Can be used for realtime diffusion with autoqueue.
         } 
 
     def capture(self, x, y, cam_index, width, height, release):
-        
-        if not hasattr(self, "cap") or self.cap is None:
+        # Check if the camera index has changed or the capture object doesn't exist
+        if not hasattr(self, "cap") or self.cap is None or self.current_cam_index != cam_index:
+            if hasattr(self, "cap") and self.cap is not None:
+                self.cap.release()
+            self.current_cam_index = cam_index
             self.cap = cv2.VideoCapture(cam_index)
-        if not self.cap.isOpened():
-            raise Exception("Could not open webcam")
-
+            if not self.cap.isOpened():
+                raise Exception("Could not open webcam")
+    
         ret, frame = self.cap.read()
         if not ret:
             raise Exception("Failed to capture image from webcam")
-
+    
         # Crop the frame to the specified bbox
         frame = frame[y:y+height, x:x+width]
         img_torch = torch.from_numpy(frame[..., [2, 1, 0]]).float() / 255.0
-
+    
         if release:
             self.cap.release()
             self.cap = None
-
+    
         return (img_torch.unsqueeze(0),)
     
 class AddLabel:
