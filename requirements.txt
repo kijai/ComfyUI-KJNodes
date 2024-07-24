@@ -4,3 +4,4 @@ color-matcher
 matplotlib
 huggingface_hub
 mss
+opencv-python

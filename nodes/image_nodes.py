@@ -8,6 +8,7 @@ import os
 import re
 import json
 import hashlib
+import cv2
 from PIL import ImageGrab, ImageDraw, ImageFont, Image, ImageSequence, ImageOps
 
 from nodes import MAX_RESOLUTION, SaveImage
@@ -458,6 +459,63 @@ Can be used for realtime diffusion with autoqueue.
                 if num_frames > 1:
                     time.sleep(delay)
         
+        return (torch.stack(captures, 0),)
+    
+class WebcamCaptureCV2:
+
+    @classmethod
+    def IS_CHANGED(cls):
+        return
+
+    RETURN_TYPES = ("IMAGE",)
+    RETURN_NAMES = ("image",)
+    FUNCTION = "capture"
+    CATEGORY = "KJNodes/experimental"
+    DESCRIPTION = """
+Captures an area specified by screen coordinates.  
+Can be used for realtime diffusion with autoqueue.
+"""
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                 "x": ("INT", {"default": 0,"min": 0, "max": 4096, "step": 1}),
+                 "y": ("INT", {"default": 0,"min": 0, "max": 4096, "step": 1}),
+                 "cam_index": ("INT", {"default": 0,"min": 0, "max": 255, "step": 1}),
+                 "width": ("INT", {"default": 512,"min": 0, "max": 4096, "step": 1}),
+                 "height": ("INT", {"default": 512,"min": 0, "max": 4096, "step": 1}),
+                 "num_frames": ("INT", {"default": 1,"min": 1, "max": 255, "step": 1}),
+                 "delay": ("FLOAT", {"default": 0.1,"min": 0.0, "max": 10.0, "step": 0.01}),
+                 "release": ("BOOLEAN", {"default": False}),
+            },
+        } 
+
+    def capture(self, x, y, cam_index, width, height, num_frames, delay, release):
+        
+        captures = []
+
+        if not hasattr(self, "cap") or self.cap is None:
+            self.cap = cv2.VideoCapture(cam_index)  # Open the first webcam (0)
+        if not self.cap.isOpened():
+            raise Exception("Could not open webcam")
+
+        for _ in range(num_frames):
+            ret, frame = self.cap.read()
+            if not ret:
+                raise Exception("Failed to capture image from webcam")
+
+            # Crop the frame to the specified bbox
+            frame = frame[y:y+height, x:x+width]
+            img_torch = torch.from_numpy(frame[..., [2, 1, 0]]).float() / 255.0
+            captures.append(img_torch)
+
+            if num_frames > 1:
+                time.sleep(delay)
+        if release:
+            self.cap.release()
+            self.cap = None
+
         return (torch.stack(captures, 0),)
     
 class AddLabel:
