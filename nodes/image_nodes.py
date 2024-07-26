@@ -496,6 +496,11 @@ Can be used for realtime diffusion with autoqueue.
                 self.cap.release()
             self.current_cam_index = cam_index
             self.cap = cv2.VideoCapture(cam_index)
+            try:
+                self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+                self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+            except:
+                pass
             if not self.cap.isOpened():
                 raise Exception("Could not open webcam")
     
