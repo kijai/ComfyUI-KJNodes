@@ -546,7 +546,6 @@ class AddLabel:
                 "caption": ("STRING", {"default": "", "forceInput": True}),
             }
             }
-    
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "addlabel"
     CATEGORY = "KJNodes/text"
@@ -606,7 +605,7 @@ ComfyUI/custom_nodes/ComfyUI-KJNodes/fonts
         if caption == "":
             processed_images = [process_image(img, text) for img in image]
         else:
-            assert len(caption) == batch_size, "Number of captions does not match number of images"
+            assert len(caption) == batch_size, f"Number of captions {(len(caption))} does not match number of images"
             processed_images = [process_image(img, cap) for img, cap in zip(image, caption)]
         processed_batch = torch.cat(processed_images, dim=0)
 

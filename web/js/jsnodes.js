@@ -79,7 +79,7 @@ app.registerExtension({
 			case "GetMaskSizeAndCount":
 				const onGetMaskSizeConnectInput = nodeType.prototype.onConnectInput;
 				nodeType.prototype.onConnectInput = function (targetSlot, type, output, originNode, originSlot) {
-					const v = onGetMaskSizeConnectInput?.(this, arguments);
+					const v = onGetMaskSizeConnectInput? onGetMaskSizeConnectInput.apply(this, arguments): undefined
 					this.outputs[1]["name"] = "width"
 					this.outputs[2]["name"] = "height" 
 					this.outputs[3]["name"] = "count"
@@ -99,7 +99,7 @@ app.registerExtension({
 			case "GetImageSizeAndCount":
 				const onGetImageSizeConnectInput = nodeType.prototype.onConnectInput;
 				nodeType.prototype.onConnectInput = function (targetSlot, type, output, originNode, originSlot) {
-					const v = onGetImageSizeConnectInput?.(this, arguments);
+					const v = onGetImageSizeConnectInput? onGetImageSizeConnectInput.apply(this, arguments): undefined
 					this.outputs[1]["name"] = "width"
 					this.outputs[2]["name"] = "height" 
 					this.outputs[3]["name"] = "count"
@@ -119,7 +119,7 @@ app.registerExtension({
 			case "PreviewAnimation":
 				const onPreviewAnimationConnectInput = nodeType.prototype.onConnectInput;
 				nodeType.prototype.onConnectInput = function (targetSlot, type, output, originNode, originSlot) {
-					const v = onPreviewAnimationConnectInput?.(this, arguments);
+					const v = onPreviewAnimationConnectInput? onPreviewAnimationConnectInput.apply(this, arguments): undefined
 					this.title = "Preview Animation"
 					return v;
 				}
@@ -135,7 +135,7 @@ app.registerExtension({
 			case "VRAM_Debug":
 				const onVRAM_DebugConnectInput = nodeType.prototype.onConnectInput;
 				nodeType.prototype.onConnectInput = function (targetSlot, type, output, originNode, originSlot) {
-					const v = onVRAM_DebugConnectInput?.(this, arguments);
+					const v = onVRAM_DebugConnectInput? onVRAM_DebugConnectInput.apply(this, arguments): undefined
 					this.outputs[3]["name"] = "freemem_before"
 					this.outputs[4]["name"] = "freemem_after" 
 					return v;
