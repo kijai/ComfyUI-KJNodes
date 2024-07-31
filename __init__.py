@@ -118,6 +118,7 @@ NODE_CONFIG = {
     "FloatToSigmas": {"class": FloatToSigmas, "name": "Float To Sigmas"},
     "PlotCoordinates": {"class": PlotCoordinates, "name": "Plot Coordinates"},
     "InterpolateCoords": {"class": InterpolateCoords, "name": "Interpolate Coords"},
+    "PointsEditor": {"class": PointsEditor, "name": "Points Editor"},
     #experimental
     "StabilityAPI_SD3": {"class": StabilityAPI_SD3, "name": "Stability API SD3"},
     "SoundReactive": {"class": SoundReactive, "name": "Sound Reactive"},

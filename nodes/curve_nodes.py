@@ -1246,3 +1246,65 @@ CreateInstanceDiffusionTracking -node.
         image_tensor_batch = torch.stack(modified_images).cpu().float()
         
         return image_tensor_batch,
+
+class PointsEditor:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "points_store": ("STRING", {"multiline": False}),
+                "coordinates": ("STRING", {"multiline": False}),
+                "width": ("INT", {"default": 512, "min": 8, "max": 4096, "step": 8}),
+                "height": ("INT", {"default": 512, "min": 8, "max": 4096, "step": 8}),
+            },
+        }
+
+    RETURN_TYPES = ("STRING", "STRING",)
+    RETURN_NAMES = ("coord_str", "normalized_str",)
+    FUNCTION = "splinedata"
+    CATEGORY = "KJNodes/weights"
+    DESCRIPTION = """
+# WORK IN PROGRESS  
+Do not count on this as part of your workflow yet,  
+probably contains lots of bugs and stability is not  
+guaranteed!!  
+  
+## Graphical editor to create coordinates
+
+**Shift + click** to add control point at end.
+**Ctrl + click** to add control point (subdivide) between two points.  
+**Right click on a point** to delete it.    
+Note that you can't delete from start/end.  
+  
+Right click on canvas for context menu:  
+These are purely visual options, doesn't affect the output:  
+ - Toggle handles visibility
+ - Display sample points: display the points to be returned.  
+
+output types:
+ - mask batch  
+        example compatible nodes: anything that takes masks  
+ - list of floats
+        example compatible nodes: IPAdapter weights  
+ - pandas series
+        example compatible nodes: anything that takes Fizz'  
+        nodes Batch Value Schedule  
+ - torch tensor  
+        example compatible nodes: unknown
+"""
+
+    def splinedata(self, points_store, width, height, coordinates):
+        
+        coordinates = json.loads(coordinates)
+        normalized = []
+        normalized_y_values = []
+        for coord in coordinates:
+            coord['x'] = int(round(coord['x']))
+            coord['y'] = int(round(coord['y']))
+            norm_x = (1.0 - (coord['x'] / height) - 0.0)
+            norm_y = (1.0 - (coord['y'] / height) - 0.0)
+            normalized_y_values.append(norm_y)
+            normalized.append({'x':norm_x, 'y':norm_y})
+       
+       
+        return (json.dumps(coordinates), json.dumps(normalized))
