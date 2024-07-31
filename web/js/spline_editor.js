@@ -303,7 +303,12 @@ function createSplineEditor(context, reset=false) {
   
   createContextMenu();
   function updatePath() {
-      let coords = samplePoints(pathElements[0], points_to_sample, samplingMethod, w);
+      if (samplingMethod != "controlpoints") {
+        var coords = samplePoints(pathElements[0], points_to_sample, samplingMethod, w);
+      }
+      else {
+        var coords = points
+      }
 
       if (drawSamplePoints) {
         if (pointsLayer) {
@@ -362,6 +367,7 @@ function createSplineEditor(context, reset=false) {
     dotShape = "triangle"
   }
   
+  
   interpolationWidget.callback = () => {
     interpolation = interpolationWidget.value
     updatePath();
@@ -370,6 +376,10 @@ function createSplineEditor(context, reset=false) {
     samplingMethod = samplingMethodWidget.value
     if (samplingMethod == "path") {
       dotShape = "triangle"
+    }
+    else if (samplingMethod == "controlpoints") {
+      dotShape = "circle"
+      drawSamplePoints = true;
     }
     updatePath();
   }

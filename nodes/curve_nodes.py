@@ -113,6 +113,7 @@ class SplineEditor:
                 [   
                     'path',
                     'time',
+                    'controlpoints'
                 ],
                 {
                     "default": 'time'
