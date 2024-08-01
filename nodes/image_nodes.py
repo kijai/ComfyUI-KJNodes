@@ -639,7 +639,7 @@ class GetImageSizeAndCount:
     RETURN_TYPES = ("IMAGE","INT", "INT", "INT",)
     RETURN_NAMES = ("image", "width", "height", "count",)
     FUNCTION = "getsize"
-    CATEGORY = "KJNodes/masking"
+    CATEGORY = "KJNodes/image"
     DESCRIPTION = """
 Returns width, height and batch size of the image,  
 and passes it through unchanged.  

@@ -396,6 +396,7 @@ function createPointsEditor(context, reset=false) {
     })
     .event("dragend", function() {
       if (pv.event.button === 2 && i !== 0 && i !== points.length - 1) {
+        this.index = i;
         points.splice(i--, 1);
         
       }
