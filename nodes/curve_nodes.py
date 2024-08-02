@@ -1256,6 +1256,12 @@ class PointsEditor:
                 "coordinates": ("STRING", {"multiline": False}),
                 "bbox_store": ("STRING", {"multiline": False}),
                 "bboxes": ("STRING", {"multiline": False}),
+                "bbox_format": (
+                [   
+                    'xyxy',
+                    'xywh',
+                ],
+                ),
                 "width": ("INT", {"default": 512, "min": 8, "max": 4096, "step": 8}),
                 "height": ("INT", {"default": 512, "min": 8, "max": 4096, "step": 8}),
             },
@@ -1263,7 +1269,7 @@ class PointsEditor:
 
     RETURN_TYPES = ("STRING", "STRING", "BBOX", "MASK")
     RETURN_NAMES = ("coord_str", "normalized_str", "bbox", "bbox_mask")
-    FUNCTION = "splinedata"
+    FUNCTION = "pointdata"
     CATEGORY = "KJNodes/weights"
     DESCRIPTION = """
 # WORK IN PROGRESS  
@@ -1274,28 +1280,16 @@ guaranteed!!
 ## Graphical editor to create coordinates
 
 **Shift + click** to add control point at end.
-**Ctrl + click** to add control point (subdivide) between two points.  
+**Ctrl + click** to draw a box.  
 **Right click on a point** to delete it.    
 Note that you can't delete from start/end.  
   
-Right click on canvas for context menu:  
-These are purely visual options, doesn't affect the output:  
- - Toggle handles visibility
- - Display sample points: display the points to be returned.  
+To add an image select the node and copy/paste or drag in the image.
+The image is saved to the node
 
-output types:
- - mask batch  
-        example compatible nodes: anything that takes masks  
- - list of floats
-        example compatible nodes: IPAdapter weights  
- - pandas series
-        example compatible nodes: anything that takes Fizz'  
-        nodes Batch Value Schedule  
- - torch tensor  
-        example compatible nodes: unknown
 """
 
-    def splinedata(self, points_store, bbox_store, width, height, coordinates, bboxes):
+    def pointdata(self, points_store, bbox_store, width, height, coordinates, bboxes, bbox_format="xyxy"):
         
         coordinates = json.loads(coordinates)
         normalized = []
@@ -1317,12 +1311,18 @@ output types:
         else:
             bboxes = [(int(bboxes["x"]), int(bboxes["y"]), int(bboxes["width"]), int(bboxes["height"]))]
 
+            bboxes_xyxy = []
             # Draw the bounding box on the mask
             for bbox in bboxes:
                 x_min, y_min, w, h = bbox
                 x_max = x_min + w
                 y_max = y_min + h
+                bboxes_xyxy.append((x_min, y_min, x_max, y_max))
+                
                 mask[y_min:y_max, x_min:x_max] = 1  # Fill the bounding box area with 1s
+
+            if bbox_format == "xyxy":
+                bboxes = bboxes_xyxy
 
         mask_tensor = torch.from_numpy(mask)
         mask_tensor = mask_tensor.unsqueeze(0).float().cpu()
