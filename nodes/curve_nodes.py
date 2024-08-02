@@ -1308,18 +1308,21 @@ output types:
             normalized_y_values.append(norm_y)
             normalized.append({'x':norm_x, 'y':norm_y})
 
-        bboxes = json.loads(bboxes)
-        bboxes = [(int(bboxes["x"]), int(bboxes["y"]), int(bboxes["width"]), int(bboxes["height"]))]
-
-         # Create a blank mask
+        # Create a blank mask
         mask = np.zeros((height, width), dtype=np.uint8)
+        bboxes = json.loads(bboxes)
+        print(bboxes)
+        if bboxes["x"] is None or bboxes["y"] is None or bboxes["width"] is None or bboxes["height"] is None:
+            bboxes = []
+        else:
+            bboxes = [(int(bboxes["x"]), int(bboxes["y"]), int(bboxes["width"]), int(bboxes["height"]))]
 
-        # Draw the bounding box on the mask
-        for bbox in bboxes:
-            x_min, y_min, w, h = bbox
-            x_max = x_min + w
-            y_max = y_min + h
-            mask[y_min:y_max, x_min:x_max] = 1  # Fill the bounding box area with 1s
+            # Draw the bounding box on the mask
+            for bbox in bboxes:
+                x_min, y_min, w, h = bbox
+                x_max = x_min + w
+                y_max = y_min + h
+                mask[y_min:y_max, x_min:x_max] = 1  # Fill the bounding box area with 1s
 
         mask_tensor = torch.from_numpy(mask)
         mask_tensor = mask_tensor.unsqueeze(0).float().cpu()
