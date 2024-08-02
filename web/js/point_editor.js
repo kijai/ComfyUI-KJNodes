@@ -106,6 +106,7 @@ app.registerExtension({
           chainCallback(nodeType.prototype, "onNodeCreated", function () {
             
             hideWidgetForGood(this, this.widgets.find(w => w.name === "coordinates"))
+            hideWidgetForGood(this, this.widgets.find(w => w.name === "bboxes"))
 
             var element = document.createElement("div");
             this.uuid = makeUUID()
@@ -277,7 +278,7 @@ function createPointsEditor(context, reset=false) {
         context.setSize([context.size[0], h + 230]);
         vis.width(w);
         vis.height(h);
-        updatePath();
+        updateData();
         backgroundImage.url(imageUrl).visible(true).root.render();
       };
     }
@@ -319,7 +320,7 @@ function createPointsEditor(context, reset=false) {
                   context.setSize([context.size[0], this.height + 230]);
                   vis.width(w);
                   vis.height(h);
-                  updatePath();
+                  updateData();
                   backgroundImage.url(imageUrl).visible(true).root.render();
                 };
               }
@@ -341,33 +342,23 @@ function createPointsEditor(context, reset=false) {
   }
   
   createContextMenu();
-  function updatePath() {
+  function updateData() {
       if (points.length == 0) {
         console.log("no points")
         return
       }
       let coords = points
-      
-      // if (pointsLayer) {
-      //     // Update the data of the existing points layer
-      //     pointsLayer.data(coords);
-      //   } else {
-      //       // Create the points layer if it doesn't exist
-      //       pointsLayer = vis.add(pv.Dot)
-      //           .data(coords)
-      //           .left(function(d) { return d.x; })
-      //           .top(function(d) { return d.y; })
-      //           .radius(3) // Adjust the radius as needed
-      //           .fillStyle("red") // Change the color as needed
-      //           .strokeStyle("black") // Change the stroke color as needed
-      //           .lineWidth(1); // Adjust the line width as needed
-      //     }
-       
       let coordsString = JSON.stringify(coords);
+      let bbox = calculateBBox(box_startX, box_startY, box_endX, box_endY)
+      let bboxString = JSON.stringify(bbox);
       pointsStoreWidget.value = JSON.stringify(points);
+      bboxStoreWidget.value = JSON.stringify(bboxString);
       if (coordWidget) {
         coordWidget.value = coordsString;
         }
+      if (bboxWidget) {
+        bboxWidget.value = bboxString;
+      }
       vis.render();
   }
   
@@ -378,8 +369,8 @@ function createPointsEditor(context, reset=false) {
   const pointsStoreWidget = context.widgets.find(w => w.name === "points_store");
   const widthWidget = context.widgets.find(w => w.name === "width");
   const heightWidget = context.widgets.find(w => w.name === "height");
-
-  var pointsLayer = null; 
+  const bboxStoreWidget = context.widgets.find(w => w.name === "bbox_store");
+  const bboxWidget = context.widgets.find(w => w.name === "bboxes");
   
   widthWidget.callback = () => {
     w = widthWidget.value;
@@ -387,17 +378,17 @@ function createPointsEditor(context, reset=false) {
         context.setSize([w + 45, context.size[1]]);
     }
     vis.width(w);
-    updatePath();
+    updateData();
 }
   heightWidget.callback = () => {
     h = heightWidget.value
     vis.height(h)
     context.setSize([context.size[0], h + 430]);
-    updatePath();
+    updateData();
   }
   pointsStoreWidget.callback = () => {
     points = JSON.parse(pointsStoreWidget.value);
-    updatePath();
+    updateData();
   }
   
  // Initialize or reset points array
@@ -407,6 +398,9 @@ function createPointsEditor(context, reset=false) {
  var h = heightWidget.value;
  var i = 3;
  let points = [];
+ let bbox = [];
+ var box_startX, box_startY, box_endX, box_endY;
+ var drawing = false;
 
  if (!reset && pointsStoreWidget.value != "") {
   points = JSON.parse(pointsStoreWidget.value);
@@ -420,7 +414,7 @@ function createPointsEditor(context, reset=false) {
   ];
     pointsStoreWidget.value = JSON.stringify(points);
  }
-  
+ 
   var vis = new pv.Panel()
   .width(w)
   .height(h)
@@ -436,11 +430,14 @@ function createPointsEditor(context, reset=false) {
         y: this.mouse().y / app.canvas.ds.scale
         };
         i = points.push(scaledMouse) - 1;
-        updatePath();
+        updateData();
         return this;
     }
     else if (pv.event.ctrlKey) {
-       
+      console.log("start drawing at " + this.mouse().x / app.canvas.ds.scale + ", " + this.mouse().y / app.canvas.ds.scale);
+      drawing = true;
+      box_startX = this.mouse().x / app.canvas.ds.scale;
+      box_startY = this.mouse().y / app.canvas.ds.scale;
     }
     else if (pv.event.button === 2) {
       context.contextMenu.style.display = 'block';
@@ -448,8 +445,37 @@ function createPointsEditor(context, reset=false) {
       context.contextMenu.style.top = `${pv.event.clientY}px`;
       }
     })
-  var backgroundImage = vis.add(pv.Image)
-    .visible(false)
+    .event("mousemove", function() {
+      if (drawing) {
+          box_endX = this.mouse().x / app.canvas.ds.scale;
+          box_endY = this.mouse().y / app.canvas.ds.scale;
+          vis.render();
+      }
+  })
+    .event("mouseup", function() {
+      console.log("end drawing at " + this.mouse().x / app.canvas.ds.scale + ", " + this.mouse().y / app.canvas.ds.scale);
+      drawing = false;
+      updateData();
+      });
+
+    var backgroundImage = vis.add(pv.Image)
+      .visible(false)
+
+    vis.add(pv.Area)
+        .data(function() {
+            return drawing || bbox ? [box_startX, box_endX] : [];
+        })
+        .bottom(function() {
+            return h - Math.max(box_startY, box_endY);
+        })
+        .left(function(d) {
+            return d;
+        })
+        .height(function() {
+            return Math.abs(box_startY - box_endY);
+        })
+        .fillStyle("rgba(70, 130, 180, 0.5)")
+        .strokeStyle("steelblue");
 
   vis.add(pv.Dot)
     .data(() => points)
@@ -475,7 +501,7 @@ function createPointsEditor(context, reset=false) {
         points.splice(i--, 1);
         
       }
-        updatePath();
+        updateData();
           isDragging = false; 
         
     })
@@ -539,7 +565,7 @@ function createPointsEditor(context, reset=false) {
       context.setSize([w + 45, context.size[1]]);
     }
     context.setSize([context.size[0], h + 430]);
-    updatePath();
+    updateData();
 
     if (context.properties.imgData && context.properties.imgData.base64) {
       const base64String = context.properties.imgData.base64;
@@ -572,4 +598,12 @@ export function hideWidgetForGood(node, widget, suffix = '') {
       hideWidgetForGood(node, w, ':' + widget.name)
     }
   }
+}
+
+function calculateBBox(x1, y1, x2, y2) {
+  var x = Math.min(x1, x2);
+  var y = Math.min(y1, y2);
+  var width = Math.abs(x2 - x1);
+  var height = Math.abs(y2 - y1);
+  return { x: x, y: y, width: width, height: height };
 }

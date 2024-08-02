@@ -1254,13 +1254,15 @@ class PointsEditor:
             "required": {
                 "points_store": ("STRING", {"multiline": False}),
                 "coordinates": ("STRING", {"multiline": False}),
+                "bbox_store": ("STRING", {"multiline": False}),
+                "bboxes": ("STRING", {"multiline": False}),
                 "width": ("INT", {"default": 512, "min": 8, "max": 4096, "step": 8}),
                 "height": ("INT", {"default": 512, "min": 8, "max": 4096, "step": 8}),
             },
         }
 
-    RETURN_TYPES = ("STRING", "STRING",)
-    RETURN_NAMES = ("coord_str", "normalized_str",)
+    RETURN_TYPES = ("STRING", "STRING", "BBOX", "MASK")
+    RETURN_NAMES = ("coord_str", "normalized_str", "bbox", "bbox_mask")
     FUNCTION = "splinedata"
     CATEGORY = "KJNodes/weights"
     DESCRIPTION = """
@@ -1293,7 +1295,7 @@ output types:
         example compatible nodes: unknown
 """
 
-    def splinedata(self, points_store, width, height, coordinates):
+    def splinedata(self, points_store, bbox_store, width, height, coordinates, bboxes):
         
         coordinates = json.loads(coordinates)
         normalized = []
@@ -1305,6 +1307,23 @@ output types:
             norm_y = (1.0 - (coord['y'] / height) - 0.0)
             normalized_y_values.append(norm_y)
             normalized.append({'x':norm_x, 'y':norm_y})
-       
-       
-        return (json.dumps(coordinates), json.dumps(normalized))
+
+        bboxes = json.loads(bboxes)
+        bboxes = [(int(bboxes["x"]), int(bboxes["y"]), int(bboxes["width"]), int(bboxes["height"]))]
+
+         # Create a blank mask
+        mask = np.zeros((height, width), dtype=np.uint8)
+
+        # Draw the bounding box on the mask
+        for bbox in bboxes:
+            x_min, y_min, w, h = bbox
+            x_max = x_min + w
+            y_max = y_min + h
+            mask[y_min:y_max, x_min:x_max] = 1  # Fill the bounding box area with 1s
+
+        mask_tensor = torch.from_numpy(mask)
+        mask_tensor = mask_tensor.unsqueeze(0).float().cpu()
+        #mask_tensor = mask_tensor[:,:,0]
+        print(mask_tensor.shape)
+
+        return (json.dumps(coordinates), json.dumps(normalized), bboxes, mask_tensor)
