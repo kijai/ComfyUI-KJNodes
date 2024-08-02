@@ -152,7 +152,8 @@ app.registerExtension({
             
             // Create an array of menu items using the createMenuItem function
             this.menuItems = [
-              createMenuItem(0, "Background image"),
+              createMenuItem(0, "Load Image"),
+              createMenuItem(1, "Clear Image"),
             ];
             
             // Add mouseover and mouseout event listeners to each menu item for styling
@@ -184,7 +185,7 @@ app.registerExtension({
               }
             });
             
-            this.setSize([550, 750]);
+            this.setSize([550, 550]);
             this.resizable = false;
             this.pointsEditor.parentEl = document.createElement("div");
             this.pointsEditor.parentEl.className = "points-editor";
@@ -249,15 +250,51 @@ function createPointsEditor(context, reset=false) {
       const reader = new FileReader();
     
       reader.onloadend = function() {
-        const base64String = reader.result.replace('data:', '').replace(/^.+,/, '');
-        context.properties.imgData = {
-          name: file.name,
-          lastModified: file.lastModified,
-          size: file.size,
-          type: file.type,
-          base64: base64String
+        const img = new Image();
+        img.src = reader.result;
+    
+        img.onload = function() {
+          const canvas = document.createElement('canvas');
+          const ctx = canvas.getContext('2d');
+    
+          const maxWidth = 800; // maximum width
+          const maxHeight = 600; // maximum height
+          let width = img.width;
+          let height = img.height;
+    
+          // Calculate the new dimensions while preserving the aspect ratio
+          if (width > height) {
+            if (width > maxWidth) {
+              height *= maxWidth / width;
+              width = maxWidth;
+            }
+          } else {
+            if (height > maxHeight) {
+              width *= maxHeight / height;
+              height = maxHeight;
+            }
+          }
+    
+          // Set the canvas to the new dimensions
+          canvas.width = width;
+          canvas.height = height;
+    
+          // Draw the image to the canvas
+          ctx.drawImage(img, 0, 0, width, height);
+    
+          // Get the compressed image data as a Base64 string
+          const base64String = canvas.toDataURL('image/jpeg', 0.5).replace('data:', '').replace(/^.+,/, ''); // 0.7 is the quality from 0 to 1
+    
+          context.properties.imgData = {
+            name: file.name,
+            lastModified: file.lastModified,
+            size: file.size,
+            type: file.type,
+            base64: base64String
+          };
+    
+          console.log('Compressed Image Data:', context.properties.imgData);
         };
-        console.log('Image Data:', context.properties.imgData);
       };
     
       reader.readAsDataURL(file);
@@ -268,14 +305,15 @@ function createPointsEditor(context, reset=false) {
     
       img.onload = function() {
         console.log(this.width, this.height); // Access width and height here
-        widthWidget.value = this.width;
-        heightWidget.value = this.height;
         const w = this.width;
         const h = this.height;
+        widthWidget.value = w;
+        heightWidget.value = h;
+        
         if (w > 256) {
           context.setSize([w + 45, context.size[1]]);
         }
-        context.setSize([context.size[0], h + 230]);
+        context.setSize([context.size[0], h + 300]);
         vis.width(w);
         vis.height(h);
         updateData();
@@ -328,12 +366,17 @@ function createPointsEditor(context, reset=false) {
 
             // If the backgroundImage is already visible, hide it. Otherwise, show file input.
             if (backgroundImage.visible()) {
-              backgroundImage.visible(false)
-              .root.render();
+              backgroundImage.visible(false).root.render();
             } else {
               // Trigger the file input dialog
               fileInput.click();
             }
+            context.contextMenu.style.display = 'none';
+            break;
+
+          case 1:
+            backgroundImage.visible(false).root.render();
+            context.properties.imgData = null;
             context.contextMenu.style.display = 'none';
             break;
         }
@@ -383,7 +426,7 @@ function createPointsEditor(context, reset=false) {
   heightWidget.callback = () => {
     h = heightWidget.value
     vis.height(h)
-    context.setSize([context.size[0], h + 430]);
+    context.setSize([context.size[0], h + 300]);
     updateData();
   }
   pointsStoreWidget.callback = () => {
@@ -404,6 +447,7 @@ function createPointsEditor(context, reset=false) {
 
  if (!reset && pointsStoreWidget.value != "") {
   points = JSON.parse(pointsStoreWidget.value);
+  bbox = JSON.parse(bboxStoreWidget.value);
   console.log(context);    
  } else {
   points = [
@@ -413,6 +457,7 @@ function createPointsEditor(context, reset=false) {
     }
   ];
     pointsStoreWidget.value = JSON.stringify(points);
+    bboxStoreWidget.value = JSON.stringify(bbox);
  }
  
   var vis = new pv.Panel()
@@ -564,7 +609,7 @@ function createPointsEditor(context, reset=false) {
     if (w > 256) {
       context.setSize([w + 45, context.size[1]]);
     }
-    context.setSize([context.size[0], h + 430]);
+    context.setSize([context.size[0], h + 300]);
     updateData();
 
     if (context.properties.imgData && context.properties.imgData.base64) {
