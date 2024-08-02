@@ -1,4 +1,5 @@
 import { app } from '../../../scripts/app.js'
+import { api } from '../../../scripts/api.js'
 
 //from melmass
 export function makeUUID() {
@@ -109,6 +110,10 @@ app.registerExtension({
             var element = document.createElement("div");
             this.uuid = makeUUID()
             element.id = `points-editor-${this.uuid}`
+            
+            // fake image widget to allow copy/paste
+            const fakeimagewidget = this.addWidget("COMBO", "image", null, () => {}, {});
+            hideWidgetForGood(this, fakeimagewidget)
 
             this.pointsEditor = this.addDOMWidget(nodeData.name, "PointsEditorWidget", element, {
             serialize: false,
@@ -171,6 +176,7 @@ app.registerExtension({
               if (!this.properties || !("points" in this.properties)) {
                 createPointsEditor(this)
                 this.addProperty("points", this.constructor.type, "string");
+               
               }
               else {
                 createPointsEditor(this, true)
@@ -208,6 +214,73 @@ function createPointsEditor(context, reset=false) {
         context.contextMenu.style.display = 'none';
       }
     });
+
+    context.pasteFile = function(file) {
+      console.log(file);
+      if (file.type.startsWith("image/")) {
+        handleImageFile(file);
+        return true;
+      }
+      return false;
+    };
+    
+    context.onDragOver = function(e) {
+      if (e.dataTransfer && e.dataTransfer.items) {
+        return [...e.dataTransfer.items].some(f => f.kind === "file" && f.type.startsWith("image/"));
+      }
+      return false;
+    };
+    
+    // On drop upload files
+    context.onDragDrop = function(e) {
+      console.log("onDragDrop called");
+      let handled = false;
+      for (const file of e.dataTransfer.files) {
+        if (file.type.startsWith("image/")) {
+          handleImageFile(file);
+          handled = true;
+        }
+      }
+      return handled;
+    };
+    
+    function handleImageFile(file) {
+      const reader = new FileReader();
+    
+      reader.onloadend = function() {
+        const base64String = reader.result.replace('data:', '').replace(/^.+,/, '');
+        context.properties.imgData = {
+          name: file.name,
+          lastModified: file.lastModified,
+          size: file.size,
+          type: file.type,
+          base64: base64String
+        };
+        console.log('Image Data:', context.properties.imgData);
+      };
+    
+      reader.readAsDataURL(file);
+    
+      const imageUrl = URL.createObjectURL(file);
+      const img = new Image();
+      img.src = imageUrl;
+    
+      img.onload = function() {
+        console.log(this.width, this.height); // Access width and height here
+        widthWidget.value = this.width;
+        heightWidget.value = this.height;
+        const w = this.width;
+        const h = this.height;
+        if (w > 256) {
+          context.setSize([w + 45, context.size[1]]);
+        }
+        context.setSize([context.size[0], h + 230]);
+        vis.width(w);
+        vis.height(h);
+        updatePath();
+        backgroundImage.url(imageUrl).visible(true).root.render();
+      };
+    }
 
     context.menuItems.forEach((menuItem, index) => {
       menuItem.addEventListener('click', function(e) {
@@ -336,7 +409,8 @@ function createPointsEditor(context, reset=false) {
  let points = [];
 
  if (!reset && pointsStoreWidget.value != "") {
-    points = JSON.parse(pointsStoreWidget.value);
+  points = JSON.parse(pointsStoreWidget.value);
+  console.log(context);    
  } else {
   points = [
     {
@@ -381,11 +455,12 @@ function createPointsEditor(context, reset=false) {
     .data(() => points)
     .left(d => d.x)
     .top(d => d.y)
-    .radius(15)
+    .radius(Math.log(Math.min(w, h)) * 4)
     .shape("circle")
     .cursor("move")
-    .strokeStyle(function() { return i == this.index ? "#ff7f0e" : "#1f77b4"; })
-    .fillStyle(function() { return "rgba(100, 100, 100, 0.2)"; })
+    .strokeStyle(function() { return i == this.index ? "#ff7f0e" : "#00FFFF"; })
+    .lineWidth(4)  // Set the stroke thickness to 2
+    .fillStyle(function() { return "rgba(100, 100, 100, 0.6)"; })
     .event("mousedown", pv.Behavior.drag())
     .event("dragstart", function() {
         i = this.index;
@@ -415,7 +490,7 @@ function createPointsEditor(context, reset=false) {
       adjustedX = Math.max(0, Math.min(panelWidth, adjustedX));
       adjustedY = Math.max(0, Math.min(panelHeight, adjustedY));
       points[this.index] = { x: adjustedX, y: adjustedY }; // Update the point's position
-      //vis.render(); // Re-render the visualization to reflect the new position
+      vis.render(); // Re-render the visualization to reflect the new position
    })
     // .event("mouseover", function() {
     //   hoverIndex = this.index; // Set the hover index to the index of the hovered dot
@@ -430,16 +505,26 @@ function createPointsEditor(context, reset=false) {
     // .visible(function() {
     //   return hoverIndex === this.index; // Only show the label for the hovered dot
     // })
-    .left(d => d.x < w / 2 ? d.x + 20 : d.x - 25) // Shift label to right if on left half, otherwise shift to left
-    .top(d => d.y < h / 2 ? d.y + 15 : d.y - 15)  // Shift label down if on top half, otherwise shift up
-    .font(20 + "px sans-serif")
+    .left(d => d.x < w / 2 ? d.x + 30 : d.x - 35) // Shift label to right if on left half, otherwise shift to left
+    .top(d => d.y < h / 2 ? d.y + 25 : d.y - 25)  // Shift label down if on top half, otherwise shift up
+    .font(25 + "px sans-serif")
     // .text(d => {
     //     return `X: ${Math.round(d.x)}, Y: ${Math.round(d.y)}`;
     //   })
     .text(d => {
       return points.indexOf(d);
   })
-    .textStyle("red")
+    .textStyle("cyan")
+    .textShadow("2px 2px 2px black")
+    
+    .add(pv.Dot) // Add smaller point in the center
+      .data(() => points)
+      .left(d => d.x)
+      .top(d => d.y)
+      .radius(2)  // Smaller radius for the center point
+      .shape("circle")
+      .fillStyle("red")  // Color for the center point
+      .lineWidth(1);  // Stroke thickness for the center point
       
     if (points.length != 0) {
       vis.render();
@@ -456,41 +541,13 @@ function createPointsEditor(context, reset=false) {
     context.setSize([context.size[0], h + 430]);
     updatePath();
 
-    document.addEventListener('paste', function(e) {
-      e.preventDefault(); // Prevent the default paste behavior
-      e.stopPropagation();
-      const items = (e.clipboardData || e.originalEvent.clipboardData).items;
-      for (let i = 0; i < items.length; i++) {
-        if (items[i].type.indexOf("image") !== -1) {
-          const blob = items[i].getAsFile();
-          const imageUrl = URL.createObjectURL(blob);
-          // Create an Image object
-          let img = new Image();
+    if (context.properties.imgData && context.properties.imgData.base64) {
+      const base64String = context.properties.imgData.base64;
+      const imageUrl = `data:${context.properties.imgData.type};base64,${base64String}`;
+      
+      backgroundImage.url(imageUrl).visible(true).root.render();
+    }
 
-          // Set the source of the image object
-          img.src = imageUrl;
-
-          // Load the image to access its dimensions
-          img.onload = function() {
-            console.log(this.width, this.height); // Access width and height here
-            widthWidget.value = this.width;
-            heightWidget.value = this.height;
-            w = widthWidget.value;
-            h = heightWidget.value;
-            if (this.width > 256) {
-              context.setSize([this.width + 45, context.size[1]]);
-            }
-            context.setSize([context.size[0], this.height + 230]);
-            vis.width(w);
-            vis.height(h);
-            updatePath();
-            backgroundImage.url(imageUrl).visible(true).root.render();
-            
-        };
-          break; // Stop after the first image is handled
-        }
-      }
-    });
 }
 
 //from melmass
