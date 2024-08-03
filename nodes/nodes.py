@@ -715,6 +715,10 @@ class WidgetToString:
                 "widget_name": ("STRING", {"multiline": False}),
                 "return_all": ("BOOLEAN", {"default": False}),
             },
+            "optional": {
+                         "any_input": (any, {}),
+                         "node_title": ("STRING", {"multiline": False}),
+                         },
             
             "hidden": {"extra_pnginfo": "EXTRA_PNGINFO",
                        "prompt": "PROMPT"},
@@ -726,26 +730,40 @@ class WidgetToString:
     DESCRIPTION = """
 Selects a node and it's specified widget and outputs the value as a string.  
 To see node id's, enable node id display from Manager badge menu.
+Alternatively you can search with the node title. Node titles ONLY exist if they 
+are manually edited!
 """
 
-    def get_widget_value(self, id, widget_name, extra_pnginfo, prompt, return_all=False):
+    def get_widget_value(self, id, widget_name, extra_pnginfo, prompt, return_all=False, any_input=None, node_title=""):
         workflow = extra_pnginfo["workflow"]
+        #print(json.dumps(workflow, indent=4))
         results = []
+        node_id = None  # Initialize node_id to handle cases where no match is found
+
         for node in workflow["nodes"]:
-            node_id = node["id"]
-
-            if node_id != id:
-                continue
-
-            values = prompt[str(node_id)]
-            if "inputs" in values:
-                if return_all:
-                    results.append(', '.join(f'{k}: {str(v)}' for k, v in values["inputs"].items()))
-                elif widget_name in values["inputs"]:
-                    v = str(values["inputs"][widget_name])  # Convert to string here
-                    return (v, )
+            if node_title:
+                if "title" in node:
+                    if node["title"] == node_title:
+                        node_id = node["id"]
+                        break
                 else:
-                    raise NameError(f"Widget not found: {id}.{widget_name}")
+                    print("Node title not found.")
+            elif node["id"] == id:
+                node_id = id
+                break
+
+        if node_id is None:
+            raise ValueError("No matching node found for the given title or id")
+
+        values = prompt[str(node_id)]
+        if "inputs" in values:
+            if return_all:
+                results.append(', '.join(f'{k}: {str(v)}' for k, v in values["inputs"].items()))
+            elif widget_name in values["inputs"]:
+                v = str(values["inputs"][widget_name])  # Convert to string here
+                return (v, )
+            else:
+                raise NameError(f"Widget not found: {id}.{widget_name}")
         if not results:
             raise NameError(f"Node not found: {id}")
         return (', '.join(results).strip(', '), )
@@ -899,10 +917,9 @@ class InjectNoiseToLatent:
             noised = mask * noised + (1-mask) * latents["samples"]
         if mix_randn_amount > 0:
             if seed is not None:
-                torch.manual_seed(seed)
-            rand_noise = torch.randn_like(noised)
-            noised = ((1 - mix_randn_amount) * noised + mix_randn_amount *
-                            rand_noise) / ((mix_randn_amount**2 + (1-mix_randn_amount)**2) ** 0.5)
+                generator = torch.manual_seed(seed)
+                rand_noise = torch.randn(noised.size(), dtype=noised.dtype, layout=noised.layout, generator=generator, device="cpu")
+                noised = noised + (mix_randn_amount * rand_noise)
         samples["samples"] = noised
         return (samples,)
  
@@ -954,6 +971,11 @@ class GenerateNoise:
             "optional": {
             "model": ("MODEL", ),
             "sigmas": ("SIGMAS", ),
+            "latent_channels": (
+            [   '4',
+                '16',
+            ],
+           ),
             }
             }
     
@@ -964,10 +986,10 @@ class GenerateNoise:
 Generates noise for injection or to be used as empty latents on samplers with add_noise off.
 """
         
-    def generatenoise(self, batch_size, width, height, seed, multiplier, constant_batch_noise, normalize, sigmas=None, model=None):
+    def generatenoise(self, batch_size, width, height, seed, multiplier, constant_batch_noise, normalize, sigmas=None, model=None, latent_channels=4):
 
         generator = torch.manual_seed(seed)
-        noise = torch.randn([batch_size, 4, height // 8, width // 8], dtype=torch.float32, layout=torch.strided, generator=generator, device="cpu")
+        noise = torch.randn([batch_size, int(latent_channels), height // 8, width // 8], dtype=torch.float32, layout=torch.strided, generator=generator, device="cpu")
         if sigmas is not None:
             sigma = sigmas[0] - sigmas[-1]
             sigma /= model.model.latent_format.scale_factor
@@ -979,6 +1001,8 @@ Generates noise for injection or to be used as empty latents on samplers with ad
             noise = noise / noise.std()
         if constant_batch_noise:
             noise = noise[0].repeat(batch_size, 1, 1, 1)
+
+        
         return ({"samples":noise}, )
 
 def camera_embeddings(elevation, azimuth):
