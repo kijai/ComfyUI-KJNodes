@@ -1285,10 +1285,12 @@ guaranteed!!
 **Shift + click** to add control point at end.
 **Ctrl + click** to draw a box.  
 **Right click on a point** to delete it.    
-Note that you can't delete from start/end.  
+Note that you can't delete from start/end of the points array.  
   
-To add an image select the node and copy/paste or drag in the image.
-The image is saved to the node
+To add an image select the node and copy/paste or drag in the image.  
+Or from the bg_image input on queue (first frame of the batch).  
+
+**THE IMAGE IS SAVED TO THE NODE AND WORKFLOW METADATA**
 
 """
 
