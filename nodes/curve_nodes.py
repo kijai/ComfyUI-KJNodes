@@ -1265,6 +1265,9 @@ class PointsEditor:
                 "width": ("INT", {"default": 512, "min": 8, "max": 4096, "step": 8}),
                 "height": ("INT", {"default": 512, "min": 8, "max": 4096, "step": 8}),
             },
+            "optional": {
+                "bg_image": ("IMAGE", ),
+            },
         }
 
     RETURN_TYPES = ("STRING", "STRING", "BBOX", "MASK")
@@ -1289,7 +1292,9 @@ The image is saved to the node
 
 """
 
-    def pointdata(self, points_store, bbox_store, width, height, coordinates, bboxes, bbox_format="xyxy"):
+    def pointdata(self, points_store, bbox_store, width, height, coordinates, bboxes, bbox_format="xyxy", bg_image=None):
+        import io
+        import base64
         
         coordinates = json.loads(coordinates)
         normalized = []
@@ -1329,4 +1334,19 @@ The image is saved to the node
         #mask_tensor = mask_tensor[:,:,0]
         print(mask_tensor.shape)
 
-        return (json.dumps(coordinates), json.dumps(normalized), bboxes, mask_tensor)
+        if bg_image is None:
+            return (json.dumps(coordinates), json.dumps(normalized), bboxes, mask_tensor)
+        else:
+            transform = transforms.ToPILImage()
+            image = transform(bg_image[0].permute(2, 0, 1))
+            buffered = io.BytesIO()
+            image.save(buffered, format="JPEG", quality=75)
+
+            # Step 3: Encode the image bytes to a Base64 string
+            img_bytes = buffered.getvalue()
+            img_base64 = base64.b64encode(img_bytes).decode('utf-8')
+        
+            return {
+                "ui": {"bg_image": [img_base64]}, 
+                "result": (json.dumps(coordinates), json.dumps(normalized), bboxes, mask_tensor)
+            }
