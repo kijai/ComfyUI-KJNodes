@@ -729,9 +729,11 @@ class WidgetToString:
     CATEGORY = "KJNodes/text"
     DESCRIPTION = """
 Selects a node and it's specified widget and outputs the value as a string.  
-To see node id's, enable node id display from Manager badge menu.
-Alternatively you can search with the node title. Node titles ONLY exist if they 
-are manually edited!
+To see node id's, enable node id display from Manager badge menu.  
+Alternatively you can search with the node title. Node titles ONLY exist if they  
+are manually edited!  
+The 'any_input' is purely for making sure the node you want the value from exists in the workflow,  
+it has no other function than place this node at right spot in the workflow execution order.
 """
 
     def get_widget_value(self, id, widget_name, extra_pnginfo, prompt, return_all=False, any_input=None, node_title=""):
