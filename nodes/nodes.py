@@ -741,6 +741,8 @@ The 'any_input' is required for making sure the node you want the value from exi
         #print(json.dumps(workflow, indent=4))
         results = []
         node_id = None  # Initialize node_id to handle cases where no match is found
+        link_id = None
+        link_to_node_map = {}
 
         for node in workflow["nodes"]:
             if node_title:
@@ -755,10 +757,24 @@ The 'any_input' is required for making sure the node you want the value from exi
                     node_id = id
                     break
             elif any_input:
-                if node["type"] == "WidgetToString" and node["id"] == int(unique_id):
+                if node["type"] == "WidgetToString" and node["id"] == int(unique_id) and not link_id:
                     for node_input in node["inputs"]:
-                        node_id = node_input["link"]
-                        break
+                        link_id = node_input["link"]
+                      
+                node_outputs = node.get("outputs", None)
+                if not node_outputs:
+                    continue
+                for output in node_outputs:
+                    node_links = output.get("links", None)
+                    if not node_links:
+                        continue
+                    for link in node_links:
+                        link_to_node_map[link] = node["id"]
+                        if link_id and link == link_id:
+                            break
+        
+        if link_id:
+            node_id = link_to_node_map.get(link_id, None)
 
         if node_id is None:
             raise ValueError("No matching node found for the given title or id")
