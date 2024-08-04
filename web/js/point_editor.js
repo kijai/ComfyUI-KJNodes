@@ -214,6 +214,7 @@ class PointsEditor {
   constructor(context, reset = false) {
     this.node = context;
     this.reset = reset;
+    const self = this; // Keep a reference to the main class context
 
     console.log("creatingPointEditor")
 
@@ -248,7 +249,6 @@ class PointsEditor {
     // context menu
     this.createContextMenu();
 
-
     if (reset && context.pointsEditor.element) {
       context.pointsEditor.element.innerHTML = ''; // Clear the container
     }
@@ -280,13 +280,17 @@ class PointsEditor {
       this.neg_points = JSON.parse(pointsStoreWidget.value).negative;
       this.updateData();
     }
+    this.bboxStoreWidget.callback = () => {
+      this.bbox = JSON.parse(bboxStoreWidget.value)
+      this.updateData();
+    }
 
     var w = this.widthWidget.value;
     var h = this.heightWidget.value;
     var i = 3;
     this.points = [];
     this.neg_points = [];
-    this.bbox = [];
+    this.bbox = [{}];
     var drawing = false;
 
     // Initialize or reset points array
@@ -294,6 +298,7 @@ class PointsEditor {
       this.points = JSON.parse(this.pointsStoreWidget.value).positive;
       this.neg_points = JSON.parse(this.pointsStoreWidget.value).negative;
       this.bbox = JSON.parse(this.bboxStoreWidget.value);
+      console.log(this.bbox)
     } else {
       this.points = [
         {
@@ -314,7 +319,8 @@ class PointsEditor {
       this.pointsStoreWidget.value = JSON.stringify(combinedPoints);
       this.bboxStoreWidget.value = JSON.stringify(this.bbox);
     }
-    const self = this; // Keep a reference to the main class context
+
+    //create main canvas panel
     this.vis = new pv.Panel()
       .width(w)
       .height(h)
@@ -323,8 +329,7 @@ class PointsEditor {
       .lineWidth(2)
       .antialias(false)
       .margin(10)
-      .event("mousedown", function () {
-        
+      .event("mousedown", function () { 
         if (pv.event.shiftKey && pv.event.button === 2) { // Use pv.event to access the event object
           let scaledMouse = {
             x: this.mouse().x / app.canvas.ds.scale,
@@ -334,7 +339,7 @@ class PointsEditor {
           self.updateData();
           return this;
         }
-        else if (pv.event.shiftKey) { // Use pv.event to access the event object
+        else if (pv.event.shiftKey) {
           let scaledMouse = {
             x: this.mouse().x / app.canvas.ds.scale,
             y: this.mouse().y / app.canvas.ds.scale
@@ -346,8 +351,8 @@ class PointsEditor {
         else if (pv.event.ctrlKey) {
           console.log("start drawing at " + this.mouse().x / app.canvas.ds.scale + ", " + this.mouse().y / app.canvas.ds.scale);
           drawing = true;
-          self.box_startX = this.mouse().x / app.canvas.ds.scale;
-          self.box_startY = this.mouse().y / app.canvas.ds.scale;
+          self.bbox[0].startX = this.mouse().x / app.canvas.ds.scale;
+          self.bbox[0].startY = this.mouse().y / app.canvas.ds.scale;
         }
         else if (pv.event.button === 2) {
           self.node.contextMenu.style.display = 'block';
@@ -357,8 +362,8 @@ class PointsEditor {
       })
       .event("mousemove", function () {
         if (drawing) {
-          self.box_endX = this.mouse().x / app.canvas.ds.scale;
-          self.box_endY = this.mouse().y / app.canvas.ds.scale;
+          self.bbox[0].endX = this.mouse().x / app.canvas.ds.scale;
+          self.bbox[0].endY = this.mouse().y / app.canvas.ds.scale;
           self.vis.render();
         }
       })
@@ -369,15 +374,66 @@ class PointsEditor {
       });
 
     this.backgroundImage = this.vis.add(pv.Image).visible(false)
-
+    
+    //create bounding box
     this.vis.add(pv.Area)
-      .data(function () {return drawing || self.bbox ? [self.box_startX, self.box_endX] : []; })
-      .bottom(function () {return h - Math.max(self.box_startY, self.box_endY); })
+      .data(function () {
+        if (drawing || (self.bbox && self.bbox[0] && Object.keys(self.bbox[0]).length > 0)) {
+          return [self.bbox[0].startX, self.bbox[0].endX];
+        } else {
+          return [];
+        }
+      })
+      .bottom(function () {return h - Math.max(self.bbox[0].startY, self.bbox[0].endY); })
       .left(function (d) {return d; })
-      .height(function () {return Math.abs(self.box_startY - self.box_endY);})
+      .height(function () {return Math.abs(self.bbox[0].startY - self.bbox[0].endY);})
       .fillStyle("rgba(70, 130, 180, 0.5)")
-      .strokeStyle("steelblue");
+      .strokeStyle("steelblue")
+      .visible(function () {return drawing || Object.keys(self.bbox[0]).length > 0; })
+      .add(pv.Dot)
+        .visible(function () {return drawing || Object.keys(self.bbox[0]).length > 0; })
+        .data(() => {
+          if (self.bbox && Object.keys(self.bbox[0]).length > 0) {
+            return [{
+              x: self.bbox[0].endX,
+              y: self.bbox[0].endY
+            }];
+          } else {
+            return [];
+          }
+        })
+        .left(d => d.x)
+        .top(d => d.y)
+        .radius(Math.log(Math.min(w, h)) * 1)
+        .shape("square")
+        .cursor("move")
+        .strokeStyle("steelblue")
+        .lineWidth(2)
+        .fillStyle(function () { return "rgba(100, 100, 100, 0.6)"; })
+        .event("mousedown", pv.Behavior.drag())
+        .event("dragstart", function () {
+          i = this.index;
+        })
+        .event("mousedown", pv.Behavior.drag())
+        .event("dragstart", function () {
+          i = this.index;
+        })
+        .event("drag", function () {
+          let adjustedX = this.mouse().x / app.canvas.ds.scale; // Adjust the new position by the inverse of the scale factor
+          let adjustedY = this.mouse().y / app.canvas.ds.scale; 
 
+          // Adjust the new position if it would place the dot outside the bounds of the vis.Panel
+          adjustedX = Math.max(0, Math.min(self.vis.width(), adjustedX));
+          adjustedY = Math.max(0, Math.min(self.vis.height(), adjustedY));
+          self.bbox[0].endX = this.mouse().x / app.canvas.ds.scale;
+          self.bbox[0].endY = this.mouse().y / app.canvas.ds.scale;
+          self.vis.render();
+        })
+        .event("dragend", function () {
+          self.updateData();
+        });
+
+    //create positive points
     this.vis.add(pv.Dot)
       .data(() => this.points)
       .left(d => d.x)
@@ -431,6 +487,7 @@ class PointsEditor {
         .fillStyle("red")  // Color for the center point
         .lineWidth(1);  // Stroke thickness for the center point
 
+    //create negative points
     this.vis.add(pv.Dot)
       .data(() => this.neg_points)
       .left(d => d.x)
@@ -466,7 +523,6 @@ class PointsEditor {
         self.neg_points[this.index] = { x: adjustedX, y: adjustedY }; // Update the point's position
         self.vis.render(); // Re-render the visualization to reflect the new position
       })
-
       .anchor("center")
       .add(pv.Label)
         .left(d => d.x < w / 2 ? d.x + 30 : d.x - 35) // Shift label to right if on left half, otherwise shift to left
@@ -507,17 +563,20 @@ class PointsEditor {
       console.log("no points")
       return
     }
-    let bbox = calculateBBox(this.box_startX, this.box_startY, this.box_endX, this.box_endY);
-    let bboxString = JSON.stringify(bbox);
     const combinedPoints = {
       positive: this.points,
       negative: this.neg_points,
     };
     this.pointsStoreWidget.value = JSON.stringify(combinedPoints);
-    this.bboxStoreWidget.value = JSON.stringify(bboxString);
     this.pos_coordWidget.value = JSON.stringify(this.points);
     this.neg_coordWidget.value = JSON.stringify(this.neg_points);
-    this.bboxWidget.value = bboxString;
+
+    if (this.bbox.length != 0) {    
+      let bboxString = JSON.stringify(this.bbox);
+      this.bboxStoreWidget.value = bboxString;
+      this.bboxWidget.value = bboxString;
+      }
+    
     this.vis.render();
     };
 
@@ -673,12 +732,4 @@ export function hideWidgetForGood(node, widget, suffix = '') {
       hideWidgetForGood(node, w, ':' + widget.name)
     }
   }
-}
-
-function calculateBBox(x1, y1, x2, y2) {
-  var x = Math.min(x1, x2);
-  var y = Math.min(y1, y2);
-  var width = Math.abs(x2 - x1);
-  var height = Math.abs(y2 - y1);
-  return { x: x, y: y, width: width, height: height };
 }

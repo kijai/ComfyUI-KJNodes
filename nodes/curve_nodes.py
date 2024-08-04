@@ -5,6 +5,7 @@ from PIL import Image, ImageDraw, ImageFont, ImageColor, ImageFilter
 import numpy as np
 from ..utility.utility import pil2tensor
 import folder_paths
+from comfy.utils import common_upscale
 
 def plot_coordinates_to_tensor(coordinates, height, width, bbox_height, bbox_width, size_multiplier, prompt):
         import matplotlib
@@ -1265,16 +1266,15 @@ class PointsEditor:
                 ),
                 "width": ("INT", {"default": 512, "min": 8, "max": 4096, "step": 8}),
                 "height": ("INT", {"default": 512, "min": 8, "max": 4096, "step": 8}),
-                "normalize": ("BOOLEAN", {"default": True}),
+                "normalize": ("BOOLEAN", {"default": False}),
             },
             "optional": {
                 "bg_image": ("IMAGE", ),
-                
             },
         }
 
-    RETURN_TYPES = ("STRING", "STRING", "BBOX", "MASK")
-    RETURN_NAMES = ("positive_coords", "negative_coords", "bbox", "bbox_mask")
+    RETURN_TYPES = ("STRING", "STRING", "BBOX", "MASK", "IMAGE")
+    RETURN_NAMES = ("positive_coords", "negative_coords", "bbox", "bbox_mask", "cropped_image")
     FUNCTION = "pointdata"
     CATEGORY = "KJNodes/weights"
     DESCRIPTION = """
@@ -1332,28 +1332,48 @@ you can clear the image from the context menu by right clicking on the canvas
         mask = np.zeros((height, width), dtype=np.uint8)
         bboxes = json.loads(bboxes)
         print(bboxes)
-        if bboxes["x"] is None or bboxes["y"] is None or bboxes["width"] is None or bboxes["height"] is None:
-            bboxes = []
-        else:
-            bboxes = [(int(bboxes["x"]), int(bboxes["y"]), int(bboxes["width"]), int(bboxes["height"]))]
+        valid_bboxes = []
+        for bbox in bboxes:
+            if (bbox.get("startX") is None or
+                bbox.get("startY") is None or
+                bbox.get("endX") is None or
+                bbox.get("endY") is None):
+                continue  # Skip this bounding box if any value is None
+            else:                
+                # Ensure that endX and endY are greater than startX and startY
+                x_min = min(int(bbox["startX"]), int(bbox["endX"]))
+                y_min = min(int(bbox["startY"]), int(bbox["endY"]))
+                x_max = max(int(bbox["startX"]), int(bbox["endX"]))
+                y_max = max(int(bbox["startY"]), int(bbox["endY"]))
+                
+                valid_bboxes.append((x_min, y_min, x_max, y_max))
 
             bboxes_xyxy = []
-            # Draw the bounding box on the mask
-            for bbox in bboxes:
-                x_min, y_min, w, h = bbox
-                x_max = x_min + w
-                y_max = y_min + h
+            for bbox in valid_bboxes:
+                x_min, y_min, x_max, y_max = bbox
                 bboxes_xyxy.append((x_min, y_min, x_max, y_max))
-                
                 mask[y_min:y_max, x_min:x_max] = 1  # Fill the bounding box area with 1s
 
-            if bbox_format == "xyxy":
-                bboxes = bboxes_xyxy
+            if bbox_format == "xywh":
+                bboxes_xywh = []
+                for bbox in valid_bboxes:
+                    x_min, y_min, x_max, y_max = bbox
+                    width = x_max - x_min
+                    height = y_max - y_min
+                    bboxes_xywh.append((x_min, y_min, width, height))
+                bboxes = bboxes_xywh
+            else:
+                bboxes = bboxes_xyxy           
 
         mask_tensor = torch.from_numpy(mask)
         mask_tensor = mask_tensor.unsqueeze(0).float().cpu()
-        #mask_tensor = mask_tensor[:,:,0]
-        print(mask_tensor.shape)
+
+        if bg_image is not None and len(valid_bboxes) > 0:
+            x_min, y_min, x_max, y_max = bboxes[0]
+            cropped_image = bg_image[:, y_min:y_max, x_min:x_max, :]
+
+        elif bg_image is not None:
+            cropped_image = bg_image
 
         if bg_image is None:
             return (json.dumps(pos_coordinates), json.dumps(neg_coordinates), bboxes, mask_tensor)
@@ -1369,5 +1389,5 @@ you can clear the image from the context menu by right clicking on the canvas
         
             return {
                 "ui": {"bg_image": [img_base64]}, 
-                "result": (json.dumps(coordinates), json.dumps(neg_coordinates), json.dumps(bboxes), bboxes, mask_tensor)
+                "result": (json.dumps(pos_coordinates), json.dumps(neg_coordinates), bboxes, mask_tensor, cropped_image)
             }
