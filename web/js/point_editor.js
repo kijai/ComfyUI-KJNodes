@@ -105,6 +105,7 @@ app.registerExtension({
       chainCallback(nodeType.prototype, "onNodeCreated", function () {
 
         hideWidgetForGood(this, this.widgets.find(w => w.name === "coordinates"))
+        hideWidgetForGood(this, this.widgets.find(w => w.name === "neg_coordinates"))
         hideWidgetForGood(this, this.widgets.find(w => w.name === "bboxes"))
 
         var element = document.createElement("div");
@@ -177,6 +178,7 @@ app.registerExtension({
           if (!this.properties || !("points" in this.properties)) {
             this.editor = new PointsEditor(this);
             this.addProperty("points", this.constructor.type, "string");
+            this.addProperty("neg_points", this.constructor.type, "string");
 
           }
           else {
@@ -250,7 +252,8 @@ class PointsEditor {
     if (reset && context.pointsEditor.element) {
       context.pointsEditor.element.innerHTML = ''; // Clear the container
     }
-    this.coordWidget = context.widgets.find(w => w.name === "coordinates");
+    this.pos_coordWidget = context.widgets.find(w => w.name === "coordinates");
+    this.neg_coordWidget = context.widgets.find(w => w.name === "neg_coordinates");
     this.pointsStoreWidget = context.widgets.find(w => w.name === "points_store");
     this.widthWidget = context.widgets.find(w => w.name === "width");
     this.heightWidget = context.widgets.find(w => w.name === "height");
@@ -273,7 +276,8 @@ class PointsEditor {
       this.updateData();
     }
     this.pointsStoreWidget.callback = () => {
-      this.points = JSON.parse(pointsStoreWidget.value);
+      this.points = JSON.parse(pointsStoreWidget.value).positive;
+      this.neg_points = JSON.parse(pointsStoreWidget.value).negative;
       this.updateData();
     }
 
@@ -281,12 +285,14 @@ class PointsEditor {
     var h = this.heightWidget.value;
     var i = 3;
     this.points = [];
+    this.neg_points = [];
     this.bbox = [];
     var drawing = false;
 
     // Initialize or reset points array
     if (!reset && this.pointsStoreWidget.value != "") {
-      this.points = JSON.parse(this.pointsStoreWidget.value);
+      this.points = JSON.parse(this.pointsStoreWidget.value).positive;
+      this.neg_points = JSON.parse(this.pointsStoreWidget.value).negative;
       this.bbox = JSON.parse(this.bboxStoreWidget.value);
     } else {
       this.points = [
@@ -295,7 +301,17 @@ class PointsEditor {
           y: h / 2 // Middle point vertically centered
         }
       ];
-      this.pointsStoreWidget.value = JSON.stringify(this.points);
+      this.neg_points = [
+        {
+          x: 0, // Middle point horizontally centered
+          y: 0 // Middle point vertically centered
+        }
+      ];
+      const combinedPoints = {
+        positive: this.points,
+        negative: this.neg_points,
+      };
+      this.pointsStoreWidget.value = JSON.stringify(combinedPoints);
       this.bboxStoreWidget.value = JSON.stringify(this.bbox);
     }
     const self = this; // Keep a reference to the main class context
@@ -308,7 +324,17 @@ class PointsEditor {
       .antialias(false)
       .margin(10)
       .event("mousedown", function () {
-        if (pv.event.shiftKey) { // Use pv.event to access the event object
+        
+        if (pv.event.shiftKey && pv.event.button === 2) { // Use pv.event to access the event object
+          let scaledMouse = {
+            x: this.mouse().x / app.canvas.ds.scale,
+            y: this.mouse().y / app.canvas.ds.scale
+          };
+          i = self.neg_points.push(scaledMouse) - 1;
+          self.updateData();
+          return this;
+        }
+        else if (pv.event.shiftKey) { // Use pv.event to access the event object
           let scaledMouse = {
             x: this.mouse().x / app.canvas.ds.scale,
             y: this.mouse().y / app.canvas.ds.scale
@@ -359,7 +385,7 @@ class PointsEditor {
       .radius(Math.log(Math.min(w, h)) * 4)
       .shape("circle")
       .cursor("move")
-      .strokeStyle(function () { return i == this.index ? "#ff7f0e" : "#00FFFF"; })
+      .strokeStyle(function () { return i == this.index ? "#07f907" : "#139613"; })
       .lineWidth(4)
       .fillStyle(function () { return "rgba(100, 100, 100, 0.6)"; })
       .event("mousedown", pv.Behavior.drag())
@@ -394,16 +420,69 @@ class PointsEditor {
       .top(d => d.y < h / 2 ? d.y + 25 : d.y - 25)  // Shift label down if on top half, otherwise shift up
       .font(25 + "px sans-serif")
       .text(d => {return this.points.indexOf(d); })
-      .textStyle("cyan")
+      .textStyle("#139613")
       .textShadow("2px 2px 2px black")
       .add(pv.Dot) // Add smaller point in the center
       .data(() => this.points)
+        .left(d => d.x)
+        .top(d => d.y)
+        .radius(2)  // Smaller radius for the center point
+        .shape("circle")
+        .fillStyle("red")  // Color for the center point
+        .lineWidth(1);  // Stroke thickness for the center point
+
+    this.vis.add(pv.Dot)
+      .data(() => this.neg_points)
       .left(d => d.x)
       .top(d => d.y)
-      .radius(2)  // Smaller radius for the center point
+      .radius(Math.log(Math.min(w, h)) * 4)
       .shape("circle")
-      .fillStyle("red")  // Color for the center point
-      .lineWidth(1);  // Stroke thickness for the center point
+      .cursor("move")
+      .strokeStyle(function () { return i == this.index ? "#f91111" : "#891616"; })
+      .lineWidth(4)
+      .fillStyle(function () { return "rgba(100, 100, 100, 0.6)"; })
+      .event("mousedown", pv.Behavior.drag())
+      .event("dragstart", function () {
+        i = this.index;
+      })
+      .event("dragend", function () {
+        if (pv.event.button === 2 && i !== 0 && i !== self.neg_points.length - 1) {
+          this.index = i;
+          self.neg_points.splice(i--, 1);
+        }
+        self.updateData();
+
+      })
+      .event("drag", function () {
+        let adjustedX = this.mouse().x / app.canvas.ds.scale; // Adjust the new X position by the inverse of the scale factor
+        let adjustedY = this.mouse().y / app.canvas.ds.scale; // Adjust the new Y position by the inverse of the scale factor
+        // Determine the bounds of the vis.Panel
+        const panelWidth = self.vis.width();
+        const panelHeight = self.vis.height();
+
+        // Adjust the new position if it would place the dot outside the bounds of the vis.Panel
+        adjustedX = Math.max(0, Math.min(panelWidth, adjustedX));
+        adjustedY = Math.max(0, Math.min(panelHeight, adjustedY));
+        self.neg_points[this.index] = { x: adjustedX, y: adjustedY }; // Update the point's position
+        self.vis.render(); // Re-render the visualization to reflect the new position
+      })
+
+      .anchor("center")
+      .add(pv.Label)
+        .left(d => d.x < w / 2 ? d.x + 30 : d.x - 35) // Shift label to right if on left half, otherwise shift to left
+        .top(d => d.y < h / 2 ? d.y + 25 : d.y - 25)  // Shift label down if on top half, otherwise shift up
+        .font(25 + "px sans-serif")
+        .text(d => {return this.neg_points.indexOf(d); })
+        .textStyle("red")
+        .textShadow("2px 2px 2px black")
+      .add(pv.Dot) // Add smaller point in the center
+        .data(() => this.neg_points)
+        .left(d => d.x)
+        .top(d => d.y)
+        .radius(2)  // Smaller radius for the center point
+        .shape("circle")
+        .fillStyle("red")  // Color for the center point
+        .lineWidth(1);  // Stroke thickness for the center point
 
     if (this.points.length != 0) {
       this.vis.render();
@@ -428,12 +507,16 @@ class PointsEditor {
       console.log("no points")
       return
     }
-    let coordsString = JSON.stringify(this.points);
     let bbox = calculateBBox(this.box_startX, this.box_startY, this.box_endX, this.box_endY);
     let bboxString = JSON.stringify(bbox);
-    this.pointsStoreWidget.value = JSON.stringify(this.points);
+    const combinedPoints = {
+      positive: this.points,
+      negative: this.neg_points,
+    };
+    this.pointsStoreWidget.value = JSON.stringify(combinedPoints);
     this.bboxStoreWidget.value = JSON.stringify(bboxString);
-    this.coordWidget.value = coordsString;
+    this.pos_coordWidget.value = JSON.stringify(this.points);
+    this.neg_coordWidget.value = JSON.stringify(this.neg_points);
     this.bboxWidget.value = bboxString;
     this.vis.render();
     };

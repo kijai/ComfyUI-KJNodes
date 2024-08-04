@@ -1254,6 +1254,7 @@ class PointsEditor:
             "required": {
                 "points_store": ("STRING", {"multiline": False}),
                 "coordinates": ("STRING", {"multiline": False}),
+                "neg_coordinates": ("STRING", {"multiline": False}),
                 "bbox_store": ("STRING", {"multiline": False}),
                 "bboxes": ("STRING", {"multiline": False}),
                 "bbox_format": (
@@ -1264,14 +1265,16 @@ class PointsEditor:
                 ),
                 "width": ("INT", {"default": 512, "min": 8, "max": 4096, "step": 8}),
                 "height": ("INT", {"default": 512, "min": 8, "max": 4096, "step": 8}),
+                "normalize": ("BOOLEAN", {"default": True}),
             },
             "optional": {
                 "bg_image": ("IMAGE", ),
+                
             },
         }
 
     RETURN_TYPES = ("STRING", "STRING", "BBOX", "MASK")
-    RETURN_NAMES = ("coord_str", "normalized_str", "bbox", "bbox_mask")
+    RETURN_NAMES = ("positive_coords", "negative_coords", "bbox", "bbox_mask")
     FUNCTION = "pointdata"
     CATEGORY = "KJNodes/weights"
     DESCRIPTION = """
@@ -1290,24 +1293,38 @@ Note that you can't delete from start/end of the points array.
 To add an image select the node and copy/paste or drag in the image.  
 Or from the bg_image input on queue (first frame of the batch).  
 
-**THE IMAGE IS SAVED TO THE NODE AND WORKFLOW METADATA**
+**THE IMAGE IS SAVED TO THE NODE AND WORKFLOW METADATA**  
 
 """
 
-    def pointdata(self, points_store, bbox_store, width, height, coordinates, bboxes, bbox_format="xyxy", bg_image=None):
+    def pointdata(self, points_store, bbox_store, width, height, coordinates, neg_coordinates, normalize, bboxes, bbox_format="xyxy", bg_image=None):
         import io
         import base64
         
         coordinates = json.loads(coordinates)
-        normalized = []
-        normalized_y_values = []
+        pos_coordinates = []
         for coord in coordinates:
             coord['x'] = int(round(coord['x']))
             coord['y'] = int(round(coord['y']))
-            norm_x = (1.0 - (coord['x'] / height) - 0.0)
-            norm_y = (1.0 - (coord['y'] / height) - 0.0)
-            normalized_y_values.append(norm_y)
-            normalized.append({'x':norm_x, 'y':norm_y})
+            if normalize:
+                norm_x = coord['x'] / width
+                norm_y = coord['y'] / height
+                pos_coordinates.append({'x': norm_x, 'y': norm_y})
+            else:
+                pos_coordinates.append({'x': coord['x'], 'y': coord['y']})
+
+        if neg_coordinates:
+            coordinates = json.loads(neg_coordinates)
+            neg_coordinates = []
+            for coord in coordinates:
+                coord['x'] = int(round(coord['x']))
+                coord['y'] = int(round(coord['y']))
+                if normalize:
+                    norm_x = coord['x'] / width
+                    norm_y = coord['y'] / height
+                    neg_coordinates.append({'x': norm_x, 'y': norm_y})
+                else:
+                    neg_coordinates.append({'x': coord['x'], 'y': coord['y']})
 
         # Create a blank mask
         mask = np.zeros((height, width), dtype=np.uint8)
@@ -1337,7 +1354,7 @@ Or from the bg_image input on queue (first frame of the batch).
         print(mask_tensor.shape)
 
         if bg_image is None:
-            return (json.dumps(coordinates), json.dumps(normalized), bboxes, mask_tensor)
+            return (json.dumps(pos_coordinates), json.dumps(neg_coordinates), bboxes, mask_tensor)
         else:
             transform = transforms.ToPILImage()
             image = transform(bg_image[0].permute(2, 0, 1))
@@ -1350,5 +1367,5 @@ Or from the bg_image input on queue (first frame of the batch).
         
             return {
                 "ui": {"bg_image": [img_base64]}, 
-                "result": (json.dumps(coordinates), json.dumps(normalized), bboxes, mask_tensor)
+                "result": (json.dumps(coordinates), json.dumps(neg_coordinates), json.dumps(bboxes), bboxes, mask_tensor)
             }
