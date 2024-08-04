@@ -4,11 +4,6 @@ from torchvision.transforms import functional as TF
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 import scipy.ndimage
 import numpy as np
-
-try:
-    import matplotlib.pyplot as plt
-except:
-    print("Matplotlib not installed")
 from contextlib import nullcontext
 import os
 
@@ -712,6 +707,7 @@ class CreateMagicMask:
 
     def createmagicmask(self, frames, transitions, depth, distortion, seed, frame_width, frame_height):
         from ..utility.magictex import coordinate_grid, random_transform, magic
+        import matplotlib.pyplot as plt
         rng = np.random.default_rng(seed)
         out = []
         coords = coordinate_grid((frame_width, frame_height))

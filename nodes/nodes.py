@@ -1,6 +1,4 @@
 import torch
-import torch.nn.functional as F
-import matplotlib.pyplot as plt
 import numpy as np
 from PIL import Image
 
@@ -1510,6 +1508,7 @@ or a .txt file with RealEstate camera intrinsics and coordinates, in a 3D plot.
 
     def customize_legend(self, list_label):
         from matplotlib.patches import Patch
+        import matplotlib.pyplot as plt
         list_handle = []
         for idx, label in enumerate(list_label):
             color = plt.cm.rainbow(idx / len(list_label))
