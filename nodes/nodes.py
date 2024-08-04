@@ -711,17 +711,17 @@ class WidgetToString:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "id": ("INT", {"default": 0}),
                 "widget_name": ("STRING", {"multiline": False}),
                 "return_all": ("BOOLEAN", {"default": False}),
             },
             "optional": {
                          "any_input": (any, {}),
+                         "id": ("INT", {"default": 0}),
                          "node_title": ("STRING", {"multiline": False}),
                          },
-            
             "hidden": {"extra_pnginfo": "EXTRA_PNGINFO",
-                       "prompt": "PROMPT"},
+                       "prompt": "PROMPT",
+                       "unique_id": "UNIQUE_ID",},
         }
 
     RETURN_TYPES = ("STRING", )
@@ -729,14 +729,14 @@ class WidgetToString:
     CATEGORY = "KJNodes/text"
     DESCRIPTION = """
 Selects a node and it's specified widget and outputs the value as a string.  
+If no node id or title is provided it will use the 'any_input' link and use that node.  
 To see node id's, enable node id display from Manager badge menu.  
 Alternatively you can search with the node title. Node titles ONLY exist if they  
 are manually edited!  
-The 'any_input' is purely for making sure the node you want the value from exists in the workflow,  
-it has no other function than place this node at right spot in the workflow execution order.
+The 'any_input' is required for making sure the node you want the value from exists in the workflow.
 """
 
-    def get_widget_value(self, id, widget_name, extra_pnginfo, prompt, return_all=False, any_input=None, node_title=""):
+    def get_widget_value(self, widget_name, extra_pnginfo, prompt, unique_id, return_all=False, any_input=None, id=0, node_title=""):
         workflow = extra_pnginfo["workflow"]
         #print(json.dumps(workflow, indent=4))
         results = []
@@ -750,9 +750,15 @@ it has no other function than place this node at right spot in the workflow exec
                         break
                 else:
                     print("Node title not found.")
-            elif node["id"] == id:
-                node_id = id
-                break
+            elif id != 0:
+                if node["id"] == id:
+                    node_id = id
+                    break
+            elif any_input:
+                if node["type"] == "WidgetToString" and node["id"] == int(unique_id):
+                    for node_input in node["inputs"]:
+                        node_id = node_input["link"]
+                        break
 
         if node_id is None:
             raise ValueError("No matching node found for the given title or id")
@@ -765,9 +771,9 @@ it has no other function than place this node at right spot in the workflow exec
                 v = str(values["inputs"][widget_name])  # Convert to string here
                 return (v, )
             else:
-                raise NameError(f"Widget not found: {id}.{widget_name}")
+                raise NameError(f"Widget not found: {node_id}.{widget_name}")
         if not results:
-            raise NameError(f"Node not found: {id}")
+            raise NameError(f"Node not found: {node_id}")
         return (', '.join(results).strip(', '), )
 
 class DummyOut:
