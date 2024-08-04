@@ -760,7 +760,8 @@ The 'any_input' is required for making sure the node you want the value from exi
                 if node["type"] == "WidgetToString" and node["id"] == int(unique_id) and not link_id:
                     for node_input in node["inputs"]:
                         link_id = node_input["link"]
-                      
+                    
+                # Construct a map of links to node IDs for future reference
                 node_outputs = node.get("outputs", None)
                 if not node_outputs:
                     continue
