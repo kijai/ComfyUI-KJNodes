@@ -711,12 +711,12 @@ class WidgetToString:
     def INPUT_TYPES(cls):
         return {
             "required": {
+                "id": ("INT", {"default": 0}),
                 "widget_name": ("STRING", {"multiline": False}),
                 "return_all": ("BOOLEAN", {"default": False}),
             },
             "optional": {
                          "any_input": (any, {}),
-                         "id": ("INT", {"default": 0}),
                          "node_title": ("STRING", {"multiline": False}),
                          },
             "hidden": {"extra_pnginfo": "EXTRA_PNGINFO",
@@ -736,7 +736,7 @@ are manually edited!
 The 'any_input' is required for making sure the node you want the value from exists in the workflow.
 """
 
-    def get_widget_value(self, widget_name, extra_pnginfo, prompt, unique_id, return_all=False, any_input=None, id=0, node_title=""):
+    def get_widget_value(self, id, widget_name, extra_pnginfo, prompt, unique_id, return_all=False, any_input=None, node_title=""):
         workflow = extra_pnginfo["workflow"]
         #print(json.dumps(workflow, indent=4))
         results = []
