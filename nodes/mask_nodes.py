@@ -5,7 +5,10 @@ from PIL import Image, ImageDraw, ImageFilter, ImageFont
 import scipy.ndimage
 import numpy as np
 
-import matplotlib.pyplot as plt
+try:
+    import matplotlib.pyplot as plt
+except:
+    print("Matplotlib not installed")
 from contextlib import nullcontext
 import os
 

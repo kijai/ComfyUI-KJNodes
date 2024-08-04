@@ -8,7 +8,11 @@ import os
 import re
 import json
 import hashlib
-import cv2
+try:
+    import cv2
+except:
+    print("OpenCV not installed")
+    pass
 from PIL import ImageGrab, ImageDraw, ImageFont, Image, ImageSequence, ImageOps
 
 from nodes import MAX_RESOLUTION, SaveImage
