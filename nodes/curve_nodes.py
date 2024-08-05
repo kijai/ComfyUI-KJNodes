@@ -1276,7 +1276,7 @@ class PointsEditor:
     RETURN_TYPES = ("STRING", "STRING", "BBOX", "MASK", "IMAGE")
     RETURN_NAMES = ("positive_coords", "negative_coords", "bbox", "bbox_mask", "cropped_image")
     FUNCTION = "pointdata"
-    CATEGORY = "KJNodes/weights"
+    CATEGORY = "KJNodes/experimental"
     DESCRIPTION = """
 # WORK IN PROGRESS  
 Do not count on this as part of your workflow yet,  
