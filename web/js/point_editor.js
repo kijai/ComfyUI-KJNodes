@@ -262,17 +262,17 @@ class PointsEditor {
 
     //widget callbacks
     this.widthWidget.callback = () => {
-      w = this.widthWidget.value;
-      if (w > 256) {
-        context.setSize([w + 45, context.size[1]]);
+      this.width = this.widthWidget.value;
+      if (this.width > 256) {
+        context.setSize([this.width + 45, context.size[1]]);
       }
-      this.vis.width(w);
+      this.vis.width(this.width);
       this.updateData();
     }
     this.heightWidget.callback = () => {
-      h = this.heightWidget.value
-      this.vis.height(h)
-      context.setSize([context.size[0], h + 300]);
+      this.height = this.heightWidget.value
+      this.vis.height(this.height)
+      context.setSize([context.size[0], this.height + 300]);
       this.updateData();
     }
     this.pointsStoreWidget.callback = () => {
@@ -285,8 +285,8 @@ class PointsEditor {
       this.updateData();
     }
 
-    var w = this.widthWidget.value;
-    var h = this.heightWidget.value;
+    this.width = this.widthWidget.value;
+    this.height = this.heightWidget.value;
     var i = 3;
     this.points = [];
     this.neg_points = [];
@@ -302,8 +302,8 @@ class PointsEditor {
     } else {
       this.points = [
         {
-          x: w / 2, // Middle point horizontally centered
-          y: h / 2 // Middle point vertically centered
+          x: this.width / 2, // Middle point horizontally centered
+          y: this.height / 2 // Middle point vertically centered
         }
       ];
       this.neg_points = [
@@ -322,8 +322,8 @@ class PointsEditor {
 
     //create main canvas panel
     this.vis = new pv.Panel()
-      .width(w)
-      .height(h)
+      .width(this.width)
+      .height(this.height)
       .fillStyle("#222")
       .strokeStyle("gray")
       .lineWidth(2)
@@ -376,7 +376,7 @@ class PointsEditor {
     this.backgroundImage = this.vis.add(pv.Image).visible(false)
     
     //create bounding box
-    this.vis.add(pv.Area)
+    this.bounding_box = this.vis.add(pv.Area)
       .data(function () {
         if (drawing || (self.bbox && self.bbox[0] && Object.keys(self.bbox[0]).length > 0)) {
           return [self.bbox[0].startX, self.bbox[0].endX];
@@ -384,7 +384,7 @@ class PointsEditor {
           return [];
         }
       })
-      .bottom(function () {return h - Math.max(self.bbox[0].startY, self.bbox[0].endY); })
+      .bottom(function () {return self.height - Math.max(self.bbox[0].startY, self.bbox[0].endY); })
       .left(function (d) {return d; })
       .height(function () {return Math.abs(self.bbox[0].startY - self.bbox[0].endY);})
       .fillStyle("rgba(70, 130, 180, 0.5)")
@@ -404,20 +404,13 @@ class PointsEditor {
         })
         .left(d => d.x)
         .top(d => d.y)
-        .radius(Math.log(Math.min(w, h)) * 1)
+        .radius(Math.log(Math.min(self.width, self.height)) * 1)
         .shape("square")
         .cursor("move")
         .strokeStyle("steelblue")
         .lineWidth(2)
         .fillStyle(function () { return "rgba(100, 100, 100, 0.6)"; })
         .event("mousedown", pv.Behavior.drag())
-        .event("dragstart", function () {
-          i = this.index;
-        })
-        .event("mousedown", pv.Behavior.drag())
-        .event("dragstart", function () {
-          i = this.index;
-        })
         .event("drag", function () {
           let adjustedX = this.mouse().x / app.canvas.ds.scale; // Adjust the new position by the inverse of the scale factor
           let adjustedY = this.mouse().y / app.canvas.ds.scale; 
@@ -438,7 +431,7 @@ class PointsEditor {
       .data(() => this.points)
       .left(d => d.x)
       .top(d => d.y)
-      .radius(Math.log(Math.min(w, h)) * 4)
+      .radius(Math.log(Math.min(self.width, self.height)) * 4)
       .shape("circle")
       .cursor("move")
       .strokeStyle(function () { return i == this.index ? "#07f907" : "#139613"; })
@@ -472,8 +465,8 @@ class PointsEditor {
 
       .anchor("center")
       .add(pv.Label)
-      .left(d => d.x < w / 2 ? d.x + 30 : d.x - 35) // Shift label to right if on left half, otherwise shift to left
-      .top(d => d.y < h / 2 ? d.y + 25 : d.y - 25)  // Shift label down if on top half, otherwise shift up
+      .left(d => d.x < this.width / 2 ? d.x + 30 : d.x - 35) // Shift label to right if on left half, otherwise shift to left
+      .top(d => d.y < this.height / 2 ? d.y + 25 : d.y - 25)  // Shift label down if on top half, otherwise shift up
       .font(25 + "px sans-serif")
       .text(d => {return this.points.indexOf(d); })
       .textStyle("#139613")
@@ -492,7 +485,7 @@ class PointsEditor {
       .data(() => this.neg_points)
       .left(d => d.x)
       .top(d => d.y)
-      .radius(Math.log(Math.min(w, h)) * 4)
+      .radius(Math.log(Math.min(self.width, self.height)) * 4)
       .shape("circle")
       .cursor("move")
       .strokeStyle(function () { return i == this.index ? "#f91111" : "#891616"; })
@@ -525,8 +518,8 @@ class PointsEditor {
       })
       .anchor("center")
       .add(pv.Label)
-        .left(d => d.x < w / 2 ? d.x + 30 : d.x - 35) // Shift label to right if on left half, otherwise shift to left
-        .top(d => d.y < h / 2 ? d.y + 25 : d.y - 25)  // Shift label down if on top half, otherwise shift up
+        .left(d => d.x < this.width / 2 ? d.x + 30 : d.x - 35) // Shift label to right if on left half, otherwise shift to left
+        .top(d => d.y < this.height / 2 ? d.y + 25 : d.y - 25)  // Shift label down if on top half, otherwise shift up
         .font(25 + "px sans-serif")
         .text(d => {return this.neg_points.indexOf(d); })
         .textStyle("red")
@@ -549,10 +542,10 @@ class PointsEditor {
     svgElement.style['position'] = "relative"
     this.node.pointsEditor.element.appendChild(svgElement);
 
-    if (w > 256) {
-      this.node.setSize([w + 45, this.node.size[1]]);
+    if (this.width > 256) {
+      this.node.setSize([this.width + 45, this.node.size[1]]);
     }
-    this.node.setSize([this.node.size[0], h + 300]);
+    this.node.setSize([this.node.size[0], this.height + 300]);
     this.updateData();
     this.refreshBackgroundImage();
 
@@ -585,13 +578,17 @@ class PointsEditor {
     this.widthWidget.value = img.width;
     this.heightWidget.value = img.height;
 
-    if (img.width > 256) {
-      this.node.setSize([img.width + 45, this.node.size[1]]);
+    if (img.width != this.vis.width() || img.height != this.vis.height()) {
+      if (img.width > 256) {
+        this.node.setSize([img.width + 45, this.node.size[1]]);
+      }
+      this.node.setSize([this.node.size[0], img.height + 300]);
+      this.vis.width(img.width);
+      this.vis.height(img.height);
+      this.height = img.height;
+      this.width = img.width;
+      this.updateData();
     }
-    this.node.setSize([this.node.size[0], img.height + 300]);
-    this.vis.width(img.width);
-    this.vis.height(img.height);
-    this.updateData();
     this.backgroundImage.url(file ? URL.createObjectURL(file) : `data:${this.node.properties.imgData.type};base64,${base64String}`).visible(true).root.render();
     };
 
