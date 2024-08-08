@@ -261,6 +261,8 @@ class CondPassThrough:
     def INPUT_TYPES(s):
         return {
             "required": {
+            },
+            "optional": {
                 "positive": ("CONDITIONING", ),
                 "negative": ("CONDITIONING", ),
             }, 
@@ -275,14 +277,16 @@ class CondPassThrough:
     workaround for Set node not allowing bypassed inputs.
 """
 
-    def passthrough(self, positive, negative):
+    def passthrough(self, positive=None, negative=None):
         return (positive, negative,)
 
 class ModelPassThrough:
     @classmethod
     def INPUT_TYPES(s):
         return {
-            "required": {
+            "required": {             
+            },
+            "optional": {
                 "model": ("MODEL", ),
             }, 
     }
@@ -296,8 +300,8 @@ class ModelPassThrough:
     workaround for Set node not allowing bypassed inputs.
 """
 
-    def passthrough(self, model):
-        return (model,)
+    def passthrough(self, model=None):
+            return (model,)
 
 def append_helper(t, mask, c, set_area_to_bounds, strength):
         n = [t[0], t[1].copy()]

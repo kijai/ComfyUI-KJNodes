@@ -28,7 +28,9 @@ class ImagePass:
     @classmethod
     def INPUT_TYPES(s):
         return {
-            "required": {
+            "required": {               
+            },
+            "optional": {
                 "image": ("IMAGE",),
             },
         }
@@ -39,7 +41,7 @@ class ImagePass:
 Passes the image through without modifying it.
 """
 
-    def passthrough(self, image):
+    def passthrough(self, image=None):
         return image,
 
 class ColorMatch:
