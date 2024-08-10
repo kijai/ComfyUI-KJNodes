@@ -76,8 +76,8 @@ app.registerExtension({
 			};
 			
 			app.ui.settings.addSetting({
-				id: "🦛 KJNodes.SetGetMenu",
-				name: "🦛 KJNodes: Make Set/Get -nodes defaults (turn off and reload to disable)",
+				id: "KJNodes.SetGetMenu",
+				name: "KJNodes: Make Set/Get -nodes defaults (turn off and reload to disable)",
 				defaultValue: false,
 				type: "boolean",
 				options: (value) => [
@@ -97,7 +97,7 @@ app.registerExtension({
 			});
 			app.ui.settings.addSetting({
 				id: "KJNodes.DisableMiddleClickDefault",
-				name: "🦛 KJNodes: Middle click default node adding",
+				name: "KJNodes: Middle click default node adding",
 				defaultValue: false,
 				type: "boolean",
 				options: (value) => [
@@ -110,7 +110,7 @@ app.registerExtension({
 			});
 			app.ui.settings.addSetting({
 				id: "KJNodes.nodeAutoColor",
-				name: "🦛 KJNodes: Automatically set node colors",
+				name: "KJNodes: Automatically set node colors",
 				defaultValue: true,
 				type: "boolean",
 				options: (value) => [
@@ -120,7 +120,7 @@ app.registerExtension({
 			});
 			app.ui.settings.addSetting({
 				id: "KJNodes.helpPopup",
-				name: "🦛 KJNodes: Help popups",
+				name: "KJNodes: Help popups",
 				defaultValue: true,
 				type: "boolean",
 				options: (value) => [
@@ -130,7 +130,7 @@ app.registerExtension({
 			});
 			app.ui.settings.addSetting({
 				id: "KJNodes.disablePrefix",
-				name: "🦛 KJNodes: Disable automatic Set_ and Get_ prefix",
+				name: "KJNodes: Disable automatic Set_ and Get_ prefix",
 				defaultValue: false,
 				type: "boolean",
 				options: (value) => [
@@ -140,7 +140,7 @@ app.registerExtension({
 			});
 			app.ui.settings.addSetting({
 				id: "KJNodes.browserStatus",
-				name: "🦛 KJNodes: 🟢 Stoplight browser status icon 🔴",
+				name: "KJNodes: 🟢 Stoplight browser status icon 🔴",
 				defaultValue: false,
 				type: "boolean",
 				options: (value) => [
