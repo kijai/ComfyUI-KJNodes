@@ -194,7 +194,11 @@ app.registerExtension({
         element.appendChild(this.pointsEditor.parentEl);
 
         chainCallback(this, "onConfigure", function () {
-          this.editor = new PointsEditor(this);
+          try {
+            this.editor = new PointsEditor(this);
+          } catch (error) {
+            console.error("An error occurred while configuring the editor:", error);
+          }
         });
         chainCallback(this, "onExecuted", function (message) {
           let bg_image = message["bg_image"];
