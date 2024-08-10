@@ -556,9 +556,9 @@ class PointsEditor {
   }//end constructor
 
   updateData = () => {
-    if (this.points.length == 0) {
-      console.log("no points")
-      return
+    if (!this.points || this.points.length === 0) {
+      console.log("no points");
+      return;
     }
     const combinedPoints = {
       positive: this.points,
