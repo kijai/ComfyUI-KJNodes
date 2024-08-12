@@ -30,6 +30,7 @@ function setColorAndBgColor(type) {
 }
 let isAlertShown = false;
 let disablePrefix = app.ui.settings.getSettingValue("KJNodes.disablePrefix")
+const LGraphNode = LiteGraph.LGraphNode
 
 function showAlertWithThrottle(message, delay) {
     if (!isAlertShown) {
@@ -41,7 +42,7 @@ function showAlertWithThrottle(message, delay) {
 app.registerExtension({
 	name: "SetNode",
 	registerCustomNodes() {
-		class SetNode {
+		class SetNode extends LGraphNode {
 			defaultVisibility = true;
 			serialize_widgets = true;
 			drawConnection = false;
@@ -50,7 +51,8 @@ app.registerExtension({
 			canvas = app.canvas;
 			menuEntry = "Show connections";
 
-			constructor() {
+			constructor(title) {
+				super(title)
 				if (!this.properties) {
 					this.properties = {
 						"previousName": ""
@@ -370,7 +372,7 @@ app.registerExtension({
 app.registerExtension({
 	name: "GetNode",
 	registerCustomNodes() {
-		class GetNode {
+		class GetNode extends LGraphNode {
 
 			defaultVisibility = true;
 			serialize_widgets = true;
@@ -379,7 +381,8 @@ app.registerExtension({
 			currentSetter = null;
 			canvas = app.canvas;
 
-			constructor() {
+			constructor(title) {
+				super(title)
 				if (!this.properties) {
 					this.properties = {};
 				}
