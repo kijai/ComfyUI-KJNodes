@@ -1507,7 +1507,7 @@ class ImageResizeKJ:
                 "width_input": ("INT", { "forceInput": True}),
                 "height_input": ("INT", { "forceInput": True}),
                 "get_image_size": ("IMAGE",),
-                "crop": (["disabled", "center", "top", "bottom", "left", "right"],),
+                "crop": (["disabled","center"],),
             }
         }
 
@@ -1556,45 +1556,14 @@ highest dimension.
                 width = W
             if height == 0:
                 height = H
-
-        if crop != "disabled":
-            if crop == "pad":
-                if H != W:
-                    if H > W:
-                        pad = (H - W) // 2
-                        pad = (pad, 0, pad, 0)
-                    elif W > H:
-                        pad = (W - H) // 2
-                        pad = (0, pad, 0, pad)
-                    output = T.functional.pad(output, pad, fill=0)
-            else:
-                #crop_size = min(height, width)
-                x = (W-width) // 2
-                y = (H-height) // 2
-                if "top" in crop:
-                    y = 0
-                elif "bottom" in crop:
-                    y = H-height
-                elif "left" in crop:
-                    x = 0
-                elif "right" in crop:
-                    x = W-width
-
-                x2 = x+width
-                y2 = y+height
-
-                image = image[:, y:y2, x:x2, :]
-        else:
-            
+      
+        if divisible_by > 1 and get_image_size is None:
+            width = width - (width % divisible_by)
+            height = height - (height % divisible_by)
         
-            if divisible_by > 1 and get_image_size is None:
-                width = width - (width % divisible_by)
-                height = height - (height % divisible_by)
-
-            
-            image = image.movedim(-1,1)
-            image = common_upscale(image, width, height, upscale_method, "disabled")
-            image = image.movedim(1,-1)
+        image = image.movedim(-1,1)
+        image = common_upscale(image, width, height, upscale_method, crop)
+        image = image.movedim(1,-1)
 
         return(image, image.shape[2], image.shape[1],)
     
