@@ -2,6 +2,7 @@ import numpy as np
 import time
 import torch
 import torch.nn.functional as F
+import torchvision.transforms as T
 import random
 import math
 import os
@@ -1506,6 +1507,7 @@ class ImageResizeKJ:
                 "width_input": ("INT", { "forceInput": True}),
                 "height_input": ("INT", { "forceInput": True}),
                 "get_image_size": ("IMAGE",),
+                "crop": (["disabled", "center", "top", "bottom", "left", "right"],),
             }
         }
 
@@ -1525,43 +1527,76 @@ Keep proportions keeps the aspect ratio of the image, by
 highest dimension.  
 """
 
-    def resize(self, image, width, height, keep_proportion, upscale_method, divisible_by, width_input=None, height_input=None, get_image_size=None):
+    def resize(self, image, width, height, keep_proportion, upscale_method, divisible_by, 
+               width_input=None, height_input=None, get_image_size=None, crop="disabled"):
         B, H, W, C = image.shape
+
         if width_input:
             width = width_input
         if height_input:
             height = height_input
         if get_image_size is not None:
             _, height, width, _ = get_image_size.shape
-
+        
         if keep_proportion and get_image_size is None:
-            # If one of the dimensions is zero, calculate it to maintain the aspect ratio
-            if width == 0 and height != 0:
-                ratio = height / H
-                width = round(W * ratio)
-            elif height == 0 and width != 0:
-                ratio = width / W
-                height = round(H * ratio)
-            elif width != 0 and height != 0:
-                # Scale based on which dimension is smaller in proportion to the desired dimensions
-                ratio = min(width / W, height / H)
-                width = round(W * ratio)
-                height = round(H * ratio)
+                # If one of the dimensions is zero, calculate it to maintain the aspect ratio
+                if width == 0 and height != 0:
+                    ratio = height / H
+                    width = round(W * ratio)
+                elif height == 0 and width != 0:
+                    ratio = width / W
+                    height = round(H * ratio)
+                elif width != 0 and height != 0:
+                    # Scale based on which dimension is smaller in proportion to the desired dimensions
+                    ratio = min(width / W, height / H)
+                    width = round(W * ratio)
+                    height = round(H * ratio)
         else:
             if width == 0:
                 width = W
             if height == 0:
                 height = H
-    
-        if divisible_by > 1 and get_image_size is None:
-            width = width - (width % divisible_by)
-            height = height - (height % divisible_by)
 
-        image = image.movedim(-1,1)
-        scaled = common_upscale(image, width, height, upscale_method, 'disabled')
-        scaled = scaled.movedim(1,-1)
+        if crop != "disabled":
+            if crop == "pad":
+                if H != W:
+                    if H > W:
+                        pad = (H - W) // 2
+                        pad = (pad, 0, pad, 0)
+                    elif W > H:
+                        pad = (W - H) // 2
+                        pad = (0, pad, 0, pad)
+                    output = T.functional.pad(output, pad, fill=0)
+            else:
+                #crop_size = min(height, width)
+                x = (W-width) // 2
+                y = (H-height) // 2
+                if "top" in crop:
+                    y = 0
+                elif "bottom" in crop:
+                    y = H-height
+                elif "left" in crop:
+                    x = 0
+                elif "right" in crop:
+                    x = W-width
 
-        return(scaled, scaled.shape[2], scaled.shape[1],)
+                x2 = x+width
+                y2 = y+height
+
+                image = image[:, y:y2, x:x2, :]
+        else:
+            
+        
+            if divisible_by > 1 and get_image_size is None:
+                width = width - (width % divisible_by)
+                height = height - (height % divisible_by)
+
+            
+            image = image.movedim(-1,1)
+            image = common_upscale(image, width, height, upscale_method, "disabled")
+            image = image.movedim(1,-1)
+
+        return(image, image.shape[2], image.shape[1],)
     
 class LoadAndResizeImage:
     _color_channels = ["alpha", "red", "green", "blue"]
