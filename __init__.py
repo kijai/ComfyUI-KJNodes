@@ -63,6 +63,7 @@ NODE_CONFIG = {
     "ImageUpscaleWithModelBatched": {"class": ImageUpscaleWithModelBatched, "name": "Image Upscale With Model Batched"},
     "InsertImagesToBatchIndexed": {"class": InsertImagesToBatchIndexed, "name": "Insert Images To Batch Indexed"},
     "LoadAndResizeImage": {"class": LoadAndResizeImage, "name": "Load & Resize Image"},
+    "LoadImagesFromFolderKJ": {"class": LoadImagesFromFolderKJ, "name": "Load Images From Folder (KJ)"},
     "MergeImageChannels": {"class": MergeImageChannels, "name": "Merge Image Channels"},
     "PreviewAnimation": {"class": PreviewAnimation, "name": "Preview Animation"},
     "RemapImageRange": {"class": RemapImageRange, "name": "Remap Image Range"},
