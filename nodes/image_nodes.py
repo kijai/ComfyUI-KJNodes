@@ -1587,8 +1587,8 @@ class LoadAndResizeImage:
                 }
 
     CATEGORY = "KJNodes/image"
-    RETURN_TYPES = ("IMAGE", "MASK", "INT", "INT",)
-    RETURN_NAMES = ("image", "mask", "width", "height",)
+    RETURN_TYPES = ("IMAGE", "MASK", "INT", "INT", "STRING",)
+    RETURN_NAMES = ("image", "mask", "width", "height","image_path",)
     FUNCTION = "load_image"
 
     def load_image(self, image, resize, width, height, repeat, keep_proportion, divisible_by, mask_channel):
@@ -1665,7 +1665,7 @@ class LoadAndResizeImage:
                 output_mask = output_mask.repeat(repeat, 1, 1)
 
      
-        return (output_image, output_mask, width, height)
+        return (output_image, output_mask, width, height, image_path)
         
 
     @classmethod
