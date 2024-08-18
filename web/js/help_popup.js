@@ -257,12 +257,13 @@ const create_documentation_stylesheet = () => {
         
         const scale = new DOMMatrix()
         .scaleSelf(transform.a, transform.d);
+        const bcr = app.canvas.canvas.getBoundingClientRect()
 
         const styleObject = {
           transformOrigin: '0 0',
           transform: scale,
-          left: `${transform.a + transform.e}px`,
-          top: `${transform.d + transform.f}px`,
+          left: `${transform.a + bcr.x + transform.e}px`,
+          top: `${transform.d + bcr.y + transform.f}px`,
          };
         Object.assign(docElement.style, styleObject);
       }
