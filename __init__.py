@@ -51,6 +51,7 @@ NODE_CONFIG = {
     "ImageBatchRepeatInterleaving": {"class": ImageBatchRepeatInterleaving},
     "ImageBatchTestPattern": {"class": ImageBatchTestPattern, "name": "Image Batch Test Pattern"},
     "ImageConcanate": {"class": ImageConcanate, "name": "Image Concatenate"},
+    "ImageConcatFromBatch": {"class": ImageConcatFromBatch, "name": "Image Concatenate From Batch"},
     "ImageConcatMulti": {"class": ImageConcatMulti, "name": "Image Concatenate Multi"},
     "ImageGrabPIL": {"class": ImageGrabPIL, "name": "Image Grab PIL"},
     "ImageGridComposite2x2": {"class": ImageGridComposite2x2, "name": "Image Grid Composite 2x2"},
