@@ -1677,7 +1677,7 @@ class LoadAndResizeImage:
                     "keep_proportion": ("BOOLEAN", { "default": False }),
                     "divisible_by": ("INT", { "default": 2, "min": 0, "max": 512, "step": 1, }),
                     "mask_channel": (s._color_channels, {"tooltip": "Channel to use for the mask output"}), 
-                    "background_color": ("STRING", { "default": "white", "tooltip": "Color to fill the alpha channel with. Enter a comma-separated RGB value.  E.g. 255, 255, 255 for white."}),
+                    "background_color": ("STRING", { "default": "", "tooltip": "Fills the alpha channel with the specified color."}),
                     },
                 }
 
@@ -1687,24 +1687,29 @@ class LoadAndResizeImage:
     FUNCTION = "load_image"
 
     def load_image(self, image, resize, width, height, repeat, keep_proportion, divisible_by, mask_channel, background_color):
-        from PIL import ImageColor
+        from PIL import ImageColor, Image, ImageOps, ImageSequence
+        import numpy as np
+        import torch
         image_path = folder_paths.get_annotated_filepath(image)
 
         import node_helpers
         img = node_helpers.pillow(Image.open, image_path)
 
         # Process the background_color
-        try:
-            # Try to parse as RGB tuple
-            bg_color_rgba = tuple(int(x.strip()) for x in background_color.split(','))
-        except ValueError:
-            # If parsing fails, it might be a hex color or named color
-            if background_color.startswith('#') or background_color.lower() in ImageColor.colormap:
-                bg_color_rgba = ImageColor.getrgb(background_color)
-            else:
-                raise ValueError(f"Invalid background color: {background_color}")
+        if background_color:
+            try:
+                # Try to parse as RGB tuple
+                bg_color_rgba = tuple(int(x.strip()) for x in background_color.split(','))
+            except ValueError:
+                # If parsing fails, it might be a hex color or named color
+                if background_color.startswith('#') or background_color.lower() in ImageColor.colormap:
+                    bg_color_rgba = ImageColor.getrgb(background_color)
+                else:
+                    raise ValueError(f"Invalid background color: {background_color}")
 
-        bg_color_rgba += (255,)  # Add alpha channel
+            bg_color_rgba += (255,)  # Add alpha channel
+        else:
+            bg_color_rgba = None  # No background color specified
         
         output_images = []
         output_masks = []
@@ -1742,7 +1747,7 @@ class LoadAndResizeImage:
                 frame = frame.convert("RGBA")
             
             # Extract alpha channel if it exists
-            if 'A' in frame.getbands():
+            if 'A' in frame.getbands() and bg_color_rgba:
                 alpha_mask = np.array(frame.getchannel('A')).astype(np.float32) / 255.0
                 alpha_mask = 1. - torch.from_numpy(alpha_mask)
                 bg_image = Image.new("RGBA", frame.size, bg_color_rgba)
@@ -1771,7 +1776,7 @@ class LoadAndResizeImage:
                     frame = frame.resize((width, height), Image.Resampling.BILINEAR)
                 mask = np.array(frame.getchannel(c)).astype(np.float32) / 255.0
                 mask = torch.from_numpy(mask)
-                if c == 'A':
+                if c == 'A' and bg_color_rgba:
                     mask = alpha_mask
             else:
                 mask = torch.zeros((64, 64), dtype=torch.float32, device="cpu")
@@ -1793,7 +1798,7 @@ class LoadAndResizeImage:
         
 
     @classmethod
-    def IS_CHANGED(s, image):
+    def IS_CHANGED(s, image, **kwargs):
         image_path = folder_paths.get_annotated_filepath(image)
         m = hashlib.sha256()
         with open(image_path, 'rb') as f:
