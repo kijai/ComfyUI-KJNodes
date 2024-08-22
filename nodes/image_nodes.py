@@ -1778,6 +1778,8 @@ class LoadAndResizeImage:
                 mask = torch.from_numpy(mask)
                 if c == 'A' and bg_color_rgba:
                     mask = alpha_mask
+                elif c == 'A':
+                    mask = 1. - mask
             else:
                 mask = torch.zeros((64, 64), dtype=torch.float32, device="cpu")
 
