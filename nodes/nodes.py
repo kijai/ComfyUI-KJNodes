@@ -1757,3 +1757,36 @@ class CheckpointPerturbWeights:
             pbar.update(1)
         model_copy.model.diffusion_model.load_state_dict(dict)
         return model_copy,
+    
+class DifferentialDiffusionAdvanced():
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": {"model": ("MODEL", ),
+                             "multiplier": ("FLOAT", {"default": 1.0, "min": -10.0, "max": 10.0, "step": 0.001}),
+                            }}
+    RETURN_TYPES = ("MODEL",)
+    FUNCTION = "apply"
+    CATEGORY = "_for_testing"
+    INIT = False
+
+    def apply(self, model, multiplier):
+        self.multiplier = multiplier
+        model = model.clone()
+        model.set_model_denoise_mask_function(self.forward)
+        return (model,)
+
+    def forward(self, sigma: torch.Tensor, denoise_mask: torch.Tensor, extra_options: dict):
+        model = extra_options["model"]
+        step_sigmas = extra_options["sigmas"]
+        sigma_to = model.inner_model.model_sampling.sigma_min
+        if step_sigmas[-1] > sigma_to:
+            sigma_to = step_sigmas[-1]
+        sigma_from = step_sigmas[0]
+
+        ts_from = model.inner_model.model_sampling.timestep(sigma_from)
+        ts_to = model.inner_model.model_sampling.timestep(sigma_to)
+        current_ts = model.inner_model.model_sampling.timestep(sigma[0])
+
+        threshold = (current_ts - ts_to) / (ts_from - ts_to) / self.multiplier
+
+        return (denoise_mask >= threshold).to(denoise_mask.dtype)
