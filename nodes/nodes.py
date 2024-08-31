@@ -1795,3 +1795,77 @@ class DifferentialDiffusionAdvanced():
         threshold = (current_ts - ts_to) / (ts_from - ts_to) / self.multiplier
 
         return (denoise_mask >= threshold).to(denoise_mask.dtype)
+    
+class FluxBlockLoraLoader:
+    def __init__(self):
+        self.loaded_lora = None
+
+    @classmethod
+    def INPUT_TYPES(s):
+        arg_dict = { 
+            "model": ("MODEL", {"tooltip": "The diffusion model the LoRA will be applied to."}),
+            "lora_name": (folder_paths.get_filename_list("loras"), {"tooltip": "The name of the LoRA."}),
+            "strength_model": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step": 0.01, "tooltip": "How strongly to modify the diffusion model. This value can be negative."}),
+            }
+
+        argument = ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1000.0, "step": 0.01})
+
+        for i in range(19):
+            arg_dict["double_blocks.{}.".format(i)] = argument
+
+        for i in range(38):
+            arg_dict["single_blocks.{}.".format(i)] = argument
+
+        return {"required": arg_dict}
+    
+    RETURN_TYPES = ("MODEL", )
+    OUTPUT_TOOLTIPS = ("The modified diffusion model.",)
+    FUNCTION = "load_lora"
+
+    CATEGORY = "loaders"
+    DESCRIPTION = "LoRAs are used to modify diffusion and CLIP models, altering the way in which latents are denoised such as applying styles. Multiple LoRA nodes can be linked together."
+
+    def load_lora(self, model,lora_name, strength_model, **kwargs):
+        from comfy.utils import load_torch_file
+        import comfy.lora
+
+        lora_path = folder_paths.get_full_path("loras", lora_name)
+        lora = None
+        if self.loaded_lora is not None:
+            if self.loaded_lora[0] == lora_path:
+                lora = self.loaded_lora[1]
+            else:
+                temp = self.loaded_lora
+                self.loaded_lora = None
+                del temp
+
+        if lora is None:
+            lora = load_torch_file(lora_path, safe_load=True)
+            self.loaded_lora = (lora_path, lora)
+
+        key_map = {}
+        if model is not None:
+            key_map = comfy.lora.model_lora_keys_unet(model.model, key_map)
+
+        loaded = comfy.lora.load_lora(lora, key_map)
+        #filtered_dict = {k: v for k, v in loaded.items() if 'double_blocks.0' in k}
+
+        #print(filtered_dict)
+        last_arg_size = 0
+        for arg in kwargs:
+            for key in loaded:
+                if arg in key and last_arg_size < len(arg):
+                    ratio = kwargs[arg]
+                    value = loaded[key]
+                    last_arg_size = len(arg)
+                    loaded[key] = (value[0], value[1][:-3] + (ratio, value[1][-2], value[1][-1]))
+        if model is not None:
+            new_modelpatcher = model.clone()
+            k = new_modelpatcher.add_patches(loaded, strength_model)  
+    
+        k = set(k)
+        for x in loaded:
+            if (x not in k):
+                print("NOT LOADED {}".format(x))
+
+        return (new_modelpatcher,)
