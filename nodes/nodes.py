@@ -1853,12 +1853,22 @@ class FluxBlockLoraLoader:
         #print(filtered_dict)
         last_arg_size = 0
         for arg in kwargs:
-            for key in loaded:
+            for key in list(loaded.keys()):  # Convert keys to a list to avoid runtime error due to size change
                 if arg in key and last_arg_size < len(arg):
                     ratio = kwargs[arg]
-                    value = loaded[key]
-                    last_arg_size = len(arg)
-                    loaded[key] = (value[0], value[1][:-3] + (ratio, value[1][-2], value[1][-1]))
+                    if ratio == 0:
+                        del loaded[key]  # Remove the key if ratio is 0
+                    else:
+                        value = loaded[key]
+                        last_arg_size = len(arg)
+                        loaded[key] = (value[0], value[1][:-3] + (ratio, value[1][-2], value[1][-1]))
+        print("loading lora keys:")
+        for key, value in loaded.items():
+            if len(value) > 1 and len(value[1]) > 2:
+                alpha = value[1][-3]  # Assuming the alpha value is the third last element in the tuple
+            else:
+                alpha = None
+            print(f"Key: {key}, Alpha: {alpha}")
         if model is not None:
             new_modelpatcher = model.clone()
             k = new_modelpatcher.add_patches(loaded, strength_model)  
