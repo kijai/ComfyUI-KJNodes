@@ -75,6 +75,22 @@ app.registerExtension({
 						});
 					}
 					break;
+			
+			case "FluxBlockLoraSelect":
+				nodeType.prototype.onNodeCreated = function () {
+					this.addWidget("button", "Set all", null, () => {
+						const userValue = parseFloat(prompt("Enter the value to set for all widgets:", "1.0"));
+						if (!isNaN(userValue)) {
+							const widgets = this.widgets;
+							for (const w of widgets) {
+								w.value = userValue;
+							}
+						} else {
+							alert("Invalid input. Please enter a numeric value.");
+						}
+					});
+				};
+				break;
 
 			case "GetMaskSizeAndCount":
 				const onGetMaskSizeConnectInput = nodeType.prototype.onConnectInput;
