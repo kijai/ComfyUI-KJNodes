@@ -1851,16 +1851,14 @@ class FluxBlockLoraLoader:
         #filtered_dict = {k: v for k, v in loaded.items() if 'double_blocks.0' in k}
 
         #print(filtered_dict)
-        last_arg_size = 0
         for arg in kwargs:
             for key in list(loaded.keys()):  # Convert keys to a list to avoid runtime error due to size change
-                if arg in key and last_arg_size < len(arg):
+                if arg in key:
                     ratio = kwargs[arg]
                     if ratio == 0:
                         del loaded[key]  # Remove the key if ratio is 0
                     else:
                         value = loaded[key]
-                        last_arg_size = len(arg)
                         loaded[key] = (value[0], value[1][:-3] + (ratio, value[1][-2], value[1][-1]))
         print("loading lora keys:")
         for key, value in loaded.items():
