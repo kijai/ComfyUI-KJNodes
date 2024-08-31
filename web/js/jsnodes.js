@@ -79,14 +79,55 @@ app.registerExtension({
 			case "FluxBlockLoraSelect":
 				nodeType.prototype.onNodeCreated = function () {
 					this.addWidget("button", "Set all", null, () => {
-						const userValue = parseFloat(prompt("Enter the value to set for all widgets:", "1.0"));
-						if (!isNaN(userValue)) {
-							const widgets = this.widgets;
-							for (const w of widgets) {
-								w.value = userValue;
+						const userInput = prompt("Enter the values to set for widgets (e.g., s0,1,2-7=2.0, d0,1,2-7=2.0, or 1.0):", "");
+						if (userInput) {
+							const regex = /([sd])?(\d+(?:,\d+|-?\d+)*?)?=(\d+(\.\d+)?)/;
+							const match = userInput.match(regex);
+							if (match) {
+								const type = match[1];
+								const indicesPart = match[2];
+								const value = parseFloat(match[3]);
+			
+								let targetWidgets = [];
+								if (type === 's') {
+									targetWidgets = this.widgets.filter(widget => widget.name.includes("single"));
+								} else if (type === 'd') {
+									targetWidgets = this.widgets.filter(widget => widget.name.includes("double"));
+								} else {
+									targetWidgets = this.widgets; // No type specified, all widgets
+								}
+			
+								if (indicesPart) {
+									const indices = indicesPart.split(',').flatMap(part => {
+										if (part.includes('-')) {
+											const [start, end] = part.split('-').map(Number);
+											return Array.from({ length: end - start + 1 }, (_, i) => start + i);
+										}
+										return Number(part);
+									});
+			
+									for (const index of indices) {
+										if (index < targetWidgets.length) {
+											targetWidgets[index].value = value;
+										}
+									}
+								} else {
+									// No indices provided, set value for all target widgets
+									for (const widget of targetWidgets) {
+										widget.value = value;
+									}
+								}
+							} else if (!isNaN(parseFloat(userInput))) {
+								// Single value provided, set it for all widgets
+								const value = parseFloat(userInput);
+								for (const widget of this.widgets) {
+									widget.value = value;
+								}
+							} else {
+								alert("Invalid input format. Please use the format s0,1,2-7=2.0, d0,1,2-7=2.0, or 1.0");
 							}
 						} else {
-							alert("Invalid input. Please enter a numeric value.");
+							alert("Invalid input. Please enter a value.");
 						}
 					});
 				};
