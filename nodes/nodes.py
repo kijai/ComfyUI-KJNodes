@@ -1822,7 +1822,7 @@ class FluxBlockLoraLoader:
     OUTPUT_TOOLTIPS = ("The modified diffusion model.",)
     FUNCTION = "load_lora"
 
-    CATEGORY = "loaders"
+    CATEGORY = "KJNodes/experimental"
     DESCRIPTION = "LoRAs are used to modify diffusion and CLIP models, altering the way in which latents are denoised such as applying styles. Multiple LoRA nodes can be linked together."
 
     def load_lora(self, model,lora_name, strength_model, **kwargs):
