@@ -1865,19 +1865,20 @@ class FluxBlockLoraLoader:
                 temp = self.loaded_lora
                 self.loaded_lora = None
                 del temp
-
+        
         if lora is None:
             lora = load_torch_file(lora_path, safe_load=True)
             # Find the first key that ends with "weight"
-            weight_key = next((key for key in lora.keys() if key.endswith('weight')), None)
-            # Print the shape of the value corresponding to the key
-            if weight_key:
-                print(f"Shape of the first 'weight' key ({weight_key}): {lora[weight_key].shape}")
-                rank = str(lora[weight_key].shape[0])
-            else:
-                print("No key ending with 'weight' found.")
-                rank = "Couldn't find rank"
-            self.loaded_lora = (lora_path, lora)
+        rank = "unknown"
+        weight_key = next((key for key in lora.keys() if key.endswith('weight')), None)
+        # Print the shape of the value corresponding to the key
+        if weight_key:
+            print(f"Shape of the first 'weight' key ({weight_key}): {lora[weight_key].shape}")
+            rank = str(lora[weight_key].shape[0])
+        else:
+            print("No key ending with 'weight' found.")
+            rank = "Couldn't find rank"
+        self.loaded_lora = (lora_path, lora)
 
         key_map = {}
         if model is not None:
