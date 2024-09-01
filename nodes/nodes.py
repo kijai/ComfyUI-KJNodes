@@ -1832,11 +1832,12 @@ class FluxBlockLoraLoader:
     def INPUT_TYPES(s):
         return {"required": {
                 "model": ("MODEL", {"tooltip": "The diffusion model the LoRA will be applied to."}),
-                "lora_name": (folder_paths.get_filename_list("loras"), {"tooltip": "The name of the LoRA."}),
                 "strength_model": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step": 0.01, "tooltip": "How strongly to modify the diffusion model. This value can be negative."}),
                 
                 },
                 "optional": {
+                    "lora_name": (folder_paths.get_filename_list("loras"), {"tooltip": "The name of the LoRA."}),
+                    "opt_lora_path": ("STRING", {"forceInput": True, "tooltip": "Absolute path of the LoRA."}),
                     "blocks": ("SELECTEDBLOCKS",),
                 }
                }
@@ -1846,11 +1847,15 @@ class FluxBlockLoraLoader:
     FUNCTION = "load_lora"
     CATEGORY = "KJNodes/experimental"
 
-    def load_lora(self, model, lora_name, strength_model, blocks=None):
+    def load_lora(self, model, strength_model, lora_name=None, opt_lora_path=None, blocks=None):
         from comfy.utils import load_torch_file
         import comfy.lora
 
-        lora_path = folder_paths.get_full_path("loras", lora_name)
+        if opt_lora_path:
+            lora_path = opt_lora_path
+        else:
+            lora_path = folder_paths.get_full_path("loras", lora_name)
+        
         lora = None
         if self.loaded_lora is not None:
             if self.loaded_lora[0] == lora_path:
