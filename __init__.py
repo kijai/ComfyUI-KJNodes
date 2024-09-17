@@ -165,9 +165,11 @@ from server import PromptServer
 from pathlib import Path
 
 if hasattr(PromptServer, "instance"):
-
-    # NOTE: we add an extra static path to avoid comfy mechanism
-    # that loads every script in web.
-    PromptServer.instance.app.add_routes(
-        [web.static("/kjweb_async", (Path(__file__).parent.absolute() / "kjweb_async").as_posix())]
-    )
+    try:
+        # NOTE: we add an extra static path to avoid comfy mechanism
+        # that loads every script in web.
+        PromptServer.instance.app.add_routes(
+            [web.static("/kjweb_async", (Path(__file__).parent.absolute() / "kjweb_async").as_posix())]
+        )
+    except:
+        pass

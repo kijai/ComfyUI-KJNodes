@@ -523,9 +523,8 @@ Can be used for realtime diffusion with autoqueue.
 class Screencap_mss:
 
     @classmethod
-    def IS_CHANGED(cls):
-
-        return
+    def IS_CHANGED(s, **kwargs):
+        return float("NaN")
 
     RETURN_TYPES = ("IMAGE",)
     RETURN_NAMES = ("image",)
@@ -1660,13 +1659,13 @@ highest dimension.
         image = image.movedim(1,-1)
 
         return(image, image.shape[2], image.shape[1],)
-    
+import pathlib    
 class LoadAndResizeImage:
     _color_channels = ["alpha", "red", "green", "blue"]
     @classmethod
     def INPUT_TYPES(s):
         input_dir = folder_paths.get_input_directory()
-        files = [f for f in os.listdir(input_dir) if os.path.isfile(os.path.join(input_dir, f))]
+        files = [f.name for f in pathlib.Path(input_dir).iterdir() if f.is_file()]
         return {"required":
                     {
                     "image": (sorted(files), {"image_upload": True}),
@@ -1691,7 +1690,7 @@ class LoadAndResizeImage:
         import numpy as np
         import torch
         image_path = folder_paths.get_annotated_filepath(image)
-
+        
         import node_helpers
         img = node_helpers.pillow(Image.open, image_path)
 
@@ -1799,13 +1798,13 @@ class LoadAndResizeImage:
         return (output_image, output_mask, width, height, image_path)
         
 
-    @classmethod
-    def IS_CHANGED(s, image, **kwargs):
-        image_path = folder_paths.get_annotated_filepath(image)
-        m = hashlib.sha256()
-        with open(image_path, 'rb') as f:
-            m.update(f.read())
-        return m.digest().hex()
+    # @classmethod
+    # def IS_CHANGED(s, image, **kwargs):
+    #     image_path = folder_paths.get_annotated_filepath(image)
+    #     m = hashlib.sha256()
+    #     with open(image_path, 'rb') as f:
+    #         m.update(f.read())
+    #     return m.digest().hex()
 
     @classmethod
     def VALIDATE_INPUTS(s, image):
