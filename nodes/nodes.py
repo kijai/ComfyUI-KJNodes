@@ -708,7 +708,52 @@ class EmptyLatentImagePresets:
 
         return (latent, int(width), int(height),)
 
+class EmptyLatentImageCustomPresets:
+    @classmethod
+    def INPUT_TYPES(cls):
+        with open(os.path.join(script_directory, 'custom_dimensions.json')) as f:
+            dimensions = json.load(f)  
+        return {
+        "required": {
+            "dimensions": (
+                dimensions,
+            ),
+           
+            "invert": ("BOOLEAN", {"default": False}),
+            "batch_size": ("INT", {
+            "default": 1,
+            "min": 1,
+            "max": 4096
+            }),
+        },
+        }
 
+    RETURN_TYPES = ("LATENT", "INT", "INT")
+    RETURN_NAMES = ("Latent", "Width", "Height")
+    FUNCTION = "generate"
+    CATEGORY = "KJNodes"
+    DESCRIPTION = """
+Generates an empty latent image with the specified dimensions.  
+The choices are loaded from 'custom_dimensions.json' in the nodes folder.
+"""
+
+    def generate(self, dimensions, invert, batch_size):
+        from nodes import EmptyLatentImage
+        result = [x.strip() for x in dimensions.split('x')]
+
+        # Remove the aspect ratio part
+        result[0] = result[0].split('(')[0].strip()
+        result[1] = result[1].split('(')[0].strip()
+        
+        if invert:
+            width = int(result[1].split(' ')[0])
+            height = int(result[0])
+        else:
+            width = int(result[0])
+            height = int(result[1].split(' ')[0])
+        latent = EmptyLatentImage().generate(width, height, batch_size)[0]
+
+        return (latent, int(width), int(height),)
 
 class WidgetToString:
     @classmethod

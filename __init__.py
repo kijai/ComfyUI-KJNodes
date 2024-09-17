@@ -101,6 +101,7 @@ NODE_CONFIG = {
     "VRAM_Debug": {"class": VRAM_Debug, "name": "VRAM Debug"},
     "SomethingToString": {"class": SomethingToString, "name": "Something To String"},
     "EmptyLatentImagePresets": {"class": EmptyLatentImagePresets, "name": "Empty Latent Image Presets"},
+    "EmptyLatentImageCustomPresets": {"class": EmptyLatentImageCustomPresets, "name": "Empty Latent Image Custom Presets"},
     "ModelPassThrough": {"class": ModelPassThrough, "name": "ModelPass"},
     #audioscheduler stuff
     "NormalizedAmplitudeToMask": {"class": NormalizedAmplitudeToMask},
