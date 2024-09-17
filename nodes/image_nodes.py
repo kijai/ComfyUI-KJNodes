@@ -1029,8 +1029,8 @@ class ImagePadForOutpaintTargetSize:
 
     def expand_image(self, image, target_width, target_height, feathering, upscale_method, mask=None):
         B, H, W, C = image.size()
-        new_height = 0
-        new_width = 0
+        new_height = H
+        new_width = W
          # Calculate the scaling factor while maintaining aspect ratio
         scaling_factor = min(target_width / W, target_height / H)
         
