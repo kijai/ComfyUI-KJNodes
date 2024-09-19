@@ -3,7 +3,7 @@ import numpy as np
 from PIL import Image
 
 import json, re, os, io, time
-
+import importlib
 import model_management
 import folder_paths
 from nodes import MAX_RESOLUTION
@@ -1991,3 +1991,36 @@ class FluxBlockLoraLoader:
                 print("NOT LOADED {}".format(x))
 
         return (new_modelpatcher, rank)
+    
+class CustomControlNetWeightsFluxFromList:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "list_of_floats": ("FLOAT", {"forceInput": True}, ),
+            },
+            "optional": {
+                "uncond_multiplier": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}, ),
+                "cn_extras": ("CN_WEIGHTS_EXTRAS",),
+                "autosize": ("ACNAUTOSIZE", {"padding": 0}),
+            }
+        }
+    
+    RETURN_TYPES = ("CONTROL_NET_WEIGHTS", "TIMESTEP_KEYFRAME",)
+    RETURN_NAMES = ("CN_WEIGHTS", "TK_SHORTCUT")
+    FUNCTION = "load_weights"
+    DESCRIPTION = "Creates controlnet weights from a list of floats for Advanced-ControlNet"
+
+    CATEGORY = "KJNodes/controlnet"
+
+    def load_weights(self, list_of_floats: list[float],
+                     uncond_multiplier: float=1.0, cn_extras: dict[str]={}):
+        
+        acn_nodes = importlib.import_module("ComfyUI-Advanced-ControlNet")
+        ControlWeights = acn_nodes.adv_control.utils.ControlWeights
+        TimestepKeyframeGroup = acn_nodes.adv_control.utils.TimestepKeyframeGroup
+        TimestepKeyframe = acn_nodes.adv_control.utils.TimestepKeyframe
+
+        weights = ControlWeights.controlnet(weights_input=list_of_floats, uncond_multiplier=uncond_multiplier, extras=cn_extras)
+        print(weights.weights_input)
+        return (weights, TimestepKeyframeGroup.default(TimestepKeyframe(control_weights=weights)))
