@@ -1951,7 +1951,8 @@ class SaveImageKJ:
         return {
             "required": {
                 "images": ("IMAGE", {"tooltip": "The images to save."}),
-                "filename_prefix": ("STRING", {"default": "ComfyUI", "tooltip": "The prefix for the file to save. This may include formatting information such as %date:yyyy-MM-dd% or %Empty Latent Image.width% to include values from nodes."})
+                "filename_prefix": ("STRING", {"default": "ComfyUI", "tooltip": "The prefix for the file to save. This may include formatting information such as %date:yyyy-MM-dd% or %Empty Latent Image.width% to include values from nodes."}),
+                "output_folder": ("STRING", {"default": "output", "tooltip": "The folder to save the images to."}),
             },
             "optional": {
                 "caption_file_extension": ("STRING", {"default": ".txt", "tooltip": "The extension for the caption file."}),
@@ -1971,9 +1972,14 @@ class SaveImageKJ:
     CATEGORY = "image"
     DESCRIPTION = "Saves the input images to your ComfyUI output directory."
 
-    def save_images(self, images, filename_prefix="ComfyUI", prompt=None, extra_pnginfo=None, caption=None, caption_file_extension=".txt"):
+    def save_images(self, images, output_folder, filename_prefix="ComfyUI", prompt=None, extra_pnginfo=None, caption=None, caption_file_extension=".txt"):
         filename_prefix += self.prefix_append
+        
         full_output_folder, filename, counter, subfolder, filename_prefix = folder_paths.get_save_image_path(filename_prefix, self.output_dir, images[0].shape[1], images[0].shape[0])
+        if output_folder != "output":
+            if not os.path.exists(output_folder):
+                os.makedirs(output_folder, exist_ok=True)
+            full_output_folder = output_folder
         results = list()
         for (batch_number, image) in enumerate(images):
             i = 255. * image.cpu().numpy()
