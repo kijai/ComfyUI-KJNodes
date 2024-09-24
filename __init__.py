@@ -7,6 +7,7 @@ from .nodes.intrinsic_lora_nodes import *
 from .nodes.mask_nodes import *
 NODE_CONFIG = {
     #constants
+    "BOOLConstant": {"class": BOOLConstant, "name": "BOOL Constant"},
     "INTConstant": {"class": INTConstant, "name": "INT Constant"},
     "FloatConstant": {"class": FloatConstant, "name": "Float Constant"},
     "StringConstant": {"class": StringConstant, "name": "String Constant"},
@@ -72,6 +73,7 @@ NODE_CONFIG = {
     "ReverseImageBatch": {"class": ReverseImageBatch, "name": "Reverse Image Batch"},
     "ReplaceImagesInBatch": {"class": ReplaceImagesInBatch, "name": "Replace Images In Batch"},
     "SaveImageWithAlpha": {"class": SaveImageWithAlpha, "name": "Save Image With Alpha"},
+    "SaveImageKJ": {"class": SaveImageKJ, "name": "Save Image KJ"},
     "SplitImageChannels": {"class": SplitImageChannels, "name": "Split Image Channels"},    
     #batch cropping
     "BatchCropFromMask": {"class": BatchCropFromMask, "name": "Batch Crop From Mask"},

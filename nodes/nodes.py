@@ -19,6 +19,21 @@ class AnyType(str):
     return False
 any = AnyType("*")
 
+class BOOLConstant:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": {
+            "value": ("BOOLEAN", {"default": True}),
+        },
+        }
+    RETURN_TYPES = ("BOOLEAN",)
+    RETURN_NAMES = ("value",)
+    FUNCTION = "get_value"
+    CATEGORY = "KJNodes/constants"
+
+    def get_value(self, value):
+        return (value,)
+    
 class INTConstant:
     @classmethod
     def INPUT_TYPES(s):
