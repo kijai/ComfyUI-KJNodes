@@ -3,6 +3,8 @@ import time
 import torch
 import torch.nn.functional as F
 import torchvision.transforms as T
+import io
+import base64
 import random
 import math
 import os
@@ -1445,6 +1447,7 @@ class ImageAddMulti:
                 {
                 "default": 'add'
                 }),
+                "blend_amount": ("FLOAT", {"default": 0.5, "min": 0, "max": 1, "step": 0.01}),
             },
     }
 
@@ -1458,16 +1461,16 @@ You can set how many inputs the node has,
 with the **inputcount** and clicking update.
 """
 
-    def add(self, inputcount, blending, **kwargs):
+    def add(self, inputcount, blending, blend_amount, **kwargs):
         image = kwargs["image_1"]
         for c in range(1, inputcount):
             new_image = kwargs[f"image_{c + 1}"]
             if blending == "add":
-                image = torch.add(image * 0.5, new_image * 0.5)
+                image = torch.add(image * blend_amount, new_image * blend_amount)
             elif blending == "subtract":
-                image = torch.sub(image * 0.5, new_image * 0.5)
+                image = torch.sub(image * blend_amount, new_image * blend_amount)
             elif blending == "multiply":
-                image = torch.mul(image * 0.5, new_image * 0.5)
+                image = torch.mul(image * blend_amount, new_image * blend_amount)
             elif blending == "difference":
                 image = torch.sub(image, new_image)
         return (image,)    
@@ -2043,3 +2046,35 @@ class SaveImageKJ:
         return { "ui": { 
                 "images": results },
                 "result": (file,) }
+    
+to_pil_image = T.ToPILImage()
+
+class FastPreview:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "image": ("IMAGE", ),
+                "format": (["JPEG", "PNG", "WEBP"], {"default": "JPEG"}),
+                "quality" : ("INT", {"default": 75, "min": 1, "max": 100, "step": 1}),
+            },
+        }
+
+    RETURN_TYPES = ()
+    FUNCTION = "preview"
+    CATEGORY = "KJNodes/experimental"
+    OUTPUT_NODE = True
+
+    def preview(self, image, format, quality):        
+        pil_image = to_pil_image(image[0].permute(2, 0, 1))
+
+        with io.BytesIO() as buffered:
+            pil_image.save(buffered, format=format, quality=quality)
+            img_bytes = buffered.getvalue()
+
+        img_base64 = base64.b64encode(img_bytes).decode('utf-8')
+    
+        return {
+            "ui": {"bg_image": [img_base64]}, 
+            "result": ()
+        }

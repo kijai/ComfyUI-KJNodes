@@ -2119,4 +2119,60 @@ class ModelSaveKJ:
         save_torch_file(new_sd, os.path.join(full_output_folder, output_checkpoint))
         return {}
         
+class PatchCublasLinear:
+    original_linear = None
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": { "model": ("MODEL",),
+                              "enabled": ("BOOLEAN", {"default": True, "tooltip": "Enable or disable the patching, won't take effect on already loaded models!"}),
+                              },
+                }
+    RETURN_TYPES = ("MODEL",)
+    FUNCTION = "patch"
+    OUTPUT_NODE = True
+    DESCRIPTION = "Highly experimental node that simply patches the Linear layer to use torch-cublas-hgemm, won't take effect on already loaded models!"
+
+    CATEGORY = "KJNodes/experimental"
+
+    def patch(self, model, enabled):
+        from comfy.ops import disable_weight_init, CastWeightBiasOp, cast_bias_weight
+        try:
+            from cublas_ops import CublasLinear
+        except ImportError:
+            raise Exception("Can't import 'torch-cublas-hgemm', install it from here https://github.com/aredden/torch-cublas-hgemm")
+        
+        class OriginalLinear(torch.nn.Linear, CastWeightBiasOp):
+            def reset_parameters(self):
+                return None
+
+            def forward_comfy_cast_weights(self, input):
+                weight, bias = cast_bias_weight(self, input)
+                return torch.nn.functional.linear(input, weight, bias)
+
+            def forward(self, *args, **kwargs):
+                if self.comfy_cast_weights:
+                    return self.forward_comfy_cast_weights(*args, **kwargs)
+                else:
+                    return super().forward(*args, **kwargs)
+        
+        class PatchedLinear(CublasLinear, CastWeightBiasOp):
+            def reset_parameters(self):
+                return None
+
+            def forward_comfy_cast_weights(self, input):
+                weight, bias = cast_bias_weight(self, input)
+                return torch.nn.functional.linear(input, weight, bias)
+
+            def forward(self, *args, **kwargs):
+                if self.comfy_cast_weights:
+                    return self.forward_comfy_cast_weights(*args, **kwargs)
+                else:
+                    return super().forward(*args, **kwargs)
+
+        if enabled:
+            disable_weight_init.Linear = PatchedLinear
+        else:
+            disable_weight_init.Linear = OriginalLinear
+        
+        return model,
     
