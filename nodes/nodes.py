@@ -191,6 +191,7 @@ class ConditioningMultiCombine:
         return {
             "required": {
                 "inputcount": ("INT", {"default": 2, "min": 2, "max": 20, "step": 1}),
+                "operation": (["combine", "concat"], {"default": "combine"}),
                 "conditioning_1": ("CONDITIONING", ),
                 "conditioning_2": ("CONDITIONING", ),
             },
@@ -204,13 +205,18 @@ class ConditioningMultiCombine:
 Combines multiple conditioning nodes into one
 """
 
-    def combine(self, inputcount, **kwargs):
+    def combine(self, inputcount, operation, **kwargs):
         from nodes import ConditioningCombine
+        from nodes import ConditioningConcat
         cond_combine_node = ConditioningCombine()
+        cond_concat_node = ConditioningConcat()
         cond = kwargs["conditioning_1"]
         for c in range(1, inputcount):
             new_cond = kwargs[f"conditioning_{c + 1}"]
-            cond = cond_combine_node.combine(new_cond, cond)[0]
+            if operation == "combine":
+                cond = cond_combine_node.combine(new_cond, cond)[0]
+            elif operation == "concat":
+                cond = cond_concat_node.concat(cond, new_cond)[0]
         return (cond, inputcount,)
 
 
