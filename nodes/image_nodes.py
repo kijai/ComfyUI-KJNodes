@@ -1323,12 +1323,13 @@ class TransitionImagesMulti:
                  "transition_type": (["horizontal slide", "vertical slide", "box", "circle", "horizontal bar", "vertical bar", "horizontal door", "vertical door", "fade"],),
                  "transitioning_frames": ("INT", {"default": 1,"min": 0, "max": 4096, "step": 1}),
                  "blur_radius": ("FLOAT", {"default": 0.0,"min": 0.0, "max": 100.0, "step": 0.1}),
+                 "reverse": ("BOOLEAN", {"default": False}),
                  "device": (["CPU", "GPU"], {"default": "CPU"}),
         },
     } 
 
     #transitions from matteo's essential nodes
-    def transition(self, inputcount, transitioning_frames, transition_type, interpolation, device, blur_radius, **kwargs):
+    def transition(self, inputcount, transitioning_frames, transition_type, interpolation, device, blur_radius, reverse, **kwargs):
 
         gpu = model_management.get_torch_device()
 
@@ -1339,6 +1340,8 @@ class TransitionImagesMulti:
             mask = torch.zeros_like(images_1, device=images_1.device)
           
             alpha = alpha.item()
+            if reverse:
+                alpha = 1 - alpha
 
             if "horizontal slide" in transition_type:
                 pos = round(width * alpha)
@@ -1409,7 +1412,6 @@ class TransitionImagesMulti:
             return 1 - (1 - t) ** 4
         
         def gaussian_blur(mask, blur_radius):
-            print(mask.device)
             if blur_radius > 0:
                 kernel_size = int(blur_radius * 2) + 1
                 if kernel_size % 2 == 0:
