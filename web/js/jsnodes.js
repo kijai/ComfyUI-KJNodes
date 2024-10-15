@@ -33,6 +33,7 @@ app.registerExtension({
 			case "ImageAddMulti":
 			case "ImageConcatMulti":
 			case "CrossFadeImagesMulti":
+			case "TransitionImagesMulti":
 				nodeType.prototype.onNodeCreated = function () {
 				this._type = "IMAGE"
 				this.inputs_offset = nodeData.name.includes("selective")?1:0

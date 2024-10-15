@@ -76,7 +76,8 @@ NODE_CONFIG = {
     "ReplaceImagesInBatch": {"class": ReplaceImagesInBatch, "name": "Replace Images In Batch"},
     "SaveImageWithAlpha": {"class": SaveImageWithAlpha, "name": "Save Image With Alpha"},
     "SaveImageKJ": {"class": SaveImageKJ, "name": "Save Image KJ"},
-    "SplitImageChannels": {"class": SplitImageChannels, "name": "Split Image Channels"},    
+    "SplitImageChannels": {"class": SplitImageChannels, "name": "Split Image Channels"},
+    "TransitionImagesMulti": {"class": TransitionImagesMulti, "name": "Transition Images Multi"},
     #batch cropping
     "BatchCropFromMask": {"class": BatchCropFromMask, "name": "Batch Crop From Mask"},
     "BatchCropFromMaskAdvanced": {"class": BatchCropFromMaskAdvanced, "name": "Batch Crop From Mask Advanced"},

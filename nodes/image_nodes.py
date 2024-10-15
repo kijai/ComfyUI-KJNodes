@@ -1307,6 +1307,147 @@ class CrossFadeImagesMulti:
         
         return image_1,
 
+class TransitionImagesMulti:
+    RETURN_TYPES = ("IMAGE",)
+    FUNCTION = "transition"
+    CATEGORY = "KJNodes/image"
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                 "inputcount": ("INT", {"default": 2, "min": 2, "max": 1000, "step": 1}),
+                 "image_1": ("IMAGE",),
+                 "image_2": ("IMAGE",),
+                 "interpolation": (["linear", "ease_in", "ease_out", "ease_in_out", "bounce", "elastic", "glitchy", "exponential_ease_out"],),
+                 "transition_type": (["horizontal slide", "vertical slide", "box", "circle", "horizontal bar", "vertical bar", "horizontal door", "vertical door", "fade"],),
+                 "transitioning_frames": ("INT", {"default": 1,"min": 0, "max": 4096, "step": 1}),
+                 "device": (["CPU", "GPU"], {"default": "CPU"}),
+        },
+    } 
+
+    #transitions from matteo's essential nodes
+    def transition(self, inputcount, transitioning_frames, transition_type, interpolation, device, **kwargs):
+
+        device = model_management.get_torch_device()
+
+        def wipe(images_1, images_2, alpha, transition_type):
+            width = images_1.shape[1]
+            height = images_1.shape[0]
+            mask = torch.zeros_like(images_1)
+            alpha = alpha.item()
+
+            if "horizontal slide" in transition_type:
+                pos = round(width * alpha)
+                mask[:, :pos, :] = 1.0
+            elif "vertical slide" in transition_type:
+                pos = round(height * alpha)
+                mask[:pos, :, :] = 1.0
+            elif "box" in transition_type:
+                box_w = round(width * alpha)
+                box_h = round(height * alpha)
+                x1 = (width - box_w) // 2
+                y1 = (height - box_h) // 2
+                x2 = x1 + box_w
+                y2 = y1 + box_h
+                mask[y1:y2, x1:x2, :] = 1.0
+            elif "circle" in transition_type:
+                radius = math.ceil(math.sqrt(pow(width, 2) + pow(height, 2)) * alpha / 2)
+                c_x = width // 2
+                c_y = height // 2
+                x = torch.arange(0, width, dtype=torch.float32, device="cpu")
+                y = torch.arange(0, height, dtype=torch.float32, device="cpu")
+                y, x = torch.meshgrid((y, x), indexing="ij")
+                circle = ((x - c_x) ** 2 + (y - c_y) ** 2) <= (radius ** 2)
+                mask[circle] = 1.0
+            elif "horizontal bar" in transition_type:
+                bar = round(height * alpha)
+                y1 = (height - bar) // 2
+                y2 = y1 + bar
+                mask[y1:y2,:, :] = 1.0
+            elif "vertical bar" in transition_type:
+                bar = round(width * alpha)
+                x1 = (width - bar) // 2
+                x2 = x1 + bar
+                mask[:, x1:x2, :] = 1.0
+            elif "horizontal door" in transition_type:
+                bar = math.ceil(height * alpha / 2)
+                if bar > 0:
+                    mask[:bar, :, :] = 1.0
+                    mask[-bar:,:, :] = 1.0
+            elif "vertical door" in transition_type:
+                bar = math.ceil(width * alpha / 2)
+                if bar > 0:
+                    mask[:, :bar,:] = 1.0
+                    mask[:, -bar:,:] = 1.0
+            elif "fade" in transition_type:
+                mask[:, :, :] = alpha
+
+            return images_1 * (1 - mask) + images_2 * mask
+        
+        def ease_in(t):
+            return t * t
+        def ease_out(t):
+            return 1 - (1 - t) * (1 - t)
+        def ease_in_out(t):
+            return 3 * t * t - 2 * t * t * t
+        def bounce(t):
+            if t < 0.5:
+                return self.ease_out(t * 2) * 0.5
+            else:
+                return self.ease_in((t - 0.5) * 2) * 0.5 + 0.5
+        def elastic(t):
+            return math.sin(13 * math.pi / 2 * t) * math.pow(2, 10 * (t - 1))
+        def glitchy(t):
+            return t + 0.1 * math.sin(40 * t)
+        def exponential_ease_out(t):
+            return 1 - (1 - t) ** 4
+
+        easing_functions = {
+            "linear": lambda t: t,
+            "ease_in": ease_in,
+            "ease_out": ease_out,
+            "ease_in_out": ease_in_out,
+            "bounce": bounce,
+            "elastic": elastic,
+            "glitchy": glitchy,
+            "exponential_ease_out": exponential_ease_out,
+        }
+
+        image_1 = kwargs["image_1"]
+        height = image_1.shape[1]
+        width = image_1.shape[2]
+
+        easing_function = easing_functions[interpolation]
+    
+        for c in range(1, inputcount):
+            frames = []
+            new_image = kwargs[f"image_{c + 1}"]
+            new_image_height = new_image.shape[1]
+            new_image_width = new_image.shape[2]
+
+            if new_image_height != height or new_image_width != width:
+                new_image = common_upscale(new_image.movedim(-1, 1), width, height, "lanczos", "disabled")
+                new_image = new_image.movedim(1, -1)  # Move channels back to the last dimension
+
+            last_frame_image_1 = image_1[-1]
+            first_frame_image_2 = new_image[0]
+            if device == "GPU":
+                last_frame_image_1 = last_frame_image_1.to(device)
+                first_frame_image_2 = first_frame_image_2.to(device)
+
+            for frame in range(transitioning_frames):
+                t = frame / (transitioning_frames - 1)
+                alpha = easing_function(t)
+                alpha_tensor = torch.tensor(alpha, dtype=last_frame_image_1.dtype, device=last_frame_image_1.device)
+                frame_image = wipe(last_frame_image_1, first_frame_image_2, alpha_tensor, transition_type)
+                frames.append(frame_image)
+        
+            frames = torch.stack(frames)
+            image_1 = torch.cat((image_1, frames, new_image), dim=0)
+        
+        return image_1.cpu(),
+
 class GetImageRangeFromBatch:
     
     RETURN_TYPES = ("IMAGE", "MASK", )
