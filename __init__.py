@@ -78,6 +78,7 @@ NODE_CONFIG = {
     "ReplaceImagesInBatch": {"class": ReplaceImagesInBatch, "name": "Replace Images In Batch"},
     "SaveImageWithAlpha": {"class": SaveImageWithAlpha, "name": "Save Image With Alpha"},
     "SaveImageKJ": {"class": SaveImageKJ, "name": "Save Image KJ"},
+    "ShuffleImageBatch": {"class": ShuffleImageBatch, "name": "Shuffle Image Batch"},
     "SplitImageChannels": {"class": SplitImageChannels, "name": "Split Image Channels"},
     "TransitionImagesMulti": {"class": TransitionImagesMulti, "name": "Transition Images Multi"},
     "TransitionImagesInBatch": {"class": TransitionImagesInBatch, "name": "Transition Images In Batch"},

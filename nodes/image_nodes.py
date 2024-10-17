@@ -1307,7 +1307,7 @@ class CrossFadeImagesMulti:
         
         return image_1,
 
-def wipe(images_1, images_2, alpha, transition_type, blur_radius, reverse):
+def wipe(images_1, images_2, alpha, transition_type, blur_radius, reverse):        
             width = images_1.shape[1]
             height = images_1.shape[0]
 
@@ -1317,6 +1317,7 @@ def wipe(images_1, images_2, alpha, transition_type, blur_radius, reverse):
             if reverse:
                 alpha = 1 - alpha
 
+            #transitions from matteo's essential nodes
             if "horizontal slide" in transition_type:
                 pos = round(width * alpha)
                 mask[:, :pos, :] = 1.0
@@ -1407,6 +1408,9 @@ class TransitionImagesMulti:
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "transition"
     CATEGORY = "KJNodes/image"
+    DESCRIPTION = """
+Creates transitions between images.
+"""
 
     @classmethod
     def INPUT_TYPES(s):
@@ -1424,7 +1428,6 @@ class TransitionImagesMulti:
         },
     } 
 
-    #transitions from matteo's essential nodes
     def transition(self, inputcount, transitioning_frames, transition_type, interpolation, device, blur_radius, reverse, **kwargs):
 
         gpu = model_management.get_torch_device()
@@ -1470,6 +1473,9 @@ class TransitionImagesInBatch:
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "transition"
     CATEGORY = "KJNodes/image"
+    DESCRIPTION = """
+Creates transitions between images in a batch.
+"""
 
     @classmethod
     def INPUT_TYPES(s):
@@ -1518,14 +1524,35 @@ class TransitionImagesInBatch:
         
         return images.cpu(),
 
+class ShuffleImageBatch:
+    RETURN_TYPES = ("IMAGE",)
+    FUNCTION = "shuffle"
+    CATEGORY = "KJNodes/image"
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                 "images": ("IMAGE",),
+                 "seed": ("INT", {"default": 123,"min": 0, "max": 0xffffffffffffffff, "step": 1}),
+        },
+    } 
+
+    def shuffle(self, images, seed):
+        torch.manual_seed(seed)
+        B, H, W, C = images.shape
+        indices = torch.randperm(B)
+        shuffled_images = images[indices]
+
+        return shuffled_images,
+
 class GetImageRangeFromBatch:
     
     RETURN_TYPES = ("IMAGE", "MASK", )
     FUNCTION = "imagesfrombatch"
     CATEGORY = "KJNodes/image"
     DESCRIPTION = """
-Creates a new batch using images from the input,  
-batch, starting from start_index.
+Randomizes image order within a batch.
 """
 
     @classmethod
