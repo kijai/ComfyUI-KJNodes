@@ -1307,33 +1307,7 @@ class CrossFadeImagesMulti:
         
         return image_1,
 
-class TransitionImagesMulti:
-    RETURN_TYPES = ("IMAGE",)
-    FUNCTION = "transition"
-    CATEGORY = "KJNodes/image"
-
-    @classmethod
-    def INPUT_TYPES(s):
-        return {
-            "required": {
-                 "inputcount": ("INT", {"default": 2, "min": 2, "max": 1000, "step": 1}),
-                 "image_1": ("IMAGE",),
-                 "image_2": ("IMAGE",),
-                 "interpolation": (["linear", "ease_in", "ease_out", "ease_in_out", "bounce", "elastic", "glitchy", "exponential_ease_out"],),
-                 "transition_type": (["horizontal slide", "vertical slide", "box", "circle", "horizontal bar", "vertical bar", "horizontal door", "vertical door", "fade"],),
-                 "transitioning_frames": ("INT", {"default": 1,"min": 0, "max": 4096, "step": 1}),
-                 "blur_radius": ("FLOAT", {"default": 0.0,"min": 0.0, "max": 100.0, "step": 0.1}),
-                 "reverse": ("BOOLEAN", {"default": False}),
-                 "device": (["CPU", "GPU"], {"default": "CPU"}),
-        },
-    } 
-
-    #transitions from matteo's essential nodes
-    def transition(self, inputcount, transitioning_frames, transition_type, interpolation, device, blur_radius, reverse, **kwargs):
-
-        gpu = model_management.get_torch_device()
-
-        def wipe(images_1, images_2, alpha, transition_type, blur_radius):
+def wipe(images_1, images_2, alpha, transition_type, blur_radius, reverse):
             width = images_1.shape[1]
             height = images_1.shape[0]
 
@@ -1366,16 +1340,6 @@ class TransitionImagesMulti:
                 y, x = torch.meshgrid((y, x), indexing="ij")
                 circle = ((x - c_x) ** 2 + (y - c_y) ** 2) <= (radius ** 2)
                 mask[circle] = 1.0
-            elif "horizontal bar" in transition_type:
-                bar = round(height * alpha)
-                y1 = (height - bar) // 2
-                y2 = y1 + bar
-                mask[y1:y2,:, :] = 1.0
-            elif "vertical bar" in transition_type:
-                bar = round(width * alpha)
-                x1 = (width - bar) // 2
-                x2 = x1 + bar
-                mask[:, x1:x2, :] = 1.0
             elif "horizontal door" in transition_type:
                 bar = math.ceil(height * alpha / 2)
                 if bar > 0:
@@ -1393,51 +1357,77 @@ class TransitionImagesMulti:
 
             return images_1 * (1 - mask) + images_2 * mask
         
-        def ease_in(t):
-            return t * t
-        def ease_out(t):
-            return 1 - (1 - t) * (1 - t)
-        def ease_in_out(t):
-            return 3 * t * t - 2 * t * t * t
-        def bounce(t):
-            if t < 0.5:
-                return self.ease_out(t * 2) * 0.5
-            else:
-                return self.ease_in((t - 0.5) * 2) * 0.5 + 0.5
-        def elastic(t):
-            return math.sin(13 * math.pi / 2 * t) * math.pow(2, 10 * (t - 1))
-        def glitchy(t):
-            return t + 0.1 * math.sin(40 * t)
-        def exponential_ease_out(t):
-            return 1 - (1 - t) ** 4
-        
-        def gaussian_blur(mask, blur_radius):
-            if blur_radius > 0:
-                kernel_size = int(blur_radius * 2) + 1
-                if kernel_size % 2 == 0:
-                    kernel_size += 1  # Ensure kernel size is odd
-                sigma = blur_radius / 3
-                x = torch.arange(-kernel_size // 2 + 1, kernel_size // 2 + 1, dtype=torch.float32)
-                x = torch.exp(-0.5 * (x / sigma) ** 2)
-                kernel1d = x / x.sum()
-                kernel2d = kernel1d[:, None] * kernel1d[None, :]
-                kernel2d = kernel2d.to(mask.device)
-                kernel2d = kernel2d.expand(mask.shape[2], 1, kernel2d.shape[0], kernel2d.shape[1])
-                mask = mask.permute(2, 0, 1).unsqueeze(0)  # Change to [C, H, W] and add batch dimension
-                mask = F.conv2d(mask, kernel2d, padding=kernel_size // 2, groups=mask.shape[1])
-                mask = mask.squeeze(0).permute(1, 2, 0)  # Change back to [H, W, C]
-            return mask
+def ease_in(t):
+    return t * t
+def ease_out(t):
+    return 1 - (1 - t) * (1 - t)
+def ease_in_out(t):
+    return 3 * t * t - 2 * t * t * t
+def bounce(t):
+    if t < 0.5:
+        return ease_out(t * 2) * 0.5
+    else:
+        return ease_in((t - 0.5) * 2) * 0.5 + 0.5
+def elastic(t):
+    return math.sin(13 * math.pi / 2 * t) * math.pow(2, 10 * (t - 1))
+def glitchy(t):
+    return t + 0.1 * math.sin(40 * t)
+def exponential_ease_out(t):
+    return 1 - (1 - t) ** 4
 
-        easing_functions = {
-            "linear": lambda t: t,
-            "ease_in": ease_in,
-            "ease_out": ease_out,
-            "ease_in_out": ease_in_out,
-            "bounce": bounce,
-            "elastic": elastic,
-            "glitchy": glitchy,
-            "exponential_ease_out": exponential_ease_out,
-        }
+def gaussian_blur(mask, blur_radius):
+    if blur_radius > 0:
+        kernel_size = int(blur_radius * 2) + 1
+        if kernel_size % 2 == 0:
+            kernel_size += 1  # Ensure kernel size is odd
+        sigma = blur_radius / 3
+        x = torch.arange(-kernel_size // 2 + 1, kernel_size // 2 + 1, dtype=torch.float32)
+        x = torch.exp(-0.5 * (x / sigma) ** 2)
+        kernel1d = x / x.sum()
+        kernel2d = kernel1d[:, None] * kernel1d[None, :]
+        kernel2d = kernel2d.to(mask.device)
+        kernel2d = kernel2d.expand(mask.shape[2], 1, kernel2d.shape[0], kernel2d.shape[1])
+        mask = mask.permute(2, 0, 1).unsqueeze(0)  # Change to [C, H, W] and add batch dimension
+        mask = F.conv2d(mask, kernel2d, padding=kernel_size // 2, groups=mask.shape[1])
+        mask = mask.squeeze(0).permute(1, 2, 0)  # Change back to [H, W, C]
+    return mask
+
+easing_functions = {
+    "linear": lambda t: t,
+    "ease_in": ease_in,
+    "ease_out": ease_out,
+    "ease_in_out": ease_in_out,
+    "bounce": bounce,
+    "elastic": elastic,
+    "glitchy": glitchy,
+    "exponential_ease_out": exponential_ease_out,
+}
+
+class TransitionImagesMulti:
+    RETURN_TYPES = ("IMAGE",)
+    FUNCTION = "transition"
+    CATEGORY = "KJNodes/image"
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                 "inputcount": ("INT", {"default": 2, "min": 2, "max": 1000, "step": 1}),
+                 "image_1": ("IMAGE",),
+                 "image_2": ("IMAGE",),
+                 "interpolation": (["linear", "ease_in", "ease_out", "ease_in_out", "bounce", "elastic", "glitchy", "exponential_ease_out"],),
+                 "transition_type": (["horizontal slide", "vertical slide", "box", "circle", "horizontal door", "vertical door", "fade"],),
+                 "transitioning_frames": ("INT", {"default": 1,"min": 0, "max": 4096, "step": 1}),
+                 "blur_radius": ("FLOAT", {"default": 0.0,"min": 0.0, "max": 100.0, "step": 0.1}),
+                 "reverse": ("BOOLEAN", {"default": False}),
+                 "device": (["CPU", "GPU"], {"default": "CPU"}),
+        },
+    } 
+
+    #transitions from matteo's essential nodes
+    def transition(self, inputcount, transitioning_frames, transition_type, interpolation, device, blur_radius, reverse, **kwargs):
+
+        gpu = model_management.get_torch_device()
 
         image_1 = kwargs["image_1"]
         height = image_1.shape[1]
@@ -1461,17 +1451,72 @@ class TransitionImagesMulti:
                 last_frame_image_1 = last_frame_image_1.to(gpu)
                 first_frame_image_2 = first_frame_image_2.to(gpu)
 
+            if reverse:
+                last_frame_image_1, first_frame_image_2 = first_frame_image_2, last_frame_image_1
+
             for frame in range(transitioning_frames):
                 t = frame / (transitioning_frames - 1)
                 alpha = easing_function(t)
                 alpha_tensor = torch.tensor(alpha, dtype=last_frame_image_1.dtype, device=last_frame_image_1.device)
-                frame_image = wipe(last_frame_image_1, first_frame_image_2, alpha_tensor, transition_type, blur_radius)
+                frame_image = wipe(last_frame_image_1, first_frame_image_2, alpha_tensor, transition_type, blur_radius, reverse)
                 frames.append(frame_image)
         
             frames = torch.stack(frames).cpu()
             image_1 = torch.cat((image_1, frames, new_image), dim=0)
         
         return image_1.cpu(),
+
+class TransitionImagesInBatch:
+    RETURN_TYPES = ("IMAGE",)
+    FUNCTION = "transition"
+    CATEGORY = "KJNodes/image"
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                 "images": ("IMAGE",),
+                 "interpolation": (["linear", "ease_in", "ease_out", "ease_in_out", "bounce", "elastic", "glitchy", "exponential_ease_out"],),
+                 "transition_type": (["horizontal slide", "vertical slide", "box", "circle", "horizontal door", "vertical door", "fade"],),
+                 "transitioning_frames": ("INT", {"default": 1,"min": 0, "max": 4096, "step": 1}),
+                 "blur_radius": ("FLOAT", {"default": 0.0,"min": 0.0, "max": 100.0, "step": 0.1}),
+                 "reverse": ("BOOLEAN", {"default": False}),
+                 "device": (["CPU", "GPU"], {"default": "CPU"}),
+        },
+    } 
+
+    #transitions from matteo's essential nodes
+    def transition(self, images, transitioning_frames, transition_type, interpolation, device, blur_radius, reverse):
+
+        gpu = model_management.get_torch_device()
+
+        easing_function = easing_functions[interpolation]
+        
+        images_list = []
+        for i in range(images.shape[0] - 1):
+            frames = []
+            image_1 = images[i]
+            image_2 = images[i + 1]
+
+            if device == "GPU":
+                image_1 = image_1.to(gpu)
+                image_2 = image_2.to(gpu)
+
+            if reverse:
+                image_1, image_2 = image_2, image_1
+                
+            for frame in range(transitioning_frames):
+                t = frame / (transitioning_frames - 1)
+                alpha = easing_function(t)
+                alpha_tensor = torch.tensor(alpha, dtype=image_1.dtype, device=image_1.device)
+                frame_image = wipe(image_1, image_2, alpha_tensor, transition_type, blur_radius, reverse)
+                frames.append(frame_image)
+        
+            frames = torch.stack(frames).cpu()
+            images_list.append(frames)
+        images = torch.cat(images_list, dim=0)
+        
+        return images.cpu(),
 
 class GetImageRangeFromBatch:
     

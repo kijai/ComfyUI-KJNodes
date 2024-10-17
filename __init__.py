@@ -80,6 +80,7 @@ NODE_CONFIG = {
     "SaveImageKJ": {"class": SaveImageKJ, "name": "Save Image KJ"},
     "SplitImageChannels": {"class": SplitImageChannels, "name": "Split Image Channels"},
     "TransitionImagesMulti": {"class": TransitionImagesMulti, "name": "Transition Images Multi"},
+    "TransitionImagesInBatch": {"class": TransitionImagesInBatch, "name": "Transition Images In Batch"},
     #batch cropping
     "BatchCropFromMask": {"class": BatchCropFromMask, "name": "Batch Crop From Mask"},
     "BatchCropFromMaskAdvanced": {"class": BatchCropFromMaskAdvanced, "name": "Batch Crop From Mask Advanced"},
