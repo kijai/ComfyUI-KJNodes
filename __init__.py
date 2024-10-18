@@ -150,7 +150,7 @@ NODE_CONFIG = {
     "FluxBlockLoraLoader": {"class": FluxBlockLoraLoader, "name": "Flux Block Lora Loader"},
     "FluxBlockLoraSelect": {"class": FluxBlockLoraSelect, "name": "Flux Block Lora Select"},
     "CustomControlNetWeightsFluxFromList": {"class": CustomControlNetWeightsFluxFromList, "name": "Custom ControlNet Weights Flux From List"},
-    "PatchCublasLinear": {"class": PatchCublasLinear, "name": "Patch Cublas Linear"},
+    "CheckpointLoaderKJ": {"class": CheckpointLoaderKJ, "name": "CheckpointLoaderKJ"},
 
     #instance diffusion
     "CreateInstanceDiffusionTracking": {"class": CreateInstanceDiffusionTracking},
