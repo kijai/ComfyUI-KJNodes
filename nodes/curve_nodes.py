@@ -91,8 +91,10 @@ Plots coordinates to sequence of images using Matplotlib.
     def append(self, coordinates, text, width, height, bbox_width, bbox_height, size_multiplier=[1.0]):
         coordinates = json.loads(coordinates.replace("'", '"'))
         coordinates = [(coord['x'], coord['y']) for coord in coordinates]
-        batch_size = len(coordinates)    
-        if len(size_multiplier) != batch_size:
+        batch_size = len(coordinates)
+        if not size_multiplier or len(size_multiplier) != batch_size:
+            size_multiplier = [0] * batch_size
+        else:
             size_multiplier = size_multiplier * (batch_size // len(size_multiplier)) + size_multiplier[:batch_size % len(size_multiplier)]
 
         plot_image_tensor = plot_coordinates_to_tensor(coordinates, height, width, bbox_height, bbox_width, size_multiplier, text)
@@ -268,7 +270,9 @@ Locations are center locations.
         batch_size = len(coordinates)
         out = []
         color = "white"
-        if len(size_multiplier) != batch_size:
+        if not size_multiplier or len(size_multiplier) != batch_size:
+            size_multiplier = [0] * batch_size
+        else:
             size_multiplier = size_multiplier * (batch_size // len(size_multiplier)) + size_multiplier[:batch_size % len(size_multiplier)]
         for i, coord in enumerate(coordinates):
             image = Image.new("RGB", (frame_width, frame_height), "black")
@@ -1021,8 +1025,10 @@ for example:
         batch_size = len(coordinates)
         # Initialize a list to hold the coordinates for the current ID
         id_coordinates = []
-        if len(size_multiplier) != batch_size:
-                size_multiplier = size_multiplier * (batch_size // len(size_multiplier)) + size_multiplier[:batch_size % len(size_multiplier)]
+        if not size_multiplier or len(size_multiplier) != batch_size:
+            size_multiplier = [0] * batch_size
+        else:
+            size_multiplier = size_multiplier * (batch_size // len(size_multiplier)) + size_multiplier[:batch_size % len(size_multiplier)]
         for i, coord in enumerate(coordinates):
             x = coord['x']
             y = coord['y']
