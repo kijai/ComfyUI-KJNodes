@@ -556,10 +556,10 @@ Can be used for realtime diffusion with autoqueue.
     def INPUT_TYPES(s):
         return {
             "required": {
-                 "x": ("INT", {"default": 0,"min": 0, "max": 4096, "step": 1}),
-                 "y": ("INT", {"default": 0,"min": 0, "max": 4096, "step": 1}),
-                 "width": ("INT", {"default": 512,"min": 0, "max": 4096, "step": 1}),
-                 "height": ("INT", {"default": 512,"min": 0, "max": 4096, "step": 1}),
+                 "x": ("INT", {"default": 0,"min": 0, "max": 10000, "step": 1}),
+                 "y": ("INT", {"default": 0,"min": 0, "max": 10000, "step": 1}),
+                 "width": ("INT", {"default": 512,"min": 0, "max": 10000, "step": 1}),
+                 "height": ("INT", {"default": 512,"min": 0, "max": 10000, "step": 1}),
                  "num_frames": ("INT", {"default": 1,"min": 1, "max": 255, "step": 1}),
                  "delay": ("FLOAT", {"default": 0.1,"min": 0.0, "max": 10.0, "step": 0.01}),
         },
@@ -1307,7 +1307,7 @@ class CrossFadeImagesMulti:
         
         return image_1,
 
-def wipe(images_1, images_2, alpha, transition_type, blur_radius, reverse):        
+def transition_images(images_1, images_2, alpha, transition_type, blur_radius, reverse):        
             width = images_1.shape[1]
             height = images_1.shape[0]
 
@@ -1461,7 +1461,7 @@ Creates transitions between images.
                 t = frame / (transitioning_frames - 1)
                 alpha = easing_function(t)
                 alpha_tensor = torch.tensor(alpha, dtype=last_frame_image_1.dtype, device=last_frame_image_1.device)
-                frame_image = wipe(last_frame_image_1, first_frame_image_2, alpha_tensor, transition_type, blur_radius, reverse)
+                frame_image = transition_images(last_frame_image_1, first_frame_image_2, alpha_tensor, transition_type, blur_radius, reverse)
                 frames.append(frame_image)
         
             frames = torch.stack(frames).cpu()
@@ -1493,6 +1493,8 @@ Creates transitions between images in a batch.
 
     #transitions from matteo's essential nodes
     def transition(self, images, transitioning_frames, transition_type, interpolation, device, blur_radius, reverse):
+        if images.shape[0] == 1:
+            return images,
 
         gpu = model_management.get_torch_device()
 
@@ -1515,7 +1517,7 @@ Creates transitions between images in a batch.
                 t = frame / (transitioning_frames - 1)
                 alpha = easing_function(t)
                 alpha_tensor = torch.tensor(alpha, dtype=image_1.dtype, device=image_1.device)
-                frame_image = wipe(image_1, image_2, alpha_tensor, transition_type, blur_radius, reverse)
+                frame_image = transition_images(image_1, image_2, alpha_tensor, transition_type, blur_radius, reverse)
                 frames.append(frame_image)
         
             frames = torch.stack(frames).cpu()
@@ -2525,11 +2527,12 @@ class ImageUncropByMask:
             bbox_width = x1 - x0
 
             # Resize source image to match the bounding box dimensions
-            resized_source = F.interpolate(source[i].unsqueeze(0).movedim(-1, 1), size=(bbox_height, bbox_width), mode='bilinear', align_corners=False)
+            #resized_source = F.interpolate(source[i].unsqueeze(0).movedim(-1, 1), size=(bbox_height, bbox_width), mode='bilinear', align_corners=False)
+            resized_source = common_upscale(source[i].unsqueeze(0).movedim(-1, 1), bbox_width, bbox_height, "lanczos", "disabled")
             resized_source = resized_source.movedim(1, -1).squeeze(0)
     
             # Resize mask to match the bounding box dimensions
-            resized_mask = F.interpolate(mask[i].unsqueeze(0).unsqueeze(0), size=(bbox_height, bbox_width), mode='nearest')
+            resized_mask = F.interpolate(mask[i].unsqueeze(0).unsqueeze(0), size=(bbox_height, bbox_width), mode='bilinear')
             resized_mask = resized_mask.squeeze(0).squeeze(0)
 
             # Calculate padding values
