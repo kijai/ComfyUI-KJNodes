@@ -446,17 +446,17 @@ this.heightWidget.callback = () => {
     const index = this.index;
     let angle = 0;
 
-    if (this.dotShape === "triangle") {
+    if (self.dotShape === "triangle") {
       let dxNext = 0, dyNext = 0;
-      if (index < points.length - 1) {
-        dxNext = points[index + 1].x - points[index].x;
-        dyNext = points[index + 1].y - points[index].y;
+      if (index < self.points.length - 1) {
+        dxNext = self.points[index + 1].x - self.points[index].x;
+        dyNext = self.points[index + 1].y - self.points[index].y;
       }
 
       let dxPrev = 0, dyPrev = 0;
       if (index > 0) {
-        dxPrev = points[index].x - points[index - 1].x;
-        dyPrev = points[index].y - points[index - 1].y;
+        dxPrev = self.points[index].x - self.points[index - 1].x;
+        dyPrev = self.points[index].y - self.points[index - 1].y;
       }
 
       const dx = (dxNext + dxPrev) / 2;
