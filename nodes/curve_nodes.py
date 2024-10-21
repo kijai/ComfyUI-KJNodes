@@ -5,6 +5,9 @@ from PIL import Image, ImageDraw, ImageFont, ImageColor, ImageFilter
 import numpy as np
 from ..utility.utility import pil2tensor
 import folder_paths
+import io
+import base64
+        
 from comfy.utils import common_upscale
 
 def plot_coordinates_to_tensor(coordinates, height, width, bbox_height, bbox_width, size_multiplier, prompt):
@@ -150,6 +153,7 @@ class SplineEditor:
             "optional": {
                 "min_value": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
                 "max_value": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
+                "bg_image": ("IMAGE", ),
             }
         }
 
@@ -196,7 +200,8 @@ output types:
 """
 
     def splinedata(self, mask_width, mask_height, coordinates, float_output_type, interpolation, 
-                   points_to_sample, sampling_method, points_store, tension, repeat_output, min_value=0.0, max_value=1.0):
+                   points_to_sample, sampling_method, points_store, tension, repeat_output, 
+                   min_value=0.0, max_value=1.0, bg_image=None):
         
         coordinates = json.loads(coordinates)
         normalized = []
@@ -226,7 +231,22 @@ output types:
         masks_out = torch.stack(mask_tensors)
         masks_out = masks_out.repeat(repeat_output, 1, 1, 1)
         masks_out = masks_out.mean(dim=-1)
-        return (masks_out, json.dumps(coordinates), out_floats, len(out_floats) , json.dumps(normalized))
+        if bg_image is None:
+            return (masks_out, json.dumps(coordinates), out_floats, len(out_floats) , json.dumps(normalized))
+        else:
+            transform = transforms.ToPILImage()
+            image = transform(bg_image[0].permute(2, 0, 1))
+            buffered = io.BytesIO()
+            image.save(buffered, format="JPEG", quality=75)
+
+            # Step 3: Encode the image bytes to a Base64 string
+            img_bytes = buffered.getvalue()
+            img_base64 = base64.b64encode(img_bytes).decode('utf-8')
+        return {
+                "ui": {"bg_image": [img_base64]},
+                "result":(masks_out, json.dumps(coordinates), out_floats, len(out_floats) , json.dumps(normalized))
+                }
+     
 
 class CreateShapeMaskOnPath:
     
@@ -335,8 +355,8 @@ Locations are center locations.
                 "coordinates": ("STRING", {"forceInput": True}),
                 "frame_width": ("INT", {"default": 512,"min": 16, "max": 4096, "step": 1}),
                 "frame_height": ("INT", {"default": 512,"min": 16, "max": 4096, "step": 1}),
-                "shape_width": ("INT", {"default": 128,"min": 8, "max": 4096, "step": 1}),
-                "shape_height": ("INT", {"default": 128,"min": 8, "max": 4096, "step": 1}),
+                "shape_width": ("INT", {"default": 128,"min": 2, "max": 4096, "step": 1}),
+                "shape_height": ("INT", {"default": 128,"min": 2, "max": 4096, "step": 1}),
                 "shape_color": ("STRING", {"default": 'white'}),
                 "bg_color": ("STRING", {"default": 'black'}),
                 "blur_radius": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 100, "step": 0.1}),
@@ -1308,9 +1328,6 @@ you can clear the image from the context menu by right clicking on the canvas
 """
 
     def pointdata(self, points_store, bbox_store, width, height, coordinates, neg_coordinates, normalize, bboxes, bbox_format="xyxy", bg_image=None):
-        import io
-        import base64
-        
         coordinates = json.loads(coordinates)
         pos_coordinates = []
         for coord in coordinates:
