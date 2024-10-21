@@ -1864,6 +1864,91 @@ class DifferentialDiffusionAdvanced():
 
         return (denoise_mask >= threshold).to(denoise_mask.dtype)
     
+class FluxBlockLoraString:
+    def __init__(self):
+        pass
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "block_string": ("STRING", {"default": "", "multiline": True}),
+            }
+        }
+
+    RETURN_TYPES = ("SELECTEDBLOCKS",)
+    RETURN_NAMES = ("blocks",)
+    OUTPUT_TOOLTIPS = ("The modified diffusion model.",)
+    FUNCTION = "load_lora"
+
+    CATEGORY = "KJNodes/experimental"
+    DESCRIPTION = "Select individual block alpha values via string input, e.g., 's0-10=1.2,d1-5=0.8'"
+
+    def load_lora(self, block_string):
+        arg_dict = {}
+        # Initialize all blocks to default value (e.g., 0.0)
+        for i in range(19):
+            arg_dict[f"double_blocks.{i}."] = 0.0
+
+        for i in range(38):
+            arg_dict[f"single_blocks.{i}."] = 0.0
+
+        # Parse the block_string
+        import re
+
+        # Pattern to match assignments like 's0-10=1.2'
+        pattern = r'([sd])([^=]+)=(\d+(\.\d+)?)'
+
+        # Find all matches in the input string
+        matches = re.findall(pattern, block_string)
+
+        for match in matches:
+            block_type = match[0]
+            indices_str = match[1]
+            value = float(match[2])
+
+            # Parse indices
+            indices_list = indices_str.split(',')
+            indices = []
+            for idx_str in indices_list:
+                idx_str = idx_str.strip()
+                if '-' in idx_str:
+                    start_str, end_str = idx_str.split('-')
+                    start = int(start_str)
+                    end = int(end_str)
+                    if start > end:
+                        # Swap if start is greater than end
+                        start, end = end, start
+                    indices.extend(range(start, end + 1))
+                else:
+                    idx = int(idx_str)
+                    indices.append(idx)
+
+            # Set the values in arg_dict
+            if block_type == 's':
+                valid_range = range(0, 38)
+                prefix = 'single_blocks.'
+            elif block_type == 'd':
+                valid_range = range(0, 19)
+                prefix = 'double_blocks.'
+            else:
+                # Invalid block type, skip
+                continue
+
+            for index in indices:
+                if index in valid_range:
+                    key = f"{prefix}{index}."
+                    arg_dict[key] = value
+                else:
+                    # Index out of valid range, skip
+                    continue
+
+        #return (arg_dict,)
+        return {"ui": {
+                    "block_string": [block_string]}, 
+                    "result": (arg_dict,)
+                }
+    
 class FluxBlockLoraSelect:
     def __init__(self):
         self.loaded_lora = None
