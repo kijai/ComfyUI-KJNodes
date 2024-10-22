@@ -103,6 +103,7 @@ NODE_CONFIG = {
     "GetLatentsFromBatchIndexed": {"class": GetLatentsFromBatchIndexed, "name": "Get Latents From Batch Indexed"},
     "ScaleBatchPromptSchedule": {"class": ScaleBatchPromptSchedule, "name": "Scale Batch Prompt Schedule"},
     "CameraPoseVisualizer": {"class": CameraPoseVisualizer, "name": "Camera Pose Visualizer"},
+    "AppendStringsToList": {"class": AppendStringsToList, "name": "Append Strings To List"},
     "JoinStrings": {"class": JoinStrings, "name": "Join Strings"},
     "JoinStringMulti": {"class": JoinStringMulti, "name": "Join String Multi"},
     "SomethingToString": {"class": SomethingToString, "name": "Something To String"},

@@ -270,11 +270,11 @@ class SplineEditor{
   this.widthWidget = context.widgets.find(w => w.name === "mask_width");
   this.heightWidget = context.widgets.find(w => w.name === "mask_height");
 
-  var interpolation = this.interpolationWidget.value
-  var tension = this.tensionWidget.value
+  this.interpolation = this.interpolationWidget.value
+  this.tension = this.tensionWidget.value
   this.points_to_sample = this.pointsWidget.value
-  var rangeMin = this.minValueWidget.value
-  var rangeMax = this.maxValueWidget.value
+  this.rangeMin = this.minValueWidget.value
+  this.rangeMax = this.maxValueWidget.value
   this.pointsLayer = null;
   this.samplingMethod = this.samplingMethodWidget.value
   
@@ -284,11 +284,11 @@ class SplineEditor{
   
   
   this.interpolationWidget.callback = () => {
-    interpolation = this.interpolationWidget.value
+    this.interpolation = this.interpolationWidget.value
     this.updatePath();
   }
   this.samplingMethodWidget.callback = () => {
-    this.samplingMethod = samplingMethodWidget.value
+    this.samplingMethod = this.samplingMethodWidget.value
     if (this.samplingMethod == "path") {
       this.dotShape = "triangle"
     }
@@ -299,7 +299,7 @@ class SplineEditor{
     this.updatePath();
   }
   this.tensionWidget.callback = () => {
-    tension = this.tensionWidget.value
+    this.tension = this.tensionWidget.value
     this.updatePath();
   }
   this.pointsWidget.callback = () => {
@@ -307,11 +307,11 @@ class SplineEditor{
     this.updatePath();
   }
   this.minValueWidget.callback = () => {
-    rangeMin = this.minValueWidget.value
+    this.rangeMin = this.minValueWidget.value
     this.updatePath();
   }
   this.maxValueWidget.callback = () => {
-    rangeMax = this.maxValueWidget.value
+    this.rangeMax = this.maxValueWidget.value
     this.updatePath();
   }
   this.widthWidget.callback = () => {
@@ -428,8 +428,8 @@ this.heightWidget.callback = () => {
     .data(() => this.points)
     .left(d => d.x)
     .top(d => d.y)
-    .interpolate(() => interpolation)
-    .tension(() => tension)
+    .interpolate(() => this.interpolation)
+    .tension(() => this.tension)
     .segmented(() => false)
     .strokeStyle(pv.Colors.category10().by(pv.index))
     .lineWidth(3)
@@ -522,8 +522,8 @@ this.heightWidget.callback = () => {
       if (this.samplingMethod == "path") {
         return `X: ${Math.round(d.x)}, Y: ${Math.round(d.y)}`;
       } else {
-          let frame = Math.round((d.x / self.width) * this.points_to_sample);
-          let normalizedY = (1.0 - (d.y / self.height) - 0.0) * (rangeMax - rangeMin) + rangeMin;
+          let frame = Math.round((d.x / self.width) * self.points_to_sample);
+          let normalizedY = (1.0 - (d.y / self.height) - 0.0) * (self.rangeMax - self.rangeMin) + self.rangeMin;
           let normalizedX = (d.x / self.width);
           return `F: ${frame}, X: ${normalizedX.toFixed(2)}, Y: ${normalizedY.toFixed(2)}`;
       }

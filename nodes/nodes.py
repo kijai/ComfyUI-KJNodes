@@ -219,7 +219,23 @@ Combines multiple conditioning nodes into one
                 cond = cond_concat_node.concat(cond, new_cond)[0]
         return (cond, inputcount,)
 
+class AppendStringsToList:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "string1": ("STRING", {"default": '', "forceInput": True}),
+                "string2": ("STRING", {"default": '', "forceInput": True}),
+            }
+        }
+    RETURN_TYPES = ("STRING",)
+    FUNCTION = "joinstring"
+    CATEGORY = "KJNodes/constants"
 
+    def joinstring(self, string1, string2):
+        joined_string = [string1, string2]
+        return (joined_string, )
+    
 class JoinStrings:
     @classmethod
     def INPUT_TYPES(cls):
