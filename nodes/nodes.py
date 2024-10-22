@@ -233,7 +233,12 @@ class AppendStringsToList:
     CATEGORY = "KJNodes/constants"
 
     def joinstring(self, string1, string2):
-        joined_string = [string1, string2]
+        if not isinstance(string1, list):
+            string1 = [string1]
+        if not isinstance(string2, list):
+            string2 = [string2]
+        
+        joined_string = string1 + string2
         return (joined_string, )
     
 class JoinStrings:
