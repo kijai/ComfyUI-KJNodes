@@ -150,11 +150,12 @@ app.registerExtension({
             
             // Create an array of menu items using the createMenuItem function
             this.menuItems = [
-              createMenuItem(1, "Toggle handles"),
-              createMenuItem(2, "Display sample points"),
-              createMenuItem(3, "Switch point shape"),
-              createMenuItem(4, "Background image"),
-              createMenuItem(5, "Invert point order")
+              createMenuItem(0, "Toggle handles"),
+              createMenuItem(1, "Display sample points"),
+              createMenuItem(2, "Switch point shape"),
+              createMenuItem(3, "Background image"),
+              createMenuItem(4, "Invert point order"),
+              createMenuItem(5, "Clear Image"),
             ];
             
             // Add mouseover and mouseout event listeners to each menu item for styling
@@ -315,16 +316,16 @@ class SplineEditor{
     this.updatePath();
   }
   this.widthWidget.callback = () => {
-    w = this.widthWidget.value;
-    if (w > 256) {
-        context.setSize([w + 45, context.size[1]]);
+    this.width = this.widthWidget.value;
+    if (this.width > 256) {
+        context.setSize([this.width + 45, context.size[1]]);
     }
-    vis.width(w);
+    this.vis.width(this.width);
     this.updatePath();
 }
 this.heightWidget.callback = () => {
     this.height = this.heightWidget.value
-    vis.height(this.height)
+    this.vis.height(this.height)
     context.setSize([context.size[0], this.height + 430]);
     this.updatePath();
   }
@@ -339,7 +340,7 @@ this.heightWidget.callback = () => {
  var hoverIndex = -1;
  var isDragging = false;
  this.width = this.widthWidget.value;
-  this.height = this.heightWidget.value;
+ this.height = this.heightWidget.value;
  var i = 3;
  this.points = [];
 
@@ -372,7 +373,7 @@ this.heightWidget.callback = () => {
   .lineWidth(2)
   .antialias(false)
   .margin(10)
-  .event("mousedown", function() {
+  .event("mousedown", function () {
     if (pv.event.shiftKey) { // Use pv.event to access the event object
         let scaledMouse = {
         x: this.mouse().x / app.canvas.ds.scale,
@@ -470,10 +471,10 @@ this.heightWidget.callback = () => {
     return angle;
  })
     .cursor("move")
-    .strokeStyle(function() { return i == this.index ? "#ff7f0e" : "#1f77b4"; })
-    .fillStyle(function() { return "rgba(100, 100, 100, 0.3)"; })
+    .strokeStyle(function () { return i == this.index ? "#ff7f0e" : "#1f77b4"; })
+    .fillStyle(function () { return "rgba(100, 100, 100, 0.3)"; })
     .event("mousedown", pv.Behavior.drag())
-    .event("dragstart", function() {
+    .event("dragstart", function () {
         i = this.index;
         hoverIndex = this.index;
         isDragging = true;
@@ -489,7 +490,7 @@ this.heightWidget.callback = () => {
       }
         isDragging = false;
     })
-    .event("drag", function() {
+    .event("drag", function () {
       let adjustedX = this.mouse().x / app.canvas.ds.scale; // Adjust the new X position by the inverse of the scale factor
       let adjustedY = this.mouse().y / app.canvas.ds.scale; // Adjust the new Y position by the inverse of the scale factor
        // Determine the bounds of the vis.Panel
@@ -536,14 +537,15 @@ this.heightWidget.callback = () => {
     var svgElement = this.vis.canvas();
     svgElement.style['zIndex'] = "2"
     svgElement.style['position'] = "relative"
-    context.splineEditor.element.appendChild(svgElement);
+    this.node.splineEditor.element.appendChild(svgElement);
     this.pathElements = svgElement.getElementsByTagName('path'); // Get all path elements
 
     if (this.width > 256) {
-      this.node.setSize([this.width + 45, context.size[1]]);
+      this.node.setSize([this.width + 45, this.node.size[1]]);
     }
     this.node.setSize([this.node.size[0], this.height + 430]);
     this.updatePath();
+    this.refreshBackgroundImage();
 }
 
   updatePath = () => {
@@ -597,7 +599,7 @@ this.heightWidget.callback = () => {
         if (img.width > 256) {
           this.node.setSize([img.width + 45, this.node.size[1]]);
         }
-        this.node.setSize([this.node.size[0], img.height + 300]);
+        this.node.setSize([this.node.size[0], img.height + 500]);
         this.vis.width(img.width);
         this.vis.height(img.height);
         this.height = img.height;
@@ -671,13 +673,14 @@ this.heightWidget.callback = () => {
         img.onload = () => this.handleImageLoad(img, null, base64String);
       }
     };
-  createContextMenu() {
+
+  createContextMenu = () => {
     self = this;
-    document.addEventListener('contextmenu', function(e) {
+    document.addEventListener('contextmenu', function (e) {
       e.preventDefault();
     });
 
-    document.addEventListener('click', function(e) {
+    document.addEventListener('click', function (e) {
       if (!self.node.contextMenu.contains(e.target)) {
         self.node.contextMenu.style.display = 'none';
       }
@@ -685,9 +688,8 @@ this.heightWidget.callback = () => {
 
     this.node.menuItems.forEach((menuItem, index) => {
       self = this;
-      menuItem.addEventListener('click', function(e) {
+      menuItem.addEventListener('click', function (e) {
         e.preventDefault();
-        // Logic specific to each menu item based on its index or id
         switch (index) {
           case 0:
             e.preventDefault();
@@ -735,35 +737,31 @@ this.heightWidget.callback = () => {
             fileInput.accept = 'image/*'; // Accept only image files
 
             // Listen for file selection
-            fileInput.addEventListener('change', function(event) {
+            fileInput.addEventListener('change', function (event) {
               const file = event.target.files[0]; // Get the selected file
 
               if (file) {
-                // Create a URL for the selected file
                 const imageUrl = URL.createObjectURL(file);
-                
-                // Set the backgroundImage with the new URL and make it visible
-                self.backgroundImage
-                  .url(imageUrl)
-                  .visible(true)
-                  .root.render();
+                let img = new Image();
+                img.src = imageUrl;
+                img.onload = () => self.handleImageLoad(img, file, null);
               }
             });
 
-            // If the backgroundImage is already visible, hide it. Otherwise, show file input.
-            if (self.backgroundImage.visible()) {
-              self.backgroundImage.visible(false)
-              .root.render();
-            } else {
-              // Trigger the file input dialog
               fileInput.click();
-            }
+            
             self.node.contextMenu.style.display = 'none';
             break;
           case 4:
             e.preventDefault();
             self.points.reverse();
             self.updatePath();
+          break;
+          case 5:
+            self.backgroundImage.visible(false).root.render();
+            self.node.properties.imgData = null;
+            self.node.contextMenu.style.display = 'none';
+          break;
         }
       });
     });
