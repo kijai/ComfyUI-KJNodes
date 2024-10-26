@@ -1864,6 +1864,7 @@ class DifferentialDiffusionAdvanced():
 
         return (denoise_mask >= threshold).to(denoise_mask.dtype)
     
+#New
 class FluxBlockLoraString:
     def __init__(self):
         pass

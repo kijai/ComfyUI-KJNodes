@@ -77,7 +77,7 @@ app.registerExtension({
 						});
 					}
 					break;
-      case "FluxBlockLoraString":
+      case "FluxBlockLoraString": //New
         const onFluxBlockLoraStringExecuted = nodeType.prototype.onExecuted;
         const onFluxBlockLoraStringDraw = nodeType.prototype.onDrawForeground;
         const onFluxBlockLoraStringDeselected = nodeType.prototype.onDeselected;
