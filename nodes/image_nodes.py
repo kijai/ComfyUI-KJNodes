@@ -2484,11 +2484,15 @@ class ImageCropByMaskAndResize:
                 target_height = base_resolution
                 target_width = int(base_resolution * aspect_ratio)
             
-            cropped_image = F.interpolate(cropped_image, size=(target_height, target_width), mode='bilinear', align_corners=False)
+            # Ensure dimensions are divisible by 8
+            target_width = (target_width + 7) // 8 * 8
+            target_height = (target_height + 7) // 8 * 8
+            
+            cropped_image = common_upscale(cropped_image, target_width, target_height, "lanczos", "disabled")
             cropped_image = cropped_image.movedim(1, -1).squeeze(0)
 
             cropped_mask = cropped_mask.unsqueeze(0).unsqueeze(0)
-            cropped_mask = F.interpolate(cropped_mask, size=(target_height, target_width), mode='nearest')
+            cropped_mask = F.interpolate(cropped_mask, size=(target_height, target_width), mode='bilinear')
             cropped_mask = cropped_mask.squeeze(0).squeeze(0)
 
             image_list.append(cropped_image)
