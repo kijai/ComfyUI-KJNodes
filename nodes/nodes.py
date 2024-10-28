@@ -2356,7 +2356,6 @@ class TorchCompileControlNet:
     EXPERIMENTAL = True
 
     def compile(self, controlnet, backend, mode, fullgraph):
-        print(controlnet.control_model)
         if not self._compiled:
             try:
                 # for i, block in enumerate(controlnet.control_model.double_blocks):
