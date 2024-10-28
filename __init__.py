@@ -153,6 +153,8 @@ NODE_CONFIG = {
     "CustomControlNetWeightsFluxFromList": {"class": CustomControlNetWeightsFluxFromList, "name": "Custom ControlNet Weights Flux From List"},
     "CheckpointLoaderKJ": {"class": CheckpointLoaderKJ, "name": "CheckpointLoaderKJ"},
     "TorchCompileModelFluxAdvanced": {"class": TorchCompileModelFluxAdvanced, "name": "TorchCompileModelFluxAdvanced"},
+    "TorchCompileVAE": {"class": TorchCompileVAE, "name": "TorchCompileVAE"},
+    "TorchCompileControlNet": {"class": TorchCompileControlNet, "name": "TorchCompileControlNet"},
 
     #instance diffusion
     "CreateInstanceDiffusionTracking": {"class": CreateInstanceDiffusionTracking},
