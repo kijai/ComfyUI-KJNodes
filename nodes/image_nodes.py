@@ -2222,7 +2222,7 @@ class LoadImagesFromFolderKJ:
             image_count += 1
 
         if len(images) == 1:
-            return (images[0], masks[0], 1)
+            return (images[0], masks[0], 1, image_path_list)
 
         elif len(images) > 1:
             image1 = images[0]
