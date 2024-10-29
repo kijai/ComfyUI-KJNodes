@@ -121,6 +121,7 @@ app.registerExtension({
 
             // context menu
             this.contextMenu = document.createElement("div");
+            this.contextMenu.className = 'spline-editor-context-menu';
             this.contextMenu.id = "context-menu";
             this.contextMenu.style.display = "none";
             this.contextMenu.style.position = "absolute";
@@ -678,12 +679,13 @@ this.heightWidget.callback = () => {
     self = this;
     document.addEventListener('contextmenu', function (e) {
       e.preventDefault();
+      
     });
 
     document.addEventListener('click', function (e) {
-      if (!self.node.contextMenu.contains(e.target)) {
-        self.node.contextMenu.style.display = 'none';
-      }
+      document.querySelectorAll('.spline-editor-context-menu').forEach(menu => {
+        menu.style.display = 'none';
+    });
     });
 
     this.node.menuItems.forEach((menuItem, index) => {
