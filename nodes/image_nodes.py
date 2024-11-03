@@ -2410,6 +2410,9 @@ class ImageCropByMaskAndResize:
                 "mask": ("MASK", ),
                 "base_resolution": ("INT", { "default": 512, "min": 0, "max": MAX_RESOLUTION, "step": 8, }),
                 "padding": ("INT", { "default": 0, "min": 0, "max": MAX_RESOLUTION, "step": 1, }),
+                "min_crop_resolution": ("INT", { "default": 128, "min": 0, "max": MAX_RESOLUTION, "step": 8, }),
+                "max_crop_resolution": ("INT", { "default": 512, "min": 0, "max": MAX_RESOLUTION, "step": 8, }),
+           
             },
         }
 
@@ -2418,7 +2421,7 @@ class ImageCropByMaskAndResize:
     FUNCTION = "crop"
     CATEGORY = "KJNodes/image"
 
-    def crop_by_mask(self, mask, padding=0):
+    def crop_by_mask(self, mask, padding=0, min_crop_resolution=None, max_crop_resolution=None):
         iy, ix = (mask == 1).nonzero(as_tuple=True)
         h0, w0 = mask.shape
 
@@ -2442,14 +2445,19 @@ class ImageCropByMaskAndResize:
             x_c = (x_min + x_max) / 2.0
             y_c = (y_min + y_max) / 2.0
 
-        width_half = width / 2.0
-        height_half = height / 2.0
+        if min_crop_resolution:
+            width = max(width, min_crop_resolution)
+            height = max(height, min_crop_resolution)
+
+        if max_crop_resolution:
+            width = min(width, max_crop_resolution)
+            height = min(height, max_crop_resolution)
 
         if w0 <= width:
             x0 = 0
             w = w0
         else:
-            x0 = max(0, x_c - width_half - padding)
+            x0 = max(0, x_c - width / 2 - padding)
             w = width + 2 * padding
             if x0 + w > w0:
                 x0 = w0 - w
@@ -2458,19 +2466,19 @@ class ImageCropByMaskAndResize:
             y0 = 0
             h = h0
         else:
-            y0 = max(0, y_c - height_half - padding)
+            y0 = max(0, y_c - height / 2 - padding)
             h = height + 2 * padding
             if y0 + h > h0:
                 y0 = h0 - h
 
         return (int(x0), int(y0), int(w), int(h))
 
-    def crop(self, image, mask, base_resolution, padding=0):
+    def crop(self, image, mask, base_resolution, padding=0, min_crop_resolution=128, max_crop_resolution=512):
         image_list = []
         mask_list = []
         bbox_list = []
         for i in range(image.shape[0]):
-            x0, y0, w, h = self.crop_by_mask(mask[i], padding)
+            x0, y0, w, h = self.crop_by_mask(mask[i], padding, min_crop_resolution, max_crop_resolution)
             cropped_image = image[i][y0:y0+h, x0:x0+w, :]
             cropped_mask = mask[i][y0:y0+h, x0:x0+w]
         

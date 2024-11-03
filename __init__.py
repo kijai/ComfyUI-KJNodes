@@ -132,6 +132,7 @@ NODE_CONFIG = {
     "WeightScheduleConvert": {"class": WeightScheduleConvert, "name": "Weight Schedule Convert"},
     "FloatToMask": {"class": FloatToMask, "name": "Float To Mask"},
     "FloatToSigmas": {"class": FloatToSigmas, "name": "Float To Sigmas"},
+    "SigmasToFloat": {"class": SigmasToFloat, "name": "Sigmas To Float"},
     "PlotCoordinates": {"class": PlotCoordinates, "name": "Plot Coordinates"},
     "InterpolateCoords": {"class": InterpolateCoords, "name": "Interpolate Coords"},
     "PointsEditor": {"class": PointsEditor, "name": "Points Editor"},

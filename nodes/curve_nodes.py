@@ -934,6 +934,25 @@ Creates a sigmas tensor from list of float values.
     def customsigmas(self, float_list):
         return torch.tensor(float_list, dtype=torch.float32),
 
+class SigmasToFloat:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required":
+                    {
+                     "sigmas": ("SIGMAS",),
+                     }
+                }
+    RETURN_TYPES = ("FLOAT",)
+    RETURN_NAMES = ("float",)
+    CATEGORY = "KJNodes/noise"
+    FUNCTION = "customsigmas"
+    DESCRIPTION = """
+Creates a float list from sigmas tensors.  
+
+"""
+    def customsigmas(self, sigmas):
+        return sigmas.tolist(),
+
 class GLIGENTextBoxApplyBatchCoords:
     @classmethod
     def INPUT_TYPES(s):
