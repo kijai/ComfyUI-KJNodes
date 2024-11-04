@@ -2321,7 +2321,6 @@ def patched_load_lora_for_models(model, clip, lora, strength_model, strength_cli
 
         
 class PatchModelPatcherOrder:
-
     @classmethod
     def INPUT_TYPES(s):
         return {"required": { 
@@ -2341,7 +2340,6 @@ class PatchModelPatcherOrder:
             comfy.sd.load_lora_for_models = patched_load_lora_for_models
         else:
             comfy.model_patcher.ModelPatcher.patch_model = original_patch_model
-            comfy.model_patcher.ModelPatcher.unpatch_model = original_unpatch_model
             comfy.sd.load_lora_for_models = original_load_lora_for_models
         
         return model,
