@@ -156,6 +156,7 @@ NODE_CONFIG = {
     "TorchCompileModelFluxAdvanced": {"class": TorchCompileModelFluxAdvanced, "name": "TorchCompileModelFluxAdvanced"},
     "TorchCompileVAE": {"class": TorchCompileVAE, "name": "TorchCompileVAE"},
     "TorchCompileControlNet": {"class": TorchCompileControlNet, "name": "TorchCompileControlNet"},
+    "PatchModelPatcherOrder": {"class": PatchModelPatcherOrder, "name": "Patch Model Patcher Order"},
 
     #instance diffusion
     "CreateInstanceDiffusionTracking": {"class": CreateInstanceDiffusionTracking},
