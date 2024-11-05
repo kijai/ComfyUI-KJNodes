@@ -2299,25 +2299,26 @@ def patched_load_lora_for_models(model, clip, lora, strength_model, strength_cli
             print("NOT LOADED {}".format(x))
 
     if patch_keys:
-        compile_settings = getattr(model.model, "compile_settings")
-        print("compile_settings: ", compile_settings)
-        for k in patch_keys:
-            if "diffusion_model." in k:
-                # Remove the prefix to get the attribute path
-                key = k.replace('diffusion_model.', '')
-                attributes = key.split('.')
-                # Start with the diffusion_model object
-                block = model.get_model_object("diffusion_model")
-                # Navigate through the attributes to get to the block
-                for attr in attributes:
-                    if attr.isdigit():
-                        block = block[int(attr)]
-                    else:
-                        block = getattr(block, attr)
-                # Compile the block
-                compiled_block = torch.compile(block, mode=compile_settings["mode"], dynamic=compile_settings["dynamic"], fullgraph=compile_settings["fullgraph"], backend=compile_settings["backend"])
-                # Add the compiled block back as an object patch
-                model.add_object_patch(k, compiled_block)
+        if hasattr(model.model, "compile_settings"):
+            compile_settings = getattr(model.model, "compile_settings")
+            print("compile_settings: ", compile_settings)
+            for k in patch_keys:
+                if "diffusion_model." in k:
+                    # Remove the prefix to get the attribute path
+                    key = k.replace('diffusion_model.', '')
+                    attributes = key.split('.')
+                    # Start with the diffusion_model object
+                    block = model.get_model_object("diffusion_model")
+                    # Navigate through the attributes to get to the block
+                    for attr in attributes:
+                        if attr.isdigit():
+                            block = block[int(attr)]
+                        else:
+                            block = getattr(block, attr)
+                    # Compile the block
+                    compiled_block = torch.compile(block, mode=compile_settings["mode"], dynamic=compile_settings["dynamic"], fullgraph=compile_settings["fullgraph"], backend=compile_settings["backend"])
+                    # Add the compiled block back as an object patch
+                    model.add_object_patch(k, compiled_block)
     return (new_modelpatcher, new_clip)
 
 def patched_write_atomic(
