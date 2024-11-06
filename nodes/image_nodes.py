@@ -2486,16 +2486,15 @@ class ImageCropByMaskAndResize:
             x0, y0, w, h = self.crop_by_mask(mask[i], padding, min_crop_resolution, max_crop_resolution)
             bbox_params.append((x0, y0, w, h))
             aspect_ratios.append(w / h)
-        #print(bbox_params)
 
         # Find maximum width and height
         max_w = max([w for x0, y0, w, h in bbox_params])
         max_h = max([h for x0, y0, w, h in bbox_params])
         max_aspect_ratio = max(aspect_ratios)
 
-        # Ensure dimensions are divisible by 8
-        max_w = (max_w + 7) // 8 * 8
-        max_h = (max_h + 7) // 8 * 8
+        # Ensure dimensions are divisible by 16
+        max_w = (max_w + 15) // 16 * 16
+        max_h = (max_h + 15) // 16 * 16
         # Calculate common target dimensions
         if max_aspect_ratio > 1:
             target_width = base_resolution
@@ -2521,9 +2520,9 @@ class ImageCropByMaskAndResize:
             cropped_image = image[i][y0_new:y1_new, x0_new:x1_new, :]
             cropped_mask = mask[i][y0_new:y1_new, x0_new:x1_new]
             
-            # Ensure dimensions are divisible by 8
-            target_width = (target_width + 7) // 8 * 8
-            target_height = (target_height + 7) // 8 * 8
+            # Ensure dimensions are divisible by 16
+            target_width = (target_width + 15) // 16 * 16
+            target_height = (target_height + 15) // 16 * 16
 
             cropped_image = cropped_image.unsqueeze(0).movedim(-1, 1)  # Move C to the second position (B, C, H, W)
             cropped_image = common_upscale(cropped_image, target_width, target_height, "lanczos", "disabled")

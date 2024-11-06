@@ -9,6 +9,7 @@ import os
 
 import model_management
 from comfy.utils import ProgressBar
+from comfy.utils import common_upscale
 from nodes import MAX_RESOLUTION
 
 import folder_paths
@@ -1179,6 +1180,7 @@ Rounds the mask or batch of masks to a binary mask.
         return (mask,)
     
 class ResizeMask:
+    upscale_methods = ["nearest-exact", "bilinear", "area", "bicubic", "lanczos"]
     @classmethod
     def INPUT_TYPES(s):
         return {
@@ -1187,6 +1189,8 @@ class ResizeMask:
                 "width": ("INT", { "default": 512, "min": 0, "max": MAX_RESOLUTION, "step": 8, "display": "number" }),
                 "height": ("INT", { "default": 512, "min": 0, "max": MAX_RESOLUTION, "step": 8, "display": "number" }),
                 "keep_proportions": ("BOOLEAN", { "default": False }),
+                "upscale_method": (s.upscale_methods,),
+                "crop": (["disabled","center"],),
             }
         }
 
@@ -1198,7 +1202,7 @@ class ResizeMask:
 Resizes the mask or batch of masks to the specified width and height.
 """
 
-    def resize(self, mask, width, height, keep_proportions):
+    def resize(self, mask, width, height, keep_proportions, upscale_method,crop):
         if keep_proportions:
             _, oh, ow = mask.shape
             width = ow if width == 0 else width
@@ -1207,7 +1211,7 @@ Resizes the mask or batch of masks to the specified width and height.
             width = round(ow*ratio)
             height = round(oh*ratio)
         outputs = mask.unsqueeze(1)
-        outputs = F.interpolate(outputs, size=(height, width), mode="nearest")
+        outputs = common_upscale(outputs, width, height, upscale_method, crop)
         outputs = outputs.squeeze(1)
 
         return(outputs, outputs.shape[2], outputs.shape[1],)
