@@ -2474,8 +2474,6 @@ class ImageCropByMaskAndResize:
         return (int(x0), int(y0), int(w), int(h))
 
     def crop(self, image, mask, base_resolution, padding=0, min_crop_resolution=128, max_crop_resolution=512):
-        print("mask shape: ",mask.shape)
-        print("image shape: ",image.shape)
         image_list = []
         mask_list = []
         bbox_list = []
@@ -2499,9 +2497,6 @@ class ImageCropByMaskAndResize:
             cropped_image = cropped_image.unsqueeze(0).movedim(-1, 1)  # Move C to the second position (B, C, H, W)
             cropped_image = common_upscale(cropped_image, target_width, target_height, "lanczos", "disabled")
             cropped_image = cropped_image.movedim(1, -1).squeeze(0)
-
-            print("cropped_image shape: ",cropped_image.shape)
-            print("cropped_mask shape: ",cropped_mask.shape)
 
             cropped_mask = cropped_mask.unsqueeze(0).unsqueeze(0)
             cropped_mask = common_upscale(cropped_mask, target_width, target_height, 'bilinear', "disabled")
@@ -2548,7 +2543,7 @@ class ImageUncropByMask:
             resized_source = resized_source.movedim(1, -1).squeeze(0)
     
             # Resize mask to match the bounding box dimensions
-            resized_mask = F.interpolate(mask[i].unsqueeze(0).unsqueeze(0), size=(bbox_height, bbox_width), mode='bilinear')
+            resized_mask = common_upscale(mask[i].unsqueeze(0).unsqueeze(0), bbox_width, bbox_height, "bilinear", "disabled")
             resized_mask = resized_mask.squeeze(0).squeeze(0)
 
             # Calculate padding values
