@@ -2407,6 +2407,7 @@ class TorchCompileModelFluxAdvanced:
             try:
                 import torch._inductor.codecache
                 torch._inductor.codecache.write_atomic = patched_write_atomic #temporary workaround for the cache write bug in Windows
+                import torch
             except:
                 pass
         single_block_list = self.parse_blocks(single_blocks)
