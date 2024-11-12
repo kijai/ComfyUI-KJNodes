@@ -56,7 +56,7 @@ app.registerExtension({
 					for (const arr of Object.values(LiteGraph.slot_types_default_in)) {
 						for (const valueToAdd of valuesToAddToIn) {
 							const idx = arr.indexOf(valueToAdd);
-							if (idx !== 0) {
+							if (idx !== -1) {
 								arr.splice(idx, 1);
 							}
 							arr.unshift(valueToAdd);
@@ -66,7 +66,7 @@ app.registerExtension({
 					for (const arr of Object.values(LiteGraph.slot_types_default_out)) {
 						for (const valueToAdd of valuesToAddToOut) {
 							const idx = arr.indexOf(valueToAdd);
-							if (idx !== 0) {
+							if (idx !== -1) {
 								arr.splice(idx, 1);
 							}
 							arr.unshift(valueToAdd);
