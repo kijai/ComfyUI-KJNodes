@@ -1501,6 +1501,7 @@ Creates transitions between images in a batch.
         easing_function = easing_functions[interpolation]
         
         images_list = []
+        pbar = ProgressBar(images.shape[0] - 1)
         for i in range(images.shape[0] - 1):
             frames = []
             image_1 = images[i]
@@ -1519,6 +1520,7 @@ Creates transitions between images in a batch.
                 alpha_tensor = torch.tensor(alpha, dtype=image_1.dtype, device=image_1.device)
                 frame_image = transition_images(image_1, image_2, alpha_tensor, transition_type, blur_radius, reverse)
                 frames.append(frame_image)
+            pbar.update(1)
         
             frames = torch.stack(frames).cpu()
             images_list.append(frames)
