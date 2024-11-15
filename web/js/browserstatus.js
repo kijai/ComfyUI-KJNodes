@@ -47,7 +47,9 @@ app.registerExtension({
           )
           if (pythongossFeed) {
             console.warn("KJNodes - Overriding pysssss.FaviconStatus")
-            app.extensions = app.extensions.filter(item => item !== pythongossFeed);
+            pythongossFeed.setup = function() {
+                console.warn("Disabled by KJNodes")
+            };
           }
     },
 });
