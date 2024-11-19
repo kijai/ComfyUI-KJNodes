@@ -55,7 +55,7 @@ class FloatConstant:
     @classmethod
     def INPUT_TYPES(s):
         return {"required": {
-            "value": ("FLOAT", {"default": 0.0, "min": -0xffffffffffffffff, "max": 0xffffffffffffffff, "step": 0.001}),
+            "value": ("FLOAT", {"default": 0.0, "min": -0xffffffffffffffff, "max": 0xffffffffffffffff, "step": 0.00001}),
         },
         }
 
