@@ -2172,10 +2172,11 @@ class CheckpointLoaderKJ:
     def patch(self, ckpt_name, patch_cublaslinear, sage_attention):
         from comfy.ops import disable_weight_init, CastWeightBiasOp, cast_bias_weight
         from nodes import CheckpointLoaderSimple
-        try:
-            from cublas_ops import CublasLinear
-        except ImportError:
-            raise Exception("Can't import 'torch-cublas-hgemm', install it from here https://github.com/aredden/torch-cublas-hgemm")
+        if patch_cublaslinear:
+            try:
+                from cublas_ops import CublasLinear
+            except ImportError:
+                raise Exception("Can't import 'torch-cublas-hgemm', install it from here https://github.com/aredden/torch-cublas-hgemm")
         
         if sage_attention:
             from sageattention import sageattn
