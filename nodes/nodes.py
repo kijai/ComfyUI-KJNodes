@@ -2482,3 +2482,25 @@ class TorchCompileControlNet:
                 raise RuntimeError("Failed to compile model")
        
         return (controlnet, )
+
+class StyleModelApplyAdvanced:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": {"conditioning": ("CONDITIONING", ),
+                             "style_model": ("STYLE_MODEL", ),
+                             "clip_vision_output": ("CLIP_VISION_OUTPUT", ),
+                             "strength": ("FLOAT", {"default": 1.0, "min": -10.0, "max": 10.0, "step": 0.01}),
+                             }}
+    RETURN_TYPES = ("CONDITIONING",)
+    FUNCTION = "apply_stylemodel"
+    CATEGORY = "KJNodes/experimental"
+    DESCRIPTION = "StyleModelApply but with strength parameter"
+
+    def apply_stylemodel(self, clip_vision_output, style_model, conditioning, strength=1.0):
+        cond = style_model.get_cond(clip_vision_output).flatten(start_dim=0, end_dim=1).unsqueeze(dim=0)
+        cond = strength * cond
+        c = []
+        for t in conditioning:
+            n = [torch.cat((t[0], cond), dim=1), t[1].copy()]
+            c.append(n)
+        return (c, )

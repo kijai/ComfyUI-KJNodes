@@ -115,6 +115,7 @@ NODE_CONFIG = {
     "ModelPassThrough": {"class": ModelPassThrough, "name": "ModelPass"},
     "ModelSaveKJ": {"class": ModelSaveKJ, "name": "Model Save KJ"},
     "SetShakkerLabsUnionControlNetType": {"class": SetShakkerLabsUnionControlNetType, "name": "Set Shakker Labs Union ControlNet Type"},
+    "StyleModelApplyAdvanced": {"class": StyleModelApplyAdvanced, "name": "Style Model Apply Advanced"},
     #audioscheduler stuff
     "NormalizedAmplitudeToMask": {"class": NormalizedAmplitudeToMask},
     "NormalizedAmplitudeToFloatList": {"class": NormalizedAmplitudeToFloatList},
