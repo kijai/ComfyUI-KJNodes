@@ -2180,6 +2180,7 @@ class CheckpointLoaderKJ:
         if sage_attention:
             from sageattention import sageattn
         
+            @torch.compiler.disable()
             def attention_sage(q, k, v, heads, mask=None, attn_precision=None, skip_reshape=False):
                 if skip_reshape:
                     b, _, _, dim_head = q.shape
@@ -2483,6 +2484,47 @@ class TorchCompileControlNet:
        
         return (controlnet, )
 
+class TorchCompileLTXModel:
+    def __init__(self):
+        self._compiled = False
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": { 
+                    "model": ("MODEL",),
+                    "backend": (["inductor", "cudagraphs"],),
+                    "fullgraph": ("BOOLEAN", {"default": False, "tooltip": "Enable full graph mode"}),
+                    "mode": (["default", "max-autotune", "max-autotune-no-cudagraphs", "reduce-overhead"], {"default": "default"}),
+                    "dynamic": ("BOOLEAN", {"default": False, "tooltip": "Enable dynamic mode"}),
+                }}
+    RETURN_TYPES = ("MODEL",)
+    FUNCTION = "patch"
+
+    CATEGORY = "KJNodes/experimental"
+    EXPERIMENTAL = True
+
+    def patch(self, model, backend, mode, fullgraph, dynamic):
+        m = model.clone()
+        diffusion_model = m.get_model_object("diffusion_model")
+        
+        if not self._compiled:
+            try:
+                for i, block in enumerate(diffusion_model.transformer_blocks):
+                        #print("Compiling double_block", i)
+                        m.add_object_patch(f"diffusion_model.transformer_blocks.{i}", torch.compile(block, mode=mode, dynamic=dynamic, fullgraph=fullgraph, backend=backend))
+                self._compiled = True
+                compile_settings = {
+                    "backend": backend,
+                    "mode": mode,
+                    "fullgraph": fullgraph,
+                    "dynamic": dynamic,
+                }
+                setattr(m.model, "compile_settings", compile_settings)
+            except:
+                raise RuntimeError("Failed to compile model")
+        
+        return (m, )
+       
 class StyleModelApplyAdvanced:
     @classmethod
     def INPUT_TYPES(s):
