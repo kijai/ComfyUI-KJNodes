@@ -646,7 +646,7 @@ class AddLabel:
             "image":("IMAGE",),  
             "text_x": ("INT", {"default": 10, "min": 0, "max": 4096, "step": 1}),
             "text_y": ("INT", {"default": 2, "min": 0, "max": 4096, "step": 1}),
-            "height": ("INT", {"default": 48, "min": 0, "max": 4096, "step": 1}),
+            "height": ("INT", {"default": 48, "min": -1, "max": 4096, "step": 1}),
             "font_size": ("INT", {"default": 32, "min": 0, "max": 4096, "step": 1}),
             "font_color": ("STRING", {"default": "white"}),
             "label_color": ("STRING", {"default": "black"}),
@@ -685,41 +685,49 @@ ComfyUI/custom_nodes/ComfyUI-KJNodes/fonts
         font_path = os.path.join(script_directory, "fonts", "TTNorms-Black.otf") if font == "TTNorms-Black.otf" else folder_paths.get_full_path("kjnodes_fonts", font)
         
         def process_image(input_image, caption_text):
-            if direction == 'overlay':
-                pil_image = Image.fromarray((input_image.cpu().numpy() * 255).astype(np.uint8))
-            else:
-                label_image = Image.new("RGB", (width, height), label_color)
-                pil_image = label_image
-                
-            draw = ImageDraw.Draw(pil_image)
             font = ImageFont.truetype(font_path, font_size)
-            
             words = caption_text.split()
-            
             lines = []
             current_line = []
             current_line_width = 0
+
             for word in words:
                 word_width = font.getbbox(word)[2]
                 if current_line_width + word_width <= width - 2 * text_x:
                     current_line.append(word)
-                    current_line_width += word_width + font.getbbox(" ")[2] # Add space width
+                    current_line_width += word_width + font.getbbox(" ")[2]  # Add space width
                 else:
                     lines.append(" ".join(current_line))
                     current_line = [word]
                     current_line_width = word_width
-            
+
             if current_line:
                 lines.append(" ".join(current_line))
+
+            if direction == 'overlay':
+                pil_image = Image.fromarray((input_image.cpu().numpy() * 255).astype(np.uint8))
+            else:
+                if height == -1:
+                    # Adjust the image height automatically
+                    margin = 8
+                    required_height = (text_y + len(lines) * font_size) + margin # Calculate required height
+                    pil_image = Image.new("RGB", (width, required_height), label_color)
+                else:
+                    # Initialize with a minimal height
+                    label_image = Image.new("RGB", (width, height), label_color)
+                    pil_image = label_image
+
+            draw = ImageDraw.Draw(pil_image)
             
+
             y_offset = text_y
             for line in lines:
                 try:
                     draw.text((text_x, y_offset), line, font=font, fill=font_color, features=['-liga'])
                 except:
                     draw.text((text_x, y_offset), line, font=font, fill=font_color)
-                y_offset += font_size # Move to the next line
-                
+                y_offset += font_size
+
             processed_image = torch.from_numpy(np.array(pil_image).astype(np.float32) / 255.0).unsqueeze(0)
             return processed_image
         
