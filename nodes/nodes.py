@@ -755,8 +755,11 @@ class EmptyLatentImagePresets:
 class EmptyLatentImageCustomPresets:
     @classmethod
     def INPUT_TYPES(cls):
-        with open(os.path.join(script_directory, 'custom_dimensions.json')) as f:
-            dimensions_dict = json.load(f)  
+        try:
+            with open(os.path.join(script_directory, 'custom_dimensions.json')) as f:
+                dimensions_dict = json.load(f)
+        except FileNotFoundError:
+            dimensions_dict = []
         return {
         "required": {
             "dimensions": (
