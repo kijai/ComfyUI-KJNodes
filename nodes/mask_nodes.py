@@ -528,7 +528,7 @@ class CreateFadeMask:
         return {
             "required": {
                  "invert": ("BOOLEAN", {"default": False}),
-                 "frames": ("INT", {"default": 2,"min": 2, "max": 255, "step": 1}),
+                 "frames": ("INT", {"default": 2,"min": 2, "max": 10000, "step": 1}),
                  "width": ("INT", {"default": 256,"min": 16, "max": 4096, "step": 1}),
                  "height": ("INT", {"default": 256,"min": 16, "max": 4096, "step": 1}),
                  "interpolation": (["linear", "ease_in", "ease_out", "ease_in_out"],),
@@ -615,7 +615,7 @@ and interpolating from that to fully black at the 16th frame.
             "required": {
                  "points_string": ("STRING", {"default": "0:(0.0),\n7:(1.0),\n15:(0.0)\n", "multiline": True}),
                  "invert": ("BOOLEAN", {"default": False}),
-                 "frames": ("INT", {"default": 16,"min": 2, "max": 255, "step": 1}),
+                 "frames": ("INT", {"default": 16,"min": 2, "max": 10000, "step": 1}),
                  "width": ("INT", {"default": 512,"min": 1, "max": 4096, "step": 1}),
                  "height": ("INT", {"default": 512,"min": 1, "max": 4096, "step": 1}),
                  "interpolation": (["linear", "ease_in", "ease_out", "ease_in_out"],),
