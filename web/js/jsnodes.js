@@ -1,4 +1,5 @@
 import { app } from "../../../scripts/app.js";
+import { applyTextReplacements } from "../../../scripts/utils.js";
 
 app.registerExtension({
 	name: "KJNodes.jsnodes",
@@ -334,6 +335,17 @@ app.registerExtension({
 					// Add stop button
 					this.addWidget("button", "Stop mic capture", null, stopMicrophoneCapture);
 				};
+			break;
+		case "SaveImageKJ":
+			const onNodeCreated = nodeType.prototype.onNodeCreated;
+			nodeType.prototype.onNodeCreated = function() {
+				const r = onNodeCreated ? onNodeCreated.apply(this, arguments) : void 0;
+				const widget = this.widgets.find((w) => w.name === "filename_prefix");
+				widget.serializeValue = () => {
+				return applyTextReplacements(app, widget.value);
+				};
+				return r;
+			};
 			break;
 			
 		}	
