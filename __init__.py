@@ -5,6 +5,7 @@ from .nodes.audioscheduler_nodes import *
 from .nodes.image_nodes import *
 from .nodes.intrinsic_lora_nodes import *
 from .nodes.mask_nodes import *
+from .nodes.model_optimization_nodes import *
 NODE_CONFIG = {
     #constants
     "BOOLConstant": {"class": BOOLConstant, "name": "BOOL Constant"},
