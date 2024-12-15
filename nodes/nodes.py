@@ -2165,3 +2165,42 @@ class StyleModelApplyAdvanced:
             n = [torch.cat((t[0], cond), dim=1), t[1].copy()]
             c.append(n)
         return (c, )
+
+class AudioConcatenate:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": {
+            "audio1": ("AUDIO",),
+            "audio2": ("AUDIO",),
+            "direction": (
+            [   'right',
+                'left',
+            ],
+            {
+            "default": 'right'
+             }),
+        }}
+
+    RETURN_TYPES = ("AUDIO",)
+    FUNCTION = "concanate"
+    CATEGORY = "KJNodes/audio"
+    DESCRIPTION = """
+Concatenates the audio1 to audio2 in the specified direction.
+"""
+
+    def concanate(self, audio1, audio2, direction):
+        sample_rate_1 = audio1["sample_rate"]
+        sample_rate_2 = audio2["sample_rate"]
+        if sample_rate_1 != sample_rate_2:
+            raise Exception("Sample rates of the two audios do not match")
+        
+        waveform_1 = audio1["waveform"]
+        print(waveform_1.shape)
+        waveform_2 = audio2["waveform"]
+
+        # Concatenate based on the specified direction
+        if direction == 'right':
+            concatenated_audio = torch.cat((waveform_1, waveform_2), dim=2)  # Concatenate along width
+        elif direction == 'left':
+            concatenated_audio= torch.cat((waveform_2, waveform_1), dim=2)  # Concatenate along width
+        return ({"waveform": concatenated_audio, "sample_rate": sample_rate_1},)

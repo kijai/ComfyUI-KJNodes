@@ -122,6 +122,7 @@ NODE_CONFIG = {
     "NormalizedAmplitudeToFloatList": {"class": NormalizedAmplitudeToFloatList},
     "OffsetMaskByNormalizedAmplitude": {"class": OffsetMaskByNormalizedAmplitude},
     "ImageTransformByNormalizedAmplitude": {"class": ImageTransformByNormalizedAmplitude},
+    "AudioConcatenate": {"class": AudioConcatenate},
     #curve nodes
     "SplineEditor": {"class": SplineEditor, "name": "Spline Editor"},
     "CreateShapeImageOnPath": {"class": CreateShapeImageOnPath, "name": "Create Shape Image On Path"},
