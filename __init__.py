@@ -162,6 +162,7 @@ NODE_CONFIG = {
     "TorchCompileControlNet": {"class": TorchCompileControlNet, "name": "TorchCompileControlNet"},
     "PatchModelPatcherOrder": {"class": PatchModelPatcherOrder, "name": "Patch Model Patcher Order"},
     "TorchCompileLTXModel": {"class": TorchCompileLTXModel, "name": "TorchCompileLTXModel"},
+    "PathchSageAttentionKJ": {"class": PathchSageAttentionKJ, "name": "Pathch Sage Attention KJ"},
 
     #instance diffusion
     "CreateInstanceDiffusionTracking": {"class": CreateInstanceDiffusionTracking},
