@@ -32,7 +32,6 @@ let disablePrefix = app.ui.settings.getSettingValue("KJNodes.disablePrefix")
 const LGraphNode = LiteGraph.LGraphNode
 
 function showAlert(message) {
-  message = message || "Set node input undefined."
   app.extensionManager.toast.add({
     severity: 'warn',
     summary: "KJ Get/Set",
@@ -123,7 +122,7 @@ app.registerExtension({
 								setColorAndBgColor.call(this, type);	
 							}
 						} else {
-                showAlert("missing link info")
+                showAlert("node input undefined.")
 						}
 					}
 					if (link_info && node.graph && slotType == 2 && isChangeConnect) {
