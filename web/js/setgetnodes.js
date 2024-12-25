@@ -327,6 +327,8 @@ app.registerExtension({
 
 						];
 				}
+				// Provide a default link object with necessary properties, to avoid errors as link can't be null anymore
+				const defaultLink = { type: 'default', color: this.slotColor };
 
 				for (const getter of this.currentGetters) {
 					if (!this.flags.collapsed) {
@@ -347,7 +349,7 @@ app.registerExtension({
 						ctx,
 						start_node_slotpos,
 						end_node_slotpos,
-						null,
+						defaultLink,
 						false,
 						null,
 						this.slotColor,
@@ -528,6 +530,9 @@ app.registerExtension({
 			// }
 			_drawVirtualLink(lGraphCanvas, ctx) {
 				if (!this.currentSetter) return;
+
+				// Provide a default link object with necessary properties, to avoid errors as link can't be null anymore
+				const defaultLink = { type: 'default', color: this.slotColor };
 				
 				let start_node_slotpos = this.currentSetter.getConnectionPos(false, 0);
 				start_node_slotpos = [
@@ -539,7 +544,7 @@ app.registerExtension({
 					ctx,
 					start_node_slotpos,
 					end_node_slotpos,
-					null,
+					defaultLink,
 					false,
 					null,
 					this.slotColor
