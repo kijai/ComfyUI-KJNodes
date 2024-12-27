@@ -78,6 +78,157 @@ app.registerExtension({
 						});
 					}
 					break;
+      case "FluxBlockLoraString": //New
+        const onFluxBlockLoraStringExecuted = nodeType.prototype.onExecuted;
+        const onFluxBlockLoraStringDraw = nodeType.prototype.onDrawForeground;
+        const onFluxBlockLoraStringDeselected = nodeType.prototype.onDeselected;
+        //this.customBorderColor = None;
+
+        // Handle execution of the workflow
+        nodeType.prototype.onExecuted = function (message) {
+          // Call the previous handler if it exists
+          const r = onFluxBlockLoraStringExecuted ? onFluxBlockLoraStringExecuted.apply(this, arguments) : undefined;
+          let inputString = message["block_string"].toString();
+          //console.log(`lora block input string passed onExecution: ${inputString}`);
+
+          //this.boxcolor = "#FF0000";
+          //this.color = "#00FF00";
+          //this.bgcolor = "#0000FF";
+
+          // Process the string and set block values if valid
+          if (inputString) {
+            const validationResult = this.validateInputString(inputString);
+            if (!validationResult.isValid) {
+              alert(`Please check your input: ${validationResult.error}`);
+              this.customBorderColor = "#FF0000";
+            } else {
+              this.customBorderColor = this.bgcolor;
+            }
+          }
+          // Optionally, add logic to handle invalid input or stop workflow execution if needed
+          return r;
+        };
+
+        nodeType.prototype.onDrawForeground = function(ctx) {
+          const r = onFluxBlockLoraStringDraw ? onFluxBlockLoraStringDraw.apply(this, arguments) : undefined;
+          if (this.customBorderColor) {
+            // Draw the border using the custom border color
+            ctx.strokeStyle = this.customBorderColor;
+            ctx.lineWidth = 4;  // Set the border thickness
+            ctx.strokeRect(0, 0, this.size[0], this.size[1]);  // Draw the border around the node
+          }
+        };
+
+        nodeType.prototype.onDeselected = function (node) {
+          const r = onFluxBlockLoraStringDeselected ? onFluxBlockLoraStringDeselected.apply(this, arguments) : undefined;
+          this.customBorderColor = this.bgcolor;
+        };
+
+        nodeType.prototype.validateInputString = function (inputString) {
+          // Define valid ranges for single and double blocks
+          const singleBlockRange = { min: 0, max: 37 };
+          const doubleBlockRange = { min: 0, max: 18 };
+
+          // Split the input string by commas to process each assignment separately
+          const assignments = inputString.split(',');
+
+          for (let assignment of assignments) {
+            assignment = assignment.trim();
+
+            // Regular expression to match the pattern: [s|d][indices]=[value]
+            const regex = /^([sd])(\d+(?:-\d+)?(?:,\d+(?:-\d+)?)*)=(\d+(\.\d+)?)$/;
+            const match = assignment.match(regex);
+
+            if (!match) {
+              // Invalid format
+              return {
+                isValid: false,
+                error: `Hmm, there's something wrong with "${assignment}". Please make sure it follows the format like "s0-10=1.2".`,
+              };
+            }
+
+            const blockType = match[1];
+            const indicesPart = match[2];
+            const valueStr = match[3];
+            const value = parseFloat(valueStr);
+
+            // Validate the value
+            if (isNaN(value)) {
+              return {
+                isValid: false,
+                error: `The value "${valueStr}" in "${assignment}" doesn't seem to be a number. Please enter a valid number.`,
+              };
+            }
+
+            // Split indices by commas
+            const indicesList = indicesPart.split(',');
+            const validIndices = [];
+
+            for (let idxStr of indicesList) {
+              idxStr = idxStr.trim();
+
+              // Handle ranges
+              if (idxStr.includes('-')) {
+                let [startStr, endStr] = idxStr.split('-');
+                let start = parseInt(startStr, 10);
+                let end = parseInt(endStr, 10);
+
+                if (isNaN(start) || isNaN(end)) {
+                  return {
+                    isValid: false,
+                    error: `It looks like there's an issue with the range "${idxStr}" in "${assignment}". Please check the numbers.`,
+                  };
+                }
+
+                // Swap if start is greater than end
+                if (start > end) {
+                  [start, end] = [end, start];
+                }
+
+                // Validate indices based on block type
+                const { min, max } = blockType === 's' ? singleBlockRange : doubleBlockRange;
+                if (start < min || end > max) {
+                  return {
+                    isValid: false,
+                    error: `Oops! The numbers in "${idxStr}" are out of range for "${blockType}" blocks. Please use numbers between ${min} and ${max}.`,
+                  };
+                }
+
+                // Collect indices
+                for (let i = start; i <= end; i++) {
+                  validIndices.push(i);
+                }
+              } else {
+                // Single index
+                const index = parseInt(idxStr, 10);
+
+                if (isNaN(index)) {
+                  return {
+                    isValid: false,
+                    error: `The index "${idxStr}" in "${assignment}" doesn't seem to be a valid number. Please check it.`,
+                  };
+                }
+
+                const { min, max } = blockType === 's' ? singleBlockRange : doubleBlockRange;
+                if (index < min || index > max) {
+                  return {
+                    isValid: false,
+                    error: `Oops! The index "${index}" is out of range for "${blockType}" blocks. Please use numbers between ${min} and ${max}.`,
+                  };
+                }
+
+                validIndices.push(index);
+              }
+            }
+
+            // If we reach here, the current assignment is valid
+            // Continue to the next assignment
+          }
+
+          // All assignments are valid
+          return { isValid: true };
+        }
+      break;
 			
 			case "FluxBlockLoraSelect":
 				nodeType.prototype.onNodeCreated = function () {
