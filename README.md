@@ -17,7 +17,7 @@ This is still work in progress, like everything else.
 ## Javascript
 
 ### browserstatus.js
-Sets the favicon to green circle when not processing anything, sets it to red when processing and shows progress percentage and the lenghth of your queue. 
+Sets the favicon to green circle when not processing anything, sets it to red when processing and shows progress percentage and the length of your queue. 
 Default off, needs to be enabled from options, overrides Custom-Scripts favicon when enabled.
 
 ## Nodes:
