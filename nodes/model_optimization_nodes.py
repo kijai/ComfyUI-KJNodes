@@ -462,3 +462,50 @@ class TorchCompileLTXModel:
                 raise RuntimeError("Failed to compile model")           
         
         return (m, )
+      
+class TorchCompileCosmosModel:
+    def __init__(self):
+        self._compiled = False
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": { 
+                    "model": ("MODEL",),
+                    "backend": (["inductor", "cudagraphs"],),
+                    "fullgraph": ("BOOLEAN", {"default": False, "tooltip": "Enable full graph mode"}),
+                    "mode": (["default", "max-autotune", "max-autotune-no-cudagraphs", "reduce-overhead"], {"default": "default"}),
+                    "dynamic": ("BOOLEAN", {"default": False, "tooltip": "Enable dynamic mode"}),
+                }}
+    RETURN_TYPES = ("MODEL",)
+    FUNCTION = "patch"
+
+    CATEGORY = "KJNodes/experimental"
+    EXPERIMENTAL = True
+
+    def patch(self, model, backend, mode, fullgraph, dynamic):
+        
+        m = model.clone()
+        diffusion_model = m.get_model_object("diffusion_model")
+        
+        if not self._compiled:
+            try:
+                for name, block in diffusion_model.blocks.items():
+                    print(f"Compiling block {name}")
+                    compiled_block = torch.compile(block, mode=mode, dynamic=dynamic, fullgraph=fullgraph, backend=backend)
+                    m.add_object_patch(f"diffusion_model.blocks.{name}", compiled_block)
+                    #diffusion_model.blocks[name] = compiled_block
+
+                self._compiled = True
+                compile_settings = {
+                    "backend": backend,
+                    "mode": mode,
+                    "fullgraph": fullgraph,
+                    "dynamic": dynamic,
+                }
+                setattr(m.model, "compile_settings", compile_settings)
+                print(model.model.diffusion_model.blocks)
+               
+            except:
+                raise RuntimeError("Failed to compile model")           
+        
+        return (m, )
