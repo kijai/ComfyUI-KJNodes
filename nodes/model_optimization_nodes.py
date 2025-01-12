@@ -490,7 +490,7 @@ class TorchCompileCosmosModel:
         if not self._compiled:
             try:
                 for name, block in diffusion_model.blocks.items():
-                    print(f"Compiling block {name}")
+                    #print(f"Compiling block {name}")
                     compiled_block = torch.compile(block, mode=mode, dynamic=dynamic, fullgraph=fullgraph, backend=backend)
                     m.add_object_patch(f"diffusion_model.blocks.{name}", compiled_block)
                     #diffusion_model.blocks[name] = compiled_block
@@ -503,7 +503,6 @@ class TorchCompileCosmosModel:
                     "dynamic": dynamic,
                 }
                 setattr(m.model, "compile_settings", compile_settings)
-                print(model.model.diffusion_model.blocks)
                
             except:
                 raise RuntimeError("Failed to compile model")           
