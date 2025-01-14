@@ -1585,14 +1585,13 @@ Randomizes image order within a batch.
     } 
     
     def imagesfrombatch(self, start_index, num_frames, images=None, masks=None):
-
         chosen_images = None
         chosen_masks = None
 
         # Process images if provided
         if images is not None:
             if start_index == -1:
-                start_index = len(images) - num_frames
+                start_index = max(0, len(images) - num_frames)
             if start_index < 0 or start_index >= len(images):
                 raise ValueError("Start index is out of range")
             end_index = start_index + num_frames
@@ -1603,7 +1602,7 @@ Randomizes image order within a batch.
         # Process masks if provided
         if masks is not None:
             if start_index == -1:
-                start_index = len(masks) - num_frames
+                start_index = max(0, len(masks) - num_frames)
             if start_index < 0 or start_index >= len(masks):
                 raise ValueError("Start index is out of range for masks")
             end_index = start_index + num_frames
