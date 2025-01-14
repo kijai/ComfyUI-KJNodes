@@ -475,6 +475,7 @@ class TorchCompileCosmosModel:
                     "fullgraph": ("BOOLEAN", {"default": False, "tooltip": "Enable full graph mode"}),
                     "mode": (["default", "max-autotune", "max-autotune-no-cudagraphs", "reduce-overhead"], {"default": "default"}),
                     "dynamic": ("BOOLEAN", {"default": False, "tooltip": "Enable dynamic mode"}),
+                    "dynamo_cache_size_limit": ("INT", {"default": 64, "tooltip": "Set the dynamo cache size limit"}),
                 }}
     RETURN_TYPES = ("MODEL",)
     FUNCTION = "patch"
@@ -482,10 +483,11 @@ class TorchCompileCosmosModel:
     CATEGORY = "KJNodes/experimental"
     EXPERIMENTAL = True
 
-    def patch(self, model, backend, mode, fullgraph, dynamic):
+    def patch(self, model, backend, mode, fullgraph, dynamic, dynamo_cache_size_limit):
         
         m = model.clone()
         diffusion_model = m.get_model_object("diffusion_model")
+        torch._dynamo.config.cache_size_limit = dynamo_cache_size_limit
         
         if not self._compiled:
             try:
