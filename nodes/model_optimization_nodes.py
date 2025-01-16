@@ -125,12 +125,12 @@ class PathchSageAttentionKJ(BaseLoaderKJ):
     def INPUT_TYPES(s):
         return {"required": {
             "model": ("MODEL",),
-            "sage_attention": (["disabled", "auto", "sageattn_qk_int8_pv_fp16_cuda", "sageattn_qk_int8_pv_fp16_triton", "sageattn_qk_int8_pv_fp8_cuda"], {"default": False, "tooltip": "Patch comfy attention to use sageattn."}),
+            "sage_attention": (["disabled", "auto", "sageattn_qk_int8_pv_fp16_cuda", "sageattn_qk_int8_pv_fp16_triton", "sageattn_qk_int8_pv_fp8_cuda"], {"default": False, "tooltip": "Global patch comfy attention to use sageattn, once patched to revert back to normal you would need to run this node again with disabled option."}),
         }}
 
     RETURN_TYPES = ("MODEL", )
     FUNCTION = "patch"
-    DESCRIPTION = "Experimental node for patching attention mode."
+    DESCRIPTION = "Experimental node for patching attention mode. This doesn't use the model patching system and thus can't be disabled without running the node again with 'disabled' option."
     EXPERIMENTAL = True
     CATEGORY = "KJNodes/experimental"
 
