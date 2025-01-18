@@ -3,7 +3,7 @@ from torchvision import transforms
 import json
 from PIL import Image, ImageDraw, ImageFont, ImageColor, ImageFilter, ImageChops
 import numpy as np
-from ..utility.utility import pil2tensor
+from ..utility.utility import pil2tensor, tensor2pil
 import folder_paths
 import io
 import base64
@@ -1452,3 +1452,110 @@ you can clear the image from the context menu by right clicking on the canvas
                 "ui": {"bg_image": [img_base64]}, 
                 "result": (json.dumps(pos_coordinates), json.dumps(neg_coordinates), bboxes, mask_tensor, cropped_image)
             }
+import cv2
+class CutAndDragOnPath:
+    
+    RETURN_TYPES = ("IMAGE", "MASK",)
+    RETURN_NAMES = ("image","mask", )
+    FUNCTION = "createshapemask" 
+    CATEGORY = "KJNodes/image"
+    DESCRIPTION = """
+Cuts the masked area from the image, and drags it along the path.
+"""
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "image": ("IMAGE",),
+                "coordinates": ("STRING", {"forceInput": True}),
+                "mask": ("MASK",),
+                "frame_width": ("INT", {"default": 512,"min": 16, "max": 4096, "step": 1}),
+                "frame_height": ("INT", {"default": 512,"min": 16, "max": 4096, "step": 1}),
+                "inpaint": ("BOOLEAN", {"default": True}),
+        },
+        "optional": {
+            "bg_image": ("IMAGE",),
+        }
+    }
+
+    def createshapemask(self, image, coordinates, mask, frame_width, frame_height, inpaint, bg_image=None):
+        # Parse coordinates
+        if len(coordinates) < 10:
+            coords_list = []
+            for coords in coordinates:
+                coords = json.loads(coords.replace("'", '"'))
+                coords_list.append(coords)
+        else:
+            coords = json.loads(coordinates.replace("'", '"'))
+            coords_list = [coords]
+
+        batch_size = len(coords_list[0])
+        images_list = []
+        masks_list = []
+
+        # Convert input image and mask to PIL
+        input_image = tensor2pil(image)[0]
+        input_mask = tensor2pil(mask)[0]
+
+        # Find masked region bounds
+        mask_array = np.array(input_mask)
+        y_indices, x_indices = np.where(mask_array > 0)
+        if len(x_indices) == 0 or len(y_indices) == 0:
+            return (image, mask)
+            
+        x_min, x_max = x_indices.min(), x_indices.max()
+        y_min, y_max = y_indices.min(), y_indices.max()
+        
+        # Cut out the masked region
+        cut_width = x_max - x_min
+        cut_height = y_max - y_min
+        cut_image = input_image.crop((x_min, y_min, x_max, y_max))
+        cut_mask = input_mask.crop((x_min, y_min, x_max, y_max))
+        
+        # Create inpainted background
+        if bg_image is None:
+            background = input_image.copy()
+            # Inpaint the cut area
+            if inpaint:
+                border = 5 # Create small border around cut area for better inpainting
+                fill_mask = Image.new("L", background.size, 0)
+                draw = ImageDraw.Draw(fill_mask)
+                draw.rectangle([x_min-border, y_min-border, x_max+border, y_max+border], fill=255)
+                background = cv2.inpaint(
+                    np.array(background), 
+                    np.array(fill_mask), 
+                    inpaintRadius=3, 
+                    flags=cv2.INPAINT_TELEA
+                )
+                background = Image.fromarray(background)
+        else:
+            background = tensor2pil(bg_image)[0]
+        
+        # Create batch of images with cut region at different positions
+        for i in range(batch_size):
+            # Create new image
+            new_image = background.copy()
+            new_mask = Image.new("L", (frame_width, frame_height), 0)
+
+            # Get target position from coordinates
+            for coords in coords_list:
+                target_x = int(coords[i]['x'] - cut_width/2)
+                target_y = int(coords[i]['y'] - cut_height/2)
+
+                # Paste cut region at new position
+                new_image.paste(cut_image, (target_x, target_y), cut_mask)
+                new_mask.paste(cut_mask, (target_x, target_y))
+
+            # Convert to tensor and append
+            image_tensor = pil2tensor(new_image)
+            mask_tensor = pil2tensor(new_mask)
+            
+            images_list.append(image_tensor)
+            masks_list.append(mask_tensor)
+
+        # Stack tensors into batches
+        out_images = torch.cat(images_list, dim=0).cpu().float()
+        out_masks = torch.cat(masks_list, dim=0)
+
+        return (out_images, out_masks)

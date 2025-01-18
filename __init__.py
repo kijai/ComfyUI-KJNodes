@@ -129,6 +129,7 @@ NODE_CONFIG = {
     "CreateShapeMaskOnPath": {"class": CreateShapeMaskOnPath, "name": "Create Shape Mask On Path"},
     "CreateTextOnPath": {"class": CreateTextOnPath, "name": "Create Text On Path"},
     "CreateGradientFromCoords": {"class": CreateGradientFromCoords, "name": "Create Gradient From Coords"},
+    "CutAndDragOnPath": {"class": CutAndDragOnPath, "name": "Cut And Drag On Path"},
     "GradientToFloat": {"class": GradientToFloat, "name": "Gradient To Float"},
     "WeightScheduleExtend": {"class": WeightScheduleExtend, "name": "Weight Schedule Extend"},
     "MaskOrImageToWeight": {"class": MaskOrImageToWeight, "name": "Mask Or Image To Weight"},
