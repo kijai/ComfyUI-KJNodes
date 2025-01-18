@@ -814,6 +814,8 @@ class WidgetToString:
             "optional": {
                          "any_input": (any, {}),
                          "node_title": ("STRING", {"multiline": False}),
+                         "allowed_float_decimals": ("INT", {"default": 2, "min": 0, "max": 10, "tooltip": "Number of decimal places to display for float values"}),
+                         
                          },
             "hidden": {"extra_pnginfo": "EXTRA_PNGINFO",
                        "prompt": "PROMPT",
@@ -832,7 +834,7 @@ are manually edited!
 The 'any_input' is required for making sure the node you want the value from exists in the workflow.
 """
 
-    def get_widget_value(self, id, widget_name, extra_pnginfo, prompt, unique_id, return_all=False, any_input=None, node_title=""):
+    def get_widget_value(self, id, widget_name, extra_pnginfo, prompt, unique_id, return_all=False, any_input=None, node_title="", allowed_float_decimals=2):
         workflow = extra_pnginfo["workflow"]
         #print(json.dumps(workflow, indent=4))
         results = []
@@ -880,14 +882,24 @@ The 'any_input' is required for making sure the node you want the value from exi
         values = prompt[str(node_id)]
         if "inputs" in values:
             if return_all:
-                results.append(', '.join(f'{k}: {str(v)}' for k, v in values["inputs"].items()))
+                # Format items based on type
+                formatted_items = []
+                for k, v in values["inputs"].items():
+                    if isinstance(v, float):
+                        item = f"{k}: {v:.{allowed_float_decimals}f}"
+                    else:
+                        item = f"{k}: {str(v)}"
+                    formatted_items.append(item)
+                results.append(', '.join(formatted_items))
             elif widget_name in values["inputs"]:
-                v = str(values["inputs"][widget_name])  # Convert to string here
+                v = values["inputs"][widget_name]
+                if isinstance(v, float):
+                    v = f"{v:.{allowed_float_decimals}f}"
+                else:
+                    v = str(v)
                 return (v, )
             else:
                 raise NameError(f"Widget not found: {node_id}.{widget_name}")
-        if not results:
-            raise NameError(f"Node not found: {node_id}")
         return (', '.join(results).strip(', '), )
 
 class DummyOut:
