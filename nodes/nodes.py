@@ -1034,13 +1034,14 @@ class InjectNoiseToLatent:
     CATEGORY = "KJNodes/noise"
         
     def injectnoise(self, latents, strength, noise, normalize, average, mix_randn_amount=0, seed=None, mask=None):
-        samples = latents.copy()
-        if latents["samples"].shape != noise["samples"].shape:
+        samples = latents["samples"].clone().cpu()
+        noise = noise["samples"].clone().cpu()
+        if samples.shape != samples.shape:
             raise ValueError("InjectNoiseToLatent: Latent and noise must have the same shape")
         if average:
-            noised = (samples["samples"].clone() + noise["samples"].clone()) / 2
+            noised = (samples + noise) / 2
         else:
-            noised = samples["samples"].clone() + noise["samples"].clone() * strength
+            noised = samples + noise * strength
         if normalize:
             noised = noised / noised.std()
         if mask is not None:
@@ -1048,14 +1049,14 @@ class InjectNoiseToLatent:
             mask = mask.expand((-1,noised.shape[1],-1,-1))
             if mask.shape[0] < noised.shape[0]:
                 mask = mask.repeat((noised.shape[0] -1) // mask.shape[0] + 1, 1, 1, 1)[:noised.shape[0]]
-            noised = mask * noised + (1-mask) * latents["samples"]
+            noised = mask * noised + (1-mask) * samples
         if mix_randn_amount > 0:
             if seed is not None:
                 generator = torch.manual_seed(seed)
                 rand_noise = torch.randn(noised.size(), dtype=noised.dtype, layout=noised.layout, generator=generator, device="cpu")
                 noised = noised + (mix_randn_amount * rand_noise)
-        samples["samples"] = noised
-        return (samples,)
+        
+        return ({"samples":noised},)
  
 class SoundReactive:
     @classmethod
