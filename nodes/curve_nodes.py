@@ -1452,15 +1452,14 @@ you can clear the image from the context menu by right clicking on the canvas
                 "ui": {"bg_image": [img_base64]}, 
                 "result": (json.dumps(pos_coordinates), json.dumps(neg_coordinates), bboxes, mask_tensor, cropped_image)
             }
-import cv2
+
 class CutAndDragOnPath:
-    
     RETURN_TYPES = ("IMAGE", "MASK",)
     RETURN_NAMES = ("image","mask", )
-    FUNCTION = "createshapemask" 
+    FUNCTION = "cutanddrag" 
     CATEGORY = "KJNodes/image"
     DESCRIPTION = """
-Cuts the masked area from the image, and drags it along the path.
+Cuts the masked area from the image, and drags it along the path. If inpaint is enabled, and no bg_image is provided, the cut area is filled using cv2 TELEA algorithm.
 """
 
     @classmethod
@@ -1479,7 +1478,7 @@ Cuts the masked area from the image, and drags it along the path.
         }
     }
 
-    def createshapemask(self, image, coordinates, mask, frame_width, frame_height, inpaint, bg_image=None):
+    def cutanddrag(self, image, coordinates, mask, frame_width, frame_height, inpaint, bg_image=None):
         # Parse coordinates
         if len(coordinates) < 10:
             coords_list = []
@@ -1518,6 +1517,7 @@ Cuts the masked area from the image, and drags it along the path.
             background = input_image.copy()
             # Inpaint the cut area
             if inpaint:
+                import cv2
                 border = 5 # Create small border around cut area for better inpainting
                 fill_mask = Image.new("L", background.size, 0)
                 draw = ImageDraw.Draw(fill_mask)
