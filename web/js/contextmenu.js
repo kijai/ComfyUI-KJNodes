@@ -95,7 +95,6 @@ app.registerExtension({
 			app.ui.settings.addSetting({
 				id: "KJNodes.nodeAutoColor",
 				name: "KJNodes: Automatically set node colors",
-				defaultValue: true,
 				type: "boolean",
 				defaultValue: true,
 			});

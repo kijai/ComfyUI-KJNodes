@@ -166,10 +166,11 @@ Selects and returns the latents at the specified indices as an latent batch.
             "required": {
                  "latents": ("LATENT",),
                  "indexes": ("STRING", {"default": "0, 1, 2", "multiline": True}),
+                 "latent_format": (["BCHW", "BTCHW", "BCTHW"], {"default": "BCHW"}),
         },
     } 
     
-    def indexedlatentsfrombatch(self, latents, indexes):
+    def indexedlatentsfrombatch(self, latents, indexes, latent_format):
         
         samples = latents.copy()
         latent_samples = samples["samples"] 
@@ -181,7 +182,12 @@ Selects and returns the latents at the specified indices as an latent batch.
         indices_tensor = torch.tensor(index_list, dtype=torch.long)
         
         # Select the latents at the specified indices
-        chosen_latents = latent_samples[indices_tensor]
+        if latent_format == "BCHW":
+            chosen_latents = latent_samples[indices_tensor]
+        elif latent_format == "BTCHW":
+            chosen_latents = latent_samples[:, indices_tensor]
+        elif latent_format == "BCTHW":
+            chosen_latents = latent_samples[:, :, indices_tensor]
 
         samples["samples"] = chosen_latents
         return (samples,)
@@ -2217,3 +2223,4 @@ Concatenates the audio1 to audio2 in the specified direction.
         elif direction == 'left':
             concatenated_audio= torch.cat((waveform_2, waveform_1), dim=2)  # Concatenate along width
         return ({"waveform": concatenated_audio, "sample_rate": sample_rate_1},)
+    
