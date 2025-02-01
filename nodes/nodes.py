@@ -1110,15 +1110,12 @@ class GenerateNoise:
             "normalize": ("BOOLEAN", {"default": False}),
             },
             "optional": {
-            "model": ("MODEL", ),
-            "sigmas": ("SIGMAS", ),
-            "latent_channels": (
-            [   '4',
-                '16',
-            ],
-           ),
+                "model": ("MODEL", ),
+                "sigmas": ("SIGMAS", ),
+                "latent_channels": (['4', '16', ],),
+                "shape": (["BCHW", "BCTHW"],),
             }
-            }
+        }
     
     RETURN_TYPES = ("LATENT",)
     FUNCTION = "generatenoise"
@@ -1127,10 +1124,14 @@ class GenerateNoise:
 Generates noise for injection or to be used as empty latents on samplers with add_noise off.
 """
         
-    def generatenoise(self, batch_size, width, height, seed, multiplier, constant_batch_noise, normalize, sigmas=None, model=None, latent_channels=4):
+    def generatenoise(self, batch_size, width, height, seed, multiplier, constant_batch_noise, normalize, sigmas=None, model=None, latent_channels=4, shape="BCHW"):
 
         generator = torch.manual_seed(seed)
-        noise = torch.randn([batch_size, int(latent_channels), height // 8, width // 8], dtype=torch.float32, layout=torch.strided, generator=generator, device="cpu")
+        if shape == "BCHW":
+            noise = torch.randn([batch_size, int(latent_channels), height // 8, width // 8], dtype=torch.float32, layout=torch.strided, generator=generator, device="cpu")
+        elif shape == "BCTHW":
+            noise = torch.randn([1, int(latent_channels), batch_size,height // 8, width // 8], dtype=torch.float32, layout=torch.strided, generator=generator, device="cpu")
+            print(noise.shape)
         if sigmas is not None:
             sigma = sigmas[0] - sigmas[-1]
             sigma /= model.model.latent_format.scale_factor
@@ -2223,4 +2224,34 @@ Concatenates the audio1 to audio2 in the specified direction.
         elif direction == 'left':
             concatenated_audio= torch.cat((waveform_2, waveform_1), dim=2)  # Concatenate along width
         return ({"waveform": concatenated_audio, "sample_rate": sample_rate_1},)
-    
+
+class LeapfusionHunyuanI2V:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "model": ("MODEL",),
+                "latent": ("LATENT",),
+            }
+        }
+
+    RETURN_TYPES = ("MODEL",)
+    FUNCTION = "patch"
+
+    CATEGORY = "KJNodes/experimental"
+
+    def patch(self, model, latent):
+
+        def outer_wrapper(samples):
+            def unet_wrapper(apply_model, args):
+                inp, timestep, c = args["input"], args["timestep"], args["c"]
+                if samples is not None:
+                    inp[:, :, [0], :, :] = samples[:, :, [0], :, :].to(inp)
+                return apply_model(inp, timestep, **c)
+            return unet_wrapper
+        
+        samples = latent["samples"] * 0.476986
+        m = model.clone()
+        m.set_model_unet_function_wrapper(outer_wrapper(samples))
+
+        return (m,)

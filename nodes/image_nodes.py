@@ -1568,7 +1568,7 @@ class GetImageRangeFromBatch:
     FUNCTION = "imagesfrombatch"
     CATEGORY = "KJNodes/image"
     DESCRIPTION = """
-Randomizes image order within a batch.
+Returns a range of images from a batch.
 """
 
     @classmethod
@@ -1594,9 +1594,7 @@ Randomizes image order within a batch.
                 start_index = max(0, len(images) - num_frames)
             if start_index < 0 or start_index >= len(images):
                 raise ValueError("Start index is out of range")
-            end_index = start_index + num_frames
-            if end_index > len(images):
-                raise ValueError("End index is out of range")
+            end_index = min(start_index + num_frames, len(images))
             chosen_images = images[start_index:end_index]
 
         # Process masks if provided
@@ -1605,12 +1603,53 @@ Randomizes image order within a batch.
                 start_index = max(0, len(masks) - num_frames)
             if start_index < 0 or start_index >= len(masks):
                 raise ValueError("Start index is out of range for masks")
-            end_index = start_index + num_frames
-            if end_index > len(masks):
-                raise ValueError("End index is out of range for masks")
+            end_index = min(start_index + num_frames, len(masks))
             chosen_masks = masks[start_index:end_index]
 
         return (chosen_images, chosen_masks,)
+
+class GetLatentRangeFromBatch:
+    
+    RETURN_TYPES = ("LATENT", )
+    FUNCTION = "latentsfrombatch"
+    CATEGORY = "KJNodes/latents"
+    DESCRIPTION = """
+Returns a range of latents from a batch.
+"""
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "latents": ("LATENT",),
+                "start_index": ("INT", {"default": 0,"min": -1, "max": 4096, "step": 1}),
+                "num_frames": ("INT", {"default": 1,"min": -1, "max": 4096, "step": 1}),
+        },
+    } 
+    
+    def latentsfrombatch(self, latents, start_index, num_frames):
+        chosen_latents = None
+        samples = latents["samples"]
+        if len(samples.shape) == 4:
+            B, C, H, W = samples.shape
+            num_latents = B
+        elif len(samples.shape) == 5:
+            B, C, T, H, W = samples.shape
+            num_latents = T
+
+        if start_index == -1:
+            start_index = max(0, num_latents - num_frames)
+        if start_index < 0 or start_index >= num_latents:
+            raise ValueError("Start index is out of range")
+        
+        end_index = num_latents if num_frames == -1 else min(start_index + num_frames, num_latents)
+        
+        if len(samples.shape) == 4:
+            chosen_latents = samples[start_index:end_index]
+        elif len(samples.shape) == 5:
+            chosen_latents = samples[:, :, start_index:end_index]
+
+        return ({"samples": chosen_latents,},)
     
 class GetImagesFromBatchIndexed:
     
