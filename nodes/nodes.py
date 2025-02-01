@@ -2256,3 +2256,27 @@ class LeapfusionHunyuanI2V:
         m.set_model_unet_function_wrapper(outer_wrapper(samples, index))
 
         return (m,)
+
+class ImageNoiseAugmentation:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "image": ("IMAGE",),
+                "noise_aug_strength": ("FLOAT", {"default": None, "min": 0.0, "max": 100.0, "step": 0.001}),
+                "seed": ("INT", {"default": 123,"min": 0, "max": 0xffffffffffffffff, "step": 1}),
+            }
+        }
+
+    RETURN_TYPES = ("IMAGE",)
+    FUNCTION = "add_noise"
+
+    CATEGORY = "KJNodes/experimental"
+
+    def add_noise(self, image, noise_aug_strength, seed):
+        torch.manual_seed(seed)
+        sigma = torch.ones((image.shape[0],)).to(image.device, image.dtype) * noise_aug_strength
+        image_noise = torch.randn_like(image) * sigma[:, None, None, None]
+        image_noise = torch.where(image==-1, torch.zeros_like(image), image_noise)
+        image_out = image + image_noise
+        return image_out,
