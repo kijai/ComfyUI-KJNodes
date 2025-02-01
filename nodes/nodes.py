@@ -2252,8 +2252,11 @@ class LeapfusionHunyuanI2V:
                 inp, timestep, c = args["input"], args["timestep"], args["c"]
                 current_step_index = (steps == timestep).nonzero().item()
                 current_percent = current_step_index / (len(steps) - 1)
-                if samples is not None and start_percent <= current_percent <= end_percent:
-                    inp[:, :, [index], :, :] = samples[:, :, [0], :, :].to(inp)
+                if samples is not None:
+                    if start_percent <= current_percent <= end_percent:
+                        inp[:, :, [index], :, :] = samples[:, :, [0], :, :].to(inp)
+                    else:
+                        inp[:, :, [index], :, :] = torch.zeros(1)
                 return apply_model(inp, timestep, **c)
             return unet_wrapper
         
