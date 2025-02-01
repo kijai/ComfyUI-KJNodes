@@ -2233,6 +2233,7 @@ class LeapfusionHunyuanI2V:
                 "model": ("MODEL",),
                 "latent": ("LATENT",),
                 "index": ("INT", {"default": 0, "min": -1, "max": 1000, "step": 1,"tooltip": "The index of the latent to be replaced. 0 for first frame and -1 for last"}),
+                "strength": ("FLOAT", {"default": 1.0, "min": -10.0, "max": 10.0, "step": 0.001}),
             }
         }
 
@@ -2241,7 +2242,7 @@ class LeapfusionHunyuanI2V:
 
     CATEGORY = "KJNodes/experimental"
 
-    def patch(self, model, latent, index):
+    def patch(self, model, latent, index, strength):
 
         def outer_wrapper(samples, index):
             def unet_wrapper(apply_model, args):
@@ -2251,7 +2252,7 @@ class LeapfusionHunyuanI2V:
                 return apply_model(inp, timestep, **c)
             return unet_wrapper
         
-        samples = latent["samples"] * 0.476986
+        samples = latent["samples"] * 0.476986 * strength
         m = model.clone()
         m.set_model_unet_function_wrapper(outer_wrapper(samples, index))
 
