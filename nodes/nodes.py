@@ -2233,6 +2233,8 @@ class LeapfusionHunyuanI2V:
                 "model": ("MODEL",),
                 "latent": ("LATENT",),
                 "index": ("INT", {"default": 0, "min": -1, "max": 1000, "step": 1,"tooltip": "The index of the latent to be replaced. 0 for first frame and -1 for last"}),
+                "start_percent": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.01, "tooltip": "The start percentage of steps to apply"}),
+                "end_percent": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01, "tooltip": "The end percentage of steps to apply"}),
                 "strength": ("FLOAT", {"default": 1.0, "min": -10.0, "max": 10.0, "step": 0.001}),
             }
         }
@@ -2242,19 +2244,22 @@ class LeapfusionHunyuanI2V:
 
     CATEGORY = "KJNodes/experimental"
 
-    def patch(self, model, latent, index, strength):
+    def patch(self, model, latent, index, strength, start_percent, end_percent):
 
-        def outer_wrapper(samples, index):
+        def outer_wrapper(samples, index, start_percent, end_percent):
             def unet_wrapper(apply_model, args):
+                steps = args["c"]["transformer_options"]["sample_sigmas"]
                 inp, timestep, c = args["input"], args["timestep"], args["c"]
-                if samples is not None:
+                current_step_index = (steps == timestep).nonzero().item()
+                current_percent = current_step_index / (len(steps) - 1)
+                if samples is not None and start_percent <= current_percent <= end_percent:
                     inp[:, :, [index], :, :] = samples[:, :, [0], :, :].to(inp)
                 return apply_model(inp, timestep, **c)
             return unet_wrapper
         
         samples = latent["samples"] * 0.476986 * strength
         m = model.clone()
-        m.set_model_unet_function_wrapper(outer_wrapper(samples, index))
+        m.set_model_unet_function_wrapper(outer_wrapper(samples, index, start_percent, end_percent))
 
         return (m,)
 
