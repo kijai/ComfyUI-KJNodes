@@ -1,6 +1,6 @@
 {
-  "last_node_id": 85,
-  "last_link_id": 142,
+  "last_node_id": 86,
+  "last_link_id": 144,
   "nodes": [
     {
       "id": 62,
@@ -83,7 +83,7 @@
         150
       ],
       "flags": {},
-      "order": 19,
+      "order": 20,
       "mode": 0,
       "inputs": [
         {
@@ -156,91 +156,6 @@
       ]
     },
     {
-      "id": 66,
-      "type": "ImageResizeKJ",
-      "pos": [
-        -1821.1531982421875,
-        -632.925048828125
-      ],
-      "size": [
-        315,
-        266
-      ],
-      "flags": {},
-      "order": 6,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "image",
-          "type": "IMAGE",
-          "link": 86
-        },
-        {
-          "name": "get_image_size",
-          "type": "IMAGE",
-          "link": null,
-          "shape": 7
-        },
-        {
-          "name": "width_input",
-          "type": "INT",
-          "link": null,
-          "widget": {
-            "name": "width_input"
-          },
-          "shape": 7
-        },
-        {
-          "name": "height_input",
-          "type": "INT",
-          "link": null,
-          "widget": {
-            "name": "height_input"
-          },
-          "shape": 7
-        }
-      ],
-      "outputs": [
-        {
-          "name": "IMAGE",
-          "type": "IMAGE",
-          "links": [
-            118
-          ],
-          "slot_index": 0
-        },
-        {
-          "name": "width",
-          "type": "INT",
-          "links": [
-            89
-          ],
-          "slot_index": 1
-        },
-        {
-          "name": "height",
-          "type": "INT",
-          "links": [
-            90
-          ],
-          "slot_index": 2
-        }
-      ],
-      "properties": {
-        "Node name for S&R": "ImageResizeKJ"
-      },
-      "widgets_values": [
-        960,
-        640,
-        "lanczos",
-        false,
-        2,
-        0,
-        0,
-        "center"
-      ]
-    },
-    {
       "id": 64,
       "type": "VAEEncode",
       "pos": [
@@ -252,13 +167,13 @@
         46
       ],
       "flags": {},
-      "order": 9,
+      "order": 14,
       "mode": 0,
       "inputs": [
         {
           "name": "pixels",
           "type": "IMAGE",
-          "link": 118
+          "link": 144
         },
         {
           "name": "vae",
@@ -523,7 +438,7 @@
         106
       ],
       "flags": {},
-      "order": 16,
+      "order": 17,
       "mode": 0,
       "inputs": [
         {
@@ -563,7 +478,7 @@
         467.4666748046875
       ],
       "flags": {},
-      "order": 17,
+      "order": 18,
       "mode": 0,
       "inputs": [
         {
@@ -619,7 +534,8 @@
         true,
         6,
         "fixed",
-        1
+        1,
+        null
       ]
     },
     {
@@ -634,7 +550,7 @@
         82
       ],
       "flags": {},
-      "order": 18,
+      "order": 19,
       "mode": 0,
       "inputs": [
         {
@@ -670,10 +586,10 @@
       ],
       "size": [
         1112.6898193359375,
-        334
+        1076.4598388671875
       ],
       "flags": {},
-      "order": 20,
+      "order": 21,
       "mode": 0,
       "inputs": [
         {
@@ -725,13 +641,13 @@
           "hidden": false,
           "paused": false,
           "params": {
-            "filename": "hyvidcomfy_00008.mp4",
+            "filename": "hyvidcomfy_00001.mp4",
             "subfolder": "",
             "type": "temp",
             "format": "video/h264-mp4",
             "frame_rate": 24,
-            "workflow": "hyvidcomfy_00008.png",
-            "fullpath": "N:\\AI\\ComfyUI\\temp\\hyvidcomfy_00008.mp4"
+            "workflow": "hyvidcomfy_00001.png",
+            "fullpath": "N:\\AI\\ComfyUI\\temp\\hyvidcomfy_00001.mp4"
           },
           "muted": false
         }
@@ -749,7 +665,7 @@
         58
       ],
       "flags": {},
-      "order": 15,
+      "order": 16,
       "mode": 0,
       "inputs": [
         {
@@ -815,45 +731,6 @@
       ]
     },
     {
-      "id": 59,
-      "type": "LoraLoaderModelOnly",
-      "pos": [
-        -1870.3748779296875,
-        -194.6091766357422
-      ],
-      "size": [
-        442.8438720703125,
-        82
-      ],
-      "flags": {},
-      "order": 11,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "model",
-          "type": "MODEL",
-          "link": 136
-        }
-      ],
-      "outputs": [
-        {
-          "name": "MODEL",
-          "type": "MODEL",
-          "links": [
-            123
-          ],
-          "slot_index": 0
-        }
-      ],
-      "properties": {
-        "Node name for S&R": "LoraLoaderModelOnly"
-      },
-      "widgets_values": [
-        "hyvid\\musubi-tuner\\img2vid544p_comfy.safetensors",
-        1
-      ]
-    },
-    {
       "id": 85,
       "type": "Note",
       "pos": [
@@ -888,7 +765,7 @@
         150
       ],
       "flags": {},
-      "order": 14,
+      "order": 15,
       "mode": 0,
       "inputs": [
         {
@@ -920,6 +797,170 @@
         0,
         1,
         0.8
+      ]
+    },
+    {
+      "id": 59,
+      "type": "LoraLoaderModelOnly",
+      "pos": [
+        -1870.3748779296875,
+        -194.6091766357422
+      ],
+      "size": [
+        442.8438720703125,
+        82
+      ],
+      "flags": {},
+      "order": 11,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 136
+        }
+      ],
+      "outputs": [
+        {
+          "name": "MODEL",
+          "type": "MODEL",
+          "links": [
+            123
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "LoraLoaderModelOnly"
+      },
+      "widgets_values": [
+        "hyvid\\musubi-tuner\\img2vid544p.safetensors",
+        1
+      ]
+    },
+    {
+      "id": 66,
+      "type": "ImageResizeKJ",
+      "pos": [
+        -1821.1531982421875,
+        -632.925048828125
+      ],
+      "size": [
+        315,
+        266
+      ],
+      "flags": {},
+      "order": 6,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 86
+        },
+        {
+          "name": "get_image_size",
+          "type": "IMAGE",
+          "link": null,
+          "shape": 7
+        },
+        {
+          "name": "width_input",
+          "type": "INT",
+          "link": null,
+          "widget": {
+            "name": "width_input"
+          },
+          "shape": 7
+        },
+        {
+          "name": "height_input",
+          "type": "INT",
+          "link": null,
+          "widget": {
+            "name": "height_input"
+          },
+          "shape": 7
+        }
+      ],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            143
+          ],
+          "slot_index": 0
+        },
+        {
+          "name": "width",
+          "type": "INT",
+          "links": [
+            89
+          ],
+          "slot_index": 1
+        },
+        {
+          "name": "height",
+          "type": "INT",
+          "links": [
+            90
+          ],
+          "slot_index": 2
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "ImageResizeKJ"
+      },
+      "widgets_values": [
+        960,
+        640,
+        "lanczos",
+        false,
+        2,
+        0,
+        0,
+        "center"
+      ]
+    },
+    {
+      "id": 86,
+      "type": "ImageNoiseAugmentation",
+      "pos": [
+        -1361.111572265625,
+        -667.0104370117188
+      ],
+      "size": [
+        315,
+        106
+      ],
+      "flags": {},
+      "order": 9,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 143
+        }
+      ],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            144
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "ImageNoiseAugmentation"
+      },
+      "widgets_values": [
+        0.05,
+        123,
+        "fixed"
       ]
     }
   ],
@@ -1053,14 +1094,6 @@
       "MODEL"
     ],
     [
-      118,
-      66,
-      0,
-      64,
-      0,
-      "IMAGE"
-    ],
-    [
       119,
       53,
       0,
@@ -1115,6 +1148,22 @@
       57,
       0,
       "LATENT"
+    ],
+    [
+      143,
+      66,
+      0,
+      86,
+      0,
+      "IMAGE"
+    ],
+    [
+      144,
+      86,
+      0,
+      64,
+      0,
+      "IMAGE"
     ]
   ],
   "groups": [],
