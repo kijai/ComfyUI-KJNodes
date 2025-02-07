@@ -2076,10 +2076,10 @@ class CustomControlNetWeightsFluxFromList:
     def load_weights(self, list_of_floats: list[float],
                      uncond_multiplier: float=1.0, cn_extras: dict[str]={}):
         
-        acn_nodes = importlib.import_module("ComfyUI-Advanced-ControlNet")
-        ControlWeights = acn_nodes.adv_control.utils.ControlWeights
-        TimestepKeyframeGroup = acn_nodes.adv_control.utils.TimestepKeyframeGroup
-        TimestepKeyframe = acn_nodes.adv_control.utils.TimestepKeyframe
+        adv_control = importlib.import_module("ComfyUI-Advanced-ControlNet.adv_control")
+        ControlWeights = adv_control.utils.ControlWeights
+        TimestepKeyframeGroup = adv_control.utils.TimestepKeyframeGroup
+        TimestepKeyframe = adv_control.utils.TimestepKeyframe
 
         weights = ControlWeights.controlnet(weights_input=list_of_floats, uncond_multiplier=uncond_multiplier, extras=cn_extras)
         print(weights.weights_input)
