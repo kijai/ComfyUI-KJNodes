@@ -111,7 +111,7 @@ class ScaleBatchPromptSchedule:
     
     RETURN_TYPES = ("STRING",)
     FUNCTION = "scaleschedule"
-    CATEGORY = "KJNodes"
+    CATEGORY = "KJNodes/misc"
     DESCRIPTION = """
 Scales a batch schedule from Fizz' nodes BatchPromptSchedule
 to a different frame count.
@@ -155,7 +155,7 @@ class GetLatentsFromBatchIndexed:
     
     RETURN_TYPES = ("LATENT",)
     FUNCTION = "indexedlatentsfrombatch"
-    CATEGORY = "KJNodes"
+    CATEGORY = "KJNodes/latents"
     DESCRIPTION = """
 Selects and returns the latents at the specified indices as an latent batch.
 """
@@ -238,7 +238,7 @@ class AppendStringsToList:
         }
     RETURN_TYPES = ("STRING",)
     FUNCTION = "joinstring"
-    CATEGORY = "KJNodes/constants"
+    CATEGORY = "KJNodes/text"
 
     def joinstring(self, string1, string2):
         if not isinstance(string1, list):
@@ -261,7 +261,7 @@ class JoinStrings:
         }
     RETURN_TYPES = ("STRING",)
     FUNCTION = "joinstring"
-    CATEGORY = "KJNodes/constants"
+    CATEGORY = "KJNodes/text"
 
     def joinstring(self, string1, string2, delimiter):
         joined_string = string1 + delimiter + string2
@@ -283,7 +283,7 @@ class JoinStringMulti:
     RETURN_TYPES = ("STRING",)
     RETURN_NAMES = ("string",)
     FUNCTION = "combine"
-    CATEGORY = "KJNodes"
+    CATEGORY = "KJNodes/text"
     DESCRIPTION = """
 Creates single string, or a list of strings, from  
 multiple input strings.  
@@ -738,7 +738,7 @@ class EmptyLatentImagePresets:
     RETURN_TYPES = ("LATENT", "INT", "INT")
     RETURN_NAMES = ("Latent", "Width", "Height")
     FUNCTION = "generate"
-    CATEGORY = "KJNodes"
+    CATEGORY = "KJNodes/latents"
 
     def generate(self, dimensions, invert, batch_size):
         from nodes import EmptyLatentImage
@@ -784,7 +784,7 @@ class EmptyLatentImageCustomPresets:
     RETURN_TYPES = ("LATENT", "INT", "INT")
     RETURN_NAMES = ("Latent", "Width", "Height")
     FUNCTION = "generate"
-    CATEGORY = "KJNodes"
+    CATEGORY = "KJNodes/latents"
     DESCRIPTION = """
 Generates an empty latent image with the specified dimensions.  
 The choices are loaded from 'custom_dimensions.json' in the nodes folder.
@@ -1113,7 +1113,7 @@ class GenerateNoise:
                 "model": ("MODEL", ),
                 "sigmas": ("SIGMAS", ),
                 "latent_channels": (['4', '16', ],),
-                "shape": (["BCHW", "BCTHW"],),
+                "shape": (["BCHW", "BCTHW","BTCHW",],),
             }
         }
     
@@ -1131,7 +1131,8 @@ Generates noise for injection or to be used as empty latents on samplers with ad
             noise = torch.randn([batch_size, int(latent_channels), height // 8, width // 8], dtype=torch.float32, layout=torch.strided, generator=generator, device="cpu")
         elif shape == "BCTHW":
             noise = torch.randn([1, int(latent_channels), batch_size,height // 8, width // 8], dtype=torch.float32, layout=torch.strided, generator=generator, device="cpu")
-            print(noise.shape)
+        elif shape == "BTCHW":
+            noise = torch.randn([1, batch_size, int(latent_channels), height // 8, width // 8], dtype=torch.float32, layout=torch.strided, generator=generator, device="cpu")
         if sigmas is not None:
             sigma = sigmas[0] - sigmas[-1]
             sigma /= model.model.latent_format.scale_factor

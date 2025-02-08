@@ -389,6 +389,7 @@ class ImageConcatFromBatch:
             grid[row*height:(row+1)*height, col*width:(col+1)*width, :] = resized_image
 
         return grid.unsqueeze(0),
+
     
 class ImageGridComposite2x2:
     @classmethod
@@ -502,7 +503,7 @@ class ImageGrabPIL:
     RETURN_TYPES = ("IMAGE",)
     RETURN_NAMES = ("image",)
     FUNCTION = "screencap"
-    CATEGORY = "KJNodes/experimental"
+    CATEGORY = "KJNodes/image"
     DESCRIPTION = """
 Captures an area specified by screen coordinates.  
 Can be used for realtime diffusion with autoqueue.
@@ -550,7 +551,7 @@ class Screencap_mss:
     RETURN_TYPES = ("IMAGE",)
     RETURN_NAMES = ("image",)
     FUNCTION = "screencap"
-    CATEGORY = "KJNodes/experimental"
+    CATEGORY = "KJNodes/image"
     DESCRIPTION = """
 Captures an area specified by screen coordinates.  
 Can be used for realtime diffusion with autoqueue.
@@ -1116,7 +1117,7 @@ class ImageAndMaskPreview(SaveImage):
     RETURN_TYPES = ("IMAGE",)
     RETURN_NAMES = ("composite",)
     FUNCTION = "execute"
-    CATEGORY = "KJNodes"
+    CATEGORY = "KJNodes/masking"
     DESCRIPTION = """
 Preview an image or a mask, when both inputs are used  
 composites the mask on top of the image.
@@ -1803,6 +1804,35 @@ with the **inputcount** and clicking update.
             new_image = kwargs[f"image_{c + 1}"]
             image, = image_batch_node.batch(image, new_image)
         return (image,)
+
+
+class ImageTensorList:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": {
+            "image1": ("IMAGE",),
+            "image2": ("IMAGE",),
+        }}
+
+    RETURN_TYPES = ("IMAGE",)
+    #OUTPUT_IS_LIST = (True,)
+    FUNCTION = "append"
+    CATEGORY = "KJNodes/image"
+    DESCRIPTION = """
+Creates an image list from the input images.
+"""
+
+    def append(self, image1, image2):
+        image_list = []
+        if isinstance(image1, torch.Tensor) and isinstance(image2, torch.Tensor):
+            image_list = [image1, image2]
+        elif isinstance(image1, list) and isinstance(image2, torch.Tensor):
+            image_list = image1 + [image2]
+        elif isinstance(image1, torch.Tensor) and isinstance(image2, list):
+            image_list = [image1] + image2
+        elif isinstance(image1, list) and isinstance(image2, list):
+            image_list = image1 + image2
+        return image_list,
 
 class ImageAddMulti:
     @classmethod
@@ -2724,3 +2754,105 @@ class ImageUncropByMask:
 
 
         return (torch.stack(output_list),)
+    
+class ImageCropByMaskBatch:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": {
+                    "image": ("IMAGE", ),
+                    "masks": ("MASK", ),
+                    "width": ("INT", {"default": 512, "min": 0, "max": MAX_RESOLUTION, "step": 8, }),
+                    "height": ("INT", {"default": 512, "min": 0, "max": MAX_RESOLUTION, "step": 8, }),
+                    "padding": ("INT", {"default": 0, "min": 0, "max": 4096, "step": 1, }),
+                    "preserve_size": ("BOOLEAN", {"default": False}),
+                    "bg_color": ("STRING", {"default": "0, 0, 0", "tooltip": "Color as RGB values in range 0-255, separated by commas."}),
+                  }
+                }
+    
+    RETURN_TYPES = ("IMAGE", "MASK", )
+    RETURN_NAMES = ("images", "masks",)
+    FUNCTION = "crop"
+    CATEGORY = "KJNodes/image"
+    DESCRIPTION = "Crops the input images based on the provided masks."
+        
+    def crop(self, image, masks, width, height, bg_color, padding, preserve_size):
+        B, H, W, C = image.shape
+        BM, HM, WM = masks.shape
+        mask_count = BM
+        if HM != H or WM != W:
+            masks = F.interpolate(masks.unsqueeze(1), size=(H, W), mode='nearest-exact').squeeze(1)
+            print(masks.shape)
+        output_images = []
+        output_masks = []
+
+        bg_color = [int(x.strip())/255.0 for x in bg_color.split(",")]
+        
+        # For each mask
+        for i in range(mask_count):
+            curr_mask = masks[i]
+            
+            # Find bounds
+            y_indices, x_indices = torch.nonzero(curr_mask, as_tuple=True)
+            if len(y_indices) == 0 or len(x_indices) == 0:
+                continue
+                
+            # Get exact bounds with padding
+            min_y = max(0, y_indices.min().item() - padding)
+            max_y = min(H, y_indices.max().item() + 1 + padding)
+            min_x = max(0, x_indices.min().item() - padding)
+            max_x = min(W, x_indices.max().item() + 1 + padding)
+            
+            # Ensure mask has correct shape for multiplication
+            curr_mask = curr_mask.unsqueeze(-1).expand(-1, -1, C)
+            
+            # Crop image and mask together
+            cropped_img = image[0, min_y:max_y, min_x:max_x, :]
+            cropped_mask = curr_mask[min_y:max_y, min_x:max_x, :]
+
+            crop_h, crop_w = cropped_img.shape[0:2]
+            new_w = crop_w
+            new_h = crop_h
+
+            if not preserve_size or crop_w > width or crop_h > height:
+                scale = min(width/crop_w, height/crop_h)
+                new_w = int(crop_w * scale)
+                new_h = int(crop_h * scale)
+                
+                # Resize RGB
+                resized_img = common_upscale(cropped_img.permute(2,0,1).unsqueeze(0), new_w, new_h, "lanczos", "disabled").squeeze(0).permute(1,2,0)
+                resized_mask = torch.nn.functional.interpolate(
+                    cropped_mask.permute(2,0,1).unsqueeze(0),
+                    size=(new_h, new_w),
+                    mode='nearest'
+                ).squeeze(0).permute(1,2,0)
+            else:
+                resized_img = cropped_img
+                resized_mask = cropped_mask
+
+            # Create empty tensors
+            new_img = torch.zeros((height, width, 3), dtype=image.dtype)
+            new_mask = torch.zeros((height, width), dtype=image.dtype)
+
+            # Pad both
+            pad_x = (width - new_w) // 2
+            pad_y = (height - new_h) // 2
+            new_img[pad_y:pad_y+new_h, pad_x:pad_x+new_w, :] = resized_img
+            if len(resized_mask.shape) == 3:
+                resized_mask = resized_mask[:,:,0]  # Take first channel if 3D
+            new_mask[pad_y:pad_y+new_h, pad_x:pad_x+new_w] = resized_mask
+
+            output_images.append(new_img)
+            output_masks.append(new_mask)
+
+        if not output_images:
+            return (torch.zeros((0, height, width, 3), dtype=image.dtype),)
+
+        out_rgb = torch.stack(output_images, dim=0)
+        out_masks = torch.stack(output_masks, dim=0)
+
+        # Apply mask to RGB
+        mask_expanded = out_masks.unsqueeze(-1).expand(-1, -1, -1, 3)
+        background_color = torch.tensor(bg_color, dtype=torch.float32, device=image.device)
+        out_rgb = out_rgb * mask_expanded + background_color * (1 - mask_expanded)
+
+        return (out_rgb, out_masks)

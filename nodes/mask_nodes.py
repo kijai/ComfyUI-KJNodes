@@ -1251,3 +1251,140 @@ Sets new min and max values for the mask.
         scaled_mask = torch.clamp(scaled_mask, min=0.0, max=1.0)
         
         return (scaled_mask, )
+
+
+def get_mask_polygon(self, mask_np):
+    import cv2
+    """Helper function to get polygon points from mask"""
+    # Find contours
+    contours, _ = cv2.findContours(mask_np, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    
+    if not contours:
+        return None
+    
+    # Get the largest contour
+    largest_contour = max(contours, key=cv2.contourArea)
+    
+    # Approximate polygon
+    epsilon = 0.02 * cv2.arcLength(largest_contour, True)
+    polygon = cv2.approxPolyDP(largest_contour, epsilon, True)
+    
+    return polygon.squeeze()
+
+import cv2
+class SeparateMasks:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "mask": ("MASK", ),
+                "size_threshold_width" : ("INT", {"default": 256, "min": 0.0, "max": 4096, "step": 1}),
+                "size_threshold_height" : ("INT", {"default": 256, "min": 0.0, "max": 4096, "step": 1}),
+                "mode": (["convex_polygons", "area"],),
+                "max_poly_points": ("INT", {"default": 8, "min": 3, "max": 32, "step": 1}),
+
+            },
+        }
+
+    RETURN_TYPES = ("MASK",)
+    RETURN_NAMES = ("mask",)
+    FUNCTION = "separate"
+    CATEGORY = "KJNodes/masking"
+    OUTPUT_NODE = True
+
+    def polygon_to_mask(self, polygon, shape):
+        mask = np.zeros((shape[0], shape[1]), dtype=np.uint8)  # Fixed shape handling
+
+        if len(polygon.shape) == 2:  # Check if polygon points are valid
+            polygon = polygon.astype(np.int32)
+            cv2.fillPoly(mask, [polygon], 1)
+        return mask
+
+    def get_mask_polygon(self, mask_np, max_points):
+        contours, _ = cv2.findContours(mask_np, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if not contours:
+            return None
+        
+        largest_contour = max(contours, key=cv2.contourArea)
+        hull = cv2.convexHull(largest_contour)
+        
+        # Initialize with smaller epsilon for more points
+        perimeter = cv2.arcLength(hull, True)
+        epsilon = perimeter * 0.01  # Start smaller
+        
+        min_eps = perimeter * 0.001  # Much smaller minimum
+        max_eps = perimeter * 0.2   # Smaller maximum
+        
+        best_approx = None
+        best_diff = float('inf')
+        max_iterations = 20
+        
+        #print(f"Target points: {max_points}, Perimeter: {perimeter}")
+        
+        for i in range(max_iterations):
+            curr_eps = (min_eps + max_eps) / 2
+            approx = cv2.approxPolyDP(hull, curr_eps, True)
+            points_diff = len(approx) - max_points
+            
+            #print(f"Iteration {i}: points={len(approx)}, eps={curr_eps:.4f}")
+            
+            if abs(points_diff) < best_diff:
+                best_approx = approx
+                best_diff = abs(points_diff)
+            
+            if len(approx) > max_points:
+                min_eps = curr_eps * 1.1  # More gradual adjustment
+            elif len(approx) < max_points:
+                max_eps = curr_eps * 0.9  # More gradual adjustment
+            else:
+                return approx.squeeze()
+            
+            if abs(max_eps - min_eps) < perimeter * 0.0001:  # Relative tolerance
+                break
+        
+        # If we didn't find exact match, return best approximation
+        return best_approx.squeeze() if best_approx is not None else hull.squeeze()
+
+    def separate(self, mask: torch.Tensor, size_threshold_width: int, size_threshold_height: int, max_poly_points: int, mode: str):
+        from scipy.ndimage import label
+        import numpy as np
+        
+        B, H, W = mask.shape
+        separated = []
+
+        mask = mask.round()
+        
+        for b in range(B):
+            mask_np = mask[b].cpu().numpy().astype(np.uint8)
+            structure = np.ones((3, 3), dtype=np.int8)
+            labeled, ncomponents = label(mask_np, structure=structure)
+            pbar = ProgressBar(ncomponents)
+            for component in range(1, ncomponents + 1):
+                component_mask_np = (labeled == component).astype(np.uint8)
+                
+                rows = np.any(component_mask_np, axis=1)
+                cols = np.any(component_mask_np, axis=0)
+                y_min, y_max = np.where(rows)[0][[0, -1]]
+                x_min, x_max = np.where(cols)[0][[0, -1]]
+                
+                width = x_max - x_min + 1
+                height = y_max - y_min + 1
+                print(f"Component {component}: width={width}, height={height}")
+                
+                if width >= size_threshold_width and height >= size_threshold_height:
+                    polygon = self.get_mask_polygon(component_mask_np, max_poly_points)
+                    if mode != "area" and polygon is not None:
+                        poly_mask = self.polygon_to_mask(polygon, (H, W))
+                        poly_mask = torch.tensor(poly_mask, device=mask.device)
+                        separated.append(poly_mask)
+                    elif mode == "area":
+                        area_mask = torch.tensor(component_mask_np, device=mask.device)
+                        separated.append(area_mask)
+                pbar.update(1)
+        
+        if len(separated) > 0:
+            out_masks = torch.stack(separated, dim=0)
+            return out_masks,
+        else:
+            return torch.empty((1, 64, 64), device=mask.device),
+        
