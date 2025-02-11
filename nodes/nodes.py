@@ -2251,7 +2251,17 @@ class LeapfusionHunyuanI2V:
             def unet_wrapper(apply_model, args):
                 steps = args["c"]["transformer_options"]["sample_sigmas"]
                 inp, timestep, c = args["input"], args["timestep"], args["c"]
-                current_step_index = (steps == timestep).nonzero().item()
+                matched_step_index = (steps == timestep).nonzero()
+                if len(matched_step_index) > 0:
+                    current_step_index = matched_step_index.item()
+                else:
+                    for i in range(len(steps) - 1):
+                        # walk from beginning of steps until crossing the timestep
+                        if (steps[i] - timestep) * (steps[i + 1] - timestep) <= 0:
+                            current_step_index = i
+                            break
+                    else:
+                        current_step_index = 0
                 current_percent = current_step_index / (len(steps) - 1)
                 if samples is not None:
                     if start_percent <= current_percent <= end_percent:
