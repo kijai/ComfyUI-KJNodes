@@ -2281,7 +2281,7 @@ class ImageNoiseAugmentation:
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "add_noise"
 
-    CATEGORY = "KJNodes/experimental"
+    CATEGORY = "KJNodes/image"
 
     def add_noise(self, image, noise_aug_strength, seed):
         torch.manual_seed(seed)

@@ -75,6 +75,7 @@ NODE_CONFIG = {
     "ImageResizeKJ": {"class": ImageResizeKJ, "name": "Resize Image"},
     "ImageUpscaleWithModelBatched": {"class": ImageUpscaleWithModelBatched, "name": "Image Upscale With Model Batched"},
     "InsertImagesToBatchIndexed": {"class": InsertImagesToBatchIndexed, "name": "Insert Images To Batch Indexed"},
+    "InsertLatentToIndexed": {"class": InsertLatentToIndex, "name": "Insert Latent To Index"},
     "LoadAndResizeImage": {"class": LoadAndResizeImage, "name": "Load & Resize Image"},
     "LoadImagesFromFolderKJ": {"class": LoadImagesFromFolderKJ, "name": "Load Images From Folder (KJ)"},
     "MergeImageChannels": {"class": MergeImageChannels, "name": "Merge Image Channels"},
@@ -105,6 +106,7 @@ NODE_CONFIG = {
     "CustomSigmas": {"class": CustomSigmas, "name": "Custom Sigmas"},
     #utility
     "WidgetToString": {"class": WidgetToString, "name": "Widget To String"},
+    "SaveStringKJ": {"class": SaveStringKJ, "name": "Save String KJ"},
     "DummyOut": {"class": DummyOut, "name": "Dummy Out"},
     "GetLatentsFromBatchIndexed": {"class": GetLatentsFromBatchIndexed, "name": "Get Latents From Batch Indexed"},
     "ScaleBatchPromptSchedule": {"class": ScaleBatchPromptSchedule, "name": "Scale Batch Prompt Schedule"},

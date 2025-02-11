@@ -1652,6 +1652,54 @@ Returns a range of latents from a batch.
 
         return ({"samples": chosen_latents,},)
     
+class InsertLatentToIndex:
+    
+    RETURN_TYPES = ("LATENT", )
+    FUNCTION = "insert"
+    CATEGORY = "KJNodes/latents"
+    DESCRIPTION = """
+Inserts a latent at the specified index into the original latent batch.
+"""
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "source": ("LATENT",),
+                "destination": ("LATENT",),
+                "index": ("INT", {"default": 0,"min": -1, "max": 4096, "step": 1}),
+        },
+    } 
+    
+    def insert(self, source, destination, index):
+        samples_destination = destination["samples"]
+        samples_source = source["samples"].to(samples_destination)
+        
+        if len(samples_source.shape) == 4:
+            B, C, H, W = samples_source.shape
+            num_latents = B
+        elif len(samples_source.shape) == 5:
+            B, C, T, H, W = samples_source.shape
+            num_latents = T
+        
+        if index >= num_latents or index < 0:
+            raise ValueError(f"Index {index} out of bounds for tensor with {num_latents} latents")
+        
+        if len(samples_source.shape) == 4:
+            joined_latents = torch.cat([
+                samples_destination[:index],
+                samples_source,
+                samples_destination[index+1:]
+            ], dim=0)
+        else:
+            joined_latents = torch.cat([
+                samples_destination[:, :, :index],
+                samples_source,
+                samples_destination[:, :, index+1:]
+            ], dim=2)
+
+        return ({"samples": joined_latents,},)
+    
 class GetImagesFromBatchIndexed:
     
     RETURN_TYPES = ("IMAGE",)
@@ -2523,6 +2571,54 @@ class SaveImageKJ:
         return { "ui": { 
                 "images": results },
                 "result": (file,) }
+    
+class SaveStringKJ:
+    def __init__(self):
+        self.output_dir = folder_paths.get_output_directory()
+        self.type = "output"
+        self.prefix_append = ""
+        self.compress_level = 4
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "string": ("STRING", {"forceInput": True, "tooltip": "string to save as .txt file"}), 
+                "filename_prefix": ("STRING", {"default": "text", "tooltip": "The prefix for the file to save. This may include formatting information such as %date:yyyy-MM-dd% or %Empty Latent Image.width% to include values from nodes."}),
+                "output_folder": ("STRING", {"default": "output", "tooltip": "The folder to save the images to."}),
+            },
+            "optional": {
+                "file_extension": ("STRING", {"default": ".txt", "tooltip": "The extension for the caption file."}),
+            },
+        }
+
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("filename",)
+    FUNCTION = "save_string"
+
+    OUTPUT_NODE = True
+
+    CATEGORY = "KJNodes/misc"
+    DESCRIPTION = "Saves the input string to your ComfyUI output directory."
+
+    def save_string(self, string, output_folder, filename_prefix="text", file_extension=".txt"):
+        filename_prefix += self.prefix_append
+        
+        full_output_folder, filename, counter, subfolder, filename_prefix = folder_paths.get_save_image_path(filename_prefix, self.output_dir)
+        if output_folder != "output":
+            if not os.path.exists(output_folder):
+                os.makedirs(output_folder, exist_ok=True)
+            full_output_folder = output_folder
+
+        base_file_name = f"{filename_prefix}_{counter:05}_"
+        results = list()
+
+        txt_file = base_file_name + file_extension
+        file_path = os.path.join(full_output_folder, txt_file)
+        with open(file_path, 'w') as f:
+            f.write(string)
+
+        return results,
     
 to_pil_image = T.ToPILImage()
 
