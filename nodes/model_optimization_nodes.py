@@ -351,6 +351,69 @@ class TorchCompileModelFluxAdvanced:
         # diffusion_model.txt_in = torch.compile(diffusion_model.txt_in, mode=mode, fullgraph=fullgraph, backend=backend)
         # diffusion_model.vector_in = torch.compile(diffusion_model.vector_in, mode=mode, fullgraph=fullgraph, backend=backend)
 
+class TorchCompileModelHyVideo:
+    def __init__(self):
+        self._compiled = False
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "model": ("MODEL",),
+                "backend": (["inductor","cudagraphs"], {"default": "inductor"}),
+                "fullgraph": ("BOOLEAN", {"default": False, "tooltip": "Enable full graph mode"}),
+                "mode": (["default", "max-autotune", "max-autotune-no-cudagraphs", "reduce-overhead"], {"default": "default"}),
+                "dynamic": ("BOOLEAN", {"default": False, "tooltip": "Enable dynamic mode"}),
+                "dynamo_cache_size_limit": ("INT", {"default": 64, "min": 0, "max": 1024, "step": 1, "tooltip": "torch._dynamo.config.cache_size_limit"}),
+                "compile_single_blocks": ("BOOLEAN", {"default": True, "tooltip": "Compile single blocks"}),
+                "compile_double_blocks": ("BOOLEAN", {"default": True, "tooltip": "Compile double blocks"}),
+                "compile_txt_in": ("BOOLEAN", {"default": False, "tooltip": "Compile txt_in layers"}),
+                "compile_vector_in": ("BOOLEAN", {"default": False, "tooltip": "Compile vector_in layers"}),
+                "compile_final_layer": ("BOOLEAN", {"default": False, "tooltip": "Compile final layer"}),
+
+            },
+        }
+    RETURN_TYPES = ("MODEL",)
+    FUNCTION = "patch"
+
+    CATEGORY = "KJNodes/experimental"
+    EXPERIMENTAL = True
+
+    def patch(self, model, backend, fullgraph, mode, dynamic, dynamo_cache_size_limit, compile_single_blocks, compile_double_blocks, compile_txt_in, compile_vector_in, compile_final_layer):
+        m = model.clone()
+        diffusion_model = m.get_model_object("diffusion_model")
+        torch._dynamo.config.cache_size_limit = dynamo_cache_size_limit
+        if not self._compiled:
+            try:
+                if compile_single_blocks:
+                    for i, block in enumerate(diffusion_model.single_blocks):
+                        compiled_block = torch.compile(block, fullgraph=fullgraph, dynamic=dynamic, backend=backend, mode=mode)
+                        m.add_object_patch(f"diffusion_model.single_blocks.{i}", compiled_block)
+                if compile_double_blocks:
+                    for i, block in enumerate(diffusion_model.double_blocks):
+                        compiled_block = torch.compile(block, fullgraph=fullgraph, dynamic=dynamic, backend=backend, mode=mode)
+                        m.add_object_patch(f"diffusion_model.double_blocks.{i}", compiled_block)
+                if compile_txt_in:
+                    compiled_block = torch.compile(diffusion_model.txt_in, fullgraph=fullgraph, dynamic=dynamic, backend=backend, mode=mode)
+                    m.add_object_patch("diffusion_model.txt_in", compiled_block)
+                if compile_vector_in:
+                    compiled_block = torch.compile(diffusion_model.vector_in, fullgraph=fullgraph, dynamic=dynamic, backend=backend, mode=mode)
+                    m.add_object_patch("diffusion_model.vector_in", compiled_block)
+                if compile_final_layer:
+                    compiled_block = torch.compile(diffusion_model.final_layer, fullgraph=fullgraph, dynamic=dynamic, backend=backend, mode=mode)
+                    m.add_object_patch("diffusion_model.final_layer", compiled_block)
+                self._compiled = True
+                compile_settings = {
+                    "backend": backend,
+                    "mode": mode,
+                    "fullgraph": fullgraph,
+                    "dynamic": dynamic,
+                }
+                setattr(m.model, "compile_settings", compile_settings)
+            except:
+                raise RuntimeError("Failed to compile model")
+        return (m, )
+
 class TorchCompileVAE:
     def __init__(self):
         self._compiled_encoder = False
