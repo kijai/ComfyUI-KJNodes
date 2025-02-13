@@ -2531,16 +2531,13 @@ class SaveImageKJ:
         filename_prefix += self.prefix_append
 
         if os.path.isabs(output_folder):
-            print("Absolute path detected")
             if not os.path.exists(output_folder):
                 os.makedirs(output_folder, exist_ok=True)
             full_output_folder = output_folder
             _, filename, counter, subfolder, filename_prefix = folder_paths.get_save_image_path(filename_prefix, output_folder, images[0].shape[1], images[0].shape[0])
         else:
-            print("Relative path detected")
             self.output_dir = folder_paths.get_output_directory()
             full_output_folder, filename, counter, subfolder, filename_prefix = folder_paths.get_save_image_path(filename_prefix, self.output_dir, images[0].shape[1], images[0].shape[0])
-            print(full_output_folder, filename, counter, subfolder, filename_prefix)
 
         results = list()
         for (batch_number, image) in enumerate(images):
