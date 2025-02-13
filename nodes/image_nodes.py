@@ -237,10 +237,10 @@ Concatenates the image2 to image1 in the specified direction.
             # Repeat the last image to match the largest batch size
             if repeats1 > 0:
                 last_image1 = image1[-1].unsqueeze(0).repeat(repeats1, 1, 1, 1)
-                image1 = torch.cat([image1, last_image1], dim=0)
+                image1 = torch.cat([image1.clone(), last_image1], dim=0)
             if repeats2 > 0:
                 last_image2 = image2[-1].unsqueeze(0).repeat(repeats2, 1, 1, 1)
-                image2 = torch.cat([image2, last_image2], dim=0)
+                image2 = torch.cat([image2.clone(), last_image2], dim=0)
 
         if match_image_size:
             # Use first_image_shape if provided; otherwise, default to image1's shape
@@ -2497,7 +2497,6 @@ class ImageGridtoBatch:
 
 class SaveImageKJ:
     def __init__(self):
-        self.output_dir = folder_paths.get_output_directory()
         self.type = "output"
         self.prefix_append = ""
         self.compress_level = 4
@@ -2530,12 +2529,19 @@ class SaveImageKJ:
 
     def save_images(self, images, output_folder, filename_prefix="ComfyUI", prompt=None, extra_pnginfo=None, caption=None, caption_file_extension=".txt"):
         filename_prefix += self.prefix_append
-        
-        full_output_folder, filename, counter, subfolder, filename_prefix = folder_paths.get_save_image_path(filename_prefix, self.output_dir, images[0].shape[1], images[0].shape[0])
-        if output_folder != "output":
+
+        if os.path.isabs(output_folder):
+            print("Absolute path detected")
             if not os.path.exists(output_folder):
                 os.makedirs(output_folder, exist_ok=True)
             full_output_folder = output_folder
+            _, filename, counter, subfolder, filename_prefix = folder_paths.get_save_image_path(filename_prefix, output_folder, images[0].shape[1], images[0].shape[0])
+        else:
+            print("Relative path detected")
+            self.output_dir = folder_paths.get_output_directory()
+            full_output_folder, filename, counter, subfolder, filename_prefix = folder_paths.get_save_image_path(filename_prefix, self.output_dir, images[0].shape[1], images[0].shape[0])
+            print(full_output_folder, filename, counter, subfolder, filename_prefix)
+
         results = list()
         for (batch_number, image) in enumerate(images):
             i = 255. * image.cpu().numpy()
@@ -2566,11 +2572,7 @@ class SaveImageKJ:
 
             counter += 1
 
-
-
-        return { "ui": { 
-                "images": results },
-                "result": (file,) }
+        return file, 
     
 class SaveStringKJ:
     def __init__(self):
