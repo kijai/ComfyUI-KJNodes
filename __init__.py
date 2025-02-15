@@ -166,6 +166,7 @@ NODE_CONFIG = {
     "CheckpointLoaderKJ": {"class": CheckpointLoaderKJ, "name": "CheckpointLoaderKJ"},
     "DiffusionModelLoaderKJ": {"class": DiffusionModelLoaderKJ, "name": "Diffusion Model Loader KJ"},
     "TorchCompileModelFluxAdvanced": {"class": TorchCompileModelFluxAdvanced, "name": "TorchCompileModelFluxAdvanced"},
+    "TorchCompileModelHyVideo": {"class": TorchCompileModelHyVideo, "name": "TorchCompileModelHyVideo"},
     "TorchCompileVAE": {"class": TorchCompileVAE, "name": "TorchCompileVAE"},
     "TorchCompileControlNet": {"class": TorchCompileControlNet, "name": "TorchCompileControlNet"},
     "PatchModelPatcherOrder": {"class": PatchModelPatcherOrder, "name": "Patch Model Patcher Order"},
