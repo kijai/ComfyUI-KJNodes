@@ -1105,6 +1105,7 @@ class ImagePrepForICLora:
             },
             "optional": {
                 "latent_image": ("IMAGE",),
+                "latent_mask": ("MASK",),
                 "reference_mask": ("MASK",),
             }
         }
@@ -1114,7 +1115,7 @@ class ImagePrepForICLora:
 
     CATEGORY = "image"
 
-    def expand_image(self, reference_image, output_width, output_height, border_width, latent_image=None, reference_mask=None):
+    def expand_image(self, reference_image, output_width, output_height, border_width, latent_image=None, reference_mask=None, latent_mask=None):
 
         if reference_mask is not None:
             if torch.allclose(reference_mask, torch.zeros_like(reference_mask)):
@@ -1127,7 +1128,7 @@ class ImagePrepForICLora:
         if reference_mask is not None:
             resized_mask = torch.nn.functional.interpolate(
                 reference_mask.unsqueeze(1), 
-                size=(image.shape[1], image.shape[2]), 
+                size=(H, W),
                 mode='nearest'
             ).squeeze(1)
             print(resized_mask.shape)
@@ -1145,16 +1146,30 @@ class ImagePrepForICLora:
         else:
             resized_latent_image = common_upscale(latent_image.movedim(-1,1), output_width, output_height, "lanczos", "disabled").movedim(1,-1)
             pad_image = resized_latent_image
+            if latent_mask is not None:
+                resized_latent_mask = torch.nn.functional.interpolate(
+                    latent_mask.unsqueeze(1), 
+                    size=(pad_image.shape[1], pad_image.shape[2]), 
+                    mode='nearest'
+                ).squeeze(1)
 
         if border_width > 0:
             border = torch.zeros((B, output_height, border_width, C), device=image.device)
             padded_image = torch.cat((resized_image, border, pad_image), dim=2)
-            padded_mask = torch.ones((B, padded_image.shape[1], padded_image.shape[2]), device=image.device)
-            padded_mask[:, :, :new_width + border_width] = 0
+            if latent_mask is not None:
+                padded_mask = torch.zeros((B, padded_image.shape[1], padded_image.shape[2]), device=image.device)
+                padded_mask[:, :, (new_width + border_width):] = resized_latent_mask
+            else:
+                padded_mask = torch.ones((B, padded_image.shape[1], padded_image.shape[2]), device=image.device)
+                padded_mask[:, :, :new_width + border_width] = 0
         else:
             padded_image = torch.cat((resized_image, pad_image), dim=2)
-            padded_mask = torch.ones((B, padded_image.shape[1], padded_image.shape[2]), device=image.device)
-            padded_mask[:, :, :new_width] = 0
+            if latent_mask is not None:
+                padded_mask = torch.zeros((B, padded_image.shape[1], padded_image.shape[2]), device=image.device)
+                padded_mask[:, :, new_width:] = resized_latent_mask
+            else:
+                padded_mask = torch.ones((B, padded_image.shape[1], padded_image.shape[2]), device=image.device)
+                padded_mask[:, :, :new_width] = 0
 
         return (padded_image, padded_mask)
         
@@ -3059,3 +3074,82 @@ class ImageCropByMaskBatch:
         out_rgb = out_rgb * mask_expanded + background_color * (1 - mask_expanded)
 
         return (out_rgb, out_masks)
+    
+class ImagePadKJ:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": {
+                    "image": ("IMAGE", ),
+                    "left": ("INT", {"default": 0, "min": 0, "max": MAX_RESOLUTION, "step": 1, }),
+                    "right": ("INT", {"default": 0, "min": 0, "max": MAX_RESOLUTION, "step": 1, }),
+                    "top": ("INT", {"default": 0, "min": 0, "max": MAX_RESOLUTION, "step": 1, }),
+                    "bottom": ("INT", {"default": 0, "min": 0, "max": MAX_RESOLUTION, "step": 1, }),
+                    "extra_padding": ("INT", {"default": 0, "min": 0, "max": MAX_RESOLUTION, "step": 1, }),
+                    "pad_mode": (["edge", "color"],),
+                    "color": ("STRING", {"default": "0, 0, 0", "tooltip": "Color as RGB values in range 0-255, separated by commas."}),
+                  }
+                , "optional": {
+                    "masks": ("MASK", ),
+                }
+                }
+    
+    RETURN_TYPES = ("IMAGE", "MASK", )
+    RETURN_NAMES = ("images", "masks",)
+    FUNCTION = "pad"
+    CATEGORY = "KJNodes/image"
+    DESCRIPTION = "Crops the input images based on the provided masks."
+        
+    def pad(self, image, left, right, top, bottom, extra_padding, color, pad_mode, mask=None):
+        B, H, W, C = image.shape
+        
+        # Resize masks to image dimensions if necessary
+        if mask is not None:
+            BM, HM, WM = mask.shape
+            if HM != H or WM != W:
+                mask = F.interpolate(mask.unsqueeze(1), size=(H, W), mode='nearest-exact').squeeze(1)
+
+        # Parse background color
+        bg_color = [int(x.strip())/255.0 for x in color.split(",")]
+        if len(bg_color) == 1:
+            bg_color = bg_color * 3  # Grayscale to RGB
+        bg_color = torch.tensor(bg_color, dtype=image.dtype, device=image.device)
+
+        # Calculate padding sizes with extra padding
+        pad_left = left + extra_padding
+        pad_right = right + extra_padding
+        pad_top = top + extra_padding
+        pad_bottom = bottom + extra_padding
+
+        padded_width = W + pad_left + pad_right
+        padded_height = H + pad_top + pad_bottom
+        out_image = torch.zeros((B, padded_height, padded_width, C), dtype=image.dtype, device=image.device)
+        
+        # Fill padded areas
+        for b in range(B):
+            if pad_mode == "edge":
+                # Pad with edge color
+                # Define edge pixels
+                top_edge = image[b, 0, :, :]
+                bottom_edge = image[b, H-1, :, :]
+                left_edge = image[b, :, 0, :]
+                right_edge = image[b, :, W-1, :]
+
+                # Fill borders with edge colors
+                out_image[b, :pad_top, :, :] = top_edge.mean(dim=0)
+                out_image[b, pad_top+H:, :, :] = bottom_edge.mean(dim=0)
+                out_image[b, :, :pad_left, :] = left_edge.mean(dim=0)
+                out_image[b, :, pad_left+W:, :] = right_edge.mean(dim=0)
+                out_image[b, pad_top:pad_top+H, pad_left:pad_left+W, :] = image[b]
+            else:
+                # Pad with specified background color
+                out_image[b, :, :, :] = bg_color.unsqueeze(0).unsqueeze(0)  # Expand for H and W dimensions
+                out_image[b, pad_top:pad_top+H, pad_left:pad_left+W, :] = image[b]
+
+        if mask is not None:
+            out_masks = torch.zeros((BM, padded_height, padded_width), dtype=mask.dtype, device=mask.device)
+            for m in range(BM):
+                out_masks[m, pad_top:pad_top+H, pad_left:pad_left+W] = mask[m]
+        else:
+            out_masks = torch.zeros((1, padded_height, padded_width), dtype=image.dtype, device=image.device)
+
+        return (out_image, out_masks)

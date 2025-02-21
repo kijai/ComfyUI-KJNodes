@@ -71,6 +71,7 @@ NODE_CONFIG = {
     "ImageNoiseAugmentation": {"class": ImageNoiseAugmentation, "name": "Image Noise Augmentation"},
     "ImageNormalize_Neg1_To_1": {"class": ImageNormalize_Neg1_To_1, "name": "Image Normalize -1 to 1"},
     "ImagePass": {"class": ImagePass},
+    "ImagePadKJ": {"class": ImagePadKJ, "name": "ImagePad KJ"},
     "ImagePadForOutpaintMasked": {"class": ImagePadForOutpaintMasked, "name": "Image Pad For Outpaint Masked"},
     "ImagePadForOutpaintTargetSize": {"class": ImagePadForOutpaintTargetSize, "name": "Image Pad For Outpaint Target Size"},
     "ImagePrepForICLora": {"class": ImagePrepForICLora, "name": "Image Prep For ICLora"},
@@ -176,6 +177,7 @@ NODE_CONFIG = {
     "TorchCompileCosmosModel": {"class": TorchCompileCosmosModel, "name": "TorchCompileCosmosModel"},
     "PathchSageAttentionKJ": {"class": PathchSageAttentionKJ, "name": "Patch Sage Attention KJ"},
     "LeapfusionHunyuanI2VPatcher": {"class": LeapfusionHunyuanI2V, "name": "Leapfusion Hunyuan I2V Patcher"},
+    "VAELoaderKJ": {"class": VAELoaderKJ, "name": "VAELoader KJ"},
 
     #instance diffusion
     "CreateInstanceDiffusionTracking": {"class": CreateInstanceDiffusionTracking},
