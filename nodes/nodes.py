@@ -1939,6 +1939,34 @@ class FluxBlockLoraSelect:
     def load_lora(self, **kwargs):
         return (kwargs,)
     
+class HunyuanVideoBlockLoraSelect:
+    def __init__(self):
+        self.loaded_lora = None
+
+    @classmethod
+    def INPUT_TYPES(s):
+        arg_dict = {}
+        argument = ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1000.0, "step": 0.01})
+
+        for i in range(20):
+            arg_dict["double_blocks.{}.".format(i)] = argument
+
+        for i in range(40):
+            arg_dict["single_blocks.{}.".format(i)] = argument
+
+        return {"required": arg_dict}
+    
+    RETURN_TYPES = ("SELECTEDBLOCKS", )
+    RETURN_NAMES = ("blocks", )
+    OUTPUT_TOOLTIPS = ("The modified diffusion model.",)
+    FUNCTION = "load_lora"
+
+    CATEGORY = "KJNodes/experimental"
+    DESCRIPTION = "Select individual block alpha values, value of 0 removes the block altogether"
+
+    def load_lora(self, **kwargs):
+        return (kwargs,)
+    
 class FluxBlockLoraLoader:
     def __init__(self):
         self.loaded_lora = None

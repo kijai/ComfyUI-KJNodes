@@ -80,6 +80,7 @@ app.registerExtension({
 					break;
 			
 			case "FluxBlockLoraSelect":
+			case "HunyuanVideoBlockLoraSelect":
 				nodeType.prototype.onNodeCreated = function () {
 					this.addWidget("button", "Set all", null, () => {
 						const userInput = prompt("Enter the values to set for widgets (e.g., s0,1,2-7=2.0, d0,1,2-7=2.0, or 1.0):", "");
