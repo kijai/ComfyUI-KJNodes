@@ -269,7 +269,7 @@ class PatchModelPatcherOrder:
     RETURN_TYPES = ("MODEL",)
     FUNCTION = "patch"
     CATEGORY = "KJNodes/experimental"
-    DESCTIPTION = "Patch the comfy patch_model function patching order, useful for torch.compile (used as object_patch) as it should come last if you want to use LoRAs with compile"
+    DESCRIPTION = "Patch the comfy patch_model function patching order, useful for torch.compile (used as object_patch) as it should come last if you want to use LoRAs with compile"
     EXPERIMENTAL = True
 
     def patch(self, model, patch_order):
