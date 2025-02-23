@@ -1291,6 +1291,7 @@ class SeparateMasks:
     FUNCTION = "separate"
     CATEGORY = "KJNodes/masking"
     OUTPUT_NODE = True
+    DESCRIPTION = "Separates a mask into multiple masks based on the size of the connected components."
 
     def polygon_to_mask(self, polygon, shape):
         mask = np.zeros((shape[0], shape[1]), dtype=np.uint8)  # Fixed shape handling

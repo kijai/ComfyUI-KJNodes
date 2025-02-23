@@ -2717,6 +2717,7 @@ class FastPreview:
     FUNCTION = "preview"
     CATEGORY = "KJNodes/experimental"
     OUTPUT_NODE = True
+    DESCRIPTION = "Experimental node for faster image previews by displaying through base64 it without saving to disk."
 
     def preview(self, image, format, quality):        
         pil_image = to_pil_image(image[0].permute(2, 0, 1))
@@ -2884,6 +2885,7 @@ class ImageCropByMask:
     RETURN_NAMES = ("image", )
     FUNCTION = "crop"
     CATEGORY = "KJNodes/image"
+    DESCRIPTION = "Crops the input images based on the provided mask."
 
     def crop(self, image, mask):
         B, H, W, C = image.shape
@@ -3097,7 +3099,7 @@ class ImagePadKJ:
     RETURN_NAMES = ("images", "masks",)
     FUNCTION = "pad"
     CATEGORY = "KJNodes/image"
-    DESCRIPTION = "Crops the input images based on the provided masks."
+    DESCRIPTION = "Pad the input image and optionally mask with the specified padding."
         
     def pad(self, image, left, right, top, bottom, extra_padding, color, pad_mode, mask=None):
         B, H, W, C = image.shape

@@ -2318,8 +2318,10 @@ class ImageNoiseAugmentation:
 
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "add_noise"
-
     CATEGORY = "KJNodes/image"
+    DESCRIPTION = """
+    Add noise to an image.  
+    """
 
     def add_noise(self, image, noise_aug_strength, seed):
         torch.manual_seed(seed)
@@ -2411,7 +2413,6 @@ class VAELoaderKJ:
         
     RETURN_TYPES = ("VAE",)
     FUNCTION = "load_vae"
-
     CATEGORY = "KJNodes/vae"
 
     def load_vae(self, vae_name, device, weight_dtype):
@@ -2478,6 +2479,10 @@ class ScheduledCFGGuidance:
     RETURN_TYPES = ("GUIDER",)
     FUNCTION = "get_guider"
     CATEGORY = "KJNodes/experimental"
+    DESCRiPTION = """
+CFG Guider that allows for scheduled CFG changes over steps, the steps outside the range will use CFG 1.0 thus being processed faster.  
+cfg input can be a list of floats matching step count, or a single float for all steps.  
+"""
 
     def get_guider(self, model, cfg, positive, negative, start_percent, end_percent):
         guider = Guider_ScheduledCFG(model) 
