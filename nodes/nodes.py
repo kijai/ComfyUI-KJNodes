@@ -2442,6 +2442,7 @@ class Guider_ScheduledCFG(CFGGuider):
     def predict_noise(self, x, timestep, model_options={}, seed=None):
         steps = model_options["transformer_options"]["sample_sigmas"]
         matched_step_index = (steps == timestep).nonzero()
+        assert not (isinstance(self.cfg, list) and len(self.cfg) != (len(steps) - 1)), "cfg list length must match step count"
         if len(matched_step_index) > 0:
             current_step_index = matched_step_index.item()
         else:
@@ -2463,6 +2464,7 @@ class Guider_ScheduledCFG(CFGGuider):
         else:
             uncond = None
             cfg = 1.0
+
         return sampling_function(self.inner_model, x, timestep, uncond, self.conds.get("positive", None), cfg, model_options=model_options, seed=seed)            
   
 class ScheduledCFGGuidance:
