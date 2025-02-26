@@ -83,6 +83,7 @@ class BaseLoaderKJ:
             comfy.ldm.flux.math.optimized_attention = attention_sage
             comfy.ldm.genmo.joint_model.asymm_models_joint.optimized_attention = attention_sage
             comfy.ldm.cosmos.blocks.optimized_attention = attention_sage
+            comfy.ldm.wan.model.optimized_attention = attention_sage
 
         else:
             comfy_attention.optimized_attention = orig_attention
@@ -90,6 +91,7 @@ class BaseLoaderKJ:
             comfy.ldm.flux.math.optimized_attention = orig_attention
             comfy.ldm.genmo.joint_model.asymm_models_joint.optimized_attention = orig_attention
             comfy.ldm.cosmos.blocks.optimized_attention = orig_attention
+            comfy.ldm.wan.model.optimized_attention = orig_attention
 
         if patch_cublaslinear:
             if not BaseLoaderKJ.cublas_patched:
