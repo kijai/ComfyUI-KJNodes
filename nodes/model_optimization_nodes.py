@@ -197,13 +197,14 @@ class DiffusionModelLoaderKJ(BaseLoaderKJ):
             model_options["dtype"] = torch.float8_e4m3fn
             model_options["fp8_optimizations"] = True
         
-        try:
-            if enable_fp16_accumulation:
+        if enable_fp16_accumulation:
+            if hasattr(torch.backends.cuda.matmul, "allow_fp16_accumulation"):
                 torch.backends.cuda.matmul.allow_fp16_accumulation = True
             else:
+                raise RuntimeError("Failed to set fp16 accumulation, this requires pytorch 2.7.0 nightly currently")
+        else:
+            if hasattr(torch.backends.cuda.matmul, "allow_fp16_accumulation"):
                 torch.backends.cuda.matmul.allow_fp16_accumulation = False
-        except:
-            raise RuntimeError("Failed to set fp16 accumulation, this requires pytorch 2.7.0 nightly currently")
 
         unet_path = folder_paths.get_full_path_or_raise("diffusion_models", model_name)
         model = comfy.sd.load_diffusion_model(unet_path, model_options=model_options)
