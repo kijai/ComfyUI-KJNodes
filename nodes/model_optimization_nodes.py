@@ -210,6 +210,7 @@ class DiffusionModelLoaderKJ(BaseLoaderKJ):
         model = comfy.sd.load_diffusion_model(unet_path, model_options=model_options)
         if dtype := DTYPE_MAP.get(compute_dtype):
             model.set_model_compute_dtype(dtype)
+            model.force_cast_weights = False
         self._patch_modules(patch_cublaslinear, sage_attention)
         
         return (model,)
