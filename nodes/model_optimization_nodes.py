@@ -682,7 +682,10 @@ class TorchCompileCosmosModel:
 
 #teacache
 
-from comfy.ldm.wan.model import sinusoidal_embedding_1d
+try:
+    from comfy.ldm.wan.model import sinusoidal_embedding_1d
+except:
+    pass
 from einops import repeat
 from unittest.mock import patch
 from contextlib import nullcontext
@@ -710,7 +713,7 @@ def teacache_wanvideo_forward(self, x, timestep, context, clip_fea=None, **kwarg
         freqs = self.rope_embedder(img_ids).movedim(1, 2)
         return self.forward_orig(x, timestep, context, clip_fea=clip_fea, freqs=freqs, **kwargs)[:, :, :t, :h, :w]
     
-def teacache_wanvideo_forward_orig(self, x, t, context, clip_fea=None, freqs=None, **kwargs):        
+def teacache_wanvideo_forward_orig(self, x, t, context, clip_fea=None, freqs=None, **kwargs):
         # embeddings
         x = self.patch_embedding(x.float()).to(x.dtype)
         grid_sizes = x.shape[2:]
@@ -743,7 +746,7 @@ def teacache_wanvideo_forward_orig(self, x, t, context, clip_fea=None, freqs=Non
                 'uncond': {'accumulated_rel_l1_distance': 0, 'prev_input': None,
                           'teacache_skipped_steps': 0, 'previous_residual': None}
             }
-            logging.info("TeaCache: Initialized")
+            logging.info("\nTeaCache: Initialized")
 
         cache = self.teacache_state[suffix]
 
@@ -845,7 +848,7 @@ class WanVideoTeaCacheKJ:
                 if current_step_index == 0:
                     if hasattr(diffusion_model, "teacache_state"):
                         delattr(diffusion_model, "teacache_state")
-                        logging.info("Resetting TeaCache state")
+                        logging.info("\nResetting TeaCache state")
                 
                 current_percent = current_step_index / (len(sigmas) - 1)
                 if start_percent <= current_percent <= end_percent:
