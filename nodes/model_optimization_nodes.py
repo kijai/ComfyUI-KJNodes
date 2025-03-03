@@ -788,7 +788,7 @@ def teacache_wanvideo_forward_orig(self, x, t, context, clip_fea=None, freqs=Non
         x = self.unpatchify(x, grid_sizes)
         return x
 
-class WanVideoTeaCache:
+class WanVideoTeaCacheKJ:
     @classmethod
     def INPUT_TYPES(s):
         return {

@@ -2601,3 +2601,47 @@ class EmbedND_RifleX(nn.Module):
             dim=-3,
         )
         return emb.unsqueeze(1)
+
+
+class Timer:
+    def __init__(self, name):
+        self.name = name
+        self.start_time = None
+        self.elapsed = 0
+
+class TimerNodeKJ:
+    @classmethod
+    
+    def INPUT_TYPES(s):
+      return {
+        "required": {
+            "any_input": (any, {}),
+            "mode": (["start", "stop"],),
+            "name": ("STRING", {"default": "Timer"}),
+        },
+        "optional": {
+            "timer": ("TIMER",),
+        },
+	}
+
+    RETURN_TYPES = (any, "TIMER", "INT", )
+    RETURN_NAMES = ("any_output", "timer", "time")
+    FUNCTION = "timer"
+    CATEGORY = "KJNodes/misc"
+
+    def timer(self, mode, name, any_input=None, timer=None):
+        if timer is None:
+            if mode == "start":
+                timer = Timer(name=name)            
+                timer.start_time = time.time()
+                return {"ui": {
+                "text": [f"{timer.start_time}"]}, 
+                "result": (any_input, timer, 0) 
+                 }
+        elif mode == "stop" and timer is not None:
+            end_time = time.time()
+            timer.elapsed = int((end_time - timer.start_time) * 1000)
+            timer.start_time = None
+            return (any_input, timer, timer.elapsed)
+
+        
