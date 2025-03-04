@@ -2501,7 +2501,7 @@ class ApplyRifleXRoPE_WanVideo:
             "required": {
                 "model": ("MODEL",),
                 "latent": ("LATENT", {"tooltip": "Only used to get the latent count"}),
-                "k": ("INT", {"default": 4, "min": 1, "max": 100, "step": 1, "tooltip": "Index of intrinsic frequency"}),
+                "k": ("INT", {"default": 6, "min": 1, "max": 100, "step": 1, "tooltip": "Index of intrinsic frequency"}),
             } 
         }
 
