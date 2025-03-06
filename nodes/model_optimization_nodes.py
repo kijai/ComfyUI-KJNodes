@@ -805,8 +805,8 @@ class WanVideoTeaCacheKJ:
         return {
             "required": {
                 "model": ("MODEL",),
-                "rel_l1_thresh": ("FLOAT", {"default": 0.03, "min": 0.0, "max": 10.0, "step": 0.001, "tooltip": "Threshold for to determine when to apply the cache, compromise between speed and accuracy"}),
-                "start_percent": ("FLOAT", {"default": 0.2, "min": 0.0, "max": 1.0, "step": 0.01, "tooltip": "The start percentage of the steps to use with TeaCache."}),
+                "rel_l1_thresh": ("FLOAT", {"default": 0.03, "min": 0.0, "max": 10.0, "step": 0.001, "tooltip": "Threshold for to determine when to apply the cache, compromise between speed and accuracy."}),
+                "start_percent": ("FLOAT", {"default": 0.1, "min": 0.0, "max": 1.0, "step": 0.01, "tooltip": "The start percentage of the steps to use with TeaCache."}),
                 "end_percent": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01, "tooltip": "The end percentage of the steps to use with TeaCache."}),
                 "cache_device": (["main_device", "offload_device"], {"default": "offload_device", "tooltip": "Device to cache to"}),
                 "coefficients": (["disabled", "1.3B", "14B", "i2v_480", "i2v_720"],),
@@ -817,7 +817,12 @@ class WanVideoTeaCacheKJ:
     RETURN_NAMES = ("model",)
     FUNCTION = "patch_teacache"
     CATEGORY = "KJNodes/teacache"
-    DESCRIPTION = "Patch WanVideo model to use TeaCache. Speeds up inference by caching the output of the model and applying it based on the input/output difference. Currently doesn't use coefficients for caching, will be imporoved in the future"
+    DESCRIPTION = """
+Patch WanVideo model to use TeaCache. Speeds up inference by caching the output and applying it instead of doing the step.   
+Best results are achieved by choosing the appropriate coefficients for the model.  
+Early steps should never be skipped, with too aggressive values this can happen and the motion suffers. Starting later can help with that too.   
+When NOT using coefficients the threshold value should be about 10 times smaller than the value used with coefficients.  
+"""
     EXPERIMENTAL = True
 
     def patch_teacache(self, model, rel_l1_thresh, start_percent, end_percent, cache_device, coefficients):
