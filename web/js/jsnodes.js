@@ -141,18 +141,18 @@ app.registerExtension({
 				const onGetMaskSizeConnectInput = nodeType.prototype.onConnectInput;
 				nodeType.prototype.onConnectInput = function (targetSlot, type, output, originNode, originSlot) {
 					const v = onGetMaskSizeConnectInput? onGetMaskSizeConnectInput.apply(this, arguments): undefined
-					this.outputs[1]["name"] = "width"
-					this.outputs[2]["name"] = "height" 
-					this.outputs[3]["name"] = "count"
+					this.outputs[1]["label"] = "width"
+					this.outputs[2]["label"] = "height" 
+					this.outputs[3]["label"] = "count"
 					return v;
 				}
-				const onGetMaskSizeExecuted = nodeType.prototype.onExecuted;
+				const onGetMaskSizeExecuted = nodeType.prototype.onAfterExecuteNode;
 				nodeType.prototype.onExecuted = function(message) {
 					const r = onGetMaskSizeExecuted? onGetMaskSizeExecuted.apply(this,arguments): undefined
 					let values = message["text"].toString().split('x').map(Number);
-					this.outputs[1]["name"] = values[1] + " width"
-					this.outputs[2]["name"] = values[2] + " height" 
-					this.outputs[3]["name"] = values[0] + " count" 
+					this.outputs[1]["label"] = values[1] + " width"
+					this.outputs[2]["label"] = values[2] + " height" 
+					this.outputs[3]["label"] = values[0] + " count" 
 					return r
 				}
 				break;
@@ -160,19 +160,24 @@ app.registerExtension({
 			case "GetImageSizeAndCount":
 				const onGetImageSizeConnectInput = nodeType.prototype.onConnectInput;
 				nodeType.prototype.onConnectInput = function (targetSlot, type, output, originNode, originSlot) {
+					console.log(this)
 					const v = onGetImageSizeConnectInput? onGetImageSizeConnectInput.apply(this, arguments): undefined
-					this.outputs[1]["name"] = "width"
-					this.outputs[2]["name"] = "height" 
-					this.outputs[3]["name"] = "count"
+					//console.log(this)
+					this.outputs[1]["label"] = "width"
+					this.outputs[2]["label"] = "height" 
+					this.outputs[3]["label"] = "count"
 					return v;
 				}
-				const onGetImageSizeExecuted = nodeType.prototype.onExecuted;
+				//const onGetImageSizeExecuted = nodeType.prototype.onExecuted;
+				const onGetImageSizeExecuted = nodeType.prototype.onAfterExecuteNode;
 				nodeType.prototype.onExecuted = function(message) {
+					console.log(this)
 					const r = onGetImageSizeExecuted? onGetImageSizeExecuted.apply(this,arguments): undefined
 					let values = message["text"].toString().split('x').map(Number);
-					this.outputs[1]["name"] = values[1] + " width"
-					this.outputs[2]["name"] = values[2] + " height" 
-					this.outputs[3]["name"] = values[0] + " count" 
+					console.log(values)
+					this.outputs[1]["label"] = values[1] + " width"
+					this.outputs[2]["label"] = values[2] + " height" 
+					this.outputs[3]["label"] = values[0] + " count" 
 					return r
 				}
 				break;
@@ -184,7 +189,7 @@ app.registerExtension({
 					this.title = "Preview Animation"
 					return v;
 				}
-				const onPreviewAnimationExecuted = nodeType.prototype.onExecuted;
+				const onPreviewAnimationExecuted = nodeType.prototype.onAfterExecuteNode;
 				nodeType.prototype.onExecuted = function(message) {
 					const r = onPreviewAnimationExecuted? onPreviewAnimationExecuted.apply(this,arguments): undefined
 					let values = message["text"].toString();
@@ -197,16 +202,16 @@ app.registerExtension({
 				const onVRAM_DebugConnectInput = nodeType.prototype.onConnectInput;
 				nodeType.prototype.onConnectInput = function (targetSlot, type, output, originNode, originSlot) {
 					const v = onVRAM_DebugConnectInput? onVRAM_DebugConnectInput.apply(this, arguments): undefined
-					this.outputs[3]["name"] = "freemem_before"
-					this.outputs[4]["name"] = "freemem_after" 
+					this.outputs[3]["label"] = "freemem_before"
+					this.outputs[4]["label"] = "freemem_after" 
 					return v;
 				}
-				const onVRAM_DebugExecuted = nodeType.prototype.onExecuted;
+				const onVRAM_DebugExecuted = nodeType.prototype.onAfterExecuteNode;
 				nodeType.prototype.onExecuted = function(message) {
 					const r = onVRAM_DebugExecuted? onVRAM_DebugExecuted.apply(this,arguments): undefined
 					let values = message["text"].toString().split('x');
-					this.outputs[3]["name"] = values[0] + "   freemem_before"
-					this.outputs[4]["name"] = values[1] + "      freemem_after" 
+					this.outputs[3]["label"] = values[0] + "   freemem_before"
+					this.outputs[4]["label"] = values[1] + "      freemem_after" 
 					return r
 				}
 				break;
