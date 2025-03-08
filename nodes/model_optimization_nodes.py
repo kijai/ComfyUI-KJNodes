@@ -844,7 +844,7 @@ When NOT using coefficients the threshold value should be about 10 times smaller
         
         # type_str = str(type(model.model.model_config).__name__)
         #if model.model.diffusion_model.dim == 1536:
-            model_type ="1.3B"
+        #    model_type ="1.3B"
         # else:
         #     if "WAN21_T2V" in type_str:
         #         model_type = "14B"
