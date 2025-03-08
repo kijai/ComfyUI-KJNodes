@@ -846,9 +846,6 @@ Official recommended values https://github.com/ali-vilab/TeaCache/tree/main/TeaC
 | Wan2.1 i2v 720P  |  0.18  |  0.20   |  0.30  |
 +-------------------+--------+---------+--------+
 </pre> 
-
-
-
 """
     EXPERIMENTAL = True
 
