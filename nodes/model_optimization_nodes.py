@@ -813,11 +813,11 @@ class WanVideoTeaCacheKJ:
         return {
             "required": {
                 "model": ("MODEL",),
-                "rel_l1_thresh": ("FLOAT", {"default": 0.03, "min": 0.0, "max": 10.0, "step": 0.001, "tooltip": "Threshold for to determine when to apply the cache, compromise between speed and accuracy."}),
+                "rel_l1_thresh": ("FLOAT", {"default": 0.275, "min": 0.0, "max": 10.0, "step": 0.001, "tooltip": "Threshold for to determine when to apply the cache, compromise between speed and accuracy. When using coefficients a good value range is something between 0.2-0.4, and without it shold be about 10 times smaller."}),
                 "start_percent": ("FLOAT", {"default": 0.1, "min": 0.0, "max": 1.0, "step": 0.01, "tooltip": "The start percentage of the steps to use with TeaCache."}),
                 "end_percent": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01, "tooltip": "The end percentage of the steps to use with TeaCache."}),
                 "cache_device": (["main_device", "offload_device"], {"default": "offload_device", "tooltip": "Device to cache to"}),
-                "coefficients": (["disabled", "1.3B", "14B", "i2v_480", "i2v_720"],),
+                "coefficients": (["disabled", "1.3B", "14B", "i2v_480", "i2v_720"], {"default": "i2v_480", "tooltip": "Coefficients for rescaling the relative l1 distance, if disabled the threshold value should be about 10 times smaller than the value used with coefficients."}),
             }
         }
     
@@ -836,9 +836,14 @@ When NOT using coefficients the threshold value should be about 10 times smaller
     def patch_teacache(self, model, rel_l1_thresh, start_percent, end_percent, cache_device, coefficients):
         if rel_l1_thresh == 0:
             return (model,)
+
+        if coefficients == "disabled" and rel_l1_thresh > 0.1:
+            logging.warning("Threshold value is too high for TeaCache without coefficients, consider using coefficients for better results.")
+        if coefficients != "disabled" and rel_l1_thresh < 0.1:
+            logging.warning("Threshold value is too low for TeaCache with coefficients, consider using higher threshold value for better results.")
         
         # type_str = str(type(model.model.model_config).__name__)
-        if model.model.diffusion_model.dim == 1536:
+        #if model.model.diffusion_model.dim == 1536:
             model_type ="1.3B"
         # else:
         #     if "WAN21_T2V" in type_str:
