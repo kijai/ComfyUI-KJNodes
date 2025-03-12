@@ -1017,6 +1017,23 @@ SVD:
         interped_ys = np.exp(new_ys)[::-1].copy()
         interped_ys_tensor = torch.tensor(interped_ys)
         return interped_ys_tensor
+    
+class StringToFloatList:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required":
+                    {
+                     "string" :("STRING", {"default": "1, 2, 3", "multiline": True}),
+                     }
+                }
+    RETURN_TYPES = ("FLOAT",)
+    RETURN_NAMES = ("FLOAT",)
+    CATEGORY = "KJNodes/misc"
+    FUNCTION = "createlist"
+
+    def createlist(self, string):
+        float_list = [float(x.strip()) for x in string.split(',')]
+        return (float_list,)
 
  
 class InjectNoiseToLatent:

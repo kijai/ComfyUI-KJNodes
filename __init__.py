@@ -108,6 +108,7 @@ NODE_CONFIG = {
     "InjectNoiseToLatent": {"class": InjectNoiseToLatent, "name": "Inject Noise To Latent"},
     "CustomSigmas": {"class": CustomSigmas, "name": "Custom Sigmas"},
     #utility
+    "StringToFloatList": {"class": StringToFloatList, "name": "String to Float List"},
     "WidgetToString": {"class": WidgetToString, "name": "Widget To String"},
     "SaveStringKJ": {"class": SaveStringKJ, "name": "Save String KJ"},
     "DummyOut": {"class": DummyOut, "name": "Dummy Out"},
