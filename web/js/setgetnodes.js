@@ -449,7 +449,7 @@ app.registerExtension({
 					if (this.outputs[0].type !== '*' && this.outputs[0].links) {
 						this.outputs[0].links.filter(linkId => {
 							const link = node.graph.links[linkId];
-							return link && (link.type !== this.outputs[0].type && link.type !== '*');
+							return link && (!link.type.split(",").includes(this.outputs[0].type) && link.type !== '*');
 						}).forEach(linkId => {
 							node.graph.removeLink(linkId);
 						});
