@@ -103,7 +103,7 @@ app.registerExtension({
 			app.ui.settings.addSetting({
 				id: "KJNodes.SetGetMenu",
 				name: "KJNodes: Make Set/Get -nodes defaults",
-				tooltip: 'Adds Set/Get nodes to the top or bottom of the list of available node suggestions. Disabling requires a browser reload.',
+				tooltip: 'Adds Set/Get nodes to the top or bottom of the list of available node suggestions.',
 				options: ['disabled', 'top', 'bottom'],
 				defaultValue: 'disabled',
 				type: "combo",
