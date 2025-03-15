@@ -49,7 +49,7 @@ app.registerExtension({
 	},
 		async setup(app) {
 			const onChange = (value) => {
-				if (value) {
+				if (value!="disabled") {
 					const valuesToAddToIn = ["GetNode"];
 					const valuesToAddToOut = ["SetNode"];
 			
@@ -59,7 +59,11 @@ app.registerExtension({
 							if (idx !== -1) {
 								arr.splice(idx, 1);
 							}
-							arr.unshift(valueToAdd);
+							if (value === "top") {
+								arr.unshift(valueToAdd);
+							} else {
+								arr.push(valueToAdd);
+							}
 						}
 					}
 			
@@ -69,7 +73,11 @@ app.registerExtension({
 							if (idx !== -1) {
 								arr.splice(idx, 1);
 							}
-							arr.unshift(valueToAdd);
+							if (value === "top") {
+								arr.unshift(valueToAdd);
+							} else {
+								arr.push(valueToAdd);
+							}
 						}
 					}
 				}
@@ -77,9 +85,11 @@ app.registerExtension({
 			
 			app.ui.settings.addSetting({
 				id: "KJNodes.SetGetMenu",
-				name: "KJNodes: Make Set/Get -nodes defaults (turn off and reload to disable)",
-				defaultValue: false,
-				type: "boolean",
+				name: "KJNodes: Make Set/Get -nodes defaults",
+				tooltip: 'Adds Set/Get nodes to the top or bottom of the list of available node suggestions. Disabling requires a browser reload.',
+				options: ['disabled', 'top', 'bottom'],
+				defaultValue: 'disabled',
+				type: "combo",
 				onChange: onChange,
 				
 			});
