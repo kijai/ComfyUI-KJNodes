@@ -34,7 +34,7 @@ app.registerExtension({
 	async beforeRegisterNodeDef(nodeType, nodeData, app) {
 		if (nodeData.input && nodeData.input.required) {
 			addMenuHandler(nodeType, function (_, options) {
-				options.unshift(
+				options.push(
 					{
 					content: "Add GetNode",
 					callback: () => {addNode("GetNode", this, { side:"left", offset: 30});}
