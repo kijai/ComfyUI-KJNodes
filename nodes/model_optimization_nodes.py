@@ -796,7 +796,7 @@ def teacache_wanvideo_forward_orig(self, x, t, context, clip_fea=None, freqs=Non
                 else:
                     x = block(x, e=e0, freqs=freqs, context=context)
 
-                cache['previous_residual']  = (x - original_x).to(transformer_options["teacache_device"])
+            cache['previous_residual']  = (x - original_x).to(transformer_options["teacache_device"])
           
         # head
         x = self.head(x, e)
