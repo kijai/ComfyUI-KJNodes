@@ -780,7 +780,12 @@ def teacache_wanvideo_forward_orig(self, x, t, context, clip_fea=None, freqs=Non
                 #print(f"TeaCache: Skipping {suffix} step")
             return should_calc, cache
 
-        should_calc, cache = tea_cache(x, e0, e, kwargs)
+        teacache_enabled = transformer_options.get("teacache_enabled", False)
+        if not teacache_enabled:
+            should_calc = True
+        else:
+            should_calc, cache = tea_cache(x, e0, e, kwargs)
+        
         if should_calc:
             original_x = x.clone().detach()
             patches_replace = transformer_options.get("patches_replace", {})
@@ -796,7 +801,8 @@ def teacache_wanvideo_forward_orig(self, x, t, context, clip_fea=None, freqs=Non
                 else:
                     x = block(x, e=e0, freqs=freqs, context=context)
 
-            cache['previous_residual']  = (x - original_x).to(transformer_options["teacache_device"])
+            if teacache_enabled:
+                cache['previous_residual']  = (x - original_x).to(transformer_options["teacache_device"])
           
         # head
         x = self.head(x, e)
