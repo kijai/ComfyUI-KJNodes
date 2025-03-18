@@ -2303,7 +2303,7 @@ class LeapfusionHunyuanI2V:
                 else:
                     for i in range(len(steps) - 1):
                         # walk from beginning of steps until crossing the timestep
-                        if (steps[i] - timestep) * (steps[i + 1] - timestep) <= 0:
+                        if (steps[i] - timestep[0]) * (steps[i + 1] - timestep[0]) <= 0:
                             current_step_index = i
                             break
                     else:
@@ -2465,7 +2465,7 @@ class Guider_ScheduledCFG(CFGGuider):
         else:
             for i in range(len(steps) - 1):
                 # walk from beginning of steps until crossing the timestep
-                if (steps[i] - timestep) * (steps[i + 1] - timestep) <= 0:
+                if (steps[i] - timestep[0]) * (steps[i + 1] - timestep[0]) <= 0:
                     current_step_index = i
                     break
             else:

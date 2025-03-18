@@ -914,7 +914,7 @@ Official recommended values https://github.com/ali-vilab/TeaCache/tree/main/TeaC
                 else:
                     for i in range(len(sigmas) - 1):
                         # walk from beginning of steps until crossing the timestep
-                        if (sigmas[i] - timestep) * (sigmas[i + 1] - timestep) <= 0:
+                        if (sigmas[i] - timestep[0]) * (sigmas[i + 1] - timestep[0]) <= 0:
                             current_step_index = i
                             break
                     else:
