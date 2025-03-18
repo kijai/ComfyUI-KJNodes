@@ -1186,8 +1186,8 @@ class ResizeMask:
         return {
             "required": {
                 "mask": ("MASK",),
-                "width": ("INT", { "default": 512, "min": 0, "max": MAX_RESOLUTION, "step": 8, "display": "number" }),
-                "height": ("INT", { "default": 512, "min": 0, "max": MAX_RESOLUTION, "step": 8, "display": "number" }),
+                "width": ("INT", { "default": 512, "min": 0, "max": MAX_RESOLUTION, "step": 1, "display": "number" }),
+                "height": ("INT", { "default": 512, "min": 0, "max": MAX_RESOLUTION, "step": 1, "display": "number" }),
                 "keep_proportions": ("BOOLEAN", { "default": False }),
                 "upscale_method": (s.upscale_methods,),
                 "crop": (["disabled","center"],),
