@@ -785,6 +785,9 @@ def teacache_wanvideo_forward_orig(self, x, t, context, clip_fea=None, freqs=Non
                 cache['teacache_skipped_steps'] += 1
                 #print(f"TeaCache: Skipping {suffix} step")
             return should_calc, cache
+        
+        if not transformer_options:
+            raise RuntimeError("Can't access transformer_options, this requires ComfyUI nightly version from Mar 14, 2025 or later")
 
         teacache_enabled = transformer_options.get("teacache_enabled", False)
         if not teacache_enabled:
@@ -938,16 +941,23 @@ Official recommended values https://github.com/ali-vilab/TeaCache/tree/main/TeaC
                 with context:
                     out = model_function(input, timestep, **c)
                     if current_step_index+1 == last_step and hasattr(diffusion_model, "teacache_state"):
-                        if cond_or_uncond[0] == 0:
+                        if len(cond_or_uncond) == 1 and cond_or_uncond[0] == 0:
                             skipped_steps_cond = diffusion_model.teacache_state["cond"]["teacache_skipped_steps"]
                             skipped_steps_uncond = diffusion_model.teacache_state["uncond"]["teacache_skipped_steps"]
-                            
                             logging.info("-----------------------------------")
                             logging.info(f"TeaCache skipped:")
                             logging.info(f"{skipped_steps_cond} cond steps")
                             logging.info(f"{skipped_steps_uncond} uncond step")
                             logging.info(f"out of {last_step} steps")
                             logging.info("-----------------------------------")
+                        elif len(cond_or_uncond) == 2:
+                            skipped_steps_cond = diffusion_model.teacache_state["uncond"]["teacache_skipped_steps"]
+                            logging.info("-----------------------------------")
+                            logging.info(f"TeaCache skipped:")
+                            logging.info(f"{skipped_steps_cond} cond steps")
+                            logging.info(f"out of {last_step} steps")
+                            logging.info("-----------------------------------")
+                        
                     return out
             return unet_wrapper_function
 
