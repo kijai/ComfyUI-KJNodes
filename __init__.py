@@ -189,6 +189,7 @@ NODE_CONFIG = {
     "SkipLayerGuidanceWanVideo": {"class": SkipLayerGuidanceWanVideo, "name": "Skip Layer Guidance WanVideo"},
     "TimerNodeKJ": {"class": TimerNodeKJ, "name": "Timer Node KJ"},
     "HunyuanVideoEncodeKeyframesToCond": {"class": HunyuanVideoEncodeKeyframesToCond, "name": "HunyuanVideo Encode Keyframes To Cond"},
+    "CFGZeroStar": {"class": CFGZeroStar, "name": "CFG Zero Star"},
 
     #instance diffusion
     "CreateInstanceDiffusionTracking": {"class": CreateInstanceDiffusionTracking},
