@@ -1731,7 +1731,7 @@ Returns a range of latents from a batch.
         elif len(samples.shape) == 5:
             chosen_latents = samples[:, :, start_index:end_index]
 
-        return ({"samples": chosen_latents,},)
+        return ({"samples": chosen_latents.contiguous(),},)
     
 class InsertLatentToIndex:
     

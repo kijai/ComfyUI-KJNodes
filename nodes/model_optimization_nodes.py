@@ -1189,18 +1189,14 @@ class CFGZeroStarAndInit:
 
     def patch(self, model, use_zero_init, zero_star_steps):
         def cfg_zerostar(args):
-            cond = args["cond"]
-            uncond = args["uncond"]
-            cond_scale = args["cond_scale"]
+            #zero init
             timestep = args["timestep"]
             sigmas = args["model_options"]["transformer_options"]["sample_sigmas"]
-
             matched_step_index = (sigmas == timestep[0] ).nonzero()
             if len(matched_step_index) > 0:
                 current_step_index = matched_step_index.item()
             else:
                 for i in range(len(sigmas) - 1):
-                    # walk from beginning of steps until crossing the timestep
                     if (sigmas[i] - timestep[0]) * (sigmas[i + 1] - timestep[0]) <= 0:
                         current_step_index = i
                         break
@@ -1208,7 +1204,11 @@ class CFGZeroStarAndInit:
                     current_step_index = 0
 
             if (current_step_index <= zero_star_steps) and use_zero_init:
-                return cond * 0 
+                return cond * 0
+                        
+            cond = args["cond"]
+            uncond = args["uncond"]
+            cond_scale = args["cond_scale"]
                 
             batch_size = cond.shape[0]
 
