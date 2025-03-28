@@ -216,11 +216,15 @@ class ImageConcanate:
             "match_image_size": ("BOOLEAN", {"default": True}),
         }}
 
-    RETURN_TYPES = ("IMAGE",)
+    RETURN_TYPES = ("IMAGE", "INT", "INT", "INT", "INT", "INT", "INT", "INT", "INT")
+    RETURN_NAMES = ("image", "image1_width", "image1_height", "image2_width", "image2_height", 
+                   "final_width", "final_height", "resized_image2_width", "resized_image2_height")
     FUNCTION = "concatenate"
     CATEGORY = "KJNodes/image"
     DESCRIPTION = """
 Concatenates the image2 to image1 in the specified direction.
+Returns original dimensions of both images, final dimensions after concatenation,
+and the dimensions of image2 after resizing.
 """
 
     def concatenate(self, image1, image2, direction, match_image_size, first_image_shape=None):
@@ -270,6 +274,10 @@ Concatenates the image2 to image1 in the specified direction.
         else:
             image2_resized = image2
 
+        # Store resized dimensions of image2
+        resized_image2_height = image2_resized.shape[1]
+        resized_image2_width = image2_resized.shape[2]
+
         # Ensure both images have the same number of channels
         channels_image1 = image1.shape[-1]
         channels_image2 = image2_resized.shape[-1]
@@ -294,7 +302,15 @@ Concatenates the image2 to image1 in the specified direction.
             concatenated_image = torch.cat((image2_resized, image1), dim=2)  # Concatenate along width
         elif direction == 'up':
             concatenated_image = torch.cat((image2_resized, image1), dim=1)  # Concatenate along height
-        return concatenated_image,
+        else:
+            concatenated_image = concatenated_image
+        
+        # Get final dimensions after concatenation
+        final_height = concatenated_image.shape[1]
+        final_width = concatenated_image.shape[2]
+
+        return (concatenated_image, image1.shape[2], image1.shape[1], image2.shape[2], image2.shape[1], 
+                final_width, final_height, resized_image2_width, resized_image2_height)
 
 import torch  # Make sure you have PyTorch installed
 
@@ -2141,8 +2157,8 @@ class ImageResizeKJ:
         return {
             "required": {
                 "image": ("IMAGE",),
-                "width": ("INT", { "default": 512, "min": 0, "max": MAX_RESOLUTION, "step": 1, }),
-                "height": ("INT", { "default": 512, "min": 0, "max": MAX_RESOLUTION, "step": 1, }),
+                "width": ("INT", { "default": 512, "min": 0, "max": MAX_RESOLUTION, "step": 8, }),
+                "height": ("INT", { "default": 512, "min": 0, "max": MAX_RESOLUTION, "step": 8, }),
                 "upscale_method": (s.upscale_methods,),
                 "keep_proportion": ("BOOLEAN", { "default": False }),
                 "divisible_by": ("INT", { "default": 2, "min": 0, "max": 512, "step": 1, }),
