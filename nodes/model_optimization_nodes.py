@@ -1123,10 +1123,10 @@ class SkipLayerGuidanceWanVideo:
                     prev_img_uncond = args["img"][0].unsqueeze(0)
 
                     new_args = {
-                        "img": args["img"][1],
-                        "txt": args["txt"][1],
-                        "vec": args["vec"][1],
-                        "pe": args["pe"][1]
+                        "img": args["img"][1].unsqueeze(0),
+                        "txt": args["txt"][1].unsqueeze(0),
+                        "vec": args["vec"][1].unsqueeze(0),
+                        "pe": args["pe"][1].unsqueeze(0)
                     }
                     
                     block_out = original_block(new_args)
