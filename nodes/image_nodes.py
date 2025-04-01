@@ -1868,10 +1868,11 @@ Inserts empty frames between the images in a batch.
             "required": {
                 "images": ("IMAGE",),
                 "empty_frames_per_image": ("INT", {"default": 1,"min": 0, "max": 4096, "step": 1}),
+                "pad_frame_value": ("FLOAT", {"default": 0.0,"min": 0.0, "max": 1.0, "step": 0.01}),
             },
         }
     
-    def pad(self, images, empty_frames_per_image):
+    def pad(self, images, empty_frames_per_image, pad_frame_value):
         B, H, W, C = images.shape
         
         if B == 1 or empty_frames_per_image == 0:
@@ -1881,9 +1882,9 @@ Inserts empty frames between the images in a batch.
         total_frames = B + (B-1) * empty_frames_per_image
         
         # Create new tensor with zeros (empty frames)
-        padded_batch = torch.zeros((total_frames, H, W, C), 
+        padded_batch = torch.ones((total_frames, H, W, C), 
                                 dtype=images.dtype, 
-                                device=images.device)
+                                device=images.device) * pad_frame_value
         # Create mask tensor (1 for original frames, 0 for empty frames)
         mask = torch.zeros((total_frames, H, W), 
                         dtype=images.dtype, 
