@@ -82,6 +82,7 @@ NODE_CONFIG = {
     "LoadAndResizeImage": {"class": LoadAndResizeImage, "name": "Load & Resize Image"},
     "LoadImagesFromFolderKJ": {"class": LoadImagesFromFolderKJ, "name": "Load Images From Folder (KJ)"},
     "MergeImageChannels": {"class": MergeImageChannels, "name": "Merge Image Channels"},
+    "PadImageBatchInterleaved": {"class": PadImageBatchInterleaved, "name": "Pad Image Batch Interleaved"},
     "PreviewAnimation": {"class": PreviewAnimation, "name": "Preview Animation"},
     "RemapImageRange": {"class": RemapImageRange, "name": "Remap Image Range"},
     "ReverseImageBatch": {"class": ReverseImageBatch, "name": "Reverse Image Batch"},
