@@ -1869,17 +1869,22 @@ Inserts empty frames between the images in a batch.
                 "images": ("IMAGE",),
                 "empty_frames_per_image": ("INT", {"default": 1,"min": 0, "max": 4096, "step": 1}),
                 "pad_frame_value": ("FLOAT", {"default": 0.0,"min": 0.0, "max": 1.0, "step": 0.01}),
+                "add_after_last": ("BOOLEAN", {"default": False}),
             },
         }
     
-    def pad(self, images, empty_frames_per_image, pad_frame_value):
+    def pad(self, images, empty_frames_per_image, pad_frame_value, add_after_last):
         B, H, W, C = images.shape
         
-        if B == 1 or empty_frames_per_image == 0:
-            return (images,)
-        
-        # Original B images + (B-1) sets of empty frames between them
-        total_frames = B + (B-1) * empty_frames_per_image
+        # Handle single frame case specifically
+        if B == 1:
+            total_frames = 1 + empty_frames_per_image if add_after_last else 1
+        else:
+            # Original B images + (B-1) sets of empty frames between them
+            total_frames = B + (B-1) * empty_frames_per_image
+            # Add additional empty frames after the last image if requested
+            if add_after_last:
+                total_frames += empty_frames_per_image
         
         # Create new tensor with zeros (empty frames)
         padded_batch = torch.ones((total_frames, H, W, C), 
@@ -1892,8 +1897,13 @@ Inserts empty frames between the images in a batch.
         
         # Fill in original images at their new positions
         for i in range(B):
-            # Each image is separated by empty_frames_per_image blank frames
-            new_pos = i * (empty_frames_per_image + 1)
+            if B == 1:
+                # For single frame, just place it at the beginning
+                new_pos = 0
+            else:
+                # Each image is separated by empty_frames_per_image blank frames
+                new_pos = i * (empty_frames_per_image + 1)
+                
             padded_batch[new_pos] = images[i]
             mask[new_pos] = 1.0  # Mark this as an original frame
         
