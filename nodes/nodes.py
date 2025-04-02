@@ -66,7 +66,7 @@ class FloatConstant:
     CATEGORY = "KJNodes/constants"
 
     def get_value(self, value):
-        return (value,)
+        return (round(value, 6),)
 
 class StringConstant:
     @classmethod
