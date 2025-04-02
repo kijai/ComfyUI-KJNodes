@@ -3151,7 +3151,7 @@ class ImagePadKJ:
                     "color": ("STRING", {"default": "0, 0, 0", "tooltip": "Color as RGB values in range 0-255, separated by commas."}),
                   }
                 , "optional": {
-                    "masks": ("MASK", ),
+                    "mask": ("MASK", ),
                 }
                 }
     
