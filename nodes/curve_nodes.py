@@ -365,11 +365,13 @@ Locations are center locations.
         "optional": {
             "size_multiplier": ("FLOAT", {"default": [1.0], "forceInput": True}),
             "trailing": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.01}),
+            "border_width": ("INT", {"default": 0, "min": 0, "max": 100, "step": 1}),
+            "border_color": ("STRING", {"default": 'black'}),
         }
     } 
 
     def createshapemask(self, coordinates, frame_width, frame_height, shape_width, shape_height, shape_color, 
-                        bg_color, blur_radius, shape, intensity, size_multiplier=[1.0], accumulate=False, trailing=1.0):
+                        bg_color, blur_radius, shape, intensity, size_multiplier=[1.0], accumulate=False, trailing=1.0, border_width=0, border_color='black'):
         # Define the number of images in the batch
         if len(coordinates) < 10:
             coords_list = []
@@ -410,16 +412,26 @@ Locations are center locations.
                     two_points = [left_up_point, right_down_point]
 
                     if shape == 'circle':
-                        draw.ellipse(two_points, fill=shape_color)
+                        if border_width > 0:
+                            draw.ellipse(two_points, fill=shape_color, outline=border_color, width=border_width)
+                        else:
+                            draw.ellipse(two_points, fill=shape_color)
                     elif shape == 'square':
-                        draw.rectangle(two_points, fill=shape_color)
+                        if border_width > 0:
+                            draw.rectangle(two_points, fill=shape_color, outline=border_color, width=border_width)
+                        else:
+                            draw.rectangle(two_points, fill=shape_color)
                         
                 elif shape == 'triangle':
                     # Define the points for the triangle
                     left_up_point = (location_x - current_width // 2, location_y + current_height // 2) # bottom left
                     right_down_point = (location_x + current_width // 2, location_y + current_height // 2) # bottom right
                     top_point = (location_x, location_y - current_height // 2) # top point
-                    draw.polygon([top_point, left_up_point, right_down_point], fill=shape_color)
+                    
+                    if border_width > 0:
+                        draw.polygon([top_point, left_up_point, right_down_point], fill=shape_color, outline=border_color, width=border_width)
+                    else:
+                        draw.polygon([top_point, left_up_point, right_down_point], fill=shape_color)
 
             if blur_radius != 0:
                     image = image.filter(ImageFilter.GaussianBlur(blur_radius))
