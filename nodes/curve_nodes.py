@@ -371,7 +371,7 @@ Locations are center locations.
     } 
 
     def createshapemask(self, coordinates, frame_width, frame_height, shape_width, shape_height, shape_color, 
-                        bg_color, blur_radius, shape, intensity, size_multiplier=[1.0], accumulate=False, trailing=1.0, border_width=0, border_color='black'):
+                        bg_color, blur_radius, shape, intensity, size_multiplier=[1.0], trailing=1.0, border_width=0, border_color='black'):
         # Define the number of images in the batch
         if len(coordinates) < 10:
             coords_list = []
@@ -398,8 +398,8 @@ Locations are center locations.
             draw = ImageDraw.Draw(image)
 
             # Calculate the size for this frame and ensure it's not less than 0
-            current_width = max(0, shape_width + i * size_multiplier[i])
-            current_height = max(0, shape_height + i * size_multiplier[i])
+            current_width = shape_width * size_multiplier[i]
+            current_height = shape_height * size_multiplier[i]
             
             for coords in coords_list:
                 location_x = coords[i]['x']
