@@ -387,7 +387,7 @@ Locations are center locations.
         masks_list = []
 
         if not size_multiplier or len(size_multiplier) != batch_size:
-            size_multiplier = [0] * batch_size
+            size_multiplier = [1] * batch_size
         else:
             size_multiplier = size_multiplier * (batch_size // len(size_multiplier)) + size_multiplier[:batch_size % len(size_multiplier)]
 
