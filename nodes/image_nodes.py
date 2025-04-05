@@ -3180,6 +3180,10 @@ class ImagePadKJ:
         
         # Calculate padding sizes with extra padding
         if target_width is not None and target_height is not None:
+            if extra_padding > 0:
+                image = common_upscale(image.movedim(-1, 1), W - extra_padding, H - extra_padding, "lanczos", "disabled").movedim(1, -1)
+                B, H, W, C = image.shape
+
             padded_width = target_width
             padded_height = target_height
             pad_left = (padded_width - W) // 2
