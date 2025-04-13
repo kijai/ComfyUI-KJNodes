@@ -1842,6 +1842,8 @@ Inserts images at the specified indices into the original image batch.
         }
     
     def insertimagesfrombatch(self, original_images, images_to_insert, indexes):
+
+        input_images = original_images.clone()
         
         # Parse the indexes string into a list of integers
         index_list = [int(index.strip()) for index in indexes.split(',')]
@@ -1855,9 +1857,9 @@ Inserts images at the specified indices into the original image batch.
         
         # Insert the images at the specified indices
         for index, image in zip(indices_tensor, images_to_insert):
-            original_images[index] = image
+            input_images[index] = image
         
-        return (original_images,)
+        return (input_images,)
 
 class PadImageBatchInterleaved:
     
@@ -1918,7 +1920,7 @@ Inserts empty frames between the images in a batch.
 
 class ReplaceImagesInBatch:
     
-    RETURN_TYPES = ("IMAGE",)
+    RETURN_TYPES = ("IMAGE", "MASK",)
     FUNCTION = "replace"
     CATEGORY = "KJNodes/image"
     DESCRIPTION = """
@@ -1934,20 +1936,38 @@ with the replacement images.
                  "replacement_images": ("IMAGE",),
                  "start_index": ("INT", {"default": 1,"min": 0, "max": 4096, "step": 1}),
         },
+        "optional": {
+            "original_masks": ("MASK",),
+            "replacement_masks": ("MASK",),
+        }
     } 
     
-    def replace(self, original_images, replacement_images, start_index):
+    def replace(self, original_images, replacement_images, start_index, original_masks=None, replacement_masks=None):
         images = None
         if start_index >= len(original_images):
             raise ValueError("GetImageRangeFromBatch: Start index is out of range")
         end_index = start_index + len(replacement_images)
         if end_index > len(original_images):
             raise ValueError("GetImageRangeFromBatch: End index is out of range")
-         # Create a copy of the original_images tensor
+        
+        if original_masks is not None and replacement_masks is not None:
+            original_masks_copy = original_masks.clone()
+            if original_masks_copy.shape[1] != replacement_masks.shape[1] or original_masks_copy.shape[2] != replacement_masks.shape[2]:
+                replacement_masks = common_upscale(replacement_masks.unsqueeze(1), original_masks_copy.shape[1], original_masks_copy.shape[2], "nearest-exact", "center").squeeze(0)
+                
+            original_masks_copy[start_index:end_index] = replacement_masks
+            masks = original_masks_copy
+        else:
+            masks = torch.zeros(1,64,64, device=original_images.device, dtype=original_images.dtype)
+        
         original_images_copy = original_images.clone()
+
+        if original_images_copy.shape[2] != replacement_images.shape[2] or original_images_copy.shape[3] != replacement_images.shape[3]:
+            replacement_images = common_upscale(replacement_images.movedim(-1, 1), original_images_copy.shape[1], original_images_copy.shape[2], "lanczos", "center").movedim(1, -1)
+        
         original_images_copy[start_index:end_index] = replacement_images
         images = original_images_copy
-        return (images, )
+        return (images, masks)
     
 
 class ReverseImageBatch:

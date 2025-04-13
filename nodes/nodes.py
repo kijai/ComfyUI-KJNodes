@@ -1649,6 +1649,7 @@ or a .txt file with RealEstate camera intrinsics and coordinates, in a 3D plot.
         return (tensor_img,)
 
     def extrinsic2pyramid(self, extrinsic, color_map='red', hw_ratio=1/1, base_xval=1, zval=3):
+        import matplotlib.pyplot as plt
         from mpl_toolkits.mplot3d.art3d import Poly3DCollection
         vertex_std = np.array([[0, 0, 0, 1],
                             [base_xval, -base_xval * hw_ratio, zval, 1],
