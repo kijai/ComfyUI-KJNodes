@@ -2288,7 +2288,7 @@ highest dimension.
             if height == 0:
                 height = H
       
-        if divisible_by > 1 and get_image_size is None:
+        if divisible_by > 1:
             width = width - (width % divisible_by)
             height = height - (height % divisible_by)
         
