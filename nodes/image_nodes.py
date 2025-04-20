@@ -1886,9 +1886,12 @@ Inserts images at the specified indices into the original image batch.
                 "images_to_insert": ("IMAGE",),
                 "indexes": ("STRING", {"default": "0, 1, 2", "multiline": True}),
             },
+            "optional": {
+                "mode": (["replace", "insert"],),
+            }
         }
     
-    def insertimagesfrombatch(self, original_images, images_to_insert, indexes):
+    def insertimagesfrombatch(self, original_images, images_to_insert, indexes, mode="replace"):
 
         input_images = original_images.clone()
         
@@ -1902,9 +1905,25 @@ Inserts images at the specified indices into the original image batch.
         if not isinstance(images_to_insert, torch.Tensor):
             images_to_insert = torch.tensor(images_to_insert)
         
-        # Insert the images at the specified indices
-        for index, image in zip(indices_tensor, images_to_insert):
-            input_images[index] = image
+        if mode == "replace":
+            # Replace the images at the specified indices
+            for index, image in zip(indices_tensor, images_to_insert):
+                input_images[index] = image
+        else:
+            # Create a list to hold the new image sequence
+            new_images = []
+            insert_offset = 0
+            
+            for i in range(len(input_images) + len(indices_tensor)):
+                if insert_offset < len(indices_tensor) and i == indices_tensor[insert_offset]:
+                    # Use modulo to cycle through images_to_insert
+                    new_images.append(images_to_insert[insert_offset % len(images_to_insert)])
+                    insert_offset += 1
+                else:
+                    new_images.append(input_images[i - insert_offset])
+            
+            # Convert the list back to a tensor
+            input_images = torch.stack(new_images, dim=0)
         
         return (input_images,)
 
