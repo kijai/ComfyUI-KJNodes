@@ -17,7 +17,7 @@ app.registerExtension({
 						this.inputs = [];
 					}
 					const target_number_of_inputs = this.widgets.find(w => w.name === "inputcount")["value"];
-					const num_inputs = this.inputs.filter(input => input.type !== "INT").length
+					const num_inputs = this.inputs.filter(input => input.type === this.cond_type).length
 					if(target_number_of_inputs===num_inputs)return; // already set, do nothing
 
 					if(target_number_of_inputs < num_inputs){
@@ -38,46 +38,51 @@ app.registerExtension({
 			case "TransitionImagesMulti":
 				nodeType.prototype.onNodeCreated = function () {
 				this._type = "IMAGE"
-				this.inputs_offset = nodeData.name.includes("selective")?1:0
 				this.addWidget("button", "Update inputs", null, () => {
 					if (!this.inputs) {
 						this.inputs = [];
 					}
 					const target_number_of_inputs = this.widgets.find(w => w.name === "inputcount")["value"];
-					const num_inputs = this.inputs.filter(input => input.type !== "INT").length
+					console.log("target_number_of_inputs", target_number_of_inputs)
+					const num_inputs = this.inputs.filter(input => input.type === this._type).length
+					console.log("num_inputs", num_inputs)
 					if(target_number_of_inputs===num_inputs)return; // already set, do nothing
 
 					if(target_number_of_inputs < num_inputs){
-						for(let i = num_inputs; i>=this.inputs_offset+target_number_of_inputs; i--)
-								this.removeInput(i)
+						const inputs_to_remove = num_inputs - target_number_of_inputs;
+						for(let i = 0; i < inputs_to_remove; i++) {
+							this.removeInput(this.inputs.length - 1);
+						}
 					}
 					else{
-						for(let i = num_inputs+1-this.inputs_offset; i <= target_number_of_inputs; ++i)
+						for(let i = num_inputs+1; i <= target_number_of_inputs; ++i)
 							this.addInput(`image_${i}`, this._type)
 					}
+					
 					});
 				}
 				break;
 			case "MaskBatchMulti":
 				nodeType.prototype.onNodeCreated = function () {
 				this._type = "MASK"
-				this.inputs_offset = nodeData.name.includes("selective")?1:0
 				this.addWidget("button", "Update inputs", null, () => {
 					if (!this.inputs) {
 						this.inputs = [];
 					}
 					const target_number_of_inputs = this.widgets.find(w => w.name === "inputcount")["value"];
-					const num_inputs = this.inputs.filter(input => input.type !== "INT").length
+					const num_inputs = this.inputs.filter(input => input.type === this._type).length
 					if(target_number_of_inputs===num_inputs)return; // already set, do nothing
 
 					if(target_number_of_inputs < num_inputs){
-						for(let i = num_inputs; i>=this.inputs_offset+target_number_of_inputs; i--)
-								this.removeInput(i)
+						const inputs_to_remove = num_inputs - target_number_of_inputs;
+						for(let i = 0; i < inputs_to_remove; i++) {
+							this.removeInput(this.inputs.length - 1);
+						}
 					}
 					else{
-						for(let i = num_inputs+1-this.inputs_offset; i <= target_number_of_inputs; ++i)
+						for(let i = num_inputs+1; i <= target_number_of_inputs; ++i)
 							this.addInput(`mask_${i}`, this._type)
-						}
+					}
 					});
 					}
 					break;
@@ -225,21 +230,23 @@ app.registerExtension({
 					originalOnNodeCreated.apply(this, arguments);
 			
 					this._type = "STRING";
-					this.inputs_offset = nodeData.name.includes("selective") ? 1 : 0;
 					this.addWidget("button", "Update inputs", null, () => {
 						if (!this.inputs) {
 							this.inputs = [];
 						}
 						const target_number_of_inputs = this.widgets.find(w => w.name === "inputcount")["value"];
-						const num_inputs = this.inputs.filter(input => input.type !== "INT").length
+						const num_inputs = this.inputs.filter(input => input.name && input.name.toLowerCase().includes("string_")).length
 						if (target_number_of_inputs === num_inputs) return; // already set, do nothing
 			
-						if (target_number_of_inputs < num_inputs) {
-							for (let i = num_inputs; i >= this.inputs_offset + target_number_of_inputs; i--)
-								this.removeInput(i);
-						} else {
-							for (let i = num_inputs + 1 - this.inputs_offset; i <= target_number_of_inputs; ++i)
-								this.addInput(`string_${i}`, this._type);
+						if(target_number_of_inputs < num_inputs){
+							const inputs_to_remove = num_inputs - target_number_of_inputs;
+							for(let i = 0; i < inputs_to_remove; i++) {
+								this.removeInput(this.inputs.length - 1);
+							}
+						}
+						else{
+							for(let i = num_inputs+1; i <= target_number_of_inputs; ++i)
+								this.addInput(`string_${i}`, this._type)
 						}
 					});
 				}

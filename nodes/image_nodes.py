@@ -1793,7 +1793,8 @@ Inserts a latent at the specified index into the original latent batch.
 
 class ImageBatchFilter:
     
-    RETURN_TYPES = ("IMAGE",)
+    RETURN_TYPES = ("IMAGE", "STRING",)
+    RETURN_NAMES = ("images", "removed_indices",)
     FUNCTION = "filter"
     CATEGORY = "KJNodes/image"
     DESCRIPTION = "Removes empty images from a batch"
@@ -1823,6 +1824,7 @@ class ImageBatchFilter:
         mean_diff = color_diff.mean(dim=(1, 2, 3))
 
         empty_indices = mean_diff <= empty_threshold
+        empty_indices_string = ', '.join([str(i) for i in range(B) if empty_indices[i]])
         
         if replacement_image is not None:
             B_rep, H_rep, W_rep, C_rep = replacement_image.shape
@@ -1831,10 +1833,10 @@ class ImageBatchFilter:
                 replacement = common_upscale(replacement.movedim(-1, 1), W, H, "lanczos", "center").movedim(1, -1)
             input_images[empty_indices] = replacement[0]
 
-            return (input_images,)
+            return (input_images, empty_indices_string,) 
         else:
             non_empty_images = input_images[~empty_indices]
-            return (non_empty_images,)
+            return (non_empty_images, empty_indices_string,)
     
 class GetImagesFromBatchIndexed:
     
