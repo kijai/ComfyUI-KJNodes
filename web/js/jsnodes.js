@@ -17,16 +17,17 @@ app.registerExtension({
 						this.inputs = [];
 					}
 					const target_number_of_inputs = this.widgets.find(w => w.name === "inputcount")["value"];
-					    if(target_number_of_inputs===this.inputs.length)return; // already set, do nothing
+					const num_inputs = this.inputs.filter(input => input.type !== "INT").length
+					if(target_number_of_inputs===num_inputs)return; // already set, do nothing
 
-					    if(target_number_of_inputs < this.inputs.length){
-    						for(let i = this.inputs.length; i>=this.inputs_offset+target_number_of_inputs; i--)
-							      this.removeInput(i)
-					    }
-                        else{
-						    for(let i = this.inputs.length+1-this.inputs_offset; i <= target_number_of_inputs; ++i)
-						    	this.addInput(`conditioning_${i}`, this.cond_type)
-                        }
+					if(target_number_of_inputs < num_inputs){
+						for(let i = num_inputs; i>=this.inputs_offset+target_number_of_inputs; i--)
+								this.removeInput(i)
+					}
+					else{
+						for(let i = num_inputs+1-this.inputs_offset; i <= target_number_of_inputs; ++i)
+							this.addInput(`conditioning_${i}`, this.cond_type)
+					}
 					});
 				}
 				break;
@@ -43,16 +44,17 @@ app.registerExtension({
 						this.inputs = [];
 					}
 					const target_number_of_inputs = this.widgets.find(w => w.name === "inputcount")["value"];
-						if(target_number_of_inputs===this.inputs.length)return; // already set, do nothing
+					const num_inputs = this.inputs.filter(input => input.type !== "INT").length
+					if(target_number_of_inputs===num_inputs)return; // already set, do nothing
 
-						if(target_number_of_inputs < this.inputs.length){
-							for(let i = this.inputs.length; i>=this.inputs_offset+target_number_of_inputs; i--)
-									this.removeInput(i)
-						}
-						else{
-							for(let i = this.inputs.length+1-this.inputs_offset; i <= target_number_of_inputs; ++i)
-								this.addInput(`image_${i}`, this._type)
-						}
+					if(target_number_of_inputs < num_inputs){
+						for(let i = num_inputs; i>=this.inputs_offset+target_number_of_inputs; i--)
+								this.removeInput(i)
+					}
+					else{
+						for(let i = num_inputs+1-this.inputs_offset; i <= target_number_of_inputs; ++i)
+							this.addInput(`image_${i}`, this._type)
+					}
 					});
 				}
 				break;
@@ -65,17 +67,18 @@ app.registerExtension({
 						this.inputs = [];
 					}
 					const target_number_of_inputs = this.widgets.find(w => w.name === "inputcount")["value"];
-						if(target_number_of_inputs===this.inputs.length)return; // already set, do nothing
+					const num_inputs = this.inputs.filter(input => input.type !== "INT").length
+					if(target_number_of_inputs===num_inputs)return; // already set, do nothing
 
-						if(target_number_of_inputs < this.inputs.length){
-							for(let i = this.inputs.length; i>=this.inputs_offset+target_number_of_inputs; i--)
-									this.removeInput(i)
+					if(target_number_of_inputs < num_inputs){
+						for(let i = num_inputs; i>=this.inputs_offset+target_number_of_inputs; i--)
+								this.removeInput(i)
+					}
+					else{
+						for(let i = num_inputs+1-this.inputs_offset; i <= target_number_of_inputs; ++i)
+							this.addInput(`mask_${i}`, this._type)
 						}
-						else{
-							for(let i = this.inputs.length+1-this.inputs_offset; i <= target_number_of_inputs; ++i)
-								this.addInput(`mask_${i}`, this._type)
-							}
-						});
+					});
 					}
 					break;
 			
@@ -228,13 +231,14 @@ app.registerExtension({
 							this.inputs = [];
 						}
 						const target_number_of_inputs = this.widgets.find(w => w.name === "inputcount")["value"];
-						if (target_number_of_inputs === this.inputs.length) return; // already set, do nothing
+						const num_inputs = this.inputs.filter(input => input.type !== "INT").length
+						if (target_number_of_inputs === num_inputs) return; // already set, do nothing
 			
-						if (target_number_of_inputs < this.inputs.length) {
-							for (let i = this.inputs.length; i >= this.inputs_offset + target_number_of_inputs; i--)
+						if (target_number_of_inputs < num_inputs) {
+							for (let i = num_inputs; i >= this.inputs_offset + target_number_of_inputs; i--)
 								this.removeInput(i);
 						} else {
-							for (let i = this.inputs.length + 1 - this.inputs_offset; i <= target_number_of_inputs; ++i)
+							for (let i = num_inputs + 1 - this.inputs_offset; i <= target_number_of_inputs; ++i)
 								this.addInput(`string_${i}`, this._type);
 						}
 					});
