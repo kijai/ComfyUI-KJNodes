@@ -52,6 +52,7 @@ NODE_CONFIG = {
     "GetLatentRangeFromBatch": {"class": GetLatentRangeFromBatch, "name": "Get Latent Range From Batch"},
     "GetImageSizeAndCount": {"class": GetImageSizeAndCount, "name": "Get Image Size & Count"},
     "FastPreview": {"class": FastPreview, "name": "Fast Preview"},
+    "ImageBatchFilter": {"class": ImageBatchFilter, "name": "Image Batch Filter"},
     "ImageAndMaskPreview": {"class": ImageAndMaskPreview},
     "ImageAddMulti": {"class": ImageAddMulti, "name": "Image Add Multi"},
     "ImageBatchMulti": {"class": ImageBatchMulti, "name": "Image Batch Multi"},
