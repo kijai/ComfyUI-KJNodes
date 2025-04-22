@@ -268,6 +268,8 @@ class SplineEditor{
   this.tensionWidget = context.widgets.find(w => w.name === "tension");
   this.minValueWidget = context.widgets.find(w => w.name === "min_value");
   this.maxValueWidget = context.widgets.find(w => w.name === "max_value");
+  this.startAtWidget = context.widgets.find(w => w.name === "start_at");
+  this.endAtWidget = context.widgets.find(w => w.name === "end_at");
   this.samplingMethodWidget = context.widgets.find(w => w.name === "sampling_method");
   this.widthWidget = context.widgets.find(w => w.name === "mask_width");
   this.heightWidget = context.widgets.find(w => w.name === "mask_height");
@@ -277,6 +279,8 @@ class SplineEditor{
   this.points_to_sample = this.pointsWidget.value
   this.rangeMin = this.minValueWidget.value
   this.rangeMax = this.maxValueWidget.value
+  this.startAt = this.startAtWidget.value
+  this.endAt = this.endAtWidget.value
   this.pointsLayer = null;
   this.samplingMethod = this.samplingMethodWidget.value
   
@@ -314,6 +318,14 @@ class SplineEditor{
   }
   this.maxValueWidget.callback = () => {
     this.rangeMax = this.maxValueWidget.value
+    this.updatePath();
+  }
+  this.startAtWidget.callback = () => {
+    this.startAt = this.startAtWidget.value
+    this.updatePath();
+  }
+  this.endAtWidget.callback = () => {
+    this.endAt = this.endAtWidget.value
     this.updatePath();
   }
   this.widthWidget.callback = () => {
@@ -555,7 +567,7 @@ this.heightWidget.callback = () => {
       return;
     }
     if (this.samplingMethod != "controlpoints") {
-      var coords = this.samplePoints(this.pathElements[0], this.points_to_sample, this.samplingMethod, this.width);
+      var coords = this.samplePoints(this.pathElements[0], this.points_to_sample, this.samplingMethod, this.width, this.startAt, this.endAt);
     }
     else {
       var coords = this.points
@@ -769,10 +781,21 @@ this.heightWidget.callback = () => {
     });
   }
 
-  samplePoints(svgPathElement, numSamples, samplingMethod, width) {
+  samplePoints(svgPathElement, numSamples, samplingMethod, width, startAt, endAt) {
   var svgWidth = width; // Fixed width of the SVG element
   var pathLength = svgPathElement.getTotalLength();
   var points = [];
+
+  // if start is higher than end, swap them
+  if (startAt > endAt) {
+      tmp = endAt;
+      endAt = startAt;
+      startAt = tmp;
+  }
+
+  var startSample = startAt * (numSamples - 1);
+  var endSample = endAt * (numSamples - 1);
+  var playSamples = endSample - startSample + 1;
 
   for (var i = 0; i < numSamples; i++) {
       if (samplingMethod === "time") {
@@ -782,8 +805,17 @@ this.heightWidget.callback = () => {
         var point = this.findPointAtX(svgPathElement, x, pathLength);
         }
       else if (samplingMethod === "path") {
-        // Calculate the distance along the path for the current sample
-        var distance = (pathLength / (numSamples - 1)) * i;
+        var distance = 0;
+
+        if (i > endSample) {
+            // keep at max distance after end sample
+            distance = pathLength;
+        }
+        else if (i > startSample && playSamples > 1) {
+            // Calculate the distance along the path for the current sample
+            distance = (pathLength / (playSamples - 1)) * (i - startSample);
+        }
+
         // Get the point at the current distance
         var point = svgPathElement.getPointAtLength(distance);
       }

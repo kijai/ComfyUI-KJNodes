@@ -153,6 +153,8 @@ class SplineEditor:
             "optional": {
                 "min_value": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
                 "max_value": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
+                "start_at": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.01}),
+                "end_at": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}),
                 "bg_image": ("IMAGE", ),
             }
         }
@@ -201,7 +203,7 @@ output types:
 
     def splinedata(self, mask_width, mask_height, coordinates, float_output_type, interpolation, 
                    points_to_sample, sampling_method, points_store, tension, repeat_output, 
-                   min_value=0.0, max_value=1.0, bg_image=None):
+                   min_value=0.0, max_value=1.0, start_at=0.0, end_at=1.0, bg_image=None):
         
         coordinates = json.loads(coordinates)
         normalized = []
