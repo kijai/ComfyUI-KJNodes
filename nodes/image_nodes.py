@@ -1892,6 +1892,8 @@ Inserts images at the specified indices into the original image batch.
         }
     
     def insertimagesfrombatch(self, original_images, images_to_insert, indexes, mode="replace"):
+        if indexes == "":
+            return (original_images,)
 
         input_images = original_images.clone()
         
