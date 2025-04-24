@@ -12,4 +12,4 @@ Repository = "https://github.com/kijai/ComfyUI-KJNodes"
 [tool.comfy]
 PublisherId = "kijai"
 DisplayName = "ComfyUI-KJNodes"
-Icon = ""
+Icon = "https://avatars.githubusercontent.com/u/40791699"

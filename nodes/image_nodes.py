@@ -2303,10 +2303,10 @@ class ImageResizeKJ:
                 "divisible_by": ("INT", { "default": 2, "min": 0, "max": 512, "step": 1, }),
             },
             "optional" : {
-                "width_input": ("INT", { "forceInput": True}),
-                "height_input": ("INT", { "forceInput": True}),
+                #"width_input": ("INT", { "forceInput": True}),
+                #"height_input": ("INT", { "forceInput": True}),
                 "get_image_size": ("IMAGE",),
-                "crop": (["disabled","center"],),
+                "crop": (["disabled","center", 0],),
             }
         }
 
@@ -2314,16 +2314,13 @@ class ImageResizeKJ:
     RETURN_NAMES = ("IMAGE", "width", "height",)
     FUNCTION = "resize"
     CATEGORY = "KJNodes/image"
+    DEPRECATED = True
     DESCRIPTION = """
-Resizes the image to the specified width and height.  
-Size can be retrieved from the inputs, and the final scale  
-is  determined in this order of importance:  
-- get_image_size  
-- width_input and height_input  
-- width and height widgets  
-  
-Keep proportions keeps the aspect ratio of the image, by  
-highest dimension.  
+DEPRECATED!
+
+Due to ComfyUI frontend changes, this node should no longer be used, please check the   
+v2 of the node. This node is only kept to not completely break older workflows.  
+
 """
 
     def resize(self, image, width, height, keep_proportion, upscale_method, divisible_by, 
@@ -2365,6 +2362,126 @@ highest dimension.
         image = image.movedim(1,-1)
 
         return(image, image.shape[2], image.shape[1],)
+
+class ImageResizeKJv2:
+    upscale_methods = ["nearest-exact", "bilinear", "area", "bicubic", "lanczos"]
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "image": ("IMAGE",),
+                "width": ("INT", { "default": 512, "min": 0, "max": MAX_RESOLUTION, "step": 1, }),
+                "height": ("INT", { "default": 512, "min": 0, "max": MAX_RESOLUTION, "step": 1, }),
+                "upscale_method": (s.upscale_methods,),
+                "keep_proportion": (["stretch", "resize", "pad", "pad_edge", "crop"], { "default": False }),
+                "pad_color": ("STRING", { "default": "0, 0, 0", "tooltip": "Color to use for padding."}),
+                "crop_position": (["center", "top", "bottom", "left", "right"], { "default": "center" }),
+                "divisible_by": ("INT", { "default": 2, "min": 0, "max": 512, "step": 1, }),
+            },
+        }
+
+    RETURN_TYPES = ("IMAGE", "INT", "INT",)
+    RETURN_NAMES = ("IMAGE", "width", "height",)
+    FUNCTION = "resize"
+    CATEGORY = "KJNodes/image"
+    DESCRIPTION = """
+Resizes the image to the specified width and height.  
+Size can be retrieved from the input.
+
+Keep proportions keeps the aspect ratio of the image, by  
+highest dimension.  
+"""
+
+    def resize(self, image, width, height, keep_proportion, upscale_method, divisible_by, pad_color, crop_position):
+        B, H, W, C = image.shape
+
+        if width == 0:
+            width = W
+        if height == 0:
+            height = H
+        
+        if keep_proportion == "resize" or keep_proportion.startswith("pad"):
+            # If one of the dimensions is zero, calculate it to maintain the aspect ratio
+            if width == 0 and height != 0:
+                ratio = height / H
+                new_width = round(W * ratio)
+            elif height == 0 and width != 0:
+                ratio = width / W
+                new_height = round(H * ratio)
+            elif width != 0 and height != 0:
+                # Scale based on which dimension is smaller in proportion to the desired dimensions
+                ratio = min(width / W, height / H)
+                new_width = round(W * ratio)
+                new_height = round(H * ratio)
+
+            if keep_proportion.startswith("pad"):
+                pad_left = (width - new_width) // 2
+                pad_right = width - new_width - pad_left
+                pad_top = (height - new_height) // 2
+                pad_bottom = height - new_height - pad_top
+
+            width = new_width
+            height = new_height
+
+        if divisible_by > 1:
+            width = width - (width % divisible_by)
+            height = height - (height % divisible_by)
+
+        out_image = image.clone()
+        
+        if keep_proportion == "crop":
+            old_width = W
+            old_height = H
+            old_aspect = old_width / old_height
+            new_aspect = width / height
+            
+            # Calculate dimensions to keep
+            if old_aspect > new_aspect:  # Image is wider than target
+                crop_w = round(old_height * new_aspect)
+                crop_h = old_height
+            else:  # Image is taller than target
+                crop_w = old_width
+                crop_h = round(old_width / new_aspect)
+            
+            # Calculate crop position
+            if crop_position == "center":
+                x = (old_width - crop_w) // 2
+                y = (old_height - crop_h) // 2
+            elif crop_position == "top":
+                x = (old_width - crop_w) // 2
+                y = 0
+            elif crop_position == "bottom":
+                x = (old_width - crop_w) // 2
+                y = old_height - crop_h
+            elif crop_position == "left":
+                x = 0
+                y = (old_height - crop_h) // 2
+            elif crop_position == "right":
+                x = old_width - crop_w
+                y = (old_height - crop_h) // 2
+            
+            # Apply crop
+            out_image = out_image.narrow(-2, x, crop_w).narrow(-3, y, crop_h)
+        
+        out_image = common_upscale(out_image.movedim(-1,1), width, height, upscale_method, crop="disabled").movedim(1,-1)
+        if keep_proportion.startswith("pad"):
+            if pad_left > 0 or pad_right > 0 or pad_top > 0 or pad_bottom > 0:
+                padded_width = width + pad_left + pad_right
+                padded_height = height + pad_top + pad_bottom
+                if divisible_by > 1:
+                    width_remainder = padded_width % divisible_by
+                    height_remainder = padded_height % divisible_by
+                    if width_remainder > 0:
+                        extra_width = divisible_by - width_remainder
+                        pad_right += extra_width
+                    if height_remainder > 0:
+                        extra_height = divisible_by - height_remainder
+                        pad_bottom += extra_height
+                out_image, _ = ImagePadKJ.pad(self, out_image, pad_left, pad_right, pad_top, pad_bottom, 0, pad_color, "edge" if keep_proportion == "pad_edge" else "color")
+
+
+        return(out_image, out_image.shape[2], out_image.shape[1],)
+    
 import pathlib    
 class LoadAndResizeImage:
     _color_channels = ["alpha", "red", "green", "blue"]
