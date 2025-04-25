@@ -10,23 +10,25 @@ app.registerExtension({
 		switch (nodeData.name) {
 			case "ConditioningMultiCombine":
 				nodeType.prototype.onNodeCreated = function () {
-				this.cond_type = "CONDITIONING"
+				this._type = "CONDITIONING"
 				this.inputs_offset = nodeData.name.includes("selective")?1:0
 				this.addWidget("button", "Update inputs", null, () => {
 					if (!this.inputs) {
 						this.inputs = [];
 					}
 					const target_number_of_inputs = this.widgets.find(w => w.name === "inputcount")["value"];
-					const num_inputs = this.inputs.filter(input => input.type === this.cond_type).length
+					const num_inputs = this.inputs.filter(input => input.type === this._type).length
 					if(target_number_of_inputs===num_inputs)return; // already set, do nothing
 
 					if(target_number_of_inputs < num_inputs){
-						for(let i = num_inputs; i>=this.inputs_offset+target_number_of_inputs; i--)
-								this.removeInput(i)
+						const inputs_to_remove = num_inputs - target_number_of_inputs;
+						for(let i = 0; i < inputs_to_remove; i++) {
+							this.removeInput(this.inputs.length - 1);
+						}
 					}
 					else{
-						for(let i = num_inputs+1-this.inputs_offset; i <= target_number_of_inputs; ++i)
-							this.addInput(`conditioning_${i}`, this.cond_type)
+						for(let i = num_inputs+1; i <= target_number_of_inputs; ++i)
+							this.addInput(`conditioning_${i}`, this._type)
 					}
 					});
 				}
@@ -43,9 +45,7 @@ app.registerExtension({
 						this.inputs = [];
 					}
 					const target_number_of_inputs = this.widgets.find(w => w.name === "inputcount")["value"];
-					console.log("target_number_of_inputs", target_number_of_inputs)
 					const num_inputs = this.inputs.filter(input => input.type === this._type).length
-					console.log("num_inputs", num_inputs)
 					if(target_number_of_inputs===num_inputs)return; // already set, do nothing
 
 					if(target_number_of_inputs < num_inputs){
