@@ -1842,3 +1842,159 @@ bounce_between disables easing_function if set above 0.0 and acts as ease in out
 
         batch_output = torch.cat(output_images, dim=0)
         return (batch_output,)
+
+class DriverOffsetCoordinates:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "driver_coords": ("STRING", {"multiline": False, "forceInput": True}),
+                "driven_coords": ("STRING", {"multiline": False, "forceInput": True}),
+                "smooth_out": ("FLOAT", {"default": 0.85, "min": 0.0, "max": 1.0, "step": 0.01}),
+                "delay": ("INT", {"default": 0, "min": 0, "max": 100, "step": 1}),
+                "rotate": ("INT", {"default": 0, "min": 0, "max": 360, "step": 1}),
+            }
+        }
+
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("output_coords",)
+    FUNCTION = "execute"
+    CATEGORY = "KJNodes/coords"
+    DESCRIPTION = """Applies rotated, smoothed, and delayed offsets from driver coordinates to driven coordinates."""
+
+    def execute(self, driver_coords, driven_coords, smooth_out, delay, rotate):
+        try:
+            # Use replace("'", '"') for potentially malformed JSON strings
+            D_orig = json.loads(driver_coords.replace("'", '"'))
+            Dn = json.loads(driven_coords.replace("'", '"'))
+        except json.JSONDecodeError as e:
+            print(f"DriverOffsetCoordinates Error: Invalid JSON input - {e}")
+            return (driven_coords,)
+        except Exception as e:
+            print(f"DriverOffsetCoordinates Error: Could not parse coordinates - {e}")
+            return (driven_coords,)
+
+        len_dn = len(Dn)
+        if len_dn == 0:
+            return (driven_coords,)
+
+        len_d_orig = len(D_orig)
+        if len_d_orig == 0:
+            print("DriverOffsetCoordinates Warning: Driver coordinates are empty. Returning driven coordinates unchanged.")
+            return (driven_coords,)
+
+        # --- Rotation Step --- (Operate on a copy)
+        D = [coord.copy() for coord in D_orig] # Work on a copy for rotation
+        len_d = len(D)
+
+        if rotate != 0 and len_d >= 2:
+            try:
+                pivot_x = float(D[0]['x'])
+                pivot_y = float(D[0]['y'])
+                angle_rad = math.radians(rotate)
+                cos_a = math.cos(angle_rad)
+                sin_a = math.sin(angle_rad)
+
+                for j in range(1, len_d):
+                    px = float(D[j]['x'])
+                    py = float(D[j]['y'])
+
+                    rel_x = px - pivot_x
+                    rel_y = py - pivot_y
+
+                    new_rel_x = rel_x * cos_a - rel_y * sin_a
+                    new_rel_y = rel_x * sin_a + rel_y * cos_a
+
+                    D[j]['x'] = new_rel_x + pivot_x
+                    D[j]['y'] = new_rel_y + pivot_y
+            except KeyError as e:
+                print(f"DriverOffsetCoordinates Error: Missing 'x' or 'y' key during rotation - {e}")
+                return (driven_coords,) # Abort if keys are missing
+            except ValueError as e:
+                print(f"DriverOffsetCoordinates Error: Cannot convert coordinate to float during rotation - {e}")
+                return (driven_coords,) # Abort if conversion fails
+
+        # --- Padding Step --- (Use potentially rotated D)
+        if len_d < len_dn:
+            print(f"DriverOffsetCoordinates Info: Driver coords shorter ({len_d}) than driven ({len_dn}). Padding driver with last coordinate.")
+            if len_d > 0:
+                 last_driver_coord = D[-1]
+                 D.extend([last_driver_coord.copy() for _ in range(len_dn - len_d)])
+            else:
+                 # This case should be impossible now due to earlier check
+                 print("DriverOffsetCoordinates Warning: Driver coords empty after rotation (should not happen), padding with {'x':0, 'y':0}.")
+                 D.extend([{'x':0.0, 'y':0.0}] * len_dn)
+            len_d = len(D)
+
+        # --- Smoothing Step --- (Use potentially rotated and padded D)
+        SmoothD = [None] * len_d
+        if len_d > 0:
+            try:
+                # Ensure coords are floats for calculation
+                SmoothD[0] = {'x': float(D[0]['x']), 'y': float(D[0]['y'])}
+                alpha = 1.0 - smooth_out
+                for j in range(1, len_d):
+                    prev_smooth_x = SmoothD[j-1]['x']
+                    prev_smooth_y = SmoothD[j-1]['y']
+                    # Ensure current coords are floats
+                    current_x = float(D[j]['x'])
+                    current_y = float(D[j]['y'])
+                    smooth_x = alpha * current_x + (1.0 - alpha) * prev_smooth_x
+                    smooth_y = alpha * current_y + (1.0 - alpha) * prev_smooth_y
+                    SmoothD[j] = {'x': smooth_x, 'y': smooth_y}
+            except KeyError as e:
+                print(f"DriverOffsetCoordinates Error: Missing 'x' or 'y' key during smoothing - {e}")
+                return (driven_coords,)
+            except ValueError as e:
+                print(f"DriverOffsetCoordinates Error: Cannot convert coordinate to float during smoothing - {e}")
+                return (driven_coords,)
+        else:
+             SmoothD = []
+
+        # --- Offset Application Step ---
+        OutputCoords = [None] * len_dn
+        RefOffsetX = SmoothD[0]['x'] if len(SmoothD) > 0 else 0.0
+        RefOffsetY = SmoothD[0]['y'] if len(SmoothD) > 0 else 0.0
+
+        for i in range(len_dn):
+            try:
+                # Ensure driven coords are floats
+                current_driven_x = float(Dn[i]['x'])
+                current_driven_y = float(Dn[i]['y'])
+
+                if i < delay:
+                    # Keep original driven coord (as float)
+                    OutputCoords[i] = {'x': current_driven_x, 'y': current_driven_y}
+                else:
+                    # Apply offset after delay period
+                    driver_idx = i - delay
+                    if 0 <= driver_idx < len(SmoothD):
+                        driver_smooth_x = SmoothD[driver_idx]['x']
+                        driver_smooth_y = SmoothD[driver_idx]['y']
+                    elif len(SmoothD) > 0:
+                        print(f"DriverOffsetCoordinates Warning: driver_idx {driver_idx} out of bounds for SmoothD (len {len(SmoothD)}). Using last.")
+                        driver_smooth_x = SmoothD[-1]['x']
+                        driver_smooth_y = SmoothD[-1]['y']
+                    else:
+                        driver_smooth_x = 0.0
+                        driver_smooth_y = 0.0
+
+                    offset_x = driver_smooth_x - RefOffsetX
+                    offset_y = driver_smooth_y - RefOffsetY
+
+                    output_x = current_driven_x + offset_x
+                    output_y = current_driven_y + offset_y
+
+                    OutputCoords[i] = {'x': output_x, 'y': output_y}
+            except KeyError as e:
+                print(f"DriverOffsetCoordinates Error: Missing 'x' or 'y' key during offset application - {e}")
+                # Return partially processed coords or original driven? Return original for safety.
+                return (driven_coords,)
+            except ValueError as e:
+                print(f"DriverOffsetCoordinates Error: Cannot convert coordinate to float during offset application - {e}")
+                return (driven_coords,)
+
+        # Format output as JSON string
+        output_json = json.dumps(OutputCoords, separators=(',', ':'))
+
+        return (output_json,)
