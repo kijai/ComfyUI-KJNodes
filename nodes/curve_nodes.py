@@ -1571,3 +1571,274 @@ Cuts the masked area from the image, and drags it along the path. If inpaint is 
         out_masks = torch.cat(masks_list, dim=0)
 
         return (out_images, out_masks)
+
+class CreateShapeJointOnPath:
+    RETURN_TYPES = ("IMAGE",)
+    RETURN_NAMES = ("image",)
+    FUNCTION = "create"
+    CATEGORY = "KJNodes/image/generate"
+    DESCRIPTION = """
+The width is controlled by shape_width, and the length is the distance between the first and second point.
+Points after second control rotation with pivot point being the first one.
+Optional pivot_coordinates acts as root for main shape.
+
+Set total_frames to video lenght.
+Use "Controlpoints" option to set input coordinates from spline editor.
+Use "Path" option to set input pivot_coordinates coordinates from spline editor.
+bounce_between disables easing_function if set above 0.0 and acts as ease in out + bounce when reaching points
+"""
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "coordinates": ("STRING", {"multiline": True, "default": '[{"x":100,"y":100},{"x":400,"y":400}]'}),
+                "frame_width": ("INT", {"default": 512, "min": 8, "max": 4096, "step": 8}),
+                "frame_height": ("INT", {"default": 512, "min": 8, "max": 4096, "step": 8}),
+                "total_frames": ("INT", {"default": 10, "min": 1, "max": 10000, "step": 1}),
+                "scaling_enabled": ("BOOLEAN", {"default": True}),
+                "shape_width": ("INT", {"default": 20, "min": 1, "max": 4096, "step": 1}),
+                "shape_width_end": ("INT", {"default": 0, "min": 0, "max": 4096, "step": 0}),
+                "bg_color": ("STRING", {"default": "black"}),
+                "fill_color": ("STRING", {"default": "white"}),
+                "easing_function": (["linear", "ease_in", "ease_out", "ease_in_out"], {"default": "linear"}),
+                "blur_radius": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 100.0, "step": 0.1}),
+                "intensity": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 100.0, "step": 0.01}),
+                "trailing": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 2.0, "step": 0.01}), # Changed default/max from original node
+                "bounce_between": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.01}),
+            },
+            "optional": { # Make pivot_coordinates optional
+                "pivot_coordinates": ("STRING", {"multiline": True}),
+            }
+        }
+
+    def create(self, coordinates, frame_width, frame_height, shape_width, shape_width_end, fill_color, bg_color, scaling_enabled, total_frames, easing_function, blur_radius, intensity, trailing, bounce_between, pivot_coordinates=None):
+        try:
+            coords = json.loads(coordinates.replace("'", '"'))
+            # Require at least 2 points for the initial frame
+            if not isinstance(coords, list) or len(coords) < 2:
+                raise ValueError("Coordinates must be a list of at least two points.")
+            points = [(c['x'], c['y']) for c in coords]
+        except Exception as e:
+            print(f"Error parsing coordinates or not enough points: {e}")
+            img = Image.new('RGB', (frame_width, frame_height), color=bg_color)
+            return (pil2tensor(img),)
+
+        if len(points) < 2:
+             print("Error: At least two points are required.")
+             img = Image.new('RGB', (frame_width, frame_height), color=bg_color)
+             return (pil2tensor(img),)
+
+        control_points = [np.array(p) for p in points]
+        p0_original = control_points[0] # Keep original p0 for reference
+        p1_initial = control_points[1]
+        output_images = []
+        previous_frame_tensor = None
+        fixed_length = 0
+        fixed_v_normalized = None
+
+        # --- Parse and Adjust Pivot Coordinates ---
+        pivot_points_adjusted = None
+        use_dynamic_pivot = False
+        if pivot_coordinates and pivot_coordinates.strip() and pivot_coordinates.strip() != '[]':
+            try:
+                pivot_coords_raw = json.loads(pivot_coordinates.replace("'", '"'))
+                if isinstance(pivot_coords_raw, list) and len(pivot_coords_raw) > 0:
+                    pivot_points_raw = [np.array((c['x'], c['y'])) for c in pivot_coords_raw]
+                    current_len = len(pivot_points_raw)
+                    if current_len < total_frames:
+                        last_point = pivot_points_raw[-1]
+                        padding = [last_point] * (total_frames - current_len)
+                        pivot_points_adjusted = pivot_points_raw + padding
+                    elif current_len > total_frames:
+                        pivot_points_adjusted = pivot_points_raw[:total_frames]
+                    else:
+                        pivot_points_adjusted = pivot_points_raw
+
+                    if pivot_points_adjusted: 
+                         use_dynamic_pivot = True
+                         # print(f"Using dynamic pivot points. Adjusted count: {len(pivot_points_adjusted)}")
+            except Exception as e:
+                print(f"Error parsing pivot_coordinates: {e}. Using static p0.")
+                use_dynamic_pivot = False
+
+        # --- Pre-calculate fixed length based on original p0->p1 ---
+        fixed_v = p1_initial - p0_original
+        fixed_length = np.linalg.norm(fixed_v)
+        if fixed_length > 0 and not scaling_enabled:
+            fixed_v_normalized = fixed_v / fixed_length
+        elif fixed_length == 0 and not scaling_enabled:
+             print("Warning: Initial control points p0 and p1 are identical. Fixed length is 0.")
+        # else: scaling_enabled is True, don't need fixed_v_normalized yet
+
+        try:
+            fill_rgb = ImageColor.getrgb(fill_color)
+        except ValueError:
+            print(f"Warning: Invalid fill_color '{fill_color}'. Defaulting to white.")
+            fill_rgb = (255, 255, 255)
+
+        # --- Easing function definitions ---
+        def ease_in(t): return t * t
+        def ease_out(t): return 1 - (1 - t) * (1 - t)
+        def ease_in_out(t): return 2 * t * t if t < 0.5 else 1 - pow(-2 * t + 2, 2) / 2
+        easing_map = {"linear": lambda t: t, "ease_in": ease_in, "ease_out": ease_out, "ease_in_out": ease_in_out}
+        apply_easing = easing_map.get(easing_function, lambda t: t)
+
+        # --- Pre-calculate the full path of interpolated target points (for frames 1+) ---
+        interpolated_path_points = []
+        num_control_points = len(control_points)
+        if num_control_points >= 3 and total_frames > 1:
+            num_animation_segments = num_control_points - 2 # Segments p1->p2, p2->p3, ...
+            num_animation_frames = total_frames - 1
+
+            if num_animation_segments > 0 and num_animation_frames > 0:
+                base_frames_per_segment = num_animation_frames // num_animation_segments
+                remainder_frames = num_animation_frames % num_animation_segments
+
+                for k in range(num_animation_segments): # k=0 is p1->p2, k=1 is p2->p3, ...
+                    p_segment_start = control_points[k+1] # p1, p2, ...
+                    p_segment_end = control_points[k+2]   # p2, p3, ...
+                    num_steps_this_segment = base_frames_per_segment + (1 if k < remainder_frames else 0)
+                    if num_steps_this_segment == 0: continue
+
+                    for j in range(num_steps_this_segment):
+                        t = (j + 1) / num_steps_this_segment # Linear t [slightly > 0 to 1.0]
+                        eased_t = 0.0
+
+                        if bounce_between > 0.0 and num_steps_this_segment > 2:
+                            # Bounce Calculation (same as before)
+                            target_t_near = 1.0 - bounce_between * 0.5
+                            target_t_near = max(0.1, target_t_near)
+                            current_t_scaled_for_ease = min(1.0, t / target_t_near)
+                            eased_t_part1 = ease_out(current_t_scaled_for_ease)
+                            overshoot_factor = bounce_between
+                            bounce_phase_t = max(0.0, (t - target_t_near) / (1.0 - target_t_near)) if (1.0 - target_t_near) > 0 else 0.0
+                            bounce_curve = 0.5 * (1 - np.cos(bounce_phase_t * np.pi))
+                            eased_t = eased_t_part1 * (1.0 - bounce_phase_t) + (1.0 + bounce_curve * overshoot_factor) * bounce_phase_t
+                        else:
+                            eased_t = apply_easing(t)
+                        
+                        p_interpolated = p_segment_start + (p_segment_end - p_segment_start) * eased_t
+                        interpolated_path_points.append(p_interpolated)
+        
+        # --- Draw Frame 0 --- 
+        current_pivot_f0 = pivot_points_adjusted[0] if use_dynamic_pivot else p0_original
+        target_point_f0 = p1_initial
+
+        # Calculate target relative to original p0, then apply to current pivot
+        relative_target_f0 = target_point_f0 - p0_original
+        offset_target_f0 = current_pivot_f0 + relative_target_f0
+
+        # Determine vector and length from current pivot to the *offset* target
+        v_dir_f0 = offset_target_f0 - current_pivot_f0 # This is essentially relative_target_f0
+        dir_length_f0 = np.linalg.norm(v_dir_f0)
+        pn_f0 = current_pivot_f0 # Default end point to pivot if length is 0
+        length_f0 = 0
+        normalized_v_f0 = None
+
+        # Determine end point pn_f0 based on pivot, target, scaling, fixed_length
+        if scaling_enabled:
+            if dir_length_f0 > 0:
+                pn_f0 = offset_target_f0 # End point is the offset target
+                length_f0 = dir_length_f0
+                normalized_v_f0 = v_dir_f0 / length_f0
+        else: # Fixed Length
+            if fixed_length > 0:
+                length_f0 = fixed_length
+                if dir_length_f0 > 0: # Use direction from pivot to target
+                    normalized_v_f0 = v_dir_f0 / dir_length_f0
+                    pn_f0 = current_pivot_f0 + normalized_v_f0 * length_f0
+                elif fixed_v_normalized is not None: # Fallback: use original p0->p1 direction
+                    normalized_v_f0 = fixed_v_normalized
+                    pn_f0 = current_pivot_f0 + normalized_v_f0 * length_f0
+        
+        img_frame0 = Image.new('RGB', (frame_width, frame_height), color=bg_color)
+        draw_frame0 = ImageDraw.Draw(img_frame0)
+        if length_f0 > 0 and normalized_v_f0 is not None:
+            perp_v0 = np.array([-normalized_v_f0[1], normalized_v_f0[0]])
+            half_w_start0 = perp_v0 * (shape_width / 2.0)
+            half_w_end0 = half_w_start0
+            if shape_width_end > 0: half_w_end0 = perp_v0 * (shape_width_end / 2.0)
+            # Use current_pivot_f0 for corners c1_0, c2_0
+            c1_0 = tuple((current_pivot_f0 - half_w_start0).astype(int))
+            c2_0 = tuple((current_pivot_f0 + half_w_start0).astype(int))
+            c3_0, c4_0 = tuple((pn_f0 + half_w_end0).astype(int)), tuple((pn_f0 - half_w_end0).astype(int))
+            draw_frame0.polygon([c1_0, c2_0, c3_0, c4_0], fill=fill_rgb)
+        
+        if blur_radius > 0.0:
+            img_frame0 = img_frame0.filter(ImageFilter.GaussianBlur(blur_radius))
+        current_frame_tensor = pil2tensor(img_frame0)
+        if trailing > 0.0 and previous_frame_tensor is not None:
+            current_frame_tensor += trailing * previous_frame_tensor
+            max_val = current_frame_tensor.max()
+            if max_val > 0: current_frame_tensor = current_frame_tensor / max_val
+        previous_frame_tensor = current_frame_tensor.clone()
+        current_frame_tensor = current_frame_tensor * intensity
+        output_images.append(current_frame_tensor)
+
+        # --- Draw Animation Frames (Frames 1+) using pre-calculated path ---
+        for frame_index in range(len(interpolated_path_points)):
+            current_pivot = pivot_points_adjusted[frame_index + 1] if use_dynamic_pivot else p0_original
+            # Get the interpolated point (which is relative to p0_original's space)
+            p_interpolated_relative_to_p0 = interpolated_path_points[frame_index]
+            
+            # Calculate the target relative to original p0, then apply to current pivot
+            relative_target = p_interpolated_relative_to_p0 - p0_original
+            offset_target = current_pivot + relative_target
+            
+            # Determine pn, length, normalized_v based on current_pivot, offset_target, scaling, fixed_length
+            v_dir = offset_target - current_pivot # Simplified: v_dir = relative_target
+            dir_length = np.linalg.norm(v_dir)
+            pn = current_pivot # Default end point
+            length = 0
+            normalized_v = None
+
+            if scaling_enabled:
+                if dir_length > 0:
+                    pn = offset_target # End point is the offset target
+                    length = dir_length
+                    normalized_v = v_dir / length
+            else: # Fixed Length
+                if fixed_length > 0:
+                    length = fixed_length
+                    if dir_length > 0:
+                        normalized_v = v_dir / dir_length
+                        pn = current_pivot + normalized_v * length
+                    elif fixed_v_normalized is not None:
+                        normalized_v = fixed_v_normalized
+                        pn = current_pivot + normalized_v * length
+                        
+            # Drawing logic (same as before, using p0 and calculated pn)
+            img = Image.new('RGB', (frame_width, frame_height), color=bg_color)
+            draw = ImageDraw.Draw(img)
+            if length > 0 and normalized_v is not None:
+                perp_v = np.array([-normalized_v[1], normalized_v[0]])
+                half_w_start = perp_v * (shape_width / 2.0)
+                half_w_end = half_w_start
+                if shape_width_end > 0:
+                    half_w_end = perp_v * (shape_width_end / 2.0)
+                c1, c2 = tuple((current_pivot - half_w_start).astype(int)), tuple((current_pivot + half_w_start).astype(int))
+                c3, c4 = tuple((pn + half_w_end).astype(int)), tuple((pn - half_w_end).astype(int))
+                draw.polygon([c1, c2, c3, c4], fill=fill_rgb)
+            
+            # Apply effects (same as before)
+            if blur_radius > 0.0:
+                img = img.filter(ImageFilter.GaussianBlur(blur_radius))
+            current_frame_tensor = pil2tensor(img)
+            if trailing > 0.0 and previous_frame_tensor is not None:
+                current_frame_tensor += trailing * previous_frame_tensor
+                max_val = current_frame_tensor.max()
+                if max_val > 0: current_frame_tensor = current_frame_tensor / max_val
+            previous_frame_tensor = current_frame_tensor.clone()
+            current_frame_tensor = current_frame_tensor * intensity
+            output_images.append(current_frame_tensor)
+
+        # --- Final Output ---
+        if not output_images:
+            # This case should ideally not be reached if len(points) >= 2
+            print("Warning: No frames generated. Returning a single blank image.")
+            img = Image.new('RGB', (frame_width, frame_height), color=bg_color)
+            return (pil2tensor(img),)
+
+        batch_output = torch.cat(output_images, dim=0)
+        return (batch_output,)
