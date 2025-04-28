@@ -141,6 +141,7 @@ NODE_CONFIG = {
     "SplineEditor": {"class": SplineEditor, "name": "Spline Editor"},
     "CreateShapeImageOnPath": {"class": CreateShapeImageOnPath, "name": "Create Shape Image On Path"},
     "CreateShapeMaskOnPath": {"class": CreateShapeMaskOnPath, "name": "Create Shape Mask On Path"},
+    "CreateShapeJointOnPath": {"class": CreateShapeJointOnPath, "name": "Create Shape Joint On Path"},
     "CreateTextOnPath": {"class": CreateTextOnPath, "name": "Create Text On Path"},
     "CreateGradientFromCoords": {"class": CreateGradientFromCoords, "name": "Create Gradient From Coords"},
     "CutAndDragOnPath": {"class": CutAndDragOnPath, "name": "Cut And Drag On Path"},
