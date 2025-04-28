@@ -3,6 +3,7 @@ from torchvision import transforms
 import json
 from PIL import Image, ImageDraw, ImageFont, ImageColor, ImageFilter, ImageChops
 import numpy as np
+import math
 from ..utility.utility import pil2tensor, tensor2pil
 import folder_paths
 import io
