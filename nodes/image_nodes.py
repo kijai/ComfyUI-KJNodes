@@ -2306,7 +2306,7 @@ class ImageResizeKJ:
                 #"width_input": ("INT", { "forceInput": True}),
                 #"height_input": ("INT", { "forceInput": True}),
                 "get_image_size": ("IMAGE",),
-                "crop": (["disabled","center", 0],),
+                "crop": (["disabled","center", 0], { "tooltip": "0 will do the default center crop, this is a workaround for the widget order changing with the new frontend, as in old workflows the value of this widget becomes 0 automatically" }),
             }
         }
 
@@ -2357,6 +2357,9 @@ v2 of the node. This node is only kept to not completely break older workflows.
             width = width - (width % divisible_by)
             height = height - (height % divisible_by)
         
+        if crop == 0: #workaround for old workflows
+            crop = "center"
+
         image = image.movedim(-1,1)
         image = common_upscale(image, width, height, upscale_method, crop)
         image = image.movedim(1,-1)
