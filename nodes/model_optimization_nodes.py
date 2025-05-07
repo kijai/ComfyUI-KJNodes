@@ -226,6 +226,7 @@ class CheckpointLoaderKJ(BaseLoaderKJ):
 
         diffusion_model_prefix = model_detection.unet_prefix_from_state_dict(sd)
         parameters = comfy.utils.calculate_parameters(sd, diffusion_model_prefix)
+        weight_dtype = comfy.utils.weight_dtype(sd, diffusion_model_prefix)
         load_device = mm.get_torch_device()
 
         model_config = model_detection.model_config_from_unet(sd, diffusion_model_prefix, metadata=metadata)
