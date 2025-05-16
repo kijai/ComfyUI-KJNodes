@@ -72,10 +72,10 @@ const create_documentation_stylesheet = () => {
   }
 }
 
-loadScript('/kjweb_async/svg-path-properties.min.js').catch((e) => {
+loadScript('kjweb_async/svg-path-properties.min.js').catch((e) => {
   console.log(e)
 })
-loadScript('/kjweb_async/protovis.min.js').catch((e) => {
+loadScript('kjweb_async/protovis.min.js').catch((e) => {
   console.log(e)
 })
 create_documentation_stylesheet()
