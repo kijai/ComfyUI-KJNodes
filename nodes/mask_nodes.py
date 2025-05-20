@@ -618,7 +618,7 @@ and interpolating from that to fully black at the 16th frame.
                  "frames": ("INT", {"default": 16,"min": 2, "max": 10000, "step": 1}),
                  "width": ("INT", {"default": 512,"min": 1, "max": 4096, "step": 1}),
                  "height": ("INT", {"default": 512,"min": 1, "max": 4096, "step": 1}),
-                 "interpolation": (["linear", "ease_in", "ease_out", "ease_in_out"],),
+                 "interpolation": (["linear", "ease_in", "ease_out", "ease_in_out", "none", "default_to_black"],),
         },
     } 
     
@@ -642,7 +642,7 @@ and interpolating from that to fully black at the 16th frame.
             points.append((frame, color))
 
         # Check if the last frame is already in the points
-        if len(points) == 0 or points[-1][0] != frames - 1:
+        if (interpolation != "default_to_black") and (len(points) == 0 or points[-1][0] != frames - 1):
             # If not, add it with the color of the last specified frame
             points.append((frames - 1, points[-1][1] if points else 0))
 
@@ -662,17 +662,39 @@ and interpolating from that to fully black at the 16th frame.
 
             # Interpolate between the previous point and the next point
             prev_point = next_point - 1
-            t = (i - points[prev_point][0]) / (points[next_point][0] - points[prev_point][0])
-            if interpolation == "ease_in":
-                t = ease_in(t)
-            elif interpolation == "ease_out":
-                t = ease_out(t)
-            elif interpolation == "ease_in_out":
-                t = ease_in_out(t)
-            elif interpolation == "linear":
-                pass  # No need to modify `t` for linear interpolation
 
-            color = points[prev_point][1] - t * (points[prev_point][1] - points[next_point][1])
+            if interpolation == "none":
+                exact_match = False
+                for p in points:
+                    if p[0] == i:  # Exact frame match
+                        color = p[1]
+                        exact_match = True
+                        break
+                if not exact_match:
+                    color = points[prev_point][1]
+
+            elif interpolation == "default_to_black":
+                exact_match = False
+                for p in points:
+                    if p[0] == i:  # Exact frame match
+                        color = p[1]
+                        exact_match = True
+                        break
+                if not exact_match:
+                    color = 0        
+            else:
+                t = (i - points[prev_point][0]) / (points[next_point][0] - points[prev_point][0])
+                if interpolation == "ease_in":
+                    t = ease_in(t)
+                elif interpolation == "ease_out":
+                    t = ease_out(t)
+                elif interpolation == "ease_in_out":
+                    t = ease_in_out(t)
+                elif interpolation == "linear":
+                    pass  # No need to modify `t` for linear interpolation
+
+                color = points[prev_point][1] - t * (points[prev_point][1] - points[next_point][1])
+                
             color = np.clip(color, 0, 255)
             image = np.full((height, width), color, dtype=np.float32)
             image_batch[i] = image
