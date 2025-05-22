@@ -174,6 +174,7 @@ app.registerExtension({
 					this.outputs[1]["label"] = "width"
 					this.outputs[2]["label"] = "height" 
 					this.outputs[3]["label"] = "count"
+					this.outputs[4]["label"] = "channels"
 					return v;
 				}
 				//const onGetImageSizeExecuted = nodeType.prototype.onExecuted;
@@ -186,6 +187,7 @@ app.registerExtension({
 					this.outputs[1]["label"] = values[1] + " width"
 					this.outputs[2]["label"] = values[2] + " height" 
 					this.outputs[3]["label"] = values[0] + " count" 
+					this.outputs[4]["label"] = values[3] + " channels"
 					return r
 				}
 				break;
