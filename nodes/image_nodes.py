@@ -2683,7 +2683,7 @@ class LoadImagesFromFolderKJ:
         if not os.path.isdir(folder):
             raise FileNotFoundError(f"Folder '{folder} cannot be found.'")
         
-        valid_extensions = ['.jpg', '.jpeg', '.png', '.webp']
+        valid_extensions = ['.jpg', '.jpeg', '.png', '.webp', '.tga']
         image_paths = []
         if include_subfolders:
             for root, _, files in os.walk(folder):

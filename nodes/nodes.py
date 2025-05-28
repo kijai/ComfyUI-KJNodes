@@ -1947,7 +1947,7 @@ class FluxBlockLoraSelect:
 
         return {"required": arg_dict}
     
-    RETURN_TYPES = ("SELECTEDBLOCKS", )
+    RETURN_TYPES = ("SELECTEDDITBLOCKS", )
     RETURN_NAMES = ("blocks", )
     OUTPUT_TOOLTIPS = ("The modified diffusion model.",)
     FUNCTION = "load_lora"
@@ -1959,9 +1959,6 @@ class FluxBlockLoraSelect:
         return (kwargs,)
     
 class HunyuanVideoBlockLoraSelect:
-    def __init__(self):
-        self.loaded_lora = None
-
     @classmethod
     def INPUT_TYPES(s):
         arg_dict = {}
@@ -1975,7 +1972,29 @@ class HunyuanVideoBlockLoraSelect:
 
         return {"required": arg_dict}
     
-    RETURN_TYPES = ("SELECTEDBLOCKS", )
+    RETURN_TYPES = ("SELECTEDDITBLOCKS", )
+    RETURN_NAMES = ("blocks", )
+    OUTPUT_TOOLTIPS = ("The modified diffusion model.",)
+    FUNCTION = "load_lora"
+
+    CATEGORY = "KJNodes/experimental"
+    DESCRIPTION = "Select individual block alpha values, value of 0 removes the block altogether"
+
+    def load_lora(self, **kwargs):
+        return (kwargs,)
+
+class Wan21BlockLoraSelect:
+    @classmethod
+    def INPUT_TYPES(s):
+        arg_dict = {}
+        argument = ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1000.0, "step": 0.01})
+
+        for i in range(40):
+            arg_dict["blocks.{}.".format(i)] = argument
+
+        return {"required": arg_dict}
+    
+    RETURN_TYPES = ("SELECTEDDITBLOCKS", )
     RETURN_NAMES = ("blocks", )
     OUTPUT_TOOLTIPS = ("The modified diffusion model.",)
     FUNCTION = "load_lora"
@@ -1986,7 +2005,7 @@ class HunyuanVideoBlockLoraSelect:
     def load_lora(self, **kwargs):
         return (kwargs,)
     
-class FluxBlockLoraLoader:
+class DiTBlockLoraLoader:
     def __init__(self):
         self.loaded_lora = None
 
@@ -2000,7 +2019,7 @@ class FluxBlockLoraLoader:
                 "optional": {
                     "lora_name": (folder_paths.get_filename_list("loras"), {"tooltip": "The name of the LoRA."}),
                     "opt_lora_path": ("STRING", {"forceInput": True, "tooltip": "Absolute path of the LoRA."}),
-                    "blocks": ("SELECTEDBLOCKS",),
+                    "blocks": ("SELECTEDDITBLOCKS",),
                 }
                }
     
