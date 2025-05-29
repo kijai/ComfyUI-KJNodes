@@ -2662,8 +2662,8 @@ class LoadImagesFromFolderKJ:
         return {
             "required": {
                 "folder": ("STRING", {"default": ""}),
-                "width": ("INT", {"default": 1024, "min": 64, "step": 1}),
-                "height": ("INT", {"default": 1024, "min": 64, "step": 1}),
+                "width": ("INT", {"default": 1024, "min": -1, "step": 1}),
+                "height": ("INT", {"default": 1024, "min": -1, "step": 1}),
                 "keep_aspect_ratio": (["crop", "pad", "stretch",],), 
             },
             "optional": {
@@ -2721,6 +2721,9 @@ class LoadImagesFromFolderKJ:
             i = ImageOps.exif_transpose(i)
             
             # Resize image to maximum dimensions
+            if width == -1 and height == -1:
+                width = i.size[0]
+                height = i.size[1]
             if i.size != (width, height):
                 i = self.resize_with_aspect_ratio(i, width, height, keep_aspect_ratio)
             
