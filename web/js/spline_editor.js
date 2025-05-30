@@ -110,9 +110,7 @@ app.registerExtension({
             this.uuid = makeUUID()
             element.id = `spline-editor-${this.uuid}`
 
-            // fake image widget to allow copy/paste
-            const fakeimagewidget = this.addWidget("COMBO", "image", null, () => { }, {});
-            hideWidgetForGood(this, fakeimagewidget)
+            this.previewMediaType = 'image'
 
             this.splineEditor = this.addDOMWidget(nodeData.name, "SplineEditorWidget", element, {
             serialize: false,

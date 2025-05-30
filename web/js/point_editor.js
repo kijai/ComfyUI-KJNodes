@@ -112,9 +112,7 @@ app.registerExtension({
         this.uuid = makeUUID()
         element.id = `points-editor-${this.uuid}`
 
-        // fake image widget to allow copy/paste
-        const fakeimagewidget = this.addWidget("COMBO", "image", null, () => { }, {});
-        hideWidgetForGood(this, fakeimagewidget)
+        this.previewMediaType = 'image'
 
         this.pointsEditor = this.addDOMWidget(nodeData.name, "PointsEditorWidget", element, {
           serialize: false,
