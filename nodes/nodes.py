@@ -814,7 +814,7 @@ class WidgetToString:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "id": ("INT", {"default": 0}),
+                "id": ("INT", {"default": 0, "min": 0, "max": 100000, "step": 1}),
                 "widget_name": ("STRING", {"multiline": False}),
                 "return_all": ("BOOLEAN", {"default": False}),
             },
