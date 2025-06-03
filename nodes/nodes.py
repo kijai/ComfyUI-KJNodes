@@ -7,7 +7,7 @@ import json, re, os, io, time, platform
 import re
 import importlib
 
-import model_management
+from comfy import model_management
 import folder_paths
 from nodes import MAX_RESOLUTION
 from comfy.utils import common_upscale, ProgressBar, load_torch_file
