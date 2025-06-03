@@ -155,6 +155,9 @@ app.registerExtension({
               createMenuItem(3, "Background image"),
               createMenuItem(4, "Invert point order"),
               createMenuItem(5, "Clear Image"),
+              createMenuItem(6, "Add new spline"),
+              createMenuItem(7, "Delete current spline"),
+              createMenuItem(8, "Next spline"),
             ];
             
             // Add mouseover and mouseout event listeners to each menu item for styling
@@ -175,7 +178,7 @@ app.registerExtension({
 
             document.body.appendChild(this.contextMenu);
 
-            this.addWidget("button", "New spline", null, () => {
+            this.addWidget("button", "New canvas", null, () => {
               if (!this.properties || !("points" in this.properties)) {
               this.editor = new SplineEditor(this);
                 this.addProperty("points", this.constructor.type, "string");
@@ -341,29 +344,32 @@ this.heightWidget.callback = () => {
  this.width = this.widthWidget.value;
  this.height = this.heightWidget.value;
  var i = 3;
- this.points = [];
+ this.splines = [];
+ this.activeSplineIndex = 0; // Track which spline is being edited
 
  if (!reset && this.pointsStoreWidget.value != "") {
-  this.points = JSON.parse(this.pointsStoreWidget.value);
- } else {
-  this.points = pv.range(1, 4).map((i, index) => {
-    if (index === 0) {
-      // First point at the bottom-left corner
-      return { x: 0, y: this.height };
-    } else if (index === 2) {
-      // Last point at the top-right corner
-      return { x: this.width, y: 0 };
+  try {
+    const parsedData = JSON.parse(this.pointsStoreWidget.value);
+    // Check if it's already in the new format (array of splines)
+    if (Array.isArray(parsedData) && parsedData.length > 0 && parsedData[0].hasOwnProperty('points')) {
+      this.splines = parsedData;
     } else {
-      // Other points remain as they were
-      return {
-        x: i * this.width / 5,
-        y: 50 + Math.random() * (this.height - 100)
-      };
+      // Convert old format (single array of points) to new format
+      this.splines = [{ 
+        points: parsedData, 
+        color: "#1f77b4", 
+        name: "Spline 1" 
+      }];
     }
-  });
-    this.pointsStoreWidget.value = JSON.stringify(this.points);
- }
-  
+  } catch (e) {
+    console.error("Error parsing spline data:", e);
+    this.initializeDefaultSplines();
+  }
+} else {
+  this.initializeDefaultSplines();
+  this.pointsStoreWidget.value = JSON.stringify(this.splines);
+}
+
   this.vis = new pv.Panel()
   .width(this.width)
   .height(this.height)
@@ -378,7 +384,7 @@ this.heightWidget.callback = () => {
         x: this.mouse().x / app.canvas.ds.scale,
         y: this.mouse().y / app.canvas.ds.scale
         };
-        i = self.points.push(scaledMouse) - 1;
+        i = self.splines[self.activeSplineIndex].points.push(scaledMouse) - 1;
         self.updatePath();
         return this;
     }
@@ -390,16 +396,17 @@ this.heightWidget.callback = () => {
         };
 
         // Find the two closest points to the clicked location
-        let { point1Index, point2Index } = self.findClosestPoints(self.points, clickedPoint);
+        const activePoints = self.splines[self.activeSplineIndex].points;
+        let { point1Index, point2Index } = self.findClosestPoints(self.splines[self.activeSplineIndex].points, clickedPoint);
 
         // Calculate the midpoint between the two closest points
         let midpoint = {
-            x: (self.points[point1Index].x + self.points[point2Index].x) / 2,
-            y: (self.points[point1Index].y + self.points[point2Index].y) / 2
+            x: (activePoints[point1Index].x + activePoints[point2Index].x) / 2,
+            y: (activePoints[point1Index].y + activePoints[point2Index].y) / 2
         };
 
         // Insert the midpoint into the array
-        self.points.splice(point2Index, 0, midpoint);
+        activePoints.splice(point2Index, 0, midpoint);
         i = point2Index;
         self.updatePath();
     }
@@ -418,54 +425,72 @@ this.heightWidget.callback = () => {
     .lineWidth(3)
     .visible(() => self.drawRuler)
 
-  // vis.add(pv.Rule)
-  //   .data(pv.range(0, points_to_sample, 1))
-  //   .left(d =>  d * 512 / (points_to_sample - 1))
-  //   .strokeStyle("gray")
-  //   .lineWidth(2)
+  this.hoverSplineIndex = -1;
 
-  this.vis.add(pv.Line)
-    .data(() => this.points)
-    .left(d => d.x)
-    .top(d => d.y)
-    .interpolate(() => this.interpolation)
-    .tension(() => this.tension)
-    .segmented(() => false)
-    .strokeStyle(pv.Colors.category10().by(pv.index))
-    .lineWidth(3)
+  this.splines.forEach((spline, splineIndex) => {
+    this.vis.add(pv.Line)
+      .data(() => spline.points)
+      .left(d => d.x)
+      .top(d => d.y)
+      .interpolate(() => this.interpolation)
+      .tension(() => this.tension)
+      .segmented(() => false)
+      .strokeStyle(spline.color)
+      .lineWidth(() => {
+        // Change line width based on active or hover state
+        if (splineIndex === this.activeSplineIndex) return 3;
+        if (splineIndex === this.hoverSplineIndex) return 2;
+        return 1.5;
+      })
+      .event("mouseover", () => {
+        this.hoverSplineIndex = splineIndex;
+        this.vis.render();
+      })
+      .event("mouseout", () => {
+        this.hoverSplineIndex = -1;
+        this.vis.render();
+      })
+      .event("mousedown", () => {
+        if (this.activeSplineIndex !== splineIndex) {
+          this.activeSplineIndex = splineIndex;
+          this.refreshSplineElements();
+        }
+      });
+  });
     
     this.vis.add(pv.Dot)
-    .data(() => this.points)
-    .left(d => d.x)
-    .top(d => d.y)
-    .radius(10)
-    .shape(function() {
-      return self.dotShape;
-   })
-   .angle(function() {
-    const index = this.index;
-    let angle = 0;
+      .data(() => this.splines[this.activeSplineIndex].points)
+      .left(d => d.x)
+      .top(d => d.y)
+      .radius(10)
+      .shape(function() {
+        return self.dotShape;
+    })
+    .angle(function() {
+      const index = this.index;
+      let angle = 0;
 
-    if (self.dotShape === "triangle") {
-      let dxNext = 0, dyNext = 0;
-      if (index < self.points.length - 1) {
-        dxNext = self.points[index + 1].x - self.points[index].x;
-        dyNext = self.points[index + 1].y - self.points[index].y;
+      if (self.dotShape === "triangle") {
+        const activePoints = self.splines[self.activeSplineIndex].points;
+        let dxNext = 0, dyNext = 0;
+        if (index < activePoints.length - 1) {
+          dxNext = activePoints[index + 1].x - activePoints[index].x;
+          dyNext = activePoints[index + 1].y - activePoints[index].y;
+        }
+      
+        let dxPrev = 0, dyPrev = 0;
+        if (index > 0) {
+          dxPrev = activePoints[index].x - activePoints[index - 1].x;
+          dyPrev = activePoints[index].y - activePoints[index - 1].y;
+        }
+
+        const dx = (dxNext + dxPrev) / 2;
+        const dy = (dyNext + dyPrev) / 2;
+
+        angle = Math.atan2(dy, dx);
+        angle -= Math.PI / 2;
+        angle = (angle + 2 * Math.PI) % (2 * Math.PI);
       }
-
-      let dxPrev = 0, dyPrev = 0;
-      if (index > 0) {
-        dxPrev = self.points[index].x - self.points[index - 1].x;
-        dyPrev = self.points[index].y - self.points[index - 1].y;
-      }
-
-      const dx = (dxNext + dxPrev) / 2;
-      const dy = (dyNext + dyPrev) / 2;
-
-      angle = Math.atan2(dy, dx);
-      angle -= Math.PI / 2;
-      angle = (angle + 2 * Math.PI) % (2 * Math.PI);
-    }
 
     return angle;
  })
@@ -477,10 +502,11 @@ this.heightWidget.callback = () => {
         i = this.index;
         hoverIndex = this.index;
         isDragging = true;
-        if (pv.event.button === 2 && i !== 0 && i !== self.points.length - 1) {
-          self.points.splice(i--, 1);
-          self.vis.render();
-        }
+        const activePoints = self.splines[self.activeSplineIndex].points;
+          if (pv.event.button === 2 && i !== 0 && i !== activePoints.length - 1) {
+            activePoints.splice(i--, 1);
+            self.vis.render();
+          }
         return this;
     })
     .event("dragend", function() {
@@ -499,7 +525,7 @@ this.heightWidget.callback = () => {
       // Adjust the new position if it would place the dot outside the bounds of the vis.Panel
       adjustedX = Math.max(0, Math.min(panelWidth, adjustedX));
       adjustedY = Math.max(0, Math.min(panelHeight, adjustedY));
-      self.points[this.index] = { x: adjustedX, y: adjustedY }; // Update the point's position
+      self.splines[self.activeSplineIndex].points[this.index] = { x: adjustedX, y: adjustedY }; // Update the point's position
       self.vis.render(); // Re-render the visualization to reflect the new position
    })
     .event("mouseover", function() {
@@ -530,64 +556,92 @@ this.heightWidget.callback = () => {
       })
     .textStyle("orange")
  
-    if (this.points.length != 0) {
-      this.vis.render();
-    }
-    var svgElement = this.vis.canvas();
-    svgElement.style['zIndex'] = "2"
-    svgElement.style['position'] = "relative"
-    this.node.splineEditor.element.appendChild(svgElement);
-    this.pathElements = svgElement.getElementsByTagName('path'); // Get all path elements
-
-    if (this.width > 256) {
-      this.node.setSize([this.width + 45, this.node.size[1]]);
-    }
-    this.node.setSize([this.node.size[0], this.height + 430]);
-    this.updatePath();
-    this.refreshBackgroundImage();
-}
-
-  updatePath = () => {
-    if (!this.points || this.points.length === 0) {
-      console.log("no points");
-      return;
-    }
-    if (this.samplingMethod != "controlpoints") {
-      var coords = this.samplePoints(this.pathElements[0], this.points_to_sample, this.samplingMethod, this.width);
-    }
-    else {
-      var coords = this.points
-    }
-
-    if (this.drawSamplePoints) {
-      if (this.pointsLayer) {
-        // Update the data of the existing points layer
-        this.pointsLayer.data(coords);
-      } else {
-          // Create the points layer if it doesn't exist
-          this.pointsLayer = this.vis.add(pv.Dot)
-              .data(coords)
-              .left(function(d) { return d.x; })
-              .top(function(d) { return d.y; })
-              .radius(5) // Adjust the radius as needed
-              .fillStyle("red") // Change the color as needed
-              .strokeStyle("black") // Change the stroke color as needed
-              .lineWidth(1); // Adjust the line width as needed
-        }
-    } else {
-        if (this.pointsLayer) {
-          // Remove the points layer
-          this.pointsLayer.data([]);
-          this.vis.render();
-        }
-    }
-    let coordsString = JSON.stringify(coords);
-    this.pointsStoreWidget.value = JSON.stringify(this.points);
-    if (this.coordWidget) {
-      this.coordWidget.value = coordsString;
+    if (this.splines.length != 0) {
+        this.vis.render();
       }
-    this.vis.render();
-  };
+      var svgElement = this.vis.canvas();
+      svgElement.style['zIndex'] = "2"
+      svgElement.style['position'] = "relative"
+      this.node.splineEditor.element.appendChild(svgElement);
+      this.pathElements = svgElement.getElementsByTagName('path'); // Get all path elements
+
+      if (this.width > 256) {
+        this.node.setSize([this.width + 45, this.node.size[1]]);
+      }
+      this.node.setSize([this.node.size[0], this.height + 430]);
+      this.updatePath();
+      this.refreshBackgroundImage();
+  }
+
+    updatePath = () => {
+      if (!this.splines || this.splines.length === 0) {
+        console.log("no splines");
+        return;
+      }
+      // Get active spline points
+      console.log("this.activeSplineIndex", this.activeSplineIndex);
+      const activeSpline = this.splines[this.activeSplineIndex];
+      const activePoints = activeSpline.points;
+      
+      if (!activePoints || activePoints.length === 0) {
+        console.log("no points in active spline");
+        return;
+      }
+
+      console.log("this.pathElements", this.pathElements);
+      
+      let coords;
+      if (this.samplingMethod != "controlpoints") {
+        coords = this.samplePoints(this.pathElements[this.activeSplineIndex], this.points_to_sample, this.samplingMethod, this.width, this.activeSplineIndex);
+      } else {
+        coords = activePoints;
+      }
+
+      let allSplineCoords = [];
+      for (let i = 0; i < this.splines.length; i++) {
+        // Use the same sampling method for all splines
+        let splineCoords;
+        const pathElement = this.pathElements[i];
+        
+        if (this.samplingMethod != "controlpoints" && pathElement) {
+          splineCoords = this.samplePoints(pathElement, this.points_to_sample, this.samplingMethod, this.width, i);
+        } else {
+          // Fall back to control points if no path element or sampling method is "controlpoints"
+          splineCoords = this.splines[i].points;
+        }
+
+        allSplineCoords.push(splineCoords);
+      }
+
+      if (this.drawSamplePoints) {
+        if (this.pointsLayer) {
+          // Update the data of the existing points layer
+          this.pointsLayer.data(coords);
+        } else {
+            // Create the points layer if it doesn't exist
+            this.pointsLayer = this.vis.add(pv.Dot)
+                .data(coords)
+                .left(function(d) { return d.x; })
+                .top(function(d) { return d.y; })
+                .radius(5) // Adjust the radius as needed
+                .fillStyle("red") // Change the color as needed
+                .strokeStyle("black") // Change the stroke color as needed
+                .lineWidth(1); // Adjust the line width as needed
+          }
+      } else {
+          if (this.pointsLayer) {
+            // Remove the points layer
+            this.pointsLayer.data([]);
+            this.vis.render();
+          }
+      }
+      this.pointsStoreWidget.value = JSON.stringify(this.splines);
+      if (this.coordWidget) {
+        this.coordWidget.value = JSON.stringify(allSplineCoords);
+      }
+      this.vis.render();
+    };
+
     handleImageLoad = (img, file, base64String) => {
       console.log(img.width, img.height); // Access width and height here
       this.widthWidget.value = img.width;
@@ -673,11 +727,143 @@ this.heightWidget.callback = () => {
       }
     };
 
+    refreshSplineElements = () => {
+      // Clear existing line elements and recreate them
+      const svgElement = this.vis.canvas();
+      
+      // Remove all existing line elements
+      const oldLines = svgElement.querySelectorAll('path');
+      oldLines.forEach(line => line.remove());
+      
+      this.pathElements = [];
+      this.lineObjects = [];
+
+      const originalChildren = [...this.vis.children];
+  
+      // Find line objects to remove (those that represent splines)
+      const linesToRemove = originalChildren.filter(child => 
+        child instanceof pv.Line
+      );
+      linesToRemove.forEach(line => line.visible(false));
+      
+      // Re-add all spline lines and store references to them
+      this.splines.forEach((spline, splineIndex) => {
+        const lineObj = this.vis.add(pv.Line)
+          .data(() => spline.points)
+          .left(d => d.x)
+          .top(d => d.y)
+          .interpolate(() => this.interpolation)
+          .tension(() => this.tension)
+          .segmented(() => false)
+          .strokeStyle(spline.color)
+          .lineWidth(() => {
+            // Change line width based on active or hover state
+            if (splineIndex === this.activeSplineIndex) return 3;
+            if (splineIndex === this.hoverSplineIndex) return 2;
+            return 1.5;
+          })
+          .event("mouseover", () => {
+            this.hoverSplineIndex = splineIndex;
+            this.vis.render();
+          })
+          .event("mouseout", () => {
+            this.hoverSplineIndex = -1;
+            this.vis.render();
+          })
+          .event("mousedown", () => {
+            if (this.activeSplineIndex !== splineIndex) {
+              this.activeSplineIndex = splineIndex;
+              this.refreshSplineElements();
+            }
+          });
+        this.lineObjects.push(lineObj);
+      });
+      
+      this.vis.render();
+      
+      requestAnimationFrame(() => {
+        const allPaths = Array.from(svgElement.querySelectorAll('path'));
+        this.pathElements = [];
+        
+        // First try: look at paths with specific childIndex values
+        this.lineObjects.forEach((lineObj, i) => {
+          // Find paths that correspond to our line objects
+          const childIndex = lineObj.childIndex;
+          const matchingPath = allPaths.find(path => 
+            path.$scene && path.$scene.scenes && 
+            path.$scene.scenes.childIndex === childIndex
+          );
+          
+          if (matchingPath) {
+            console.log("matchingPath:", matchingPath);
+            this.pathElements[i] = matchingPath;
+          }
+        });
+        
+        // Check if we found all paths
+        if (this.pathElements.filter(p => p).length !== this.splines.length) {
+          // Fallback to color matching
+          this.pathElements = [];
+          for (let i = 0; i < this.splines.length; i++) {
+            const color = this.splines[i].color;
+            const matchingPath = allPaths.find(p => 
+              p.getAttribute('style')?.includes(color) && 
+              !this.pathElements.includes(p)
+            );
+            
+            if (matchingPath) {
+              this.pathElements[i] = matchingPath;
+            }
+          }
+        }
+        
+        // If we still don't have the right number of paths, use the first N paths
+        if (this.pathElements.filter(p => p).length !== this.splines.length) {
+          this.pathElements = allPaths.slice(0, this.splines.length);
+        }
+        
+        this.updatePath();
+      });
+    };
+    
+    
+    initializeDefaultSplines() {
+      this.splines = [{
+        points: pv.range(1, 4).map((i, index) => {
+          if (index === 0) {
+            return { x: 0, y: this.height };
+          } else if (index === 2) {
+            return { x: this.width, y: 0 };
+          } else {
+            return {
+              x: i * this.width / 5,
+              y: 50 + Math.random() * (this.height - 100)
+            };
+          }
+        }),
+        color: this.getSplineColor(0),
+        name: "Spline 1"
+      }];
+    }
+
+    getSplineColor(index) {
+      const colors = [
+        "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", 
+        "#9467bd", "#8c564b", "#e377c2", "#7f7f7f", 
+        "#bcbd22", "#17becf"
+      ];
+      return colors[index % colors.length];
+    }
+
   createContextMenu = () => {
-    self = this;
+    const self = this;
+    const oldMenu = this.node.contextMenu;
+    const newMenu = oldMenu.cloneNode(true);
+    oldMenu.parentNode.replaceChild(newMenu, oldMenu);
+    this.node.contextMenu = newMenu;
+
     document.addEventListener('contextmenu', function (e) {
       e.preventDefault();
-      
     });
 
     document.addEventListener('click', function (e) {
@@ -686,17 +872,18 @@ this.heightWidget.callback = () => {
     });
     });
 
-    this.node.menuItems.forEach((menuItem, index) => {
-      self = this;
-      menuItem.addEventListener('click', function (e) {
-        e.preventDefault();
-        switch (index) {
+    this.node.contextMenu.addEventListener('click', function(e) {
+      e.preventDefault();
+      if (e.target.tagName === 'A') {
+        const id = parseInt(e.target.id.split('-')[2]);
+        
+        switch(id) {
           case 0:
             e.preventDefault();
             if (!self.drawHandles) {
               self.drawHandles = true
               self.vis.add(pv.Line)
-              .data(() => self.points.map((point, index) => ({
+              .data(() => self.splines[self.activeSplineIndex].points.map((point, index) => ({
                   start: point,
                   end: [index]
               })))
@@ -715,12 +902,11 @@ this.heightWidget.callback = () => {
             self.node.contextMenu.style.display = 'none';
             break;
           case 1:
-            e.preventDefault();
+   
             self.drawSamplePoints = !self.drawSamplePoints;
             self.updatePath();
             break;
           case 2:
-            e.preventDefault();
             if (self.dotShape == "circle"){
               self.dotShape = "triangle"
             }
@@ -753,8 +939,7 @@ this.heightWidget.callback = () => {
             self.node.contextMenu.style.display = 'none';
             break;
           case 4:
-            e.preventDefault();
-            self.points.reverse();
+            self.splines[self.activeSplineIndex].points.reverse();
             self.updatePath();
           break;
           case 5:
@@ -762,34 +947,93 @@ this.heightWidget.callback = () => {
             self.node.properties.imgData = null;
             self.node.contextMenu.style.display = 'none';
           break;
+          case 6: // Add new spline
+            const newSplineIndex = self.splines.length;
+            self.splines.push({
+              points: [
+                // Create default points for the new spline
+                { x: 0, y: self.height },
+                { x: self.width/2, y: self.height/2 },
+                { x: self.width, y: 0 }
+              ],
+              color: self.getSplineColor(newSplineIndex),
+              name: `Spline ${newSplineIndex + 1}`
+            });
+            self.activeSplineIndex = newSplineIndex;
+            self.refreshSplineElements();
+            self.node.contextMenu.style.display = 'none';
+            break;
+          case 7: // Delete current spline
+            if (self.splines.length > 1) {
+              self.splines.splice(self.activeSplineIndex, 1);
+              self.activeSplineIndex = Math.min(self.activeSplineIndex, self.splines.length - 1);
+              self.refreshSplineElements();
+            }
+            self.node.contextMenu.style.display = 'none';
+            break;
+          case 8: // Next spline
+            self.activeSplineIndex = (self.activeSplineIndex + 1) % self.splines.length;
+            self.refreshSplineElements();
+            self.node.contextMenu.style.display = 'none';
+            break;
         }
-      });
+      }
     });
   }
 
-  samplePoints(svgPathElement, numSamples, samplingMethod, width) {
-  var svgWidth = width; // Fixed width of the SVG element
-  var pathLength = svgPathElement.getTotalLength();
-  var points = [];
+  samplePoints(svgPathElement, numSamples, samplingMethod, width, splineIndex) {
+    if (!svgPathElement) {
+      console.warn(`Path element not found for spline index: ${splineIndex}. Available paths: ${this.pathElements.length}`);
 
-  for (var i = 0; i < numSamples; i++) {
-      if (samplingMethod === "time") {
-        // Calculate the x-coordinate for the current sample based on the SVG's width
-        var x = (svgWidth / (numSamples - 1)) * i;
-        // Find the point on the path that intersects the vertical line at the calculated x-coordinate
-        var point = this.findPointAtX(svgPathElement, x, pathLength);
-        }
-      else if (samplingMethod === "path") {
-        // Calculate the distance along the path for the current sample
-        var distance = (pathLength / (numSamples - 1)) * i;
-        // Get the point at the current distance
-        var point = svgPathElement.getPointAtLength(distance);
+
+      const splinePoints = this.splines[splineIndex].points;
+      
+      // If we have no points, return an empty array
+      if (!splinePoints || splinePoints.length === 0) {
+        return [];
       }
+      
+      // Create a simple interpolation between control points
+      const result = [];
+      for (let i = 0; i < numSamples; i++) {
+        const t = i / (numSamples - 1);
+        const idx = Math.min(
+          Math.floor(t * (splinePoints.length - 1)), 
+          splinePoints.length - 2
+        );
+        const fraction = (t * (splinePoints.length - 1)) - idx;
+        
+        const x = splinePoints[idx].x + fraction * (splinePoints[idx + 1].x - splinePoints[idx].x);
+        const y = splinePoints[idx].y + fraction * (splinePoints[idx + 1].y - splinePoints[idx].y);
+        
+        result.push({ x, y });
+      }
+      return result;
+    }
+    
+    var svgWidth = width; // Fixed width of the SVG element
+    var pathLength = svgPathElement.getTotalLength();
+    console.log(" pathLength:", pathLength);
+    var points = [];
 
-      // Add the point to the array of points
-      points.push({ x: point.x, y: point.y });
-  }
-  return points;
+    for (var i = 0; i < numSamples; i++) {
+        if (samplingMethod === "time") {
+          // Calculate the x-coordinate for the current sample based on the SVG's width
+          var x = (svgWidth / (numSamples - 1)) * i;
+          // Find the point on the path that intersects the vertical line at the calculated x-coordinate
+          var point = this.findPointAtX(svgPathElement, x, pathLength);
+          }
+        else if (samplingMethod === "path") {
+          // Calculate the distance along the path for the current sample
+          var distance = (pathLength / (numSamples - 1)) * i;
+          // Get the point at the current distance
+          var point = svgPathElement.getPointAtLength(distance);
+        }
+
+        // Add the point to the array of points
+        points.push({ x: point.x, y: point.y });
+    }
+    return points;
   }
 
   findClosestPoints(points, clickedPoint) {
@@ -846,16 +1090,7 @@ export function hideWidgetForGood(node, widget, suffix = '') {
   widget.origSerializeValue = widget.serializeValue
   widget.computeSize = () => [0, -4] // -4 is due to the gap litegraph adds between widgets automatically
   widget.type = "converted-widget" + suffix
-  // widget.serializeValue = () => {
-  //     // Prevent serializing the widget if we have no input linked
-  //     const w = node.inputs?.find((i) => i.widget?.name === widget.name);
-  //     if (w?.link == null) {
-  //         return undefined;
-  //     }
-  //     return widget.origSerializeValue ? widget.origSerializeValue() : widget.value;
-  // };
-
-  // Hide any linked widgets, e.g. seed+seedControl
+  
   if (widget.linkedWidgets) {
     for (const w of widget.linkedWidgets) {
       hideWidgetForGood(node, w, ':' + widget.name)

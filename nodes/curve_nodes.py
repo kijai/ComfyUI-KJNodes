@@ -200,52 +200,77 @@ output types:
 """
 
     def splinedata(self, mask_width, mask_height, coordinates, float_output_type, interpolation, 
-                   points_to_sample, sampling_method, points_store, tension, repeat_output, 
-                   min_value=0.0, max_value=1.0, bg_image=None):
-        
+               points_to_sample, sampling_method, points_store, tension, repeat_output, 
+               min_value=0.0, max_value=1.0, bg_image=None):
+    
         coordinates = json.loads(coordinates)
-        normalized = []
-        normalized_y_values = []
-        for coord in coordinates:
-            coord['x'] = int(round(coord['x']))
-            coord['y'] = int(round(coord['y']))
-            norm_x = (1.0 - (coord['x'] / mask_height) - 0.0) * (max_value - min_value) + min_value
-            norm_y = (1.0 - (coord['y'] / mask_height) - 0.0) * (max_value - min_value) + min_value
-            normalized_y_values.append(norm_y)
-            normalized.append({'x':norm_x, 'y':norm_y})
+        print("Coordinates: ", coordinates)
+        
+        # Handle nested list structure if present
+        all_normalized = []
+        all_normalized_y_values = []
+        
+        # Check if we have a nested list structure
+        if isinstance(coordinates, list) and len(coordinates) > 0 and isinstance(coordinates[0], list):
+            # Process each list of coordinates in the nested structure
+            coordinate_sets = coordinates
+        else:
+            # If not nested, treat as a single list of coordinates
+            coordinate_sets = [coordinates]
+        
+        # Process each set of coordinates
+        for coord_set in coordinate_sets:
+            normalized = []
+            normalized_y_values = []
+            
+            for coord in coord_set:
+                coord['x'] = int(round(coord['x']))
+                coord['y'] = int(round(coord['y']))
+                norm_x = (1.0 - (coord['x'] / mask_height) - 0.0) * (max_value - min_value) + min_value
+                norm_y = (1.0 - (coord['y'] / mask_height) - 0.0) * (max_value - min_value) + min_value
+                normalized_y_values.append(norm_y)
+                normalized.append({'x':norm_x, 'y':norm_y})
+            
+            all_normalized.extend(normalized)
+            all_normalized_y_values.extend(normalized_y_values)
+        
+        # Use the combined normalized values for output
         if float_output_type == 'list':
-            out_floats = normalized_y_values * repeat_output
+            out_floats = all_normalized_y_values * repeat_output
         elif float_output_type == 'pandas series':
             try:
                 import pandas as pd
             except:
                 raise Exception("MaskOrImageToWeight: pandas is not installed. Please install pandas to use this output_type")
-            out_floats = pd.Series(normalized_y_values * repeat_output),
+            out_floats = pd.Series(all_normalized_y_values * repeat_output),
         elif float_output_type == 'tensor':
-            out_floats = torch.tensor(normalized_y_values * repeat_output, dtype=torch.float32)
+            out_floats = torch.tensor(all_normalized_y_values * repeat_output, dtype=torch.float32)
+        
         # Create a color map for grayscale intensities
         color_map = lambda y: torch.full((mask_height, mask_width, 3), y, dtype=torch.float32)
 
         # Create image tensors for each normalized y value
-        mask_tensors = [color_map(y) for y in normalized_y_values]
+        mask_tensors = [color_map(y) for y in all_normalized_y_values]
         masks_out = torch.stack(mask_tensors)
         masks_out = masks_out.repeat(repeat_output, 1, 1, 1)
         masks_out = masks_out.mean(dim=-1)
+        
         if bg_image is None:
-            return (masks_out, json.dumps(coordinates), out_floats, len(out_floats) , json.dumps(normalized))
+            return (masks_out, json.dumps(coordinates), out_floats, len(out_floats), json.dumps(all_normalized))
         else:
             transform = transforms.ToPILImage()
             image = transform(bg_image[0].permute(2, 0, 1))
             buffered = io.BytesIO()
             image.save(buffered, format="JPEG", quality=75)
 
-            # Step 3: Encode the image bytes to a Base64 string
+            # Encode the image bytes to a Base64 string
             img_bytes = buffered.getvalue()
             img_base64 = base64.b64encode(img_bytes).decode('utf-8')
-        return {
+            
+            return {
                 "ui": {"bg_image": [img_base64]},
-                "result":(masks_out, json.dumps(coordinates), out_floats, len(out_floats) , json.dumps(normalized))
-                }
+                "result": (masks_out, json.dumps(coordinates), out_floats, len(out_floats), json.dumps(all_normalized))
+            }
      
 
 class CreateShapeMaskOnPath:
