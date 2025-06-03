@@ -155,7 +155,6 @@ NODE_CONFIG = {
     "InterpolateCoords": {"class": InterpolateCoords, "name": "Interpolate Coords"},
     "PointsEditor": {"class": PointsEditor, "name": "Points Editor"},
     #experimental
-    "StabilityAPI_SD3": {"class": StabilityAPI_SD3, "name": "Stability API SD3"},
     "SoundReactive": {"class": SoundReactive, "name": "Sound Reactive"},
     "StableZero123_BatchSchedule": {"class": StableZero123_BatchSchedule, "name": "Stable Zero123 Batch Schedule"},
     "SV3D_BatchSchedule": {"class": SV3D_BatchSchedule, "name": "SV3D Batch Schedule"},
