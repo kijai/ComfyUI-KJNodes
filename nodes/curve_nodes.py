@@ -255,7 +255,7 @@ output types:
         masks_out = masks_out.mean(dim=-1)
         
         if bg_image is None:
-            return (masks_out, json.dumps(coordinates), out_floats, len(out_floats), json.dumps(all_normalized))
+            return (masks_out, json.dumps(coordinates if len(coordinates) > 1 else coordinates[0]), out_floats, len(out_floats), json.dumps(all_normalized))
         else:
             transform = transforms.ToPILImage()
             image = transform(bg_image[0].permute(2, 0, 1))
@@ -268,7 +268,7 @@ output types:
             
             return {
                 "ui": {"bg_image": [img_base64]},
-                "result": (masks_out, json.dumps(coordinates), out_floats, len(out_floats), json.dumps(all_normalized))
+                "result": (masks_out, json.dumps(coordinates if len(coordinates) > 1 else coordinates[0]), out_floats, len(out_floats), json.dumps(all_normalized))
             }
      
 
