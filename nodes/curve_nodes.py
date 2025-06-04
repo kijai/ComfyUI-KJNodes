@@ -204,7 +204,6 @@ output types:
                min_value=0.0, max_value=1.0, bg_image=None):
     
         coordinates = json.loads(coordinates)
-        print("Coordinates: ", coordinates)
         
         # Handle nested list structure if present
         all_normalized = []
