@@ -1240,7 +1240,7 @@ Official recommended values https://github.com/ali-vilab/TeaCache/tree/main/TeaC
 
 
 
-from comfy.ldm.modules.attention import optimized_attention
+
 from comfy.ldm.flux.math import apply_rope
 
 def modified_wan_self_attention_forward(self, x, freqs):
@@ -1264,7 +1264,7 @@ def modified_wan_self_attention_forward(self, x, freqs):
 
     feta_scores = get_feta_scores(q, k, self.num_frames, self.enhance_weight)
 
-    x = optimized_attention(
+    x = comfy.ldm.modules.attention.optimized_attention(
         q.view(b, s, n * d),
         k.view(b, s, n * d),
         v,
