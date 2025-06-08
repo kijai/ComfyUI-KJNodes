@@ -10,6 +10,36 @@ import base64
         
 from comfy.utils import common_upscale
 
+def parse_json_tracks(tracks):
+    tracks_data = []
+    try:
+        # If tracks is a string, try to parse it as JSON
+        if isinstance(tracks, str):
+            parsed = json.loads(tracks.replace("'", '"'))
+            tracks_data.extend(parsed)
+        else:
+            # If tracks is a list of strings, parse each one
+            for track_str in tracks:
+                parsed = json.loads(track_str.replace("'", '"'))
+                tracks_data.append(parsed)
+        
+        # Check if we have a single track (dict with x,y) or a list of tracks
+        if tracks_data and isinstance(tracks_data[0], dict) and 'x' in tracks_data[0]:
+            # Single track detected, wrap it in a list
+            tracks_data = [tracks_data]
+        elif tracks_data and isinstance(tracks_data[0], list) and tracks_data[0] and isinstance(tracks_data[0][0], dict) and 'x' in tracks_data[0][0]:
+            # Already a list of tracks, nothing to do
+            pass
+        else:
+            # Unexpected format
+            print(f"Warning: Unexpected track format: {type(tracks_data[0])}")
+            
+    except json.JSONDecodeError as e:
+        print(f"Error parsing tracks JSON: {e}")
+        tracks_data = []
+
+    return tracks_data
+
 def plot_coordinates_to_tensor(coordinates, height, width, bbox_height, bbox_width, size_multiplier, prompt):
         import matplotlib
         matplotlib.use('Agg')
@@ -282,6 +312,7 @@ class CreateShapeMaskOnPath:
 Creates a mask or batch of masks with the specified shape.  
 Locations are center locations.  
 """
+    DEPRECATED = True
 
     @classmethod
     def INPUT_TYPES(s):
@@ -353,6 +384,8 @@ Locations are center locations.
         outstack = torch.cat(out, dim=0)
         return (outstack, 1.0 - outstack,)
 
+
+
 class CreateShapeImageOnPath:
     
     RETURN_TYPES = ("IMAGE", "MASK",)
@@ -396,15 +429,8 @@ Locations are center locations.
 
     def createshapemask(self, coordinates, frame_width, frame_height, shape_width, shape_height, shape_color, 
                         bg_color, blur_radius, shape, intensity, size_multiplier=[1.0], trailing=1.0, border_width=0, border_color='black'):
-        # Define the number of images in the batch
-        if len(coordinates) < 10:
-            coords_list = []
-            for coords in coordinates:
-                coords = json.loads(coords.replace("'", '"'))
-                coords_list.append(coords)
-        else:
-            coords = json.loads(coordinates.replace("'", '"'))
-            coords_list = [coords]
+
+        coords_list = parse_json_tracks(coordinates)
 
         batch_size = len(coords_list[0])
         images_list = []
@@ -1516,14 +1542,7 @@ Cuts the masked area from the image, and drags it along the path. If inpaint is 
 
     def cutanddrag(self, image, coordinates, mask, frame_width, frame_height, inpaint, bg_image=None):
         # Parse coordinates
-        if len(coordinates) < 10:
-            coords_list = []
-            for coords in coordinates:
-                coords = json.loads(coords.replace("'", '"'))
-                coords_list.append(coords)
-        else:
-            coords = json.loads(coordinates.replace("'", '"'))
-            coords_list = [coords]
+        coords_list = parse_json_tracks(coordinates)
 
         batch_size = len(coords_list[0])
         images_list = []
