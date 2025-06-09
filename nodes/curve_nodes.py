@@ -206,6 +206,16 @@ guaranteed!!
 Note that you can't delete from start/end.  
   
 Right click on canvas for context menu:  
+NEW!:
+- Add new spline
+    - Creates a new spline on same canvas, currently these paths are only outputed  
+      as coordinates.
+- Add single point
+    - Creates a single point that only returns it's current position coords  
+- Delete spline
+    - Deletes the currently selected spline, you can select a spline by clicking on   
+    it's path, or cycle through them with the 'Next spline' -option.  
+
 These are purely visual options, doesn't affect the output:  
  - Toggle handles visibility
  - Display sample points: display the points to be returned.  
@@ -216,6 +226,7 @@ actual control points, so the interpolation type matters.
 sampling_method: 
  - time: samples along the time axis, used for schedules  
  - path: samples along the path itself, useful for coordinates  
+ - controlpoints: samples only the control points themselves  
 
 output types:
  - mask batch  

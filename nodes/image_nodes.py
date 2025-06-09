@@ -2285,7 +2285,7 @@ class PreviewAnimation:
         c = len(pil_images)
         for i in range(0, c, num_frames):
             file = f"{filename}_{counter:05}_.webp"
-            pil_images[i].save(os.path.join(full_output_folder, file), save_all=True, duration=int(1000.0/fps), append_images=pil_images[i + 1:i + num_frames], lossless=False, quality=80, method=4)
+            pil_images[i].save(os.path.join(full_output_folder, file), save_all=True, duration=int(1000.0/fps), append_images=pil_images[i + 1:i + num_frames], lossless=False, quality=50, method=0)
             results.append({
                 "filename": file,
                 "subfolder": subfolder,

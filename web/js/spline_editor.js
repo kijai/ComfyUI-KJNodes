@@ -104,7 +104,6 @@ app.registerExtension({
         if (nodeData?.name === 'SplineEditor') {
           chainCallback(nodeType.prototype, "onNodeCreated", function () {
             
-            //hideWidgetForGood(this, this.widgets.find(w => w.name === "coordinates"))
             this.widgets.find(w => w.name === "coordinates").hidden = true
 
             var element = document.createElement("div");
@@ -157,8 +156,9 @@ app.registerExtension({
               createMenuItem(4, "Invert point order"),
               createMenuItem(5, "Clear Image"),
               createMenuItem(6, "Add new spline"),
-              createMenuItem(7, "Delete current spline"),
-              createMenuItem(8, "Next spline"),
+              createMenuItem(7, "Add new single point"),
+              createMenuItem(8, "Delete current spline"),
+              createMenuItem(9, "Next spline"),
             ];
             
             // Add mouseover and mouseout event listeners to each menu item for styling
@@ -189,7 +189,7 @@ app.registerExtension({
               }
             });
             
-            this.setSize([550, 950]);
+            this.setSize([550, 1000]);
             this.resizable = false;
             this.splineEditor.parentEl = document.createElement("div");
             this.splineEditor.parentEl.className = "spline-editor";
@@ -329,7 +329,7 @@ class SplineEditor{
 this.heightWidget.callback = () => {
     this.height = this.heightWidget.value
     this.vis.height(this.height)
-    context.setSize([context.size[0], this.height + 430]);
+    context.setSize([context.size[0], this.height + 450]);
     this.updatePath();
   }
   this.pointsStoreWidget.callback = () => {
@@ -347,6 +347,8 @@ this.heightWidget.callback = () => {
  var i = 3;
  this.splines = [];
  this.activeSplineIndex = 0; // Track which spline is being edited
+ // init mouse position
+this.lastMousePosition = { x: this.width/2, y: this.height/2 };
 
  if (!reset && this.pointsStoreWidget.value != "") {
   try {
@@ -412,6 +414,12 @@ this.heightWidget.callback = () => {
         self.updatePath();
     }
     else if (pv.event.button === 2) {
+      // Store the current mouse position adjusted for scale
+      self.lastMousePosition = {
+        x: this.mouse().x / app.canvas.ds.scale,
+        y: this.mouse().y / app.canvas.ds.scale
+      };
+
       self.node.contextMenu.style.display = 'block';
       self.node.contextMenu.style.left = `${pv.event.clientX}px`;
       self.node.contextMenu.style.top = `${pv.event.clientY}px`;
@@ -429,6 +437,21 @@ this.heightWidget.callback = () => {
   this.hoverSplineIndex = -1;
 
   this.splines.forEach((spline, splineIndex) => {
+    const strokeObj = this.vis.add(pv.Line)
+      .data(() => spline.points)
+      .left(d => d.x)
+      .top(d => d.y)
+      .interpolate(() => this.interpolation)
+      .tension(() => this.tension)
+      .segmented(() => false)
+      .strokeStyle("black") // Stroke color
+      .lineWidth(() => {
+        // Make stroke slightly wider than the main line
+        if (splineIndex === this.activeSplineIndex) return 5;
+        if (splineIndex === this.hoverSplineIndex) return 4;
+        return 3.5;
+      });
+
     this.vis.add(pv.Line)
       .data(() => spline.points)
       .left(d => d.x)
@@ -460,7 +483,14 @@ this.heightWidget.callback = () => {
   });
     
     this.vis.add(pv.Dot)
-      .data(() => this.splines[this.activeSplineIndex].points)
+      .data(() => {
+        const activeSpline = this.splines[this.activeSplineIndex];
+        // If this is a single point, don't show it in the main visualization
+        if (activeSpline.isSinglePoint || (activeSpline.points && activeSpline.points.length === 1)) {
+          return []; // Return empty array to hide in main visualization
+        }
+        return activeSpline.points;
+      })
       .left(d => d.x)
       .top(d => d.y)
       .radius(10)
@@ -556,6 +586,63 @@ this.heightWidget.callback = () => {
       }
       })
     .textStyle("orange")
+
+    // single points
+    this.vis.add(pv.Dot)
+      .data(() => {
+        // Collect all single points from all splines
+        const singlePoints = [];
+        this.splines.forEach((spline, splineIndex) => {
+          if (spline.isSinglePoint || (spline.points && spline.points.length === 1)) {
+            singlePoints.push({
+              x: spline.points[0].x, 
+              y: spline.points[0].y,
+              splineIndex: splineIndex,
+              color: spline.color
+            });
+          }
+        });
+        return singlePoints;
+      })
+      .left(d => d.x)
+      .top(d => d.y)
+      .radius(6)
+      .shape("square")
+      .strokeStyle(d => d.splineIndex === this.activeSplineIndex ? "#ff7f0e" : d.color)
+      .fillStyle(d => "rgba(100, 100, 100, 0.9)")
+      .lineWidth(d => d.splineIndex === this.activeSplineIndex ? 3 : 1.5)
+      .cursor("move")
+      .event("mousedown", pv.Behavior.drag())
+      .event("dragstart", function(d) {
+        self.activeSplineIndex = d.splineIndex;
+        self.refreshSplineElements();
+        return this;
+      })
+      .event("drag", function(d) {
+        let adjustedX = this.mouse().x / app.canvas.ds.scale;
+        let adjustedY = this.mouse().y / app.canvas.ds.scale;
+        
+        // Determine the bounds of the vis.Panel
+        const panelWidth = self.vis.width();
+        const panelHeight = self.vis.height();
+
+        // Adjust the new position if it would place the dot outside the bounds
+        adjustedX = Math.max(0, Math.min(panelWidth, adjustedX));
+        adjustedY = Math.max(0, Math.min(panelHeight, adjustedY));
+        
+        // Update the point position
+        const spline = self.splines[d.splineIndex];
+        spline.points[0] = { x: adjustedX, y: adjustedY };
+        
+        // For single points, we need to refresh the entire spline element
+        // to prevent the line-drawing effect
+        
+      })
+      .event("dragend", function(d) {
+        self.refreshSplineElements();
+        self.updatePath();
+      })
+      .visible(d => true);  // Make always visible
  
     if (this.splines.length != 0) {
         this.vis.render();
@@ -569,7 +656,7 @@ this.heightWidget.callback = () => {
       if (this.width > 256) {
         this.node.setSize([this.width + 45, this.node.size[1]]);
       }
-      this.node.setSize([this.node.size[0], this.height + 430]);
+      this.node.setSize([this.node.size[0], this.height + 450]);
       this.updatePath();
       this.refreshBackgroundImage();
   }
@@ -589,7 +676,6 @@ this.heightWidget.callback = () => {
         return;
       }
 
-      console.log("this.pathElements", this.pathElements);
       
       let coords;
       if (this.samplingMethod != "controlpoints") {
@@ -644,7 +730,7 @@ this.heightWidget.callback = () => {
     };
 
     handleImageLoad = (img, file, base64String) => {
-      console.log(img.width, img.height); // Access width and height here
+      //console.log(img.width, img.height); // Access width and height here
       this.widthWidget.value = img.width;
       this.heightWidget.value = img.height;
       this.drawRuler = false;
@@ -653,7 +739,7 @@ this.heightWidget.callback = () => {
         if (img.width > 256) {
           this.node.setSize([img.width + 45, this.node.size[1]]);
         }
-        this.node.setSize([this.node.size[0], img.height + 500]);
+        this.node.setSize([this.node.size[0], img.height + 520]);
         this.vis.width(img.width);
         this.vis.height(img.height);
         this.height = img.height;
@@ -749,7 +835,53 @@ this.heightWidget.callback = () => {
       
       // Re-add all spline lines and store references to them
       this.splines.forEach((spline, splineIndex) => {
-        const lineObj = this.vis.add(pv.Line)
+        // For single points, we need a special handling
+        if (spline.isSinglePoint || (spline.points && spline.points.length === 1)) {
+          const point = spline.points[0];
+          // For single points, create a tiny line at the same point
+          // This ensures we have a path element for the point
+          const lineObj = this.vis.add(pv.Line)
+            .data([point, {x: point.x + 0.001, y: point.y + 0.001}])
+            .left(d => d.x)
+            .top(d => d.y)
+            .strokeStyle(spline.color)
+            .lineWidth(() => {
+              if (splineIndex === this.activeSplineIndex) return 3;
+              if (splineIndex === this.hoverSplineIndex) return 2;
+              return 1.5;
+            })
+            .event("mouseover", () => {
+              this.hoverSplineIndex = splineIndex;
+              this.vis.render();
+            })
+            .event("mouseout", () => {
+              this.hoverSplineIndex = -1;
+              this.vis.render();
+            })
+            .event("mousedown", () => {
+              if (this.activeSplineIndex !== splineIndex) {
+                this.activeSplineIndex = splineIndex;
+                this.refreshSplineElements();
+              }
+            });
+          this.lineObjects.push(lineObj);
+        } else {
+          // For normal multi-point splines
+          const strokeObj = this.vis.add(pv.Line)
+            .data(() => spline.points)
+            .left(d => d.x)
+            .top(d => d.y)
+            .interpolate(() => this.interpolation)
+            .tension(() => this.tension)
+            .segmented(() => false)
+            .strokeStyle("black") // Stroke color
+            .lineWidth(() => {
+              // Make stroke slightly wider than the main line
+              if (splineIndex === this.activeSplineIndex) return 5;
+              if (splineIndex === this.hoverSplineIndex) return 4;
+              return 3.5;
+            });
+          const lineObj = this.vis.add(pv.Line)
           .data(() => spline.points)
           .left(d => d.x)
           .top(d => d.y)
@@ -758,7 +890,6 @@ this.heightWidget.callback = () => {
           .segmented(() => false)
           .strokeStyle(spline.color)
           .lineWidth(() => {
-            // Change line width based on active or hover state
             if (splineIndex === this.activeSplineIndex) return 3;
             if (splineIndex === this.hoverSplineIndex) return 2;
             return 1.5;
@@ -777,7 +908,34 @@ this.heightWidget.callback = () => {
               this.refreshSplineElements();
             }
           });
-        this.lineObjects.push(lineObj);
+
+          // Add invisible wider hit area for easier selection
+          this.vis.add(pv.Line)
+          .data(() => spline.points)
+          .left(d => d.x)
+          .top(d => d.y)
+          .interpolate(() => this.interpolation)
+          .tension(() => this.tension)
+          .segmented(() => false)
+          .strokeStyle("rgba(0,0,0,0.01)") // Nearly invisible
+          .lineWidth(15) // Much wider hit area
+          .event("mouseover", () => {
+            this.hoverSplineIndex = splineIndex;
+            this.vis.render();
+          })
+          .event("mouseout", () => {
+            this.hoverSplineIndex = -1;
+            this.vis.render();
+          })
+          .event("mousedown", () => {
+            if (this.activeSplineIndex !== splineIndex) {
+              this.activeSplineIndex = splineIndex;
+              this.refreshSplineElements();
+            }
+          });
+
+          this.lineObjects.push(lineObj);
+        }
       });
       
       this.vis.render();
@@ -796,7 +954,7 @@ this.heightWidget.callback = () => {
           );
           
           if (matchingPath) {
-            console.log("matchingPath:", matchingPath);
+            //console.log("matchingPath:", matchingPath);
             this.pathElements[i] = matchingPath;
           }
         });
@@ -914,7 +1072,6 @@ this.heightWidget.callback = () => {
             else {
               self.dotShape = "circle"
             }
-            console.log(self.dotShape)
             self.updatePath();
             break;
           case 3:
@@ -964,7 +1121,21 @@ this.heightWidget.callback = () => {
             self.refreshSplineElements();
             self.node.contextMenu.style.display = 'none';
             break;
-          case 7: // Delete current spline
+          case 7: // Add new single point
+            const newSingleSplineIndex = self.splines.length;
+            self.splines.push({
+              points: [
+                { x: self.lastMousePosition.x, y: self.lastMousePosition.y },
+              ],
+              color: self.getSplineColor(newSingleSplineIndex),
+              name: `Spline ${newSingleSplineIndex + 1}`,
+              isSinglePoint: true
+            });
+            self.activeSplineIndex = newSingleSplineIndex;
+            self.refreshSplineElements();
+            self.node.contextMenu.style.display = 'none';
+            break;
+          case 8: // Delete current spline
             if (self.splines.length > 1) {
               self.splines.splice(self.activeSplineIndex, 1);
               self.activeSplineIndex = Math.min(self.activeSplineIndex, self.splines.length - 1);
@@ -972,7 +1143,7 @@ this.heightWidget.callback = () => {
             }
             self.node.contextMenu.style.display = 'none';
             break;
-          case 8: // Next spline
+          case 9: // Next spline
             self.activeSplineIndex = (self.activeSplineIndex + 1) % self.splines.length;
             self.refreshSplineElements();
             self.node.contextMenu.style.display = 'none';
@@ -983,6 +1154,15 @@ this.heightWidget.callback = () => {
   }
 
   samplePoints(svgPathElement, numSamples, samplingMethod, width, splineIndex) {
+    const spline = this.splines[splineIndex];
+  
+    // Check if this is a single point spline
+    if (spline && (spline.isSinglePoint || (spline.points && spline.points.length === 1))) {
+      // For a single point, return an array with the same coordinates repeated
+      const point = spline.points[0];
+      return Array(numSamples).fill().map(() => ({ x: point.x, y: point.y }));
+    }
+
     if (!svgPathElement) {
       console.warn(`Path element not found for spline index: ${splineIndex}. Available paths: ${this.pathElements.length}`);
 
@@ -1014,7 +1194,6 @@ this.heightWidget.callback = () => {
     
     var svgWidth = width; // Fixed width of the SVG element
     var pathLength = svgPathElement.getTotalLength();
-    console.log(" pathLength:", pathLength);
     var points = [];
 
     for (var i = 0; i < numSamples; i++) {
@@ -1082,19 +1261,5 @@ this.heightWidget.callback = () => {
 
     // Return the closest point found
     return bestPoint;
-  }
-}
-//from melmass
-export function hideWidgetForGood(node, widget, suffix = '') {
-  widget.origType = widget.type
-  widget.origComputeSize = widget.computeSize
-  widget.origSerializeValue = widget.serializeValue
-  widget.computeSize = () => [0, -4] // -4 is due to the gap litegraph adds between widgets automatically
-  widget.type = "converted-widget" + suffix
-  
-  if (widget.linkedWidgets) {
-    for (const w of widget.linkedWidgets) {
-      hideWidgetForGood(node, w, ':' + widget.name)
-    }
   }
 }
