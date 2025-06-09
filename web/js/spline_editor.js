@@ -1222,8 +1222,8 @@ this.lastMousePosition = { x: this.width/2, y: this.height/2 };
       // Sort positions along path
       pathPositions.sort((a, b) => a - b);
       
-      // Create a smooth speed mapping function using cubic spline interpolation
-      const createSmoothMapping = () => {
+      // Create a smooth speed mapping function with synchronization
+      const createSynchronizedMapping = () => {
         // Calculate segment lengths and densities
         const segments = [];
         let totalLength = pathPositions[pathPositions.length - 1] - pathPositions[0];
@@ -1239,72 +1239,63 @@ this.lastMousePosition = { x: this.width/2, y: this.height/2 };
           });
         }
         
-        // Create cubic spline interpolation of densities
-        const positions = segments.map(seg => seg.position / totalLength);
-        const densities = segments.map(seg => seg.density);
-        
-        // Add control points at beginning and end with gradual transition
-        positions.unshift(0);
-        positions.push(1);
-        densities.unshift(densities[0]);
-        densities.push(densities[densities.length - 1]);
-        
-        // Smooth the density curve by applying a moving average
-        const smoothedDensities = [];
-        const windowSize = 3;
-        
-        for (let i = 0; i < densities.length; i++) {
-          let sum = 0;
-          let count = 0;
+        // Create mapping function with forced synchronization at endpoints
+        return t => {
+          // Force synchronization at t=0 and t=1
+          if (t === 0) return 0;
+          if (t === 1) return pathLength;
           
-          for (let j = Math.max(0, i - windowSize); j <= Math.min(densities.length - 1, i + windowSize); j++) {
-            // Apply a triangular window weight based on distance
-            const weight = 1 - Math.abs(i - j) / (windowSize + 1);
-            sum += densities[j] * weight;
-            count += weight;
+          // For intermediate points, use the speed control
+          // Scale t to fit between first and last control points
+          const firstPos = pathPositions[0];
+          const lastPos = pathPositions[pathPositions.length - 1];
+          
+          // Create a density-weighted position mapping
+          let totalWeight = 0;
+          let weights = [];
+          
+          for (let i = 0; i < segments.length; i++) {
+            totalWeight += segments[i].density;
+            weights.push(segments[i].density);
           }
           
-          smoothedDensities.push(sum / count);
-        }
-        
-        // Calculate cumulative density function
-        let totalDensity = 0;
-        const cumulativeDensities = smoothedDensities.map(density => {
-          totalDensity += density;
-          return totalDensity;
-        });
-        
-        // Normalize to [0,1] range
-        const normalizedCumulative = cumulativeDensities.map(cd => cd / totalDensity);
-        
-        // Create mapping function
-        return t => {
-          // Find the segment containing t using binary search
-          let low = 0;
-          let high = normalizedCumulative.length - 1;
+          // Normalize weights
+          const normalizedWeights = weights.map(w => w / totalWeight);
           
-          while (low < high) {
-            const mid = Math.floor((low + high) / 2);
-            if (normalizedCumulative[mid] < t) {
-              low = mid + 1;
-            } else {
-              high = mid;
+          // Calculate cumulative weights
+          let cumulativeWeight = 0;
+          const cumulativeWeights = normalizedWeights.map(w => {
+            cumulativeWeight += w;
+            return cumulativeWeight;
+          });
+          
+          // Find the segment for this t value
+          let segmentIndex = 0;
+          for (let i = 0; i < cumulativeWeights.length; i++) {
+            if (t <= cumulativeWeights[i]) {
+              segmentIndex = i;
+              break;
             }
           }
           
-          // Interpolate within the segment
-          const i = Math.max(0, low - 1);
-          const segT = (t - (i > 0 ? normalizedCumulative[i] : 0)) / 
-                     (normalizedCumulative[i+1] - (i > 0 ? normalizedCumulative[i] : 0));
+          // Calculate position within segment
+          const segmentStart = segmentIndex > 0 ? cumulativeWeights[segmentIndex - 1] : 0;
+          const segmentEnd = cumulativeWeights[segmentIndex];
+          const segmentT = (t - segmentStart) / (segmentEnd - segmentStart);
           
-          const pos = positions[i] + segT * (positions[i+1] - positions[i]);
-          return pos * totalLength + pathPositions[0];
+          // Map to path position
+          const pathStart = pathPositions[segmentIndex];
+          const pathEnd = pathPositions[segmentIndex + 1];
+          const pos = pathStart + segmentT * (pathEnd - pathStart);
+          
+          // Scale to fill entire path
+          return pos;
         };
       };
       
-      const mapToPath = createSmoothMapping();
+      const mapToPath = createSynchronizedMapping();
       
-      // Sample using the smooth mapping function
+      // Sample using the synchronized mapping function
       for (let i = 0; i < numSamples; i++) {
         const t = i / (numSamples - 1);
         const pathPos = mapToPath(t);
@@ -1313,6 +1304,7 @@ this.lastMousePosition = { x: this.width/2, y: this.height/2 };
       }
       
       return points;
+    
     }
     else{
     for (var i = 0; i < numSamples; i++) {
