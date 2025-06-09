@@ -1412,7 +1412,7 @@ class WanVideoEnhanceAVideoKJ:
             "required": {
                 "model": ("MODEL",),
                 "latent": ("LATENT", {"tooltip": "Only used to get the latent count"}),
-                "weight": ("FLOAT", {"default": 0.2, "min": 0.0, "max": 10.0, "step": 0.001, "tooltip": "Strength of the enhance effect"}),
+                "weight": ("FLOAT", {"default": 2.0, "min": 0.0, "max": 10.0, "step": 0.001, "tooltip": "Strength of the enhance effect"}),
            }
         }
     
