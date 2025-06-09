@@ -104,7 +104,8 @@ app.registerExtension({
         if (nodeData?.name === 'SplineEditor') {
           chainCallback(nodeType.prototype, "onNodeCreated", function () {
             
-            hideWidgetForGood(this, this.widgets.find(w => w.name === "coordinates"))
+            //hideWidgetForGood(this, this.widgets.find(w => w.name === "coordinates"))
+            this.widgets.find(w => w.name === "coordinates").hidden = true
 
             var element = document.createElement("div");
             this.uuid = makeUUID()
