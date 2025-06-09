@@ -282,7 +282,7 @@ class SplineEditor{
   this.pointsLayer = null;
   this.samplingMethod = this.samplingMethodWidget.value
   
-  if (this.samplingMethod == "path") {
+  if (this.samplingMethod == "path"||this.samplingMethod == "speed") {
     this.dotShape = "triangle"
   }
   
@@ -1196,6 +1196,125 @@ this.lastMousePosition = { x: this.width/2, y: this.height/2 };
     var pathLength = svgPathElement.getTotalLength();
     var points = [];
 
+    if (samplingMethod === "speed") {
+      // Calculate control point distances along the path
+      const controlPoints = this.splines[splineIndex].points;
+      const pathPositions = [];
+      
+      // Find approximate path positions for each control point
+      for (const cp of controlPoints) {
+        let bestDist = Infinity;
+        let bestPos = 0;
+        
+        // Sample the path to find closest point to each control point
+        for (let pos = 0; pos <= pathLength; pos += pathLength / 100) {
+          const pt = svgPathElement.getPointAtLength(pos);
+          const dist = Math.sqrt(Math.pow(pt.x - cp.x, 2) + Math.pow(pt.y - cp.y, 2));
+          
+          if (dist < bestDist) {
+            bestDist = dist;
+            bestPos = pos;
+          }
+        }
+        pathPositions.push(bestPos);
+      }
+      
+      // Sort positions along path
+      pathPositions.sort((a, b) => a - b);
+      
+      // Create a smooth speed mapping function using cubic spline interpolation
+      const createSmoothMapping = () => {
+        // Calculate segment lengths and densities
+        const segments = [];
+        let totalLength = pathPositions[pathPositions.length - 1] - pathPositions[0];
+        
+        for (let i = 0; i < pathPositions.length - 1; i++) {
+          const segLength = pathPositions[i+1] - pathPositions[i];
+          // Inverse relationship - shorter segments = higher density = slower speed
+          const density = 1 / Math.max(segLength, 0.0001);
+          segments.push({ 
+            position: pathPositions[i],
+            length: segLength, 
+            density: density
+          });
+        }
+        
+        // Create cubic spline interpolation of densities
+        const positions = segments.map(seg => seg.position / totalLength);
+        const densities = segments.map(seg => seg.density);
+        
+        // Add control points at beginning and end with gradual transition
+        positions.unshift(0);
+        positions.push(1);
+        densities.unshift(densities[0]);
+        densities.push(densities[densities.length - 1]);
+        
+        // Smooth the density curve by applying a moving average
+        const smoothedDensities = [];
+        const windowSize = 3;
+        
+        for (let i = 0; i < densities.length; i++) {
+          let sum = 0;
+          let count = 0;
+          
+          for (let j = Math.max(0, i - windowSize); j <= Math.min(densities.length - 1, i + windowSize); j++) {
+            // Apply a triangular window weight based on distance
+            const weight = 1 - Math.abs(i - j) / (windowSize + 1);
+            sum += densities[j] * weight;
+            count += weight;
+          }
+          
+          smoothedDensities.push(sum / count);
+        }
+        
+        // Calculate cumulative density function
+        let totalDensity = 0;
+        const cumulativeDensities = smoothedDensities.map(density => {
+          totalDensity += density;
+          return totalDensity;
+        });
+        
+        // Normalize to [0,1] range
+        const normalizedCumulative = cumulativeDensities.map(cd => cd / totalDensity);
+        
+        // Create mapping function
+        return t => {
+          // Find the segment containing t using binary search
+          let low = 0;
+          let high = normalizedCumulative.length - 1;
+          
+          while (low < high) {
+            const mid = Math.floor((low + high) / 2);
+            if (normalizedCumulative[mid] < t) {
+              low = mid + 1;
+            } else {
+              high = mid;
+            }
+          }
+          
+          // Interpolate within the segment
+          const i = Math.max(0, low - 1);
+          const segT = (t - (i > 0 ? normalizedCumulative[i] : 0)) / 
+                     (normalizedCumulative[i+1] - (i > 0 ? normalizedCumulative[i] : 0));
+          
+          const pos = positions[i] + segT * (positions[i+1] - positions[i]);
+          return pos * totalLength + pathPositions[0];
+        };
+      };
+      
+      const mapToPath = createSmoothMapping();
+      
+      // Sample using the smooth mapping function
+      for (let i = 0; i < numSamples; i++) {
+        const t = i / (numSamples - 1);
+        const pathPos = mapToPath(t);
+        const point = svgPathElement.getPointAtLength(pathPos);
+        points.push({ x: point.x, y: point.y });
+      }
+      
+      return points;
+    }
+    else{
     for (var i = 0; i < numSamples; i++) {
         if (samplingMethod === "time") {
           // Calculate the x-coordinate for the current sample based on the SVG's width
@@ -1212,8 +1331,9 @@ this.lastMousePosition = { x: this.width/2, y: this.height/2 };
 
         // Add the point to the array of points
         points.push({ x: point.x, y: point.y });
-    }
+        }
     return points;
+    }
   }
 
   findClosestPoints(points, clickedPoint) {
