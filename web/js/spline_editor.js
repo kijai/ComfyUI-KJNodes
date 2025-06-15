@@ -928,11 +928,13 @@ this.lastMousePosition = { x: this.width/2, y: this.height/2 };
             this.vis.render();
           })
           .event("mousedown", () => {
-            if (this.activeSplineIndex !== splineIndex) {
-              this.activeSplineIndex = splineIndex;
-              this.refreshSplineElements();
-            }
-          });
+            if (pv.event.shiftKey) {
+              if (this.activeSplineIndex !== splineIndex) {
+                this.activeSplineIndex = splineIndex;
+                this.refreshSplineElements();
+              }
+            }}
+          );
 
           this.lineObjects.push(lineObj);
         }
