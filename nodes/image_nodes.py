@@ -2656,7 +2656,59 @@ class LoadAndResizeImage:
 
         return True
 
+import hashlib
 class LoadImagesFromFolderKJ:
+    # Dictionary to store folder hashes
+    folder_hashes = {}
+
+    @classmethod
+    def IS_CHANGED(cls, folder, **kwargs):
+        if not os.path.isdir(folder):
+            return float("NaN")
+        
+        valid_extensions = ['.jpg', '.jpeg', '.png', '.webp', '.tga']
+        include_subfolders = kwargs.get('include_subfolders', False)
+        
+        file_data = []
+        if include_subfolders:
+            for root, _, files in os.walk(folder):
+                for file in files:
+                    if any(file.lower().endswith(ext) for ext in valid_extensions):
+                        path = os.path.join(root, file)
+                        try:
+                            mtime = os.path.getmtime(path)
+                            file_data.append((path, mtime))
+                        except OSError:
+                            pass
+        else:
+            for file in os.listdir(folder):
+                if any(file.lower().endswith(ext) for ext in valid_extensions):
+                    path = os.path.join(folder, file)
+                    try:
+                        mtime = os.path.getmtime(path)
+                        file_data.append((path, mtime))
+                    except OSError:
+                        pass
+        
+        file_data.sort()
+        
+        combined_hash = hashlib.md5()
+        combined_hash.update(folder.encode('utf-8'))
+        combined_hash.update(str(len(file_data)).encode('utf-8'))
+        
+        for path, mtime in file_data:
+            combined_hash.update(f"{path}:{mtime}".encode('utf-8'))
+        
+        current_hash = combined_hash.hexdigest()
+        
+        old_hash = cls.folder_hashes.get(folder)
+        cls.folder_hashes[folder] = current_hash
+        
+        if old_hash == current_hash:
+            return old_hash
+        
+        return current_hash
+
     @classmethod
     def INPUT_TYPES(s):
         return {
