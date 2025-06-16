@@ -493,7 +493,7 @@ this.lastMousePosition = { x: this.width/2, y: this.height/2 };
       })
       .left(d => d.x)
       .top(d => d.y)
-      .radius(10)
+      .radius(12)
       .shape(function() {
         return self.dotShape;
     })
@@ -909,32 +909,32 @@ this.lastMousePosition = { x: this.width/2, y: this.height/2 };
             }
           });
 
-          // Add invisible wider hit area for easier selection
-          this.vis.add(pv.Line)
-          .data(() => spline.points)
-          .left(d => d.x)
-          .top(d => d.y)
-          .interpolate(() => this.interpolation)
-          .tension(() => this.tension)
-          .segmented(() => false)
-          .strokeStyle("rgba(0,0,0,0.01)") // Nearly invisible
-          .lineWidth(15) // Much wider hit area
-          .event("mouseover", () => {
-            this.hoverSplineIndex = splineIndex;
-            this.vis.render();
-          })
-          .event("mouseout", () => {
-            this.hoverSplineIndex = -1;
-            this.vis.render();
-          })
-          .event("mousedown", () => {
-            if (pv.event.shiftKey) {
-              if (this.activeSplineIndex !== splineIndex) {
-                this.activeSplineIndex = splineIndex;
-                this.refreshSplineElements();
-              }
-            }}
-          );
+          // // Add invisible wider hit area for easier selection
+          // this.vis.add(pv.Line)
+          // .data(() => spline.points)
+          // .left(d => d.x)
+          // .top(d => d.y)
+          // .interpolate(() => this.interpolation)
+          // .tension(() => this.tension)
+          // .segmented(() => false)
+          // .strokeStyle("rgba(0,0,0,0.01)") // Nearly invisible
+          // .lineWidth(15) // Much wider hit area
+          // .event("mouseover", () => {
+          //   this.hoverSplineIndex = splineIndex;
+          //   this.vis.render();
+          // })
+          // .event("mouseout", () => {
+          //   this.hoverSplineIndex = -1;
+          //   this.vis.render();
+          // })
+          // .event("mousedown", () => {
+          //   if (pv.event.shiftKey) {
+          //     if (this.activeSplineIndex !== splineIndex) {
+          //       this.activeSplineIndex = splineIndex;
+          //       this.refreshSplineElements();
+          //     }
+          //   }}
+          // );
 
           this.lineObjects.push(lineObj);
         }
