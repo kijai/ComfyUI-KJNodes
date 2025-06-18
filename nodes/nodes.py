@@ -806,9 +806,9 @@ The choices are loaded from 'custom_dimensions.json' in the nodes folder.
        return (latent, int(width), int(height),)
 
 class WidgetToString:
-    @classmethod
-    def IS_CHANGED(cls, **kwargs):
-        return float("NaN")
+    # @classmethod
+    # def IS_CHANGED(cls, **kwargs):
+    #     return float("NaN")
 
     @classmethod
     def INPUT_TYPES(cls):
