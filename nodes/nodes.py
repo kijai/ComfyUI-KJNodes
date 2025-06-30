@@ -41,7 +41,7 @@ class INTConstant:
     @classmethod
     def INPUT_TYPES(s):
         return {"required": {
-            "value": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
+            "value": ("INT", {"default": 0, "min": -0xffffffffffffffff, "max": 0xffffffffffffffff}),
         },
         }
     RETURN_TYPES = ("INT",)
