@@ -1232,11 +1232,13 @@ Resizes the mask or batch of masks to the specified width and height.
             ratio = min(width / ow, height / oh)
             width = round(ow*ratio)
             height = round(oh*ratio)
-        outputs = mask.unsqueeze(1)
-        outputs = common_upscale(outputs, width, height, upscale_method, crop)
-        outputs = outputs.squeeze(1)
 
-        return(outputs, outputs.shape[2], outputs.shape[1],)
+        if upscale_method == "lanczos":
+            out_mask = common_upscale(mask.unsqueeze(1).repeat(1, 3, 1, 1), width, height, upscale_method, crop=crop).movedim(1,-1)[:, :, :, 0]
+        else:
+            out_mask = common_upscale(mask.unsqueeze(1), width, height, upscale_method, crop=crop).squeeze(1)
+
+        return(out_mask, out_mask.shape[2], out_mask.shape[1],)
 
 class RemapMaskRange:
     @classmethod

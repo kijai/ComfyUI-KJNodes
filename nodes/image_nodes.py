@@ -2389,12 +2389,13 @@ class ImageResizeKJv2:
                 "divisible_by": ("INT", { "default": 2, "min": 0, "max": 512, "step": 1, }),
             },
             "optional" : {
+                "mask": ("MASK",),
                 "device": (["cpu", "gpu"],),
             }
         }
 
-    RETURN_TYPES = ("IMAGE", "INT", "INT",)
-    RETURN_NAMES = ("IMAGE", "width", "height",)
+    RETURN_TYPES = ("IMAGE", "INT", "INT", "MASK",)
+    RETURN_NAMES = ("IMAGE", "width", "height", "mask",)
     FUNCTION = "resize"
     CATEGORY = "KJNodes/image"
     DESCRIPTION = """
@@ -2405,7 +2406,7 @@ Keep proportions keeps the aspect ratio of the image, by
 highest dimension.  
 """
 
-    def resize(self, image, width, height, keep_proportion, upscale_method, divisible_by, pad_color, crop_position, device="cpu"):
+    def resize(self, image, width, height, keep_proportion, upscale_method, divisible_by, pad_color, crop_position, device="cpu", mask=None):
         B, H, W, C = image.shape
 
         if device == "gpu":
@@ -2448,6 +2449,9 @@ highest dimension.
             height = height - (height % divisible_by)
 
         out_image = image.clone().to(device)
+
+        if mask is not None:
+            out_mask = mask.clone().to(device)
         
         if keep_proportion == "crop":
             old_width = W
@@ -2482,8 +2486,17 @@ highest dimension.
             
             # Apply crop
             out_image = out_image.narrow(-2, x, crop_w).narrow(-3, y, crop_h)
+            if mask is not None:
+                out_mask = out_mask.narrow(-1, x, crop_w).narrow(-2, y, crop_h)
         
         out_image = common_upscale(out_image.movedim(-1,1), width, height, upscale_method, crop="disabled").movedim(1,-1)
+
+        if mask is not None:
+            if upscale_method == "lanczos":
+                out_mask = common_upscale(out_mask.unsqueeze(1).repeat(1, 3, 1, 1), width, height, upscale_method, crop="disabled").movedim(1,-1)[:, :, :, 0]
+            else:
+                out_mask = common_upscale(out_mask.unsqueeze(1), width, height, upscale_method, crop="disabled").squeeze(1)
+            
         if keep_proportion.startswith("pad"):
             if pad_left > 0 or pad_right > 0 or pad_top > 0 or pad_bottom > 0:
                 padded_width = width + pad_left + pad_right
@@ -2498,9 +2511,13 @@ highest dimension.
                         extra_height = divisible_by - height_remainder
                         pad_bottom += extra_height
                 out_image, _ = ImagePadKJ.pad(self, out_image, pad_left, pad_right, pad_top, pad_bottom, 0, pad_color, "edge" if keep_proportion == "pad_edge" else "color")
+                if mask is not None:
+                    out_mask = out_mask.unsqueeze(1).repeat(1, 3, 1, 1).movedim(1,-1)
+                    out_mask, _ = ImagePadKJ.pad(self, out_mask, pad_left, pad_right, pad_top, pad_bottom, 0, pad_color, "edge" if keep_proportion == "pad_edge" else "color")
+                    out_mask = out_mask[:, :, :, 0]
 
 
-        return(out_image.cpu(), out_image.shape[2], out_image.shape[1],)
+        return(out_image.cpu(), out_image.shape[2], out_image.shape[1], out_mask.cpu() if mask is not None else torch.zeros(64,64, device=torch.device("cpu"), dtype=torch.float32))
     
 import pathlib    
 class LoadAndResizeImage:
