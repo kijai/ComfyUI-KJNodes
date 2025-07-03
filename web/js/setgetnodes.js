@@ -562,4 +562,37 @@ app.registerExtension({
 
 		GetNode.category = "KJNodes";
 	},
+    async setup() {
+        let originalGraphToPrompt = app.graphToPrompt
+        let graphToPrompt = async function() {
+            let res = await originalGraphToPrompt.apply(this, arguments);
+            let setters = {}
+            for (let node of res.workflow.nodes) {
+                if (node.type == "SetNode") {
+                    let linkId = node.inputs[0].link
+                    let link = res.workflow.links.find((l) => l[0] == linkId)
+                    setters[node.widgets_values[0]] = [''+link[1], link[2]]
+                }
+            }
+            for (let node of res.workflow.nodes) {
+                if (node.type == "GetNode") {
+                    let sourceLink = setters[node.widgets_values[0]]
+                    if (!sourceLink) {
+                        const errorMessage = "No SetNode found for " + node.widgets_values[0] + "(" + node.type + ")";
+                        showAlert(errorMessage);
+                    }
+                    for (let targetLinkId of node.outputs[0].links) {
+                        let targetLink = res.workflow.links.find((l) => l[0] == targetLinkId)
+                        let targetNodeId = targetLink[3]
+                        let targetNode = res.workflow.nodes.find((n) => n.id == targetNodeId)
+                        let targetName = targetNode.inputs[targetLink[4]].name
+                        res.output[targetNodeId].inputs[targetName] = sourceLink
+                    }
+
+                }
+            }
+            return res
+        }
+        app.graphToPrompt = graphToPrompt
+    }
 });
