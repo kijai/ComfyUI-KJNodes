@@ -1304,7 +1304,7 @@ class SeparateMasks:
                 "mask": ("MASK", ),
                 "size_threshold_width" : ("INT", {"default": 256, "min": 0.0, "max": 4096, "step": 1}),
                 "size_threshold_height" : ("INT", {"default": 256, "min": 0.0, "max": 4096, "step": 1}),
-                "mode": (["convex_polygons", "area"],),
+                "mode": (["convex_polygons", "area", "box"],),
                 "max_poly_points": ("INT", {"default": 8, "min": 3, "max": 32, "step": 1}),
 
             },
@@ -1399,12 +1399,18 @@ class SeparateMasks:
                 print(f"Component {component}: width={width}, height={height}, x_pos={centroid_x}")
                 
                 if width >= size_threshold_width and height >= size_threshold_height:
-                    if mode != "area":
+                    if mode == "convex_polygons":
                         polygon = self.get_mask_polygon(component_mask_np, max_poly_points)
                         if polygon is not None:
                             poly_mask = self.polygon_to_mask(polygon, (H, W))
                             poly_mask = torch.tensor(poly_mask, device=mask.device)
                             separated.append((centroid_x, poly_mask))
+                    elif mode == "box":
+                        # Create bounding box mask
+                        box_mask = np.zeros((H, W), dtype=np.uint8)
+                        box_mask[y_min:y_max+1, x_min:x_max+1] = 1
+                        box_mask = torch.tensor(box_mask, device=mask.device)
+                        separated.append((centroid_x, box_mask))
                     else:
                         area_mask = torch.tensor(component_mask_np, device=mask.device)
                         separated.append((centroid_x, area_mask))
