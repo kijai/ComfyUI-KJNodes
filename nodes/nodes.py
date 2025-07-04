@@ -2,8 +2,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 from PIL import Image
-from typing import Union
-import json, re, os, io, time, platform
+import json, re, os, io, time
 import re
 import importlib
 
@@ -11,16 +10,10 @@ from comfy import model_management
 import folder_paths
 from nodes import MAX_RESOLUTION
 from comfy.utils import common_upscale, ProgressBar, load_torch_file
+from comfy.comfy_types.node_typing import IO
 
 script_directory = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 folder_paths.add_model_folder_path("kjnodes_fonts", os.path.join(script_directory, "fonts"))
-
-class AnyType(str):
-  """A special class that is always equal in not equal comparisons. Credit to pythongosssss"""
-
-  def __ne__(self, __value: object) -> bool:
-    return False
-any = AnyType("*")
 
 class BOOLConstant:
     @classmethod
@@ -615,13 +608,13 @@ class VRAM_Debug:
             "unload_all_models": ("BOOLEAN", {"default": False}),
         },
         "optional": {
-            "any_input": (any, {}),
+            "any_input": (IO.ANY,),
             "image_pass": ("IMAGE",),
             "model_pass": ("MODEL",),
         }
 	}
         
-    RETURN_TYPES = (any, "IMAGE","MODEL","INT", "INT",)
+    RETURN_TYPES = (IO.ANY, "IMAGE","MODEL","INT", "INT",)
     RETURN_NAMES = ("any_output", "image_pass", "model_pass", "freemem_before", "freemem_after")
     FUNCTION = "VRAMdebug"
     CATEGORY = "KJNodes/misc"
@@ -655,7 +648,7 @@ class SomethingToString:
     def INPUT_TYPES(s):
      return {
         "required": {
-        "input": (any, {}),
+        "input": (IO.ANY, ),
     },
     "optional": {
         "prefix": ("STRING", {"default": ""}),
@@ -688,12 +681,12 @@ class Sleep:
     def INPUT_TYPES(s):
         return {
             "required": {
-                "input": (any, {}),
+                "input": (IO.ANY, ),
                 "minutes": ("INT", {"default": 0, "min": 0, "max": 1439}),
                 "seconds": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 59.99, "step": 0.01}),
             },
         }
-    RETURN_TYPES = (any,)
+    RETURN_TYPES = (IO.ANY,)
     FUNCTION = "sleepdelay"
     CATEGORY = "KJNodes/misc"
     DESCRIPTION = """
@@ -820,7 +813,7 @@ class WidgetToString:
                 "return_all": ("BOOLEAN", {"default": False}),
             },
             "optional": {
-                         "any_input": (any, {}),
+                         "any_input": (IO.ANY, ),
                          "node_title": ("STRING", {"multiline": False}),
                          "allowed_float_decimals": ("INT", {"default": 2, "min": 0, "max": 10, "tooltip": "Number of decimal places to display for float values"}),
                          
@@ -916,11 +909,11 @@ class DummyOut:
     def INPUT_TYPES(cls):
         return {
             "required": {
-            "any_input": (any, {}),
+            "any_input": (IO.ANY, ),
             }
         }
 
-    RETURN_TYPES = (any,)
+    RETURN_TYPES = (IO.ANY,)
     FUNCTION = "dummy"
     CATEGORY = "KJNodes/misc"
     OUTPUT_NODE = True
@@ -2493,7 +2486,7 @@ class TimerNodeKJ:
     def INPUT_TYPES(s):
       return {
         "required": {
-            "any_input": (any, {}),
+            "any_input": (IO.ANY, ),
             "mode": (["start", "stop"],),
             "name": ("STRING", {"default": "Timer"}),
         },
@@ -2502,7 +2495,7 @@ class TimerNodeKJ:
         },
 	}
 
-    RETURN_TYPES = (any, "TIMER", "INT", )
+    RETURN_TYPES = (IO.ANY, "TIMER", "INT", )
     RETURN_NAMES = ("any_output", "timer", "time")
     FUNCTION = "timer"
     CATEGORY = "KJNodes/misc"
