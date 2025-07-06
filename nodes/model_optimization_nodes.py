@@ -179,7 +179,6 @@ class CheckpointLoaderKJ(BaseLoaderKJ):
 
     RETURN_TYPES = ("MODEL", "CLIP", "VAE")
     FUNCTION = "patch"
-    OUTPUT_NODE = True
     DESCRIPTION = "Experimental node for patching torch.nn.Linear with CublasLinear."
     EXPERIMENTAL = True
     CATEGORY = "KJNodes/experimental"
@@ -321,7 +320,6 @@ class DiffusionModelLoaderKJ(BaseLoaderKJ):
 
     RETURN_TYPES = ("MODEL",)
     FUNCTION = "patch_and_load"
-    OUTPUT_NODE = True
     DESCRIPTION = "Node for patching torch.nn.Linear with CublasLinear."
     EXPERIMENTAL = True
     CATEGORY = "KJNodes/experimental"
@@ -375,7 +373,6 @@ class ModelPatchTorchSettings:
 
     RETURN_TYPES = ("MODEL",)
     FUNCTION = "patch"
-    OUTPUT_NODE = True
     DESCRIPTION = "Adds callbacks to model to set torch settings before and after running the model."
     EXPERIMENTAL = True
     CATEGORY = "KJNodes/experimental"
@@ -534,6 +531,7 @@ class TorchCompileModelFluxAdvanced:
 
     CATEGORY = "KJNodes/torchcompile"
     EXPERIMENTAL = True
+    DEPRECATED = True
 
     def parse_blocks(self, blocks_str):
         blocks = []
@@ -723,6 +721,7 @@ class TorchCompileModelWanVideo:
 
     CATEGORY = "KJNodes/torchcompile"
     EXPERIMENTAL = True
+    DEPCRECATED = True
 
     def patch(self, model, backend, fullgraph, mode, dynamic, dynamo_cache_size_limit, compile_transformer_blocks_only):
         m = model.clone()
