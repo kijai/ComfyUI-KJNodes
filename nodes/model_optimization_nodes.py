@@ -721,7 +721,7 @@ class TorchCompileModelWanVideo:
 
     CATEGORY = "KJNodes/torchcompile"
     EXPERIMENTAL = True
-    DEPCRECATED = True
+    DEPRECATED = True
 
     def patch(self, model, backend, fullgraph, mode, dynamic, dynamo_cache_size_limit, compile_transformer_blocks_only):
         m = model.clone()
