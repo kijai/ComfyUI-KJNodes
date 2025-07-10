@@ -16,7 +16,7 @@ try:
 except:
     print("OpenCV not installed")
     pass
-from PIL import ImageGrab, ImageDraw, ImageFont, Image, ImageSequence, ImageOps
+from PIL import ImageGrab, ImageDraw, ImageFont, Image, ImageOps
 
 from nodes import MAX_RESOLUTION, SaveImage
 from comfy_extras.nodes_mask import ImageCompositeMasked
@@ -24,6 +24,10 @@ from comfy.cli_args import args
 from comfy.utils import ProgressBar, common_upscale
 import folder_paths
 from comfy import model_management
+try:
+    from server import PromptServer
+except:
+    PromptServer = None
 
 script_directory = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -2402,7 +2406,10 @@ class ImageResizeKJv2:
             "optional" : {
                 "mask": ("MASK",),
                 "device": (["cpu", "gpu"],),
-            }
+            },
+             "hidden": {
+                "unique_id": "UNIQUE_ID",
+            },
         }
 
     RETURN_TYPES = ("IMAGE", "INT", "INT", "MASK",)
@@ -2417,7 +2424,7 @@ Keep proportions keeps the aspect ratio of the image, by
 highest dimension.  
 """
 
-    def resize(self, image, width, height, keep_proportion, upscale_method, divisible_by, pad_color, crop_position, device="cpu", mask=None):
+    def resize(self, image, width, height, keep_proportion, upscale_method, divisible_by, pad_color, crop_position, unique_id, device="cpu", mask=None):
         B, H, W, C = image.shape
 
         if device == "gpu":
@@ -2447,10 +2454,32 @@ highest dimension.
                 new_height = round(H * ratio)
 
             if keep_proportion.startswith("pad"):
-                pad_left = (width - new_width) // 2
-                pad_right = width - new_width - pad_left
-                pad_top = (height - new_height) // 2
-                pad_bottom = height - new_height - pad_top
+                # Calculate padding based on position
+                if crop_position == "center":
+                    pad_left = (width - new_width) // 2
+                    pad_right = width - new_width - pad_left
+                    pad_top = (height - new_height) // 2
+                    pad_bottom = height - new_height - pad_top
+                elif crop_position == "top":
+                    pad_left = (width - new_width) // 2
+                    pad_right = width - new_width - pad_left
+                    pad_top = 0
+                    pad_bottom = height - new_height
+                elif crop_position == "bottom":
+                    pad_left = (width - new_width) // 2
+                    pad_right = width - new_width - pad_left
+                    pad_top = height - new_height
+                    pad_bottom = 0
+                elif crop_position == "left":
+                    pad_left = 0
+                    pad_right = width - new_width
+                    pad_top = (height - new_height) // 2
+                    pad_bottom = height - new_height - pad_top
+                elif crop_position == "right":
+                    pad_left = width - new_width
+                    pad_right = 0
+                    pad_top = (height - new_height) // 2
+                    pad_bottom = height - new_height - pad_top
 
             width = new_width
             height = new_height
@@ -2527,6 +2556,18 @@ highest dimension.
                     out_mask, _ = ImagePadKJ.pad(self, out_mask, pad_left, pad_right, pad_top, pad_bottom, 0, pad_color, "edge" if keep_proportion == "pad_edge" else "color")
                     out_mask = out_mask[:, :, :, 0]
 
+        if unique_id and PromptServer is not None:
+            try:
+                num_elements = out_image.numel()
+                element_size = out_image.element_size()
+                memory_size_mb = (num_elements * element_size) / (1024 * 1024)
+                
+                PromptServer.instance.send_progress_text(
+                    f"<tr><td>Output: </td><td><b>{out_image.shape[0]}x{out_image.shape[2]}x{out_image.shape[1]} | {memory_size_mb:.2f}MB</b></td></tr>",
+                    unique_id
+                )
+            except:
+                pass
 
         return(out_image.cpu(), out_image.shape[2], out_image.shape[1], out_mask.cpu() if mask is not None else torch.zeros(64,64, device=torch.device("cpu"), dtype=torch.float32))
     
