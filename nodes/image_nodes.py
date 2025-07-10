@@ -2563,7 +2563,7 @@ highest dimension.
                 memory_size_mb = (num_elements * element_size) / (1024 * 1024)
                 
                 PromptServer.instance.send_progress_text(
-                    f"<tr><td>Output: </td><td><b>{out_image.shape[0]}x{out_image.shape[2]}x{out_image.shape[1]} | {memory_size_mb:.2f}MB</b></td></tr>",
+                    f"<tr><td>Output: </td><td><b>{out_image.shape[0]}</b> x <b>{out_image.shape[2]}</b> x <b>{out_image.shape[1]} | {memory_size_mb:.2f}MB</b></td></tr>",
                     unique_id
                 )
             except:
