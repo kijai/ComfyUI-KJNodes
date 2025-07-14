@@ -55,6 +55,7 @@ NODE_CONFIG = {
     "ImageBatchFilter": {"class": ImageBatchFilter, "name": "Image Batch Filter"},
     "ImageAndMaskPreview": {"class": ImageAndMaskPreview},
     "ImageAddMulti": {"class": ImageAddMulti, "name": "Image Add Multi"},
+    "ImageBatchJoinWithTransition": {"class": ImageBatchJoinWithTransition, "name": "Image Batch Join With Transition"},
     "ImageBatchMulti": {"class": ImageBatchMulti, "name": "Image Batch Multi"},
     "ImageBatchRepeatInterleaving": {"class": ImageBatchRepeatInterleaving},
     "ImageBatchTestPattern": {"class": ImageBatchTestPattern, "name": "Image Batch Test Pattern"},
