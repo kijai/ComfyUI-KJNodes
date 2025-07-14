@@ -1285,9 +1285,9 @@ class CrossFadeImages:
             return 3 * t * t - 2 * t * t * t
         def bounce(t):
             if t < 0.5:
-                return self.ease_out(t * 2) * 0.5
+                return ease_out(t * 2) * 0.5
             else:
-                return self.ease_in((t - 0.5) * 2) * 0.5 + 0.5
+                return ease_in((t - 0.5) * 2) * 0.5 + 0.5
         def elastic(t):
             return math.sin(13 * math.pi / 2 * t) * math.pow(2, 10 * (t - 1))
         def glitchy(t):
