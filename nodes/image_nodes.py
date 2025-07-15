@@ -2510,6 +2510,8 @@ highest dimension.
 
         if mask is not None:
             out_mask = mask.clone().to(device)
+        else:
+            out_mask = None
         
         if keep_proportion == "crop":
             old_width = W
@@ -2573,6 +2575,11 @@ highest dimension.
                     out_mask = out_mask.unsqueeze(1).repeat(1, 3, 1, 1).movedim(1,-1)
                     out_mask, _ = ImagePadKJ.pad(self, out_mask, pad_left, pad_right, pad_top, pad_bottom, 0, pad_color, "edge" if keep_proportion == "pad_edge" else "color")
                     out_mask = out_mask[:, :, :, 0]
+                else:
+                    B, H_pad, W_pad, _ = out_image.shape
+                    out_mask = torch.ones((B, H_pad, W_pad), dtype=out_image.dtype, device=out_image.device)
+                    out_mask[:, pad_top:pad_top+height, pad_left:pad_left+width] = 0.0
+
 
         if unique_id and PromptServer is not None:
             try:
@@ -2587,7 +2594,7 @@ highest dimension.
             except:
                 pass
 
-        return(out_image.cpu(), out_image.shape[2], out_image.shape[1], out_mask.cpu() if mask is not None else torch.zeros(64,64, device=torch.device("cpu"), dtype=torch.float32))
+        return(out_image.cpu(), out_image.shape[2], out_image.shape[1], out_mask.cpu() if out_mask is not None else torch.zeros(64,64, device=torch.device("cpu"), dtype=torch.float32))
     
 import pathlib    
 class LoadAndResizeImage:
