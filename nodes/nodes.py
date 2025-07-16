@@ -248,16 +248,18 @@ class JoinStrings:
     def INPUT_TYPES(cls):
         return {
             "required": {
+                "delimiter": ("STRING", {"default": ' ', "multiline": False}),
+            },
+            "optional": {
                 "string1": ("STRING", {"default": '', "forceInput": True}),
                 "string2": ("STRING", {"default": '', "forceInput": True}),
-                "delimiter": ("STRING", {"default": ' ', "multiline": False}),
             }
         }
     RETURN_TYPES = ("STRING",)
     FUNCTION = "joinstring"
     CATEGORY = "KJNodes/text"
 
-    def joinstring(self, string1, string2, delimiter):
+    def joinstring(self, delimiter, string1="", string2=""):
         joined_string = string1 + delimiter + string2
         return (joined_string, )
     
