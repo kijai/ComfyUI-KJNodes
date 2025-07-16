@@ -270,10 +270,12 @@ class JoinStringMulti:
             "required": {
                 "inputcount": ("INT", {"default": 2, "min": 2, "max": 1000, "step": 1}),
                 "string_1": ("STRING", {"default": '', "forceInput": True}),
-                "string_2": ("STRING", {"default": '', "forceInput": True}),
                 "delimiter": ("STRING", {"default": ' ', "multiline": False}),
                 "return_list": ("BOOLEAN", {"default": False}),
             },
+            "optional": {
+                "string_2": ("STRING", {"default": '', "forceInput": True}),
+            }
     }
 
     RETURN_TYPES = ("STRING",)
@@ -292,7 +294,9 @@ with the **inputcount** and clicking update.
         return_list = kwargs["return_list"]
         strings = [string] # Initialize a list with the first string
         for c in range(1, inputcount):
-            new_string = kwargs[f"string_{c + 1}"]
+            new_string = kwargs.get(f"string_{c + 1}", "")
+            if not new_string:
+                continue
             if return_list:
                 strings.append(new_string) # Add new string to the list
             else:

@@ -1351,15 +1351,19 @@ class CrossFadeImagesMulti:
             "required": {
                  "inputcount": ("INT", {"default": 2, "min": 2, "max": 1000, "step": 1}),
                  "image_1": ("IMAGE",),
-                 "image_2": ("IMAGE",),
                  "interpolation": (["linear", "ease_in", "ease_out", "ease_in_out", "bounce", "elastic", "glitchy", "exponential_ease_out"],),
                  "transitioning_frames": ("INT", {"default": 1,"min": 0, "max": 4096, "step": 1}),
         },
+        "optional": {
+            "image_2": ("IMAGE",),
+        }
     } 
     
     def crossfadeimages(self, inputcount, transitioning_frames, interpolation, **kwargs):
 
         image_1 = kwargs["image_1"]
+        first_image_shape = image_1.shape
+        first_image_device = image_1.device
         height = image_1.shape[1]
         width = image_1.shape[2]
 
@@ -1367,7 +1371,7 @@ class CrossFadeImagesMulti:
        
         for c in range(1, inputcount):
             frames = []
-            new_image = kwargs[f"image_{c + 1}"]
+            new_image = kwargs.get(f"image_{c + 1}", torch.zeros(first_image_shape)).to(first_image_device)
             new_image_height = new_image.shape[1]
             new_image_width = new_image.shape[2]
 
@@ -1483,14 +1487,16 @@ Creates transitions between images.
             "required": {
                  "inputcount": ("INT", {"default": 2, "min": 2, "max": 1000, "step": 1}),
                  "image_1": ("IMAGE",),
-                 "image_2": ("IMAGE",),
                  "interpolation": (["linear", "ease_in", "ease_out", "ease_in_out", "bounce", "elastic", "glitchy", "exponential_ease_out"],),
                  "transition_type": (["horizontal slide", "vertical slide", "box", "circle", "horizontal door", "vertical door", "fade"],),
-                 "transitioning_frames": ("INT", {"default": 1,"min": 0, "max": 4096, "step": 1}),
+                 "transitioning_frames": ("INT", {"default": 2,"min": 2, "max": 4096, "step": 1}),
                  "blur_radius": ("FLOAT", {"default": 0.0,"min": 0.0, "max": 100.0, "step": 0.1}),
                  "reverse": ("BOOLEAN", {"default": False}),
                  "device": (["CPU", "GPU"], {"default": "CPU"}),
-        },
+            },
+            "optional": {
+                "image_2": ("IMAGE",),
+            }
     } 
 
     def transition(self, inputcount, transitioning_frames, transition_type, interpolation, device, blur_radius, reverse, **kwargs):
@@ -1500,12 +1506,14 @@ Creates transitions between images.
         image_1 = kwargs["image_1"]
         height = image_1.shape[1]
         width = image_1.shape[2]
+        first_image_shape = image_1.shape
+        first_image_device = image_1.device
 
         easing_function = easing_functions[interpolation]
     
         for c in range(1, inputcount):
             frames = []
-            new_image = kwargs[f"image_{c + 1}"]
+            new_image = kwargs.get(f"image_{c + 1}", torch.zeros(first_image_shape)).to(first_image_device)
             new_image_height = new_image.shape[1]
             new_image_width = new_image.shape[2]
 
@@ -2106,8 +2114,11 @@ class ImageBatchMulti:
             "required": {
                 "inputcount": ("INT", {"default": 2, "min": 2, "max": 1000, "step": 1}),
                 "image_1": ("IMAGE", ),
-                "image_2": ("IMAGE", ),
+                
             },
+            "optional": {
+                "image_2": ("IMAGE", ),
+            }
     }
 
     RETURN_TYPES = ("IMAGE",)
@@ -2123,9 +2134,10 @@ with the **inputcount** and clicking update.
     def combine(self, inputcount, **kwargs):
         from nodes import ImageBatch
         image_batch_node = ImageBatch()
-        image = kwargs["image_1"]
+        image = kwargs["image_1"].cpu()
+        first_image_shape = image.shape
         for c in range(1, inputcount):
-            new_image = kwargs[f"image_{c + 1}"]
+            new_image = kwargs.get(f"image_{c + 1}", torch.zeros(first_image_shape)).cpu()
             image, = image_batch_node.batch(image, new_image)
         return (image,)
 
@@ -2139,7 +2151,6 @@ class ImageTensorList:
         }}
 
     RETURN_TYPES = ("IMAGE",)
-    #OUTPUT_IS_LIST = (True,)
     FUNCTION = "append"
     CATEGORY = "KJNodes/image"
     DESCRIPTION = """
@@ -2210,7 +2221,7 @@ class ImageConcatMulti:
             "required": {
                 "inputcount": ("INT", {"default": 2, "min": 2, "max": 1000, "step": 1}),
                 "image_1": ("IMAGE", ),
-                "image_2": ("IMAGE", ),
+                
                 "direction": (
                 [   'right',
                     'down',
@@ -2221,6 +2232,9 @@ class ImageConcatMulti:
             "default": 'right'
              }),
             "match_image_size": ("BOOLEAN", {"default": False}),
+            },
+            "optional": {
+                "image_2": ("IMAGE", ),
             },
     }
 
@@ -2240,7 +2254,7 @@ with the **inputcount** and clicking update.
         if first_image_shape is None:
             first_image_shape = image.shape
         for c in range(1, inputcount):
-            new_image = kwargs[f"image_{c + 1}"]
+            new_image = kwargs.get(f"image_{c + 1}", torch.zeros(first_image_shape))
             image, = ImageConcanate.concatenate(self, image, new_image, direction, match_image_size, first_image_shape=first_image_shape)
         first_image_shape = None
         return (image,)

@@ -56,7 +56,7 @@ app.registerExtension({
 					}
 					else{
 						for(let i = num_inputs+1; i <= target_number_of_inputs; ++i)
-							this.addInput(`image_${i}`, this._type)
+							this.addInput(`image_${i}`, this._type, {shape: 7});						
 					}
 					
 					});
@@ -247,7 +247,7 @@ app.registerExtension({
 						}
 						else{
 							for(let i = num_inputs+1; i <= target_number_of_inputs; ++i)
-								this.addInput(`string_${i}`, this._type)
+								this.addInput(`string${i}`, this._type, {shape: 7});
 						}
 					});
 				}
