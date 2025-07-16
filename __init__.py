@@ -6,6 +6,7 @@ from .nodes.image_nodes import *
 from .nodes.intrinsic_lora_nodes import *
 from .nodes.mask_nodes import *
 from .nodes.model_optimization_nodes import *
+from .nodes.lora_nodes import *
 NODE_CONFIG = {
     #constants
     "BOOLConstant": {"class": BOOLConstant, "name": "BOOL Constant"},
@@ -203,6 +204,9 @@ NODE_CONFIG = {
     "CreateInstanceDiffusionTracking": {"class": CreateInstanceDiffusionTracking},
     "AppendInstanceDiffusionTracking": {"class": AppendInstanceDiffusionTracking},
     "DrawInstanceDiffusionTracking": {"class": DrawInstanceDiffusionTracking},
+
+    #lora
+    "LoraExtractKJ": {"class": LoraExtractKJ, "name": "LoraExtractKJ"},
 }
 
 def generate_node_mappings(node_config):
