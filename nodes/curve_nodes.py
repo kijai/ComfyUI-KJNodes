@@ -10,6 +10,11 @@ import base64
         
 from comfy.utils import common_upscale
 
+def parse_color(color):
+    if isinstance(color, str) and ',' in color:
+        return tuple(int(c.strip()) for c in color.split(','))
+    return color
+
 def parse_json_tracks(tracks):
     tracks_data = []
     try:
@@ -442,6 +447,9 @@ Locations are center locations.
     def createshapemask(self, coordinates, frame_width, frame_height, shape_width, shape_height, shape_color, 
                         bg_color, blur_radius, shape, intensity, size_multiplier=[1.0], trailing=1.0, border_width=0, border_color='black'):
 
+        shape_color = parse_color(shape_color)
+        border_color = parse_color(border_color)
+        bg_color = parse_color(bg_color)
         coords_list = parse_json_tracks(coordinates)
 
         batch_size = len(coords_list[0])
@@ -555,7 +563,7 @@ Locations are center locations.
         batch_size = len(coordinates)
         mask_list = []
         image_list = []
-        color = text_color
+        color = parse_color(text_color)
         font_path = folder_paths.get_full_path("kjnodes_fonts", font)
 
         if len(size_multiplier) != batch_size:
@@ -635,8 +643,8 @@ Creates a gradient image from coordinates.
         start_coord = coordinates[0]
         end_coord = coordinates[1]
 
-        start_color = ImageColor.getrgb(start_color)
-        end_color = ImageColor.getrgb(end_color)
+        start_color = parse_color(start_color)
+        end_color = parse_color(end_color)
 
         # Calculate the gradient direction (vector)
         gradient_direction = (end_coord['x'] - start_coord['x'], end_coord['y'] - start_coord['y'])
