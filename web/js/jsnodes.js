@@ -247,7 +247,7 @@ app.registerExtension({
 						}
 						else{
 							for(let i = num_inputs+1; i <= target_number_of_inputs; ++i)
-								this.addInput(`string${i}`, this._type, {shape: 7});
+								this.addInput(`string_${i}`, this._type, {shape: 7});
 						}
 					});
 				}
