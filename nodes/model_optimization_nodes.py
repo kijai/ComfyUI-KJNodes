@@ -811,9 +811,6 @@ class TorchCompileModelWanVideo:
         return (m, )
     
 class TorchCompileModelWanVideoV2:
-    def __init__(self):
-        self._compiled = False
-
     @classmethod
     def INPUT_TYPES(s):
         return {
@@ -843,6 +840,46 @@ class TorchCompileModelWanVideoV2:
                 compile_key_list = []
                 for i, block in enumerate(diffusion_model.blocks):
                     compile_key_list.append(f"diffusion_model.blocks.{i}")
+            else:
+                compile_key_list =["diffusion_model"]
+
+            set_torch_compile_wrapper(model=m, keys=compile_key_list, backend=backend, mode=mode, dynamic=dynamic, fullgraph=fullgraph)           
+        except:
+            raise RuntimeError("Failed to compile model")
+
+        return (m, )
+    
+class TorchCompileModelQwenImage:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "model": ("MODEL",),
+                "backend": (["inductor","cudagraphs"], {"default": "inductor"}),
+                "fullgraph": ("BOOLEAN", {"default": False, "tooltip": "Enable full graph mode"}),
+                "mode": (["default", "max-autotune", "max-autotune-no-cudagraphs", "reduce-overhead"], {"default": "default"}),
+                "dynamic": ("BOOLEAN", {"default": False, "tooltip": "Enable dynamic mode"}),
+                "compile_transformer_blocks_only": ("BOOLEAN", {"default": True, "tooltip": "Compile only transformer blocks, faster compile and less error prone"}),
+                "dynamo_cache_size_limit": ("INT", {"default": 64, "min": 0, "max": 1024, "step": 1, "tooltip": "torch._dynamo.config.cache_size_limit"}),
+            },
+        }
+    RETURN_TYPES = ("MODEL",)
+    FUNCTION = "patch"
+
+    CATEGORY = "KJNodes/torchcompile"
+    EXPERIMENTAL = True
+
+    def patch(self, model, backend, fullgraph, mode, dynamic, dynamo_cache_size_limit, compile_transformer_blocks_only):
+        from comfy_api.torch_helpers import set_torch_compile_wrapper
+        m = model.clone()
+        diffusion_model = m.get_model_object("diffusion_model")
+        print(diffusion_model)
+        torch._dynamo.config.cache_size_limit = dynamo_cache_size_limit            
+        try:
+            if compile_transformer_blocks_only:
+                compile_key_list = []
+                for i, block in enumerate(diffusion_model.transformer_blocks):
+                    compile_key_list.append(f"diffusion_model.transformer_blocks.{i}")
             else:
                 compile_key_list =["diffusion_model"]
 
