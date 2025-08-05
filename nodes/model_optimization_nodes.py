@@ -873,7 +873,6 @@ class TorchCompileModelQwenImage:
         from comfy_api.torch_helpers import set_torch_compile_wrapper
         m = model.clone()
         diffusion_model = m.get_model_object("diffusion_model")
-        print(diffusion_model)
         torch._dynamo.config.cache_size_limit = dynamo_cache_size_limit            
         try:
             if compile_transformer_blocks_only:
