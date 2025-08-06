@@ -1935,22 +1935,29 @@ class DiTBlockLoraLoader:
                         if ratio == 0:
                             keys_to_delete.append(key)
                         else:
-                            value = loaded[key].weights
-                            weights_list = list(loaded[key].weights)
-                            weights_list[2] = ratio
-                            loaded[key].weights = tuple(weights_list)
+                            # Only modify LoRA adapters, skip diff tuples
+                            value = loaded[key]
+                            if hasattr(value, 'weights'):
+                                print(f"Modifying LoRA adapter for key: {key}")
+                                weights_list = list(value.weights)
+                                weights_list[2] = ratio
+                                loaded[key].weights = tuple(weights_list)
+                            else:
+                                print(f"Skipping non-LoRA entry for key: {key}")
 
             for key in keys_to_delete:
                 del loaded[key]
 
             print("loading lora keys:")
             for key, value in loaded.items():
-                print(f"Key: {key}, Alpha: {value.weights[2]}")
+                if hasattr(value, 'weights'):
+                    print(f"Key: {key}, Alpha: {value.weights[2]}")
+                else:
+                    print(f"Key: {key}, Type: {type(value)}")
 
-
-                if model is not None:
-                    new_modelpatcher = model.clone()
-                    k = new_modelpatcher.add_patches(loaded, strength_model)  
+        if model is not None:
+            new_modelpatcher = model.clone()
+            k = new_modelpatcher.add_patches(loaded, strength_model)  
     
         k = set(k)
         for x in loaded:
