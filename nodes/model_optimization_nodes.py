@@ -19,7 +19,10 @@ if not _initialized:
     _original_functions["orig_attention"] = comfy_attention.optimized_attention
     _original_functions["original_patch_model"] = comfy.model_patcher.ModelPatcher.patch_model
     _original_functions["original_load_lora_for_models"] = comfy.sd.load_lora_for_models
-    _original_functions["original_qwen_forward"] = comfy.ldm.qwen_image.model.Attention.forward
+    try:
+        _original_functions["original_qwen_forward"] = comfy.ldm.qwen_image.model.Attention.forward
+    except:
+        pass
     _initialized = True
 
 class BaseLoaderKJ:
