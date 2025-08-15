@@ -694,6 +694,7 @@ class BboxVisualize:
                 "images": ("IMAGE",),
                 "bboxes": ("BBOX",),
                 "line_width": ("INT", {"default": 1,"min": 1, "max": 10, "step": 1}),
+                "bbox_format": (["xywh", "xyxy"], {"default": "xywh"}),
             },
         }
 
@@ -706,26 +707,33 @@ Visualizes the specified bbox on the image.
 
     CATEGORY = "KJNodes/masking"
 
-    def visualizebbox(self, bboxes, images, line_width):
+    def visualizebbox(self, bboxes, images, line_width, bbox_format):
         image_list = []
         for image, bbox in zip(images, bboxes):
-            x_min, y_min, width, height = bbox
-            
+            if bbox_format == "xywh":
+                x_min, y_min, width, height = bbox
+            elif bbox_format == "xyxy":
+                x_min, y_min, x_max, y_max = bbox
+                width = x_max - x_min
+                height = y_max - y_min
+            else:
+                raise ValueError(f"Unknown bbox_format: {bbox_format}")
+
             # Ensure bbox coordinates are integers
             x_min = int(x_min)
             y_min = int(y_min)
             width = int(width)
             height = int(height)
-            
+
             # Permute the image dimensions
             image = image.permute(2, 0, 1)
 
             # Clone the image to draw bounding boxes
             img_with_bbox = image.clone()
-            
+
             # Define the color for the bbox, e.g., red
             color = torch.tensor([1, 0, 0], dtype=torch.float32)
-            
+
             # Ensure color tensor matches the image channels
             if color.shape[0] != img_with_bbox.shape[0]:
                 color = color.unsqueeze(1).expand(-1, line_width)
@@ -735,23 +743,21 @@ Visualizes the specified bbox on the image.
                 # Top horizontal line
                 if y_min + lw < img_with_bbox.shape[1]:
                     img_with_bbox[:, y_min + lw, x_min:x_min + width] = color[:, None]
-                
+
                 # Bottom horizontal line
                 if y_min + height - lw < img_with_bbox.shape[1]:
                     img_with_bbox[:, y_min + height - lw, x_min:x_min + width] = color[:, None]
-                
+
                 # Left vertical line
                 if x_min + lw < img_with_bbox.shape[2]:
                     img_with_bbox[:, y_min:y_min + height, x_min + lw] = color[:, None]
-                
+
                 # Right vertical line
                 if x_min + width - lw < img_with_bbox.shape[2]:
                     img_with_bbox[:, y_min:y_min + height, x_min + width - lw] = color[:, None]
-        
+
             # Permute the image dimensions back
             img_with_bbox = img_with_bbox.permute(1, 2, 0).unsqueeze(0)
             image_list.append(img_with_bbox)
-
-        return (torch.cat(image_list, dim=0),)
 
         return (torch.cat(image_list, dim=0),)
