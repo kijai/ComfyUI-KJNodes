@@ -85,6 +85,7 @@ NODE_CONFIG = {
     "InsertLatentToIndexed": {"class": InsertLatentToIndex, "name": "Insert Latent To Index"},
     "LoadAndResizeImage": {"class": LoadAndResizeImage, "name": "Load & Resize Image"},
     "LoadImagesFromFolderKJ": {"class": LoadImagesFromFolderKJ, "name": "Load Images From Folder (KJ)"},
+    "LoadVideosFromFolder": {"class": LoadVideosFromFolder, "name": "Load Videos From Folder"},
     "MergeImageChannels": {"class": MergeImageChannels, "name": "Merge Image Channels"},
     "PadImageBatchInterleaved": {"class": PadImageBatchInterleaved, "name": "Pad Image Batch Interleaved"},
     "PreviewAnimation": {"class": PreviewAnimation, "name": "Preview Animation"},

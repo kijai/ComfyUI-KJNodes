@@ -10,6 +10,7 @@ import math
 import os
 import re
 import json
+import importlib
 from PIL.PngImagePlugin import PngInfo
 try:
     import cv2
@@ -3635,3 +3636,132 @@ class ImagePadKJ:
                 out_masks[m, pad_top:pad_top+H, pad_left:pad_left+W] = 0.0
 
         return (out_image, out_masks)
+
+# extends https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite
+class LoadVideosFromFolder:
+    @classmethod
+    def __init__(cls):
+        try:
+            cls.vhs_nodes = importlib.import_module("ComfyUI-VideoHelperSuite.videohelpersuite")
+        except ImportError:
+            try:
+                cls.vhs_nodes = importlib.import_module("comfyui-videohelpersuite.videohelpersuite")
+            except ImportError:
+                raise ImportError("This node requires ComfyUI-VideoHelperSuite to be installed.")
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "video": ("STRING", {"default": "X://insert/path/"},),
+                "force_rate": ("FLOAT", {"default": 0, "min": 0, "max": 60, "step": 1, "disable": 0}),
+                "custom_width": ("INT", {"default": 0, "min": 0, "max": 4096, 'disable': 0}),
+                "custom_height": ("INT", {"default": 0, "min": 0, "max": 4096, 'disable': 0}),
+                "frame_load_cap": ("INT", {"default": 0, "min": 0, "max": 10000, "step": 1, "disable": 0}),
+                "skip_first_frames": ("INT", {"default": 0, "min": 0, "max": 10000, "step": 1}),
+                "select_every_nth": ("INT", {"default": 1, "min": 1, "max": 1000, "step": 1}),
+                "output_type": (["batch", "grid"], {"default": "batch"}),
+                "grid_max_columns": ("INT", {"default": 4, "min": 1, "max": 16, "step": 1, "disable": 1}),
+                "add_label": ( "BOOLEAN", {"default": False} ),
+            },
+            "hidden": {
+                "force_size": "STRING",
+                "unique_id": "UNIQUE_ID"
+            },
+        }
+
+    CATEGORY = "KJNodes/misc"
+
+    RETURN_TYPES = ("IMAGE", )
+    RETURN_NAMES = ("IMAGE", )
+
+    FUNCTION = "load_video"
+
+    def load_video(self, output_type, grid_max_columns, add_label=False, **kwargs):
+        if self.vhs_nodes is None:
+            raise ImportError("This node requires ComfyUI-VideoHelperSuite to be installed.")
+        videos_list = []
+        filenames = []
+        for f in os.listdir(kwargs['video']):
+            if os.path.isfile(os.path.join(kwargs['video'], f)):
+                file_parts = f.split('.')
+                if len(file_parts) > 1 and (file_parts[-1].lower() in ['webm', 'mp4', 'mkv', 'gif', 'mov']):
+                    videos_list.append(os.path.join(kwargs['video'], f))
+                    filenames.append(f)
+        print(videos_list)
+        kwargs.pop('video')
+        loaded_videos = []
+        for idx, video in enumerate(videos_list):
+            video_tensor = self.vhs_nodes.load_video_nodes.load_video(video=video, **kwargs)[0]
+            if add_label:
+                # Add filename label above video (without extension)
+                if video_tensor.dim() == 4:
+                    _, h, w, c = video_tensor.shape
+                else:
+                    h, w, c = video_tensor.shape
+                # Remove extension from filename
+                label_text = filenames[idx].rsplit('.', 1)[0]
+                font_size = max(16, w // 20)
+                try:
+                    font = ImageFont.truetype("arial.ttf", font_size)
+                except:
+                    font = ImageFont.load_default()
+                dummy_img = Image.new("RGB", (w, 10), (0,0,0))
+                draw = ImageDraw.Draw(dummy_img)
+                text_bbox = draw.textbbox((0,0), label_text, font=font)
+                extra_padding = max(12, font_size // 2)  # More padding under the font
+                label_height = text_bbox[3] - text_bbox[1] + extra_padding
+                label_img = Image.new("RGB", (w, label_height), (0,0,0))
+                draw = ImageDraw.Draw(label_img)
+                draw.text((w//2 - (text_bbox[2]-text_bbox[0])//2, 4), label_text, font=font, fill=(255,255,255))
+                label_np = np.asarray(label_img).astype(np.float32) / 255.0
+                label_tensor = torch.from_numpy(label_np)
+                if c == 1:
+                    label_tensor = label_tensor.mean(dim=2, keepdim=True)
+                elif c == 4:
+                    alpha = torch.ones((label_height, w, 1), dtype=label_tensor.dtype)
+                    label_tensor = torch.cat([label_tensor, alpha], dim=2)
+                if video_tensor.dim() == 4:
+                    label_tensor = label_tensor.unsqueeze(0).expand(video_tensor.shape[0], -1, -1, -1)
+                    video_tensor = torch.cat([label_tensor, video_tensor], dim=1)
+                else:
+                    video_tensor = torch.cat([label_tensor, video_tensor], dim=0)
+            loaded_videos.append(video_tensor)
+        if output_type == "batch":
+            out_tensor = torch.cat(loaded_videos)
+        elif output_type == "grid":
+            rows = (len(loaded_videos) + grid_max_columns - 1) // grid_max_columns
+            # Pad the last row if needed
+            total_slots = rows * grid_max_columns
+            while len(loaded_videos) < total_slots:
+                loaded_videos.append(torch.zeros_like(loaded_videos[0]))
+            # Create grid by rows
+            row_tensors = []
+            for row_idx in range(rows):
+                start_idx = row_idx * grid_max_columns
+                end_idx = start_idx + grid_max_columns
+                row_videos = loaded_videos[start_idx:end_idx]
+                # Pad all videos in this row to the same height
+                heights = [v.shape[1] for v in row_videos]
+                max_height = max(heights)
+                padded_row_videos = []
+                for v in row_videos:
+                    pad_height = max_height - v.shape[1]
+                    if pad_height > 0:
+                        # Pad (frames, H, W, C) or (H, W, C)
+                        if v.dim() == 4:
+                            pad = (0,0, 0,0, 0,pad_height, 0,0)  # (C,W,H,F)
+                            v = torch.nn.functional.pad(v, (0,0,0,0,0,pad_height,0,0))
+                        else:
+                            v = torch.nn.functional.pad(v, (0,0,0,0,pad_height,0))
+                    padded_row_videos.append(v)
+                row_tensor = torch.cat(padded_row_videos, dim=2)  # Concatenate horizontally
+                row_tensors.append(row_tensor)
+            out_tensor = torch.cat(row_tensors, dim=1)  # Concatenate rows vertically
+        print(out_tensor.shape)
+        return out_tensor,
+
+    @classmethod
+    def IS_CHANGED(s, video, **kwargs):
+        if s.vhs_nodes is not None:
+            return s.vhs_nodes.utils.hash_path(video)
+        return None
