@@ -1,3 +1,5 @@
+from itertools import count
+from turtle import width
 import numpy as np
 import time
 import torch
@@ -794,6 +796,36 @@ and passes it through unchanged.
         return {"ui": {
             "text": [f"{count}x{width}x{height}"]}, 
             "result": (image, width, height, count) 
+        }
+
+class GetLatentSizeAndCount:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": {
+            "latent": ("LATENT",),
+        }}
+
+    RETURN_TYPES = ("LATENT","INT", "INT", "INT", "INT", "INT")
+    RETURN_NAMES = ("latent", "batch_size", "channels", "frames", "width", "height")
+    FUNCTION = "getsize"
+    CATEGORY = "KJNodes/image"
+    DESCRIPTION = """
+Returns latent tensor dimensions,  
+and passes the latent through unchanged.  
+
+"""
+    def getsize(self, latent):
+        if len(latent["samples"].shape) == 5:
+            B, C, T, H, W = latent["samples"].shape
+        elif len(latent["samples"].shape) == 4:
+            B, C, H, W = latent["samples"].shape
+            T = 0
+        else:
+            raise ValueError("Invalid latent shape")
+
+        return {"ui": {
+            "text": [f"{B}x{C}x{T}x{H}x{W}"]}, 
+            "result": (latent, B, C, T, H, W) 
         }
     
 class ImageBatchRepeatInterleaving:

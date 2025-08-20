@@ -191,6 +191,33 @@ app.registerExtension({
 				}
 				break;
 
+			case "GetLatentSizeAndCount":
+				const onGetLatentConnectInput = nodeType.prototype.onConnectInput;
+				nodeType.prototype.onConnectInput = function (targetSlot, type, output, originNode, originSlot) {
+					console.log(this)
+					const v = onGetLatentConnectInput? onGetLatentConnectInput.apply(this, arguments): undefined
+					//console.log(this)
+					this.outputs[1]["label"] = "width"
+					this.outputs[2]["label"] = "height" 
+					this.outputs[3]["label"] = "count"
+					return v;
+				}
+				//const onGetImageSizeExecuted = nodeType.prototype.onExecuted;
+				const onGetLatentSizeExecuted = nodeType.prototype.onAfterExecuteNode;
+				nodeType.prototype.onExecuted = function(message) {
+					console.log(this)
+					const r = onGetLatentSizeExecuted? onGetLatentSizeExecuted.apply(this,arguments): undefined
+					let values = message["text"].toString().split('x').map(Number);
+					console.log(values)
+					this.outputs[1]["label"] = values[0] + " batch"
+					this.outputs[2]["label"] = values[1] + " channels" 
+					this.outputs[3]["label"] = values[2] + " frames" 
+					this.outputs[4]["label"] = values[3] + " height" 
+					this.outputs[5]["label"] = values[4] + " width" 
+					return r
+				}
+				break;
+
 			case "PreviewAnimation":
 				const onPreviewAnimationConnectInput = nodeType.prototype.onConnectInput;
 				nodeType.prototype.onConnectInput = function (targetSlot, type, output, originNode, originSlot) {
