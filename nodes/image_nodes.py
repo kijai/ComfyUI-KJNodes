@@ -1,5 +1,3 @@
-from itertools import count
-from turtle import width
 import numpy as np
 import time
 import torch
