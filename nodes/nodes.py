@@ -2592,4 +2592,34 @@ class HunyuanVideoEncodeKeyframesToCond:
             out.append(c)
         if len(out) == 1:
             out.append(out[0])
-        return (model_clone, out[0], out[1], out_latent)      
+        return (model_clone, out[0], out[1], out_latent)
+    
+
+class LazySwitchKJ:
+    def __init__(self):
+        pass
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "switch": ("BOOLEAN",),
+                "on_false": (IO.ANY, {"lazy": True}),
+                "on_true": (IO.ANY, {"lazy": True}),
+            },
+        }
+
+    RETURN_TYPES = (IO.ANY,)
+    FUNCTION = "switch"
+    CATEGORY = "KJNodes/misc"
+    DESCRIPTION = "Controls flow of execution based on a boolean switch."
+
+    def check_lazy_status(self, switch, on_false=None, on_true=None):
+        if switch and on_true is None:
+            return ["on_true"]
+        if not switch and on_false is None:
+            return ["on_false"]
+
+    def switch(self, switch, on_false = None, on_true=None):
+        value = on_true if switch else on_false
+        return (value,)
