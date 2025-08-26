@@ -12,6 +12,14 @@ from nodes import MAX_RESOLUTION
 from comfy.utils import common_upscale, ProgressBar, load_torch_file
 from comfy.comfy_types.node_typing import IO
 
+import hashlib
+import logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+log = logging.getLogger(__name__)
+
+# Cache directory for storing text embeddings
+cache_dir = cache_dir = os.path.join(os.path.dirname(__file__), "prompts_embed_cache")
+
 script_directory = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 folder_paths.add_model_folder_path("kjnodes_fonts", os.path.join(script_directory, "fonts"))
 
@@ -2623,3 +2631,119 @@ class LazySwitchKJ:
     def switch(self, switch, on_false = None, on_true=None):
         value = on_true if switch else on_false
         return (value,)
+    
+# code based on WanVideoWrapper->WanVideoTextEncodeCached by Kijai (https://github.com/kijai/ComfyUI-WanVideoWrapper)    
+def get_cache_path(prompt):
+    """
+    Generate a cache file path for a given prompt using SHA256 hash.
+    Args:
+        prompt (str): The input prompt to hash.
+    Returns:
+        str: Path to the cache file (.pt).
+    """
+    cache_key = prompt.strip()
+    cache_hash = hashlib.sha256(cache_key.encode('utf-8')).hexdigest()
+    return os.path.join(cache_dir, f"{cache_hash}.pt")
+
+def get_cached_text_embeds(positive_prompt, negative_prompt):
+    """
+    Attempt to load cached text embeddings for positive and negative prompts.
+    Args:
+        positive_prompt (str): The positive prompt to check.
+        negative_prompt (str): The negative prompt to check.
+    Returns:
+        tuple: (positive_cond, negative_cond) - Cached embeddings or None if not found.
+    """
+    os.makedirs(cache_dir, exist_ok=True)
+
+    context = None
+    context_null = None
+
+    pos_cache_path = get_cache_path(positive_prompt)
+    neg_cache_path = get_cache_path(negative_prompt)
+
+    # Try to load positive prompt embeds
+    if os.path.exists(pos_cache_path):
+        try:
+            log.info(f"Loading prompt embeds from cache: {pos_cache_path}")
+            context = torch.load(pos_cache_path)
+        except Exception as e:
+            log.warning(f"Failed to load cache: {e}, will re-encode.")
+
+    # Try to load negative prompt embeds
+    if os.path.exists(neg_cache_path):
+        try:
+            log.info(f"Loading prompt embeds from cache: {neg_cache_path}")
+            context_null = torch.load(neg_cache_path)
+        except Exception as e:
+            log.warning(f"Failed to load cache: {e}, will re-encode.")
+
+    return context, context_null
+
+class CLIPTextEncodeCached:
+    """
+    A node that encodes positive and negative text prompts using a CLIP model into conditioning embeddings.
+    Supports disk caching for faster reuse.
+    """
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "positive_prompt": ("STRING", {"multiline": True, "dynamicPrompts": True, "tooltip": "The positive text prompt to be encoded."}),
+                "negative_prompt": ("STRING", {"multiline": True, "dynamicPrompts": True, "tooltip": "The negative text prompt to be encoded."}),
+                "clip": ("CLIP", {"tooltip": "The CLIP model used for encoding the text."}),
+                "use_disk_cache": ("BOOLEAN", {"default": True, "tooltip": "Cache the embeddings to disk for faster reuse."}),
+                "verbose": ("BOOLEAN", {"default": False, "tooltip": "Enable verbose logging for cache and encoding steps."}),
+            }
+        }
+
+    RETURN_TYPES = ("CONDITIONING", "CONDITIONING",)
+    RETURN_NAMES = ("positive", "negative",)
+    OUTPUT_TOOLTIPS = ("A conditioning containing the embedded positive text.", "A conditioning containing the embedded negative text.")
+    FUNCTION = "encode"
+
+    CATEGORY = "KJNodes/misc"
+    DESCRIPTION = "Encodes positive and negative text prompts using a CLIP model into embeddings for guiding the diffusion model. Supports disk caching to avoid redundant computations."
+
+    def encode(self, positive_prompt, negative_prompt, clip, use_disk_cache, verbose):
+        if clip is None:
+            raise RuntimeError("ERROR: clip input is invalid: None")
+
+        pbar = ProgressBar(2)
+
+        # Check disk cache for both prompts
+        positive_cond, negative_cond = get_cached_text_embeds(positive_prompt, negative_prompt)
+        if positive_cond is not None and negative_cond is not None:
+            pbar.update(2)  # Skip progress as loaded from cache
+            return (positive_cond, negative_cond,)
+
+        pbar.update(1)  # Progress: Cache check complete, starting encoding
+
+        if verbose:
+            log.info("Encoding prompts (not found in cache)...")
+
+        # Encode positive prompt
+        tokens_positive = clip.tokenize(positive_prompt)
+        positive_cond = clip.encode_from_tokens_scheduled(tokens_positive)
+
+        # Encode negative prompt
+        tokens_negative = clip.tokenize(negative_prompt)
+        negative_cond = clip.encode_from_tokens_scheduled(tokens_negative)
+
+        # Save to disk cache if enabled
+        if use_disk_cache:
+            pos_cache_path = get_cache_path(positive_prompt)
+            neg_cache_path = get_cache_path(negative_prompt)
+            try:
+                torch.save(positive_cond, pos_cache_path)
+                if verbose:
+                    log.info(f"Saved positive embeddings to disk cache: {pos_cache_path}")
+                torch.save(negative_cond, neg_cache_path)
+                if verbose:
+                    log.info(f"Saved negative embeddings to disk cache: {neg_cache_path}")
+            except Exception as e:
+                log.warning(f"Failed to save cache: {e}")
+
+        pbar.update(1)  # Progress: Encoding complete
+
+        return (positive_cond, negative_cond,)
