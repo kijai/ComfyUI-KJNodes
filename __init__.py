@@ -212,6 +212,7 @@ NODE_CONFIG = {
 
     #lora
     "LoraExtractKJ": {"class": LoraExtractKJ, "name": "LoraExtractKJ"},
+    "LoraReduceRankKJ": {"class": LoraReduceRank, "name": "LoraReduceRank"}
 }
 
 def generate_node_mappings(node_config):
