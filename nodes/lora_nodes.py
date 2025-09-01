@@ -265,8 +265,8 @@ class LoraReduceRank:
         full_output_folder, filename, counter, subfolder, filename_prefix = folder_paths.get_save_image_path(output_filename_prefix, self.output_dir)
         output_dtype_str = f"_{output_dtype}" if output_dtype != "match_original" else ""
         average_rank = str(int(np.mean(rank_list)))
-        rank_str = new_rank if dynamic_method == "disabled" else average_rank
-        output_checkpoint = f"{filename}_resized_from_{old_dim}_to_{rank_str}{output_dtype_str}_{counter:05}_.safetensors"
+        rank_str = new_rank if dynamic_method == "disabled" else f"dynamic_{average_rank}"
+        output_checkpoint = f"{filename.replace('.safetensors', '')}_resized_from_{old_dim}_to_{rank_str}{output_dtype_str}_{counter:05}_.safetensors"
         output_checkpoint = os.path.join(full_output_folder, output_checkpoint)
         print(f"Saving resized LoRA to {output_checkpoint}")
 
