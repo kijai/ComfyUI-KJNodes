@@ -201,7 +201,7 @@ class LoraReduceRank:
         return {"required": 
                 {
                     "lora_name": (folder_paths.get_filename_list("loras"), {"tooltip": "The name of the LoRA."}),
-                    "new_rank": ("INT", {"default": 8, "min": 1, "max": 4096, "step": 1, "tooltip": "The new rank to resize the LoRA to when not using dynamic_method"}),
+                    "new_rank": ("INT", {"default": 8, "min": 1, "max": 4096, "step": 1, "tooltip": "The new rank to resize the LoRA. Acts as max rank when using dynamic_method."}),
                     "dynamic_method": (["disabled", "sv_ratio", "sv_cumulative", "sv_fro"], {"default": "disabled", "tooltip": "Method to use for dynamically determining new alphas and dims"}),
                     "dynamic_param": ("FLOAT", {"default": 0.2, "min": 0.0, "max": 1.0, "step": 0.01, "tooltip": "Method to use for dynamically determining new alphas and dims"}),
                     "output_dtype": (["match_original", "fp16", "bf16", "fp32"], {"default": "match_original", "tooltip": "Data type to save the LoRA as."}),
@@ -268,6 +268,7 @@ class LoraReduceRank:
         rank_str = new_rank if dynamic_method == "disabled" else average_rank
         output_checkpoint = f"{filename}_resized_from_{old_dim}_to_{rank_str}{output_dtype_str}_{counter:05}_.safetensors"
         output_checkpoint = os.path.join(full_output_folder, output_checkpoint)
+        print(f"Saving resized LoRA to {output_checkpoint}")
 
         comfy.utils.save_torch_file(output_sd, output_checkpoint, metadata=metadata)
         return {}
