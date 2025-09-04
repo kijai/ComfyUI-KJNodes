@@ -481,6 +481,9 @@ app.registerExtension({
 			
 			getInputLink(slot) {
 				const setter = this.findSetter(this.graph);
+				if (this.mode !== 0) {
+					return null;
+				}
 			
 				if (setter) {
 					const slotInfo = setter.inputs[slot];
@@ -520,6 +523,11 @@ app.registerExtension({
 			}
 
 			onDrawForeground(ctx, lGraphCanvas) {
+				if (this.mode === 4) {
+						console.log(`Mode is ${this.mode}, setting to disabled`)
+						this.mode = 2;
+						return null;
+					}
 				if (this.drawConnection) {
 					this._drawVirtualLink(lGraphCanvas, ctx);
 				}
