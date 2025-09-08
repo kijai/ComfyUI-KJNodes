@@ -520,13 +520,10 @@ def resize_lora_model(lora_sd, new_rank, save_dtype, device, dynamic_method, dyn
                 fro_retained = param_dict["fro_retained"]
                 if not np.isnan(fro_retained):
                     fro_list.append(float(fro_retained))
-
-                verbose_str += f"{block_down_name:75} | "
-                verbose_str += f"sum(S) retained: {sum_retained:.1%}, fro retained: {fro_retained:.1%}, max(S) ratio: {max_ratio:0.1f}"
-                print(verbose_str)
-
+                log_str = f"{block_down_name:75} | sum(S) retained: {sum_retained:.1%}, fro retained: {fro_retained:.1%}, max(S) ratio: {max_ratio:0.1f}"
+                print(log_str)
+                verbose_str += log_str
             
-
             if verbose and dynamic_method:
                 verbose_str += f", dynamic | dim: {param_dict['new_rank']}, alpha: {param_dict['new_alpha']}\n"
             else:
@@ -547,6 +544,5 @@ def resize_lora_model(lora_sd, new_rank, save_dtype, device, dynamic_method, dyn
         pbar.update(1)
 
     if verbose:
-        print(verbose_str)
         print(f"Average Frobenius norm retention: {np.mean(fro_list):.2%} | std: {np.std(fro_list):0.3f}")
     return o_lora_sd, max_old_rank, new_alpha, rank_list
