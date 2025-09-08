@@ -463,7 +463,7 @@ def resize_lora_model(lora_sd, new_rank, save_dtype, device, dynamic_method, dyn
     total_keys = len([k for k in lora_sd if k.endswith(".weight")])
 
     pbar = comfy.utils.ProgressBar(total_keys)
-    for key, value in tqdm(lora_sd.items(), leave=True, desc="Resizing LoRA weights", total=total_keys):
+    for key, value in tqdm(lora_sd.items(), leave=True, desc="Resizing LoRA weights"):
         key_parts = key.split(".")
         block_down_name = None
         for _format in LORA_DOWN_UP_FORMATS:
