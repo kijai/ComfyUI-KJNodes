@@ -463,7 +463,7 @@ def resize_lora_model(lora_sd, new_rank, save_dtype, device, dynamic_method, dyn
     total_keys = len([k for k in lora_sd if k.endswith(".weight")])
 
     pbar = comfy.utils.ProgressBar(total_keys)
-    for key, value in tqdm(lora_sd.items()):
+    for key, value in tqdm(lora_sd.items(), leave=True, desc="Resizing LoRA weights", total=total_keys):
         key_parts = key.split(".")
         block_down_name = None
         for _format in LORA_DOWN_UP_FORMATS:
@@ -521,7 +521,7 @@ def resize_lora_model(lora_sd, new_rank, save_dtype, device, dynamic_method, dyn
                 if not np.isnan(fro_retained):
                     fro_list.append(float(fro_retained))
                 log_str = f"{block_down_name:75} | sum(S) retained: {sum_retained:.1%}, fro retained: {fro_retained:.1%}, max(S) ratio: {max_ratio:0.1f}"
-                print(log_str)
+                tqdm.write(log_str)
                 verbose_str += log_str
             
             if verbose and dynamic_method:
