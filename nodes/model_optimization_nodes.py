@@ -114,7 +114,7 @@ class BaseLoaderKJ:
             sage_func = set_sage_func(sage_attention)
 
             @torch.compiler.disable()
-            def attention_sage(q, k, v, heads, mask=None, attn_precision=None, skip_reshape=False, skip_output_reshape=False, transformer_options=None):
+            def attention_sage(q, k, v, heads, mask=None, attn_precision=None, skip_reshape=False, skip_output_reshape=False, **kwargs):
                 if skip_reshape:
                     b, _, _, dim_head = q.shape
                     tensor_layout="HND"
