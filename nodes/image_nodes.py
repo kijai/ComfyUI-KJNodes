@@ -2436,7 +2436,7 @@ class ImageResizeKJv2:
                 "width": ("INT", { "default": 512, "min": 0, "max": MAX_RESOLUTION, "step": 1, }),
                 "height": ("INT", { "default": 512, "min": 0, "max": MAX_RESOLUTION, "step": 1, }),
                 "upscale_method": (s.upscale_methods,),
-                "keep_proportion": (["stretch", "resize", "pad", "pad_edge", "crop", "pillarbox_blur"], { "default": False }),
+                "keep_proportion": (["stretch", "resize", "pad", "pad_edge", "pad_edge_pixel", "crop", "pillarbox_blur"], { "default": False }),
                 "pad_color": ("STRING", { "default": "0, 0, 0", "tooltip": "Color to use for padding."}),
                 "crop_position": (["center", "top", "bottom", "left", "right"], { "default": "center" }),
                 "divisible_by": ("INT", { "default": 2, "min": 0, "max": 512, "step": 1, }),
@@ -2477,154 +2477,27 @@ highest dimension.
         if height == 0:
             height = H
 
-        # Pillarbox blur path: build blurred background that fills the target canvas,
-        # overlay resized foreground centered on top.
-        if keep_proportion == "pillarbox_blur":
-            # Adjust to divisibility first, since we are producing the final canvas here
-            if divisible_by > 1:
-                width = width - (width % divisible_by)
-                height = height - (height % divisible_by)
-
-            image = image.to(device)
-            if mask is not None:
-                mask = mask.to(device)
-
-            # Compute foreground fit size (keep aspect, fit inside target)
-            ratio_fit = min(width / W, height / H) if (W > 0 and H > 0) else 1.0
-            fg_w = max(1, int(round(W * ratio_fit)))
-            fg_h = max(1, int(round(H * ratio_fit)))
-
-            # Foreground placement (center)
-            pad_left = (width - fg_w) // 2
-            pad_right = width - fg_w - pad_left
-            pad_top = (height - fg_h) // 2
-            pad_bottom = height - fg_h - pad_top
-
-            # Prepare output tensors
-            out_image = torch.zeros((B, height, width, C), dtype=image.dtype, device=device)
-            out_mask = None
-
-            # Helper: separable gaussian blur for NCHW
-            def _gaussian_blur_nchw(img_nchw, sigma_px):
-                if sigma_px <= 0:
-                    return img_nchw
-                radius = max(1, int(3.0 * float(sigma_px)))
-                k = 2 * radius + 1
-                x = torch.arange(-radius, radius + 1, device=img_nchw.device, dtype=img_nchw.dtype)
-                k1 = torch.exp(-(x * x) / (2.0 * float(sigma_px) * float(sigma_px)))
-                k1 = k1 / k1.sum()
-                kx = k1.view(1, 1, 1, k)
-                ky = k1.view(1, 1, k, 1)
-                c = img_nchw.shape[1]
-                kx = kx.repeat(c, 1, 1, 1)
-                ky = ky.repeat(c, 1, 1, 1)
-                img_nchw = F.conv2d(img_nchw, kx, padding=(0, radius), groups=c)
-                img_nchw = F.conv2d(img_nchw, ky, padding=(radius, 0), groups=c)
-                return img_nchw
-
-            # Build per-batch frames
-            for b in range(B):
-                # Background: scale-to-fill (keep aspect), then center-crop to (height, width)
-                scale_fill = max(width / float(W), height / float(H)) if (W > 0 and H > 0) else 1.0
-                bg_w = max(1, int(round(W * scale_fill)))
-                bg_h = max(1, int(round(H * scale_fill)))
-
-                src_b = image[b].movedim(-1, 0).unsqueeze(0)  # 1,C,H,W
-                bg = common_upscale(src_b, bg_w, bg_h, upscale_method, crop="disabled")
-
-                # Center crop to canvas
-                y0 = max(0, (bg_h - height) // 2)
-                x0 = max(0, (bg_w - width) // 2)
-                y1 = min(bg_h, y0 + height)
-                x1 = min(bg_w, x0 + width)
-                bg = bg[:, :, y0:y1, x0:x1]
-
-                # If rounding made it a hair off, pad to exact size
-                if bg.shape[2] != height or bg.shape[3] != width:
-                    pad_h = height - bg.shape[2]
-                    pad_w = width - bg.shape[3]
-                    pad_top_fix = max(0, pad_h // 2)
-                    pad_bottom_fix = max(0, pad_h - pad_top_fix)
-                    pad_left_fix = max(0, pad_w // 2)
-                    pad_right_fix = max(0, pad_w - pad_left_fix)
-                    bg = F.pad(bg, (pad_left_fix, pad_right_fix, pad_top_fix, pad_bottom_fix), mode="replicate")
-
-                # Blur strength scales with output size
-                sigma = max(1.0, 0.006 * float(min(height, width)))
-                bg = _gaussian_blur_nchw(bg, sigma_px=sigma)
-
-                # 20% saturation reduction (Rec.709 luma)
-                if C >= 3:
-                    r, g, bch = bg[:, 0:1], bg[:, 1:2], bg[:, 2:3]
-                    luma = 0.2126 * r + 0.7152 * g + 0.0722 * bch
-                    gray = torch.cat([luma, luma, luma], dim=1)
-                    desat = 0.20
-                    rgb = torch.cat([r, g, bch], dim=1)
-                    rgb = rgb * (1.0 - desat) + gray * desat
-                    bg[:, 0:3, :, :] = rgb
-
-                # Dim to keep attention on foreground
-                dim = 0.35
-                bg = torch.clamp(bg * dim, 0.0, 1.0)
-
-                # Write background to canvas
-                out_image[b] = bg.squeeze(0).movedim(0, -1)
-
-            # Resize foreground to fit size and composite at center
-            fg = common_upscale(image.movedim(-1, 1), fg_w, fg_h, upscale_method, crop="disabled").movedim(1, -1)
-            out_image[:, pad_top:pad_top+fg_h, pad_left:pad_left+fg_w, :] = fg
-
-            # Mask handling
-            if mask is not None:
-                # Transform mask like the foreground
-                if upscale_method == "lanczos":
-                    # Use the same path as elsewhere in this node for lanczos
-                    fg_mask = common_upscale(mask.unsqueeze(1).repeat(1, 3, 1, 1), fg_w, fg_h, upscale_method, crop="disabled").movedim(1, -1)[:, :, :, 0]
-                else:
-                    fg_mask = common_upscale(mask.unsqueeze(1), fg_w, fg_h, upscale_method, crop="disabled").squeeze(1)
-
-                out_mask = torch.ones((B, height, width), dtype=image.dtype, device=device)
-                out_mask[:, pad_top:pad_top+fg_h, pad_left:pad_left+fg_w] = fg_mask
-            else:
-                out_mask = torch.ones((B, height, width), dtype=image.dtype, device=device)
-                out_mask[:, pad_top:pad_top+fg_h, pad_left:pad_left+fg_w] = 0.0
-
-            # Progress UI (kept consistent with existing code)
-            if unique_id and PromptServer is not None:
-                try:
-                    num_elements = out_image.numel()
-                    element_size = out_image.element_size()
-                    memory_size_mb = (num_elements * element_size) / (1024 * 1024)
-                    PromptServer.instance.send_progress_text(
-                        f"<tr><td>Output: </td><td><b>{out_image.shape[0]}</b> x <b>{out_image.shape[2]}</b> x <b>{out_image.shape[1]} | {memory_size_mb:.2f}MB</b></td></tr>",
-                        unique_id
-                    )
-                except:
-                    pass
-
-            return (
-                out_image.cpu(),
-                out_image.shape[2],
-                out_image.shape[1],
-                out_mask.cpu() if out_mask is not None else torch.zeros(64, 64, device=torch.device("cpu"), dtype=torch.float32),
-            )
-
-        # Existing logic for other modes
-        if keep_proportion == "resize" or keep_proportion.startswith("pad"):
+        pillarbox_blur = keep_proportion == "pillarbox_blur"
+        if keep_proportion == "resize" or keep_proportion.startswith("pad") or pillarbox_blur:
             # If one of the dimensions is zero, calculate it to maintain the aspect ratio
             if width == 0 and height != 0:
                 ratio = height / H
                 new_width = round(W * ratio)
+                new_height = height
             elif height == 0 and width != 0:
                 ratio = width / W
+                new_width = width
                 new_height = round(H * ratio)
             elif width != 0 and height != 0:
-                # Scale based on which dimension is smaller in proportion to the desired dimensions
                 ratio = min(width / W, height / H)
                 new_width = round(W * ratio)
                 new_height = round(H * ratio)
+            else:
+                new_width = width
+                new_height = height
 
-            if keep_proportion.startswith("pad"):
+            pad_left = pad_right = pad_top = pad_bottom = 0
+            if keep_proportion.startswith("pad") or pillarbox_blur:
                 # Calculate padding based on position
                 if crop_position == "center":
                     pad_left = (width - new_width) // 2
@@ -2660,27 +2533,23 @@ highest dimension.
             height = height - (height % divisible_by)
 
         out_image = image.clone().to(device)
-
         if mask is not None:
             out_mask = mask.clone().to(device)
         else:
             out_mask = None
-        
+
+        # Crop logic
         if keep_proportion == "crop":
             old_width = W
             old_height = H
             old_aspect = old_width / old_height
             new_aspect = width / height
-            
-            # Calculate dimensions to keep
-            if old_aspect > new_aspect:  # Image is wider than target
+            if old_aspect > new_aspect:
                 crop_w = round(old_height * new_aspect)
                 crop_h = old_height
-            else:  # Image is taller than target
+            else:
                 crop_w = old_width
                 crop_h = round(old_width / new_aspect)
-            
-            # Calculate crop position
             if crop_position == "center":
                 x = (old_width - crop_w) // 2
                 y = (old_height - crop_h) // 2
@@ -2696,50 +2565,45 @@ highest dimension.
             elif crop_position == "right":
                 x = old_width - crop_w
                 y = (old_height - crop_h) // 2
-            
-            # Apply crop
             out_image = out_image.narrow(-2, x, crop_w).narrow(-3, y, crop_h)
             if mask is not None:
                 out_mask = out_mask.narrow(-1, x, crop_w).narrow(-2, y, crop_h)
-        
-        out_image = common_upscale(out_image.movedim(-1,1), width, height, upscale_method, crop="disabled").movedim(1,-1)
 
+        out_image = common_upscale(out_image.movedim(-1,1), width, height, upscale_method, crop="disabled").movedim(1,-1)
         if mask is not None:
             if upscale_method == "lanczos":
                 out_mask = common_upscale(out_mask.unsqueeze(1).repeat(1, 3, 1, 1), width, height, upscale_method, crop="disabled").movedim(1,-1)[:, :, :, 0]
             else:
                 out_mask = common_upscale(out_mask.unsqueeze(1), width, height, upscale_method, crop="disabled").squeeze(1)
-            
-        if keep_proportion.startswith("pad"):
-            if pad_left > 0 or pad_right > 0 or pad_top > 0 or pad_bottom > 0:
-                padded_width = width + pad_left + pad_right
-                padded_height = height + pad_top + pad_bottom
-                if divisible_by > 1:
-                    width_remainder = padded_width % divisible_by
-                    height_remainder = padded_height % divisible_by
-                    if width_remainder > 0:
-                        extra_width = divisible_by - width_remainder
-                        pad_right += extra_width
-                    if height_remainder > 0:
-                        extra_height = divisible_by - height_remainder
-                        pad_bottom += extra_height
-                out_image, _ = ImagePadKJ.pad(self, out_image, pad_left, pad_right, pad_top, pad_bottom, 0, pad_color, "edge" if keep_proportion == "pad_edge" else "color")
-                if mask is not None:
-                    out_mask = out_mask.unsqueeze(1).repeat(1, 3, 1, 1).movedim(1,-1)
-                    out_mask, _ = ImagePadKJ.pad(self, out_mask, pad_left, pad_right, pad_top, pad_bottom, 0, pad_color, "edge" if keep_proportion == "pad_edge" else "color")
-                    out_mask = out_mask[:, :, :, 0]
-                else:
-                    B, H_pad, W_pad, _ = out_image.shape
-                    out_mask = torch.ones((B, H_pad, W_pad), dtype=out_image.dtype, device=out_image.device)
-                    out_mask[:, pad_top:pad_top+height, pad_left:pad_left+width] = 0.0
 
+        # Pad logic
+        if (keep_proportion.startswith("pad") or pillarbox_blur) and (pad_left > 0 or pad_right > 0 or pad_top > 0 or pad_bottom > 0):
+            padded_width = width + pad_left + pad_right
+            padded_height = height + pad_top + pad_bottom
+            if divisible_by > 1:
+                width_remainder = padded_width % divisible_by
+                height_remainder = padded_height % divisible_by
+                if width_remainder > 0:
+                    extra_width = divisible_by - width_remainder
+                    pad_right += extra_width
+                if height_remainder > 0:
+                    extra_height = divisible_by - height_remainder
+                    pad_bottom += extra_height
 
+            pad_mode = (
+                "pillarbox_blur" if pillarbox_blur else
+                "edge" if keep_proportion == "pad_edge" else
+                "edge_pixel" if keep_proportion == "pad_edge_pixel" else
+                "color"
+            )
+            out_image, out_mask = ImagePadKJ.pad(self, out_image, pad_left, pad_right, pad_top, pad_bottom, 0, pad_color, pad_mode, mask=out_mask)
+
+        # Progress UI
         if unique_id and PromptServer is not None:
             try:
                 num_elements = out_image.numel()
                 element_size = out_image.element_size()
                 memory_size_mb = (num_elements * element_size) / (1024 * 1024)
-                
                 PromptServer.instance.send_progress_text(
                     f"<tr><td>Output: </td><td><b>{out_image.shape[0]}</b> x <b>{out_image.shape[2]}</b> x <b>{out_image.shape[1]} | {memory_size_mb:.2f}MB</b></td></tr>",
                     unique_id
@@ -2747,7 +2611,7 @@ highest dimension.
             except:
                 pass
 
-        return(out_image.cpu(), out_image.shape[2], out_image.shape[1], out_mask.cpu() if out_mask is not None else torch.zeros(64,64, device=torch.device("cpu"), dtype=torch.float32))
+        return (out_image.cpu(), out_image.shape[2], out_image.shape[1], out_mask.cpu() if out_mask is not None else torch.zeros(64,64, device=torch.device("cpu"), dtype=torch.float32))
 
 import pathlib    
 class LoadAndResizeImage:
@@ -3681,7 +3545,7 @@ class ImagePadKJ:
                     "top": ("INT", {"default": 0, "min": 0, "max": MAX_RESOLUTION, "step": 1, }),
                     "bottom": ("INT", {"default": 0, "min": 0, "max": MAX_RESOLUTION, "step": 1, }),
                     "extra_padding": ("INT", {"default": 0, "min": 0, "max": MAX_RESOLUTION, "step": 1, }),
-                    "pad_mode": (["edge", "color"],),
+                    "pad_mode": (["edge", "edge_pixel", "color", "pillarbox_blur"],),
                     "color": ("STRING", {"default": "0, 0, 0", "tooltip": "Color as RGB values in range 0-255, separated by commas."}),
                   },
                 "optional": {
@@ -3699,7 +3563,6 @@ class ImagePadKJ:
         
     def pad(self, image, left, right, top, bottom, extra_padding, color, pad_mode, mask=None, target_width=None, target_height=None):
         B, H, W, C = image.shape
-        
         # Resize masks to image dimensions if necessary
         if mask is not None:
             BM, HM, WM = mask.shape
@@ -3711,7 +3574,7 @@ class ImagePadKJ:
         if len(bg_color) == 1:
             bg_color = bg_color * 3  # Grayscale to RGB
         bg_color = torch.tensor(bg_color, dtype=image.dtype, device=image.device)
-        
+
         # Calculate padding sizes with extra padding
         if target_width is not None and target_height is not None:
             if extra_padding > 0:
@@ -3732,30 +3595,104 @@ class ImagePadKJ:
 
             padded_width = W + pad_left + pad_right
             padded_height = H + pad_top + pad_bottom
-        out_image = torch.zeros((B, padded_height, padded_width, C), dtype=image.dtype, device=image.device)
-        
-        # Fill padded areas
-        for b in range(B):
-            if pad_mode == "edge":
-                # Pad with edge color
-                # Define edge pixels
-                top_edge = image[b, 0, :, :]
-                bottom_edge = image[b, H-1, :, :]
-                left_edge = image[b, :, 0, :]
-                right_edge = image[b, :, W-1, :]
 
-                # Fill borders with edge colors
-                out_image[b, :pad_top, :, :] = top_edge.mean(dim=0)
-                out_image[b, pad_top+H:, :, :] = bottom_edge.mean(dim=0)
-                out_image[b, :, :pad_left, :] = left_edge.mean(dim=0)
-                out_image[b, :, pad_left+W:, :] = right_edge.mean(dim=0)
-                out_image[b, pad_top:pad_top+H, pad_left:pad_left+W, :] = image[b]
+        # Pillarbox blur mode
+        if pad_mode == "pillarbox_blur":
+            def _gaussian_blur_nchw(img_nchw, sigma_px):
+                if sigma_px <= 0:
+                    return img_nchw
+                radius = max(1, int(3.0 * float(sigma_px)))
+                k = 2 * radius + 1
+                x = torch.arange(-radius, radius + 1, device=img_nchw.device, dtype=img_nchw.dtype)
+                k1 = torch.exp(-(x * x) / (2.0 * float(sigma_px) * float(sigma_px)))
+                k1 = k1 / k1.sum()
+                kx = k1.view(1, 1, 1, k)
+                ky = k1.view(1, 1, k, 1)
+                c = img_nchw.shape[1]
+                kx = kx.repeat(c, 1, 1, 1)
+                ky = ky.repeat(c, 1, 1, 1)
+                img_nchw = F.conv2d(img_nchw, kx, padding=(0, radius), groups=c)
+                img_nchw = F.conv2d(img_nchw, ky, padding=(radius, 0), groups=c)
+                return img_nchw
+
+            out_image = torch.zeros((B, padded_height, padded_width, C), dtype=image.dtype, device=image.device)
+            for b in range(B):
+                scale_fill = max(padded_width / float(W), padded_height / float(H)) if (W > 0 and H > 0) else 1.0
+                bg_w = max(1, int(round(W * scale_fill)))
+                bg_h = max(1, int(round(H * scale_fill)))
+                src_b = image[b].movedim(-1, 0).unsqueeze(0)
+                bg = common_upscale(src_b, bg_w, bg_h, "bilinear", crop="disabled")
+                y0 = max(0, (bg_h - padded_height) // 2)
+                x0 = max(0, (bg_w - padded_width) // 2)
+                y1 = min(bg_h, y0 + padded_height)
+                x1 = min(bg_w, x0 + padded_width)
+                bg = bg[:, :, y0:y1, x0:x1]
+                if bg.shape[2] != padded_height or bg.shape[3] != padded_width:
+                    pad_h = padded_height - bg.shape[2]
+                    pad_w = padded_width - bg.shape[3]
+                    pad_top_fix = max(0, pad_h // 2)
+                    pad_bottom_fix = max(0, pad_h - pad_top_fix)
+                    pad_left_fix = max(0, pad_w // 2)
+                    pad_right_fix = max(0, pad_w - pad_left_fix)
+                    bg = F.pad(bg, (pad_left_fix, pad_right_fix, pad_top_fix, pad_bottom_fix), mode="replicate")
+                sigma = max(1.0, 0.006 * float(min(padded_height, padded_width)))
+                bg = _gaussian_blur_nchw(bg, sigma_px=sigma)
+                if C >= 3:
+                    r, g, bch = bg[:, 0:1], bg[:, 1:2], bg[:, 2:3]
+                    luma = 0.2126 * r + 0.7152 * g + 0.0722 * bch
+                    gray = torch.cat([luma, luma, luma], dim=1)
+                    desat = 0.20
+                    rgb = torch.cat([r, g, bch], dim=1)
+                    rgb = rgb * (1.0 - desat) + gray * desat
+                    bg[:, 0:3, :, :] = rgb
+                dim = 0.35
+                bg = torch.clamp(bg * dim, 0.0, 1.0)
+                out_image[b] = bg.squeeze(0).movedim(0, -1)
+            out_image[:, pad_top:pad_top+H, pad_left:pad_left+W, :] = image
+            # Mask handling for pillarbox_blur
+            if mask is not None:
+                fg_mask = mask
+                out_masks = torch.ones((B, padded_height, padded_width), dtype=image.dtype, device=image.device)
+                out_masks[:, pad_top:pad_top+H, pad_left:pad_left+W] = fg_mask
             else:
-                # Pad with specified background color
-                out_image[b, :, :, :] = bg_color.unsqueeze(0).unsqueeze(0)  # Expand for H and W dimensions
-                out_image[b, pad_top:pad_top+H, pad_left:pad_left+W, :] = image[b]
+                out_masks = torch.ones((B, padded_height, padded_width), dtype=image.dtype, device=image.device)
+                out_masks[:, pad_top:pad_top+H, pad_left:pad_left+W] = 0.0
+            return (out_image, out_masks)
 
-        
+        # Standard pad logic (edge/color)
+        out_image = torch.zeros((B, padded_height, padded_width, C), dtype=image.dtype, device=image.device)
+        for b in range(B):
+                if pad_mode == "edge":
+                    # Pad with edge color (mean)
+                    top_edge = image[b, 0, :, :]
+                    bottom_edge = image[b, H-1, :, :]
+                    left_edge = image[b, :, 0, :]
+                    right_edge = image[b, :, W-1, :]
+                    out_image[b, :pad_top, :, :] = top_edge.mean(dim=0)
+                    out_image[b, pad_top+H:, :, :] = bottom_edge.mean(dim=0)
+                    out_image[b, :, :pad_left, :] = left_edge.mean(dim=0)
+                    out_image[b, :, pad_left+W:, :] = right_edge.mean(dim=0)
+                    out_image[b, pad_top:pad_top+H, pad_left:pad_left+W, :] = image[b]
+                elif pad_mode == "edge_pixel":
+                    # Pad with exact edge pixel values
+                    for y in range(pad_top):
+                        out_image[b, y, pad_left:pad_left+W, :] = image[b, 0, :, :]
+                    for y in range(pad_top+H, padded_height):
+                        out_image[b, y, pad_left:pad_left+W, :] = image[b, H-1, :, :]
+                    for x in range(pad_left):
+                        out_image[b, pad_top:pad_top+H, x, :] = image[b, :, 0, :]
+                    for x in range(pad_left+W, padded_width):
+                        out_image[b, pad_top:pad_top+H, x, :] = image[b, :, W-1, :]
+                    out_image[b, :pad_top, :pad_left, :] = image[b, 0, 0, :]
+                    out_image[b, :pad_top, pad_left+W:, :] = image[b, 0, W-1, :]
+                    out_image[b, pad_top+H:, :pad_left, :] = image[b, H-1, 0, :]
+                    out_image[b, pad_top+H:, pad_left+W:, :] = image[b, H-1, W-1, :]
+                    out_image[b, pad_top:pad_top+H, pad_left:pad_left+W, :] = image[b]
+                else:
+                    # Pad with specified background color
+                    out_image[b, :, :, :] = bg_color.unsqueeze(0).unsqueeze(0)
+                    out_image[b, pad_top:pad_top+H, pad_left:pad_left+W, :] = image[b]
+
         if mask is not None:
             out_masks = torch.nn.functional.pad(
                 mask, 
