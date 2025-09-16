@@ -41,7 +41,7 @@ NODE_CONFIG = {
     "ResizeMask": {"class": ResizeMask, "name": "Resize Mask"},
     "RoundMask": {"class": RoundMask, "name": "Round Mask"},
     "SeparateMasks": {"class": SeparateMasks, "name": "Separate Masks"},
-    "KJConsolidateMasks": {"class": KJConsolidateMasks, "name": "Consolidate Masks"},
+    "ConsolidateMasksKJ": {"class": ConsolidateMasksKJ, "name": "Consolidate Masks"},
     #images
     "AddLabel": {"class": AddLabel, "name": "Add Label"},
     "ColorMatch": {"class": ColorMatch, "name": "Color Match"},
