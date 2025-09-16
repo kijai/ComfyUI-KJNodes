@@ -2909,6 +2909,8 @@ class LoadImagesFromFolderKJ:
             limit_images = True
         image_count = 0
 
+        pbar = ProgressBar(len(dir_files))
+
         for image_path in dir_files:
             if os.path.isdir(image_path):
                 continue
@@ -2944,6 +2946,7 @@ class LoadImagesFromFolderKJ:
             masks.append(mask)
             image_path_list.append(image_path)
             image_count += 1
+            pbar.update(1)
 
         if len(images) == 1:
             return (images[0], masks[0], 1, image_path_list)
