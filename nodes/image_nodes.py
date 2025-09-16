@@ -1128,16 +1128,17 @@ class ImagePadForOutpaintTargetSize:
             
             # Downscale the image
             image_scaled = common_upscale(image, new_width, new_height, upscale_method, "disabled").movedim(1,-1)
-            if mask is not None:
-                mask_scaled = mask.unsqueeze(0)  # Add an extra dimension for batch size
-                mask_scaled = F.interpolate(mask_scaled, size=(new_height, new_width), mode="nearest")
-                mask_scaled = mask_scaled.squeeze(0)  # Remove the extra dimension after interpolation
-            else:
-                mask_scaled = mask
         else:
             # If downscaling is not needed, use the original image dimensions
             image_scaled = image
-            mask_scaled = mask
+
+        # Ensure mask dimensions match image dimensions
+        if mask is not None:
+            mask_scaled = mask.unsqueeze(0)  # Add an extra dimension for batch size
+            mask_scaled = F.interpolate(mask_scaled, size=(new_height, new_width), mode="nearest")
+            mask_scaled = mask_scaled.squeeze(0)  # Remove the extra dimension after interpolation
+        else:
+            mask_scaled = None
 
         # Calculate how much padding is needed to reach the target dimensions
         pad_top = max(0, (target_height - new_height) // 2)
