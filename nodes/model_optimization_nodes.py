@@ -1930,6 +1930,7 @@ class GGUFLoaderKJ(io.ComfyNode):
         return io.Schema(
             node_id="GGUFLoaderKJ",
             category="KJNodes/experimental",
+            description="Loads a GGUF model with advanced options, requires [ComfyUI-GGUF](https://github.com/city96/ComfyUI-GGUF) to be installed.",
             is_experimental=True,
             inputs=[
                 io.Combo.Input("model_name", options=[x for x in folder_paths.get_filename_list("unet_gguf")]),
