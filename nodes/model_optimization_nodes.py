@@ -9,7 +9,12 @@ import comfy.model_management as mm
 from comfy.cli_args import args
 from typing import Optional, Tuple
 import importlib
-from comfy_api.latest import io
+try:
+    from comfy_api.latest import io
+    v3_available = True
+except ImportError:
+    v3_available = False
+    logging.warning("ComfyUI v3 node API not available, please update ComfyUI to access latest v3 nodes.")
 
 sageattn_modes = ["disabled", "auto", "sageattn_qk_int8_pv_fp16_cuda", "sageattn_qk_int8_pv_fp16_triton", "sageattn_qk_int8_pv_fp8_cuda", "sageattn_qk_int8_pv_fp8_cuda++"]
 
@@ -1913,106 +1918,110 @@ class CFGZeroStarAndInit:
         m.set_model_sampler_cfg_function(cfg_zerostar)
         return (m, )
     
+if v3_available:
+    class GGUFLoaderKJ(io.ComfyNode):
+        gguf_nodes = None
 
-class GGUFLoaderKJ(io.ComfyNode):
-    @classmethod
-    def __init__(cls):
-        try:
-            cls.gguf_nodes = importlib.import_module("ComfyUI-GGUF")
-        except ImportError:
-            try:
-                cls.gguf_nodes = importlib.import_module("comfyui-gguf")
-            except ImportError:
+        @classmethod
+        def _ensure_gguf_loaded(cls):
+            if cls.gguf_nodes is None:
+                try:
+                    cls.gguf_nodes = importlib.import_module("ComfyUI-GGUF")
+                except ImportError:
+                    try:
+                        cls.gguf_nodes = importlib.import_module("comfyui-gguf")
+                    except ImportError:
+                        raise ImportError("This node requires ComfyUI-GGUF to be installed.")
+
+        @classmethod
+        def define_schema(cls):
+            cls._ensure_gguf_loaded() 
+            return io.Schema(
+                node_id="GGUFLoaderKJ",
+                category="KJNodes/experimental",
+                description="Loads a GGUF model with advanced options, requires [ComfyUI-GGUF](https://github.com/city96/ComfyUI-GGUF) to be installed.",
+                is_experimental=True,
+                inputs=[
+                    io.Combo.Input("model_name", options=[x for x in folder_paths.get_filename_list("unet_gguf")]),
+                    io.Combo.Input("extra_model_name", options=[x for x in folder_paths.get_filename_list("unet_gguf")] + ["none"], default="none", tooltip="An extra gguf model to load and merge into the main model, for example VACE module"),
+                    io.Combo.Input("dequant_dtype", options=["default", "target", "float32", "float16", "bfloat16"], default="default"),
+                    io.Combo.Input("patch_dtype", options=["default", "target", "float32", "float16", "bfloat16"], default="default"),
+                    io.Boolean.Input("patch_on_device", default=False),
+                    io.Boolean.Input("enable_fp16_accumulation", default=False, tooltip="Enable torch.backends.cuda.matmul.allow_fp16_accumulation, required minimum pytorch version 2.7.1"),
+                    io.Combo.Input("attention_override", options=["none", "sdpa", "sageattn", "xformers", "flashattn"], default="none", tooltip="Overrides the used attention implementation, requires the respective library to be installed"),
+
+                ],
+                outputs=[io.Model.Output(),],
+            )
+        
+        def attention_override_pytorch(func, *args, **kwargs):
+            new_attention = comfy.ldm.modules.attention.attention_pytorch
+            return new_attention.__wrapped__(*args, **kwargs)
+        def attention_override_sage(func, *args, **kwargs):
+            new_attention = comfy.ldm.modules.attention.attention_sage
+            return new_attention.__wrapped__(*args, **kwargs)
+        def attention_override_xformers(func, *args, **kwargs):
+            new_attention = comfy.ldm.modules.attention.attention_xformers
+            return new_attention.__wrapped__(*args, **kwargs)
+        def attention_override_flash(func, *args, **kwargs):
+            new_attention = comfy.ldm.modules.attention.attention_flash
+            return new_attention.__wrapped__(*args, **kwargs)
+        
+        ATTENTION_OVERRIDES = {
+            "sdpa": attention_override_pytorch,
+            "sageattn": attention_override_sage,
+            "xformers": attention_override_xformers,
+            "flashattn": attention_override_flash,
+        }
+        
+        @classmethod
+        def execute(cls, model_name, extra_model_name, dequant_dtype, patch_dtype, patch_on_device, attention_override, enable_fp16_accumulation):
+            if cls.gguf_nodes is None:
                 raise ImportError("This node requires ComfyUI-GGUF to be installed.")
+            ops = cls.gguf_nodes.ops.GGMLOps()
 
-    @classmethod
-    def define_schema(cls):
-        return io.Schema(
-            node_id="GGUFLoaderKJ",
-            category="KJNodes/experimental",
-            description="Loads a GGUF model with advanced options, requires [ComfyUI-GGUF](https://github.com/city96/ComfyUI-GGUF) to be installed.",
-            is_experimental=True,
-            inputs=[
-                io.Combo.Input("model_name", options=[x for x in folder_paths.get_filename_list("unet_gguf")]),
-                io.Combo.Input("extra_model_name", options=[x for x in folder_paths.get_filename_list("unet_gguf")] + ["none"], default="none", tooltip="An extra gguf model to load and merge into the main model, for example VACE module"),
-                io.Combo.Input("dequant_dtype", options=["default", "target", "float32", "float16", "bfloat16"], default="default"),
-                io.Combo.Input("patch_dtype", options=["default", "target", "float32", "float16", "bfloat16"], default="default"),
-                io.Boolean.Input("patch_on_device", default=False),
-                io.Boolean.Input("enable_fp16_accumulation", default=False, tooltip="Enable torch.backends.cuda.matmul.allow_fp16_accumulation, required minimum pytorch version 2.7.1"),
-                io.Combo.Input("attention_override", options=["none", "sdpa", "sageattn", "xformers", "flashattn"], default="none", tooltip="Overrides the used attention implementation, requires the respective library to be installed"),
+            def set_linear_dtype(attr, value):
+                if value == "default":
+                    setattr(ops.Linear, attr, None)
+                elif value == "target":
+                    setattr(ops.Linear, attr, value)
+                else:
+                    setattr(ops.Linear, attr, getattr(torch, value))
 
-            ],
-            outputs=[io.Model.Output(),],
-        )
-    
-    def attention_override_pytorch(func, *args, **kwargs):
-        new_attention = comfy.ldm.modules.attention.attention_pytorch
-        return new_attention.__wrapped__(*args, **kwargs)
-    def attention_override_sage(func, *args, **kwargs):
-        new_attention = comfy.ldm.modules.attention.attention_sage
-        return new_attention.__wrapped__(*args, **kwargs)
-    def attention_override_xformers(func, *args, **kwargs):
-        new_attention = comfy.ldm.modules.attention.attention_xformers
-        return new_attention.__wrapped__(*args, **kwargs)
-    def attention_override_flash(func, *args, **kwargs):
-        new_attention = comfy.ldm.modules.attention.attention_flash
-        return new_attention.__wrapped__(*args, **kwargs)
-    
-    ATTENTION_OVERRIDES = {
-        "sdpa": attention_override_pytorch,
-        "sageattn": attention_override_sage,
-        "xformers": attention_override_xformers,
-        "flashattn": attention_override_flash,
-    }
-    
-    @classmethod
-    def execute(cls, model_name, extra_model_name, dequant_dtype, patch_dtype, patch_on_device, attention_override, enable_fp16_accumulation):
-        if cls.gguf_nodes is None:
-            raise ImportError("This node requires ComfyUI-GGUF to be installed.")
-        ops = cls.gguf_nodes.ops.GGMLOps()
+            set_linear_dtype("dequant_dtype", dequant_dtype)
+            set_linear_dtype("patch_dtype", patch_dtype)
 
-        def set_linear_dtype(attr, value):
-            if value == "default":
-                setattr(ops.Linear, attr, None)
-            elif value == "target":
-                setattr(ops.Linear, attr, value)
+            # init model
+            model_path = folder_paths.get_full_path("unet", model_name)
+            sd = cls.gguf_nodes.loader.gguf_sd_loader(model_path)
+
+            if extra_model_name is not None and extra_model_name != "none":
+                if not extra_model_name.endswith(".gguf"):
+                    raise ValueError("Extra model must also be a .gguf file")
+                extra_model_full_path = folder_paths.get_full_path("unet", extra_model_name)
+                extra_model = cls.gguf_nodes.loader.gguf_sd_loader(extra_model_full_path)
+                sd.update(extra_model)
+
+            model = comfy.sd.load_diffusion_model_state_dict(
+                sd, model_options={"custom_operations": ops}
+            )
+            if model is None:
+                raise RuntimeError(f"ERROR: Could not detect model type of: {model_path}")
+            
+            model = cls.gguf_nodes.nodes.GGUFModelPatcher.clone(model)
+            model.patch_on_device = patch_on_device
+
+            # attention override
+            if attention_override in cls.ATTENTION_OVERRIDES:
+                model.model_options["transformer_options"]["optimized_attention_override"] = cls.ATTENTION_OVERRIDES[attention_override]
+            
+            if enable_fp16_accumulation:
+                if hasattr(torch.backends.cuda.matmul, "allow_fp16_accumulation"):
+                    torch.backends.cuda.matmul.allow_fp16_accumulation = True
+                else:
+                    raise RuntimeError("Failed to set fp16 accumulation, requires pytorch version 2.7.1 or higher")
             else:
-                setattr(ops.Linear, attr, getattr(torch, value))
+                if hasattr(torch.backends.cuda.matmul, "allow_fp16_accumulation"):
+                    torch.backends.cuda.matmul.allow_fp16_accumulation = False
 
-        set_linear_dtype("dequant_dtype", dequant_dtype)
-        set_linear_dtype("patch_dtype", patch_dtype)
-
-        # init model
-        model_path = folder_paths.get_full_path("unet", model_name)
-        sd = cls.gguf_nodes.loader.gguf_sd_loader(model_path)
-
-        if extra_model_name is not None and extra_model_name != "none":
-            if not extra_model_name.endswith(".gguf"):
-                raise ValueError("Extra model must also be a .gguf file")
-            extra_model_full_path = folder_paths.get_full_path("unet", extra_model_name)
-            extra_model = cls.gguf_nodes.loader.gguf_sd_loader(extra_model_full_path)
-            sd.update(extra_model)
-
-        model = comfy.sd.load_diffusion_model_state_dict(
-            sd, model_options={"custom_operations": ops}
-        )
-        if model is None:
-            raise RuntimeError(f"ERROR: Could not detect model type of: {model_path}")
-        
-        model = cls.gguf_nodes.nodes.GGUFModelPatcher.clone(model)
-        model.patch_on_device = patch_on_device
-
-        # attention override
-        if attention_override in cls.ATTENTION_OVERRIDES:
-            model.model_options["transformer_options"]["optimized_attention_override"] = cls.ATTENTION_OVERRIDES[attention_override]
-        
-        if enable_fp16_accumulation:
-            if hasattr(torch.backends.cuda.matmul, "allow_fp16_accumulation"):
-                torch.backends.cuda.matmul.allow_fp16_accumulation = True
-            else:
-                raise RuntimeError("Failed to set fp16 accumulation, requires pytorch version 2.7.1 or higher")
-        else:
-            if hasattr(torch.backends.cuda.matmul, "allow_fp16_accumulation"):
-                torch.backends.cuda.matmul.allow_fp16_accumulation = False
-
-        return io.NodeOutput(model,)
+            return io.NodeOutput(model,)
