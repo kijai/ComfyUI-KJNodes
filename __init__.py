@@ -25,6 +25,7 @@ NODE_CONFIG = {
     "DrawMaskOnImage": {"class": DrawMaskOnImage, "name": "Draw Mask On Image"},
     "DownloadAndLoadCLIPSeg": {"class": DownloadAndLoadCLIPSeg, "name": "(Down)load CLIPSeg"},
     "BatchCLIPSeg": {"class": BatchCLIPSeg, "name": "Batch CLIPSeg"},
+    "BlockifyMask": {"class": BlockifyMask, "name": "Create Block Mask"},
     "ColorToMask": {"class": ColorToMask, "name": "Color To Mask"},
     "CreateGradientMask": {"class": CreateGradientMask, "name": "Create Gradient Mask"},
     "CreateTextMask": {"class": CreateTextMask, "name": "Create Text Mask"},
