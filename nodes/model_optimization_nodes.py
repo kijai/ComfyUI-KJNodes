@@ -1,3 +1,4 @@
+import os
 from comfy.ldm.modules import attention as comfy_attention
 import logging
 import comfy.model_patcher
@@ -1963,15 +1964,20 @@ if v3_available:
 
         @classmethod
         def _get_gguf_module(cls):
-            """Lazy import of GGUF module with fallback options"""
-            try:
-                return importlib.import_module("ComfyUI-GGUF")
-            except ImportError:
+            gguf_path = os.path.join(folder_paths.folder_names_and_paths["custom_nodes"][0][0], "ComfyUI-GGUF")
+            """Import GGUF module with version validation"""
+            for module_name in ["ComfyUI-GGUF", "custom_nodes.ComfyUI-GGUF", "comfyui-gguf", "custom_nodes.comfyui-gguf", gguf_path, gguf_path.lower()]:
                 try:
-                    return importlib.import_module("comfyui-gguf")
+                    module = importlib.import_module(module_name)
+                    return module
                 except ImportError:
-                    raise ImportError("This node requires ComfyUI-GGUF to be installed.")
-        
+                    continue
+
+            raise ImportError(
+                "Compatible ComfyUI-GGUF not found. "
+                "Please install/update from: https://github.com/city96/ComfyUI-GGUF"
+            )
+
         
         @classmethod
         def execute(cls, model_name, extra_model_name, dequant_dtype, patch_dtype, patch_on_device, attention_override, enable_fp16_accumulation):
