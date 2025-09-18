@@ -1919,23 +1919,10 @@ class CFGZeroStarAndInit:
         return (m, )
     
 if v3_available:
+
     class GGUFLoaderKJ(io.ComfyNode):
-        gguf_nodes = None
-
-        @classmethod
-        def _ensure_gguf_loaded(cls):
-            if cls.gguf_nodes is None:
-                try:
-                    cls.gguf_nodes = importlib.import_module("ComfyUI-GGUF")
-                except ImportError:
-                    try:
-                        cls.gguf_nodes = importlib.import_module("comfyui-gguf")
-                    except ImportError:
-                        raise ImportError("This node requires ComfyUI-GGUF to be installed.")
-
         @classmethod
         def define_schema(cls):
-            cls._ensure_gguf_loaded() 
             return io.Schema(
                 node_id="GGUFLoaderKJ",
                 category="KJNodes/experimental",
@@ -1973,12 +1960,23 @@ if v3_available:
             "xformers": attention_override_xformers,
             "flashattn": attention_override_flash,
         }
+
+        @classmethod
+        def _get_gguf_module(cls):
+            """Lazy import of GGUF module with fallback options"""
+            try:
+                return importlib.import_module("ComfyUI-GGUF")
+            except ImportError:
+                try:
+                    return importlib.import_module("comfyui-gguf")
+                except ImportError:
+                    raise ImportError("This node requires ComfyUI-GGUF to be installed.")
+        
         
         @classmethod
         def execute(cls, model_name, extra_model_name, dequant_dtype, patch_dtype, patch_on_device, attention_override, enable_fp16_accumulation):
-            if cls.gguf_nodes is None:
-                raise ImportError("This node requires ComfyUI-GGUF to be installed.")
-            ops = cls.gguf_nodes.ops.GGMLOps()
+            gguf_nodes = cls._get_gguf_module()
+            ops = gguf_nodes.ops.GGMLOps()
 
             def set_linear_dtype(attr, value):
                 if value == "default":
@@ -1993,13 +1991,13 @@ if v3_available:
 
             # init model
             model_path = folder_paths.get_full_path("unet", model_name)
-            sd = cls.gguf_nodes.loader.gguf_sd_loader(model_path)
+            sd = gguf_nodes.loader.gguf_sd_loader(model_path)
 
             if extra_model_name is not None and extra_model_name != "none":
                 if not extra_model_name.endswith(".gguf"):
                     raise ValueError("Extra model must also be a .gguf file")
                 extra_model_full_path = folder_paths.get_full_path("unet", extra_model_name)
-                extra_model = cls.gguf_nodes.loader.gguf_sd_loader(extra_model_full_path)
+                extra_model = gguf_nodes.loader.gguf_sd_loader(extra_model_full_path)
                 sd.update(extra_model)
 
             model = comfy.sd.load_diffusion_model_state_dict(
@@ -2008,7 +2006,7 @@ if v3_available:
             if model is None:
                 raise RuntimeError(f"ERROR: Could not detect model type of: {model_path}")
             
-            model = cls.gguf_nodes.nodes.GGUFModelPatcher.clone(model)
+            model = gguf_nodes.nodes.GGUFModelPatcher.clone(model)
             model.patch_on_device = patch_on_device
 
             # attention override
@@ -2025,3 +2023,12 @@ if v3_available:
                     torch.backends.cuda.matmul.allow_fp16_accumulation = False
 
             return io.NodeOutput(model,)
+else:
+    class GGUFLoaderKJ:
+        @classmethod
+        def INPUT_TYPES(s):
+            return {}
+        RETURN_TYPES = ()
+        FUNCTION = ""
+        CATEGORY = ""
+        DESCRIPTION = "This node requires newer ComfyUI"
