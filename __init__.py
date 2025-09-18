@@ -22,6 +22,7 @@ NODE_CONFIG = {
     "ConditioningSetMaskAndCombine5": {"class": ConditioningSetMaskAndCombine5, "name": "ConditioningSetMaskAndCombine5"},
     "CondPassThrough": {"class": CondPassThrough},
     #masking
+    "DrawMaskOnImage": {"class": DrawMaskOnImage, "name": "Draw Mask On Image"},
     "DownloadAndLoadCLIPSeg": {"class": DownloadAndLoadCLIPSeg, "name": "(Down)load CLIPSeg"},
     "BatchCLIPSeg": {"class": BatchCLIPSeg, "name": "Batch CLIPSeg"},
     "ColorToMask": {"class": ColorToMask, "name": "Color To Mask"},
