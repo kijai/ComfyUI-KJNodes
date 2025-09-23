@@ -17,6 +17,8 @@ import folder_paths
 from ..utility.utility import tensor2pil, pil2tensor
 
 script_directory = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+device = model_management.get_torch_device()
+offload_device = model_management.unet_offload_device()
 
 class BatchCLIPSeg:
 
@@ -997,6 +999,7 @@ class GrowMaskWithBlur:
 - fill_holes: fill holes in the mask (slow)"""
     
     def expand_mask(self, mask, expand, tapered_corners, flip_input, blur_radius, incremental_expandrate, lerp_alpha, decay_factor, fill_holes=False):
+        import kornia.morphology as morph
         alpha = lerp_alpha
         decay = decay_factor
         if flip_input:
@@ -1010,30 +1013,45 @@ class GrowMaskWithBlur:
         previous_output = None
         current_expand = expand
         for m in growmask:
-            output = m.numpy().astype(np.float32)
-            for _ in range(abs(round(current_expand))):
-                if current_expand < 0:
-                    output = scipy.ndimage.grey_erosion(output, footprint=kernel)
+            output = m.unsqueeze(0).unsqueeze(0).to(device)  # Add batch and channel dims for kornia
+            if abs(round(current_expand)) > 0:
+                # Create kernel - kornia expects kernel on same device as input
+                if tapered_corners:
+                    kernel = torch.tensor([[0, 1, 0],
+                                        [1, 1, 1],
+                                        [0, 1, 0]], dtype=torch.float32, device=output.device)
                 else:
-                    output = scipy.ndimage.grey_dilation(output, footprint=kernel)
+                    kernel = torch.tensor([[1, 1, 1],
+                                        [1, 1, 1],
+                                        [1, 1, 1]], dtype=torch.float32, device=output.device)
+                
+                for _ in range(abs(round(current_expand))):
+                    if current_expand < 0:
+                        output = morph.erosion(output, kernel)
+                    else:
+                        output = morph.dilation(output, kernel)
+            
+            output = output.squeeze(0).squeeze(0)  # Remove batch and channel dims
+            
             if current_expand < 0:
                 current_expand -= abs(incremental_expandrate)
             else:
                 current_expand += abs(incremental_expandrate)
+                
             if fill_holes:
+                # For fill_holes, you might need to keep using scipy or implement GPU version
                 binary_mask = output > 0
-                output = scipy.ndimage.binary_fill_holes(binary_mask)
-                output = output.astype(np.float32) * 255
-            output = torch.from_numpy(output)
+                output_np = binary_mask.cpu().numpy()
+                filled = scipy.ndimage.binary_fill_holes(output_np)
+                output = torch.from_numpy(filled.astype(np.float32)).to(output.device)
+            
             if alpha < 1.0 and previous_output is not None:
-                # Interpolate between the previous and current frame
                 output = alpha * output + (1 - alpha) * previous_output
             if decay < 1.0 and previous_output is not None:
-                # Add the decayed previous output to the current frame
                 output += decay * previous_output
                 output = output / output.max()
             previous_output = output
-            out.append(output)
+            out.append(output.cpu())
 
         if blur_radius != 0:
             # Convert the tensor list to PIL images, apply blur, and convert back

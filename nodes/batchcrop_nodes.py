@@ -710,14 +710,19 @@ Visualizes the specified bbox on the image.
     def visualizebbox(self, bboxes, images, line_width, bbox_format):
         image_list = []
         for image, bbox in zip(images, bboxes):
-            if bbox_format == "xywh":
-                x_min, y_min, width, height = bbox
-            elif bbox_format == "xyxy":
-                x_min, y_min, x_max, y_max = bbox
-                width = x_max - x_min
-                height = y_max - y_min
+            # Ensure bbox is a sequence of 4 values
+            if isinstance(bbox, (list, tuple, np.ndarray)) and len(bbox) == 4:
+                if bbox_format == "xywh":
+                    x_min, y_min, width, height = bbox
+                elif bbox_format == "xyxy":
+                    x_min, y_min, x_max, y_max = bbox
+                    width = x_max - x_min
+                    height = y_max - y_min
+                else:
+                    raise ValueError(f"Unknown bbox_format: {bbox_format}")
             else:
-                raise ValueError(f"Unknown bbox_format: {bbox_format}")
+                print("Invalid bbox:", bbox)
+                continue
 
             # Ensure bbox coordinates are integers
             x_min = int(x_min)
