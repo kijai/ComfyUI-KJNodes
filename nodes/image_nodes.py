@@ -3807,29 +3807,29 @@ class LoadVideosFromFolder:
             try:
                 cls.vhs_nodes = importlib.import_module("comfyui-videohelpersuite.videohelpersuite")
             except ImportError:
-                # Fallback to sys.modules sweep for Windows/packaging variations
+                # Fallback to sys.modules search for Windows compatibility
                 import sys
                 vhs_module = None
                 for module_name in sys.modules:
-                    try:
-                        mod = sys.modules[module_name]
-                        if mod and hasattr(mod, "videohelpersuite"):
-                            vhs_module = mod
-                            break
-                    except Exception:
-                        continue
-
+                    if 'videohelpersuite' in module_name and 'videohelpersuite' in sys.modules[module_name].__dict__:
+                        vhs_module = sys.modules[module_name]
+                        break
+                
                 if vhs_module is None:
+                    # Try direct access to the videohelpersuite submodule
                     for module_name in sys.modules:
                         if module_name.endswith('videohelpersuite'):
-                            vhs_module = sys.modules.get(module_name)
-                            if vhs_module is not None:
-                                break
-
+                            vhs_module = sys.modules[module_name]
+                            break
+                
                 if vhs_module is not None:
                     cls.vhs_nodes = vhs_module
                 else:
                     raise ImportError("This node requires ComfyUI-VideoHelperSuite to be installed.")
+                
+        except ImportError:
+            raise ImportError("This node requires ComfyUI-VideoHelperSuite to be installed.")
+          
     @classmethod
     def INPUT_TYPES(s):
         return {
