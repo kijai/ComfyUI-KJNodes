@@ -1005,11 +1005,8 @@ class GrowMaskWithBlur:
         decay = decay_factor
         if flip_input:
             mask = 1.0 - mask
-        c = 0 if tapered_corners else 1
-        kernel = np.array([[c, 1, c],
-                           [1, 1, 1],
-                           [c, 1, c]])
-        growmask = mask.reshape((-1, mask.shape[-2], mask.shape[-1])).cpu()
+
+        growmask = mask.reshape((-1, mask.shape[-2], mask.shape[-1]))
         out = []
         previous_output = None
         current_expand = expand
@@ -1040,7 +1037,6 @@ class GrowMaskWithBlur:
                 current_expand += abs(incremental_expandrate)
                 
             if fill_holes:
-                # For fill_holes, you might need to keep using scipy or implement GPU version
                 binary_mask = output > 0
                 output_np = binary_mask.cpu().numpy()
                 filled = scipy.ndimage.binary_fill_holes(output_np)
