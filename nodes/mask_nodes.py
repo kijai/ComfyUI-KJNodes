@@ -1603,7 +1603,6 @@ class BlockifyMask:
 
     def process(self, masks, block_size, device="cpu"):
         processing_device = main_device if device == "gpu" else torch.device("cpu")
-        print("mask.dtype:", masks.dtype, "device:", processing_device)
         
         masks = masks.to(processing_device)
         batch_size, height, width = masks.shape
