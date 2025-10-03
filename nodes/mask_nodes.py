@@ -1013,7 +1013,7 @@ class GrowMaskWithBlur:
         out = []
         previous_output = None
         current_expand = expand
-        for m in growmask:
+        for m in tqdm(growmask, desc="Expanding/Contracting Mask"):
             output = m.unsqueeze(0).unsqueeze(0).to(main_device)  # Add batch and channel dims for kornia
             if abs(round(current_expand)) > 0:
                 # Create kernel - kornia expects kernel on same device as input
