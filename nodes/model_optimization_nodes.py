@@ -122,10 +122,16 @@ class BaseLoaderKJ:
                     from sageattn3 import sageattn3_blackwell
                     if sage_attention == "sageattn3_per_block_mean":
                         def func(q, k, v, is_causal=False, attn_mask=None, **kwargs):
-                            return sageattn3_blackwell(q, k, v, is_causal=is_causal, attn_mask=attn_mask, per_block_mean=True)
+                            if q.shape == k.shape and q.shape == v.shape:
+                                return sageattn3_blackwell(q, k, v, is_causal=is_causal, attn_mask=attn_mask, per_block_mean=True)
+                            else:
+                                return sageattn(q, k, v, is_causal=is_causal, attn_mask=attn_mask, tensor_layout="NHD")
                     else:
                         def func(q, k, v, is_causal=False, attn_mask=None, **kwargs):
-                            return sageattn3_blackwell(q, k, v, is_causal=is_causal, attn_mask=attn_mask, per_block_mean=False)
+                            if q.shape == k.shape and q.shape == v.shape:
+                                return sageattn3_blackwell(q, k, v, is_causal=is_causal, attn_mask=attn_mask, per_block_mean=False)
+                            else:
+                                return sageattn(q, k, v, is_causal=is_causal, attn_mask=attn_mask, tensor_layout="NHD")
                     return func
 
             sage_func = set_sage_func(sage_attention)
