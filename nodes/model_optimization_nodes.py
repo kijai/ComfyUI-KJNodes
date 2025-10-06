@@ -449,7 +449,7 @@ class DiffusionModelLoaderKJ(BaseLoaderKJ):
             if hasattr(torch.backends.cuda.matmul, "allow_fp16_accumulation"):
                 torch.backends.cuda.matmul.allow_fp16_accumulation = True
             else:
-                raise RuntimeError("Failed to set fp16 accumulation, this requires pytorch 2.7.0 nightly currently")
+                raise RuntimeError("Failed to set fp16 accumulation, this requires pytorch 2.7.1 or higher")
         else:
             if hasattr(torch.backends.cuda.matmul, "allow_fp16_accumulation"):
                 torch.backends.cuda.matmul.allow_fp16_accumulation = False
@@ -503,12 +503,12 @@ class ModelPatchTorchSettings:
                 model_clone.add_callback(CallbacksMP.ON_PRE_RUN, patch_enable_fp16_accum)
                 model_clone.add_callback(CallbacksMP.ON_CLEANUP, patch_disable_fp16_accum)
             else:
-                raise RuntimeError("Failed to set fp16 accumulation, this requires pytorch 2.7.0 nightly currently")
+                raise RuntimeError("Failed to set fp16 accumulation, this requires pytorch 2.7.1 or higher")
         else:
             if hasattr(torch.backends.cuda.matmul, "allow_fp16_accumulation"):
                 model_clone.add_callback(CallbacksMP.ON_PRE_RUN, patch_disable_fp16_accum)
             else:
-                raise RuntimeError("Failed to set fp16 accumulation, this requires pytorch 2.7.0 nightly currently")
+                raise RuntimeError("Failed to set fp16 accumulation, this requires pytorch 2.7.1 or higher")
                 
         return (model_clone,)
     
@@ -1933,14 +1933,20 @@ if v3_available:
     class GGUFLoaderKJ(io.ComfyNode):
         @classmethod
         def define_schema(cls):
+            # Get GGUF models safely, fallback to empty list if unet_gguf folder doesn't exist
+            try:
+                gguf_models = folder_paths.get_filename_list("unet_gguf")
+            except KeyError:
+                gguf_models = []
+            
             return io.Schema(
                 node_id="GGUFLoaderKJ",
                 category="KJNodes/experimental",
                 description="Loads a GGUF model with advanced options, requires [ComfyUI-GGUF](https://github.com/city96/ComfyUI-GGUF) to be installed.",
                 is_experimental=True,
                 inputs=[
-                    io.Combo.Input("model_name", options=[x for x in folder_paths.get_filename_list("unet_gguf")]),
-                    io.Combo.Input("extra_model_name", options=[x for x in folder_paths.get_filename_list("unet_gguf")] + ["none"], default="none", tooltip="An extra gguf model to load and merge into the main model, for example VACE module"),
+                    io.Combo.Input("model_name", options=gguf_models),
+                    io.Combo.Input("extra_model_name", options=gguf_models + ["none"], default="none", tooltip="An extra gguf model to load and merge into the main model, for example VACE module"),
                     io.Combo.Input("dequant_dtype", options=["default", "target", "float32", "float16", "bfloat16"], default="default"),
                     io.Combo.Input("patch_dtype", options=["default", "target", "float32", "float16", "bfloat16"], default="default"),
                     io.Boolean.Input("patch_on_device", default=False),
