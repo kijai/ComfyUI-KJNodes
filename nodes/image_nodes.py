@@ -2476,7 +2476,7 @@ class ImageResizeKJv2:
             "optional" : {
                 "mask": ("MASK",),
                 "device": (["cpu", "gpu"],),
-                "per_batch": ("INT", { "default": 0, "min": 0, "max": MAX_RESOLUTION, "step": 1, "tooltip": "Process images in sub-batches to reduce memory usage. 0 disables sub-batching."}),
+                #"per_batch": ("INT", { "default": 0, "min": 0, "max": MAX_RESOLUTION, "step": 1, "tooltip": "Process images in sub-batches to reduce memory usage. 0 disables sub-batching."}),
             },
              "hidden": {
                 "unique_id": "UNIQUE_ID",
@@ -2495,7 +2495,7 @@ Keep proportions keeps the aspect ratio of the image, by
 highest dimension.  
 """
 
-    def resize(self, image, width, height, keep_proportion, upscale_method, divisible_by, pad_color, crop_position, unique_id, device="cpu", mask=None, per_batch=0):
+    def resize(self, image, width, height, keep_proportion, upscale_method, divisible_by, pad_color, crop_position, unique_id, device="cpu", mask=None, per_batch=64):
         B, H, W, C = image.shape
 
         if device == "gpu":
