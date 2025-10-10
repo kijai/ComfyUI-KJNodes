@@ -150,6 +150,7 @@ NODE_CONFIG = {
     "SplineEditor": {"class": SplineEditor, "name": "Spline Editor"},
     "CreateShapeImageOnPath": {"class": CreateShapeImageOnPath, "name": "Create Shape Image On Path"},
     "CreateShapeMaskOnPath": {"class": CreateShapeMaskOnPath, "name": "Create Shape Mask On Path"},
+    "CreateShapeJointOnPath": {"class": CreateShapeJointOnPath, "name": "Create Shape Joint On Path"},
     "CreateTextOnPath": {"class": CreateTextOnPath, "name": "Create Text On Path"},
     "CreateGradientFromCoords": {"class": CreateGradientFromCoords, "name": "Create Gradient From Coords"},
     "CutAndDragOnPath": {"class": CutAndDragOnPath, "name": "Cut And Drag On Path"},
@@ -163,6 +164,7 @@ NODE_CONFIG = {
     "PlotCoordinates": {"class": PlotCoordinates, "name": "Plot Coordinates"},
     "InterpolateCoords": {"class": InterpolateCoords, "name": "Interpolate Coords"},
     "PointsEditor": {"class": PointsEditor, "name": "Points Editor"},
+    "DriverOffsetCoordinates": {"class": DriverOffsetCoordinates, "name": "Driver Offset Coordinates"},
     #experimental
     "SoundReactive": {"class": SoundReactive, "name": "Sound Reactive"},
     "StableZero123_BatchSchedule": {"class": StableZero123_BatchSchedule, "name": "Stable Zero123 Batch Schedule"},

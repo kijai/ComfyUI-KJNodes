@@ -3,6 +3,7 @@ from torchvision import transforms
 import json
 from PIL import Image, ImageDraw, ImageFont, ImageColor, ImageFilter, ImageChops
 import numpy as np
+import math
 from ..utility.utility import pil2tensor, tensor2pil
 import folder_paths
 import io
@@ -1634,3 +1635,564 @@ Cuts the masked area from the image, and drags it along the path. If inpaint is 
         out_masks = torch.cat(masks_list, dim=0)
 
         return (out_images, out_masks)
+
+class CreateShapeJointOnPath:
+    RETURN_TYPES = ("IMAGE",)
+    RETURN_NAMES = ("image",)
+    FUNCTION = "create"
+    CATEGORY = "KJNodes/image/generate"
+    DESCRIPTION = """
+The width is controlled by shape_width, and the length is the distance between the first and second points.
+If pivot_coordinates are provided:
+  - relative=True: The pivot movement offsets the entire shape from its path-defined position.
+  - relative=False: The pivot replaces the starting point of the shape for positioning.
+"""
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "coordinates": ("STRING", {"multiline": True, "default": '[{"x":100,"y":100},{"x":400,"y":400}]'}),
+                "frame_width": ("INT", {"default": 512, "min": 8, "max": 4096, "step": 8}),
+                "frame_height": ("INT", {"default": 512, "min": 8, "max": 4096, "step": 8}),
+                "total_frames": ("INT", {"default": 10, "min": 1, "max": 10000, "step": 1}),
+                "scaling_enabled": ("BOOLEAN", {"default": True}),
+                "shape_width": ("INT", {"default": 20, "min": 1, "max": 4096, "step": 1}),
+                "shape_width_end": ("INT", {"default": 0, "min": 0, "max": 4096, "step": 0}),
+                "bg_color": ("STRING", {"default": "black"}),
+                "fill_color": ("STRING", {"default": "white"}),
+                "easing_function": (["linear", "ease_in", "ease_out", "ease_in_out"], {"default": "linear"}),
+                "blur_radius": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 100.0, "step": 0.1}),
+                "intensity": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 100.0, "step": 0.01}),
+                "trailing": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 2.0, "step": 0.01}), # Changed default/max from original node
+                "bounce_between": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.01}),
+            },
+            "optional": { # Make pivot_coordinates optional
+                "pivot_coordinates": ("STRING", {"multiline": True}),
+                "relative": ("BOOLEAN", {"default": True}), # Added relative input
+            }
+        }
+
+    def create(self, coordinates, frame_width, frame_height, shape_width, shape_width_end, fill_color, bg_color, scaling_enabled, total_frames, easing_function, blur_radius, intensity, trailing, bounce_between, pivot_coordinates=None, relative=True): # Added relative param
+        # --- Standardize coordinates input ---
+        if isinstance(coordinates, str):
+            # Try parsing as a list of lists first, if it looks like it
+            try:
+                potential_list = json.loads(coordinates.replace("'", '"'))
+                if isinstance(potential_list, list) and all(isinstance(item, list) for item in potential_list):
+                    # It's likely a string representation of a list of paths
+                    # Re-dump each inner list to treat them as separate coord strings
+                    coord_strings = [json.dumps(path) for path in potential_list]
+                    print(f"Interpreted single string input as {len(coord_strings)} paths.")
+                elif isinstance(potential_list, list) and all(isinstance(item, dict) for item in potential_list):
+                     # It's a single path represented as a string
+                     coord_strings = [coordinates]
+                else:
+                     # Fallback: treat as single path string if format is unexpected
+                     print("Warning: Unexpected format in single coordinate string. Treating as one path.")
+                     coord_strings = [coordinates]
+            except Exception as e:
+                 print(f"Warning: Could not parse single coordinate string as JSON list. Treating as one path string. Error: {e}")
+                 coord_strings = [coordinates] # Treat as a single path string if parsing fails
+        elif isinstance(coordinates, list) and all(isinstance(item, str) for item in coordinates):
+            coord_strings = coordinates # Already a list of strings
+        else:
+            print(f"Error: Invalid coordinates input type: {type(coordinates)}. Expected string or list of strings.")
+            img = Image.new('RGB', (frame_width, frame_height), color=bg_color)
+            return (pil2tensor(img),)
+
+        all_paths_control_points = []
+        all_paths_original_p0 = []
+        all_paths_initial_p1 = []
+        valid_paths_found = False
+        for i, coord_string in enumerate(coord_strings):
+            try:
+                coords = json.loads(coord_string.replace("'", '"'))
+                if not isinstance(coords, list) or len(coords) < 2:
+                    print(f"Warning: Path {i+1} has < 2 points or invalid format. Skipping.")
+                    all_paths_control_points.append(None) # Placeholder for skipped path
+                    all_paths_original_p0.append(None)
+                    all_paths_initial_p1.append(None)
+                    continue
+                points = [(c['x'], c['y']) for c in coords]
+                control_points = [np.array(p) for p in points]
+                all_paths_control_points.append(control_points)
+                all_paths_original_p0.append(control_points[0])
+                all_paths_initial_p1.append(control_points[1])
+                valid_paths_found = True
+            except Exception as e:
+                print(f"Error parsing coordinates for path {i+1}: {e}. Skipping path.")
+                all_paths_control_points.append(None) # Placeholder for skipped path
+                all_paths_original_p0.append(None)
+                all_paths_initial_p1.append(None)
+                continue
+
+        if not valid_paths_found:
+             print("Error: No valid coordinate paths found.")
+             img = Image.new('RGB', (frame_width, frame_height), color=bg_color)
+             return (pil2tensor(img),)
+
+        output_images = []
+        previous_frame_tensor = None
+
+        # --- Parse and Adjust Pivot Coordinates ---
+        # (Applies the *same* pivot motion to *all* paths if provided)
+        pivot_points_adjusted = None
+        use_dynamic_pivot = False
+        static_pivot_point = None # Used if pivot_coordinates is None or invalid
+
+        if pivot_coordinates and pivot_coordinates.strip() and pivot_coordinates.strip() != '[]':
+            try:
+                pivot_coords_raw = json.loads(pivot_coordinates.replace("'", '"'))
+                if isinstance(pivot_coords_raw, list) and len(pivot_coords_raw) > 0:
+                    pivot_points_raw = [np.array((c['x'], c['y'])) for c in pivot_coords_raw]
+                    current_len = len(pivot_points_raw)
+                    if current_len < total_frames:
+                        last_point = pivot_points_raw[-1]
+                        padding = [last_point] * (total_frames - current_len)
+                        pivot_points_adjusted = pivot_points_raw + padding
+                    elif current_len > total_frames:
+                        pivot_points_adjusted = pivot_points_raw[:total_frames]
+                    else:
+                        pivot_points_adjusted = pivot_points_raw
+
+                    if pivot_points_adjusted:
+                         use_dynamic_pivot = True
+                         # print(f"Using dynamic pivot points. Adjusted count: {len(pivot_points_adjusted)}")
+            except Exception as e:
+                print(f"Warning: Error parsing pivot_coordinates: {e}. Using static p0 for each path.")
+                use_dynamic_pivot = False
+        # else: use_dynamic_pivot remains False
+
+        # --- Pre-calculate fixed length and direction for paths if needed ---
+        all_paths_fixed_length = []
+        all_paths_fixed_v_normalized = []
+        for i in range(len(all_paths_control_points)):
+             if all_paths_control_points[i] is None:
+                 all_paths_fixed_length.append(0)
+                 all_paths_fixed_v_normalized.append(None)
+                 continue
+
+             p0_orig = all_paths_original_p0[i]
+             p1_init = all_paths_initial_p1[i]
+             fixed_v = p1_init - p0_orig
+             fixed_len = np.linalg.norm(fixed_v)
+             fixed_v_norm = None
+             if fixed_len > 0 and not scaling_enabled:
+                 fixed_v_norm = fixed_v / fixed_len
+             elif fixed_len == 0 and not scaling_enabled:
+                 print(f"Warning: Path {i+1} initial control points p0 and p1 are identical. Fixed length is 0.")
+
+             all_paths_fixed_length.append(fixed_len)
+             all_paths_fixed_v_normalized.append(fixed_v_norm)
+
+
+        try:
+            fill_rgb = ImageColor.getrgb(fill_color)
+        except ValueError:
+            print(f"Warning: Invalid fill_color '{fill_color}'. Defaulting to white.")
+            fill_rgb = (255, 255, 255)
+
+        # --- Easing function definitions ---
+        def ease_in(t): return t * t
+        def ease_out(t): return 1 - (1 - t) * (1 - t)
+        def ease_in_out(t): return 2 * t * t if t < 0.5 else 1 - pow(-2 * t + 2, 2) / 2
+        easing_map = {"linear": lambda t: t, "ease_in": ease_in, "ease_out": ease_out, "ease_in_out": ease_in_out}
+        apply_easing = easing_map.get(easing_function, lambda t: t)
+
+        # --- Loop through frames ---
+        for frame_index in range(total_frames):
+            img_frame = Image.new('RGB', (frame_width, frame_height), color=bg_color)
+            draw_frame = ImageDraw.Draw(img_frame)
+
+            # --- Loop through paths for the current frame ---
+            for path_idx, control_points in enumerate(all_paths_control_points):
+                if control_points is None: # Skip invalid/skipped paths
+                    continue
+
+                p0_original = all_paths_original_p0[path_idx]
+                p1_initial = all_paths_initial_p1[path_idx]
+                fixed_length = all_paths_fixed_length[path_idx]
+                fixed_v_normalized = all_paths_fixed_v_normalized[path_idx]
+
+                # --- Determine current pivot for this frame ---
+                # If dynamic pivot is used, all paths use the same pivot point for this frame.
+                # Otherwise, each path uses its own original p0 as the static pivot.
+                current_pivot = p0_original # Default to path's own p0 if no dynamic pivot
+                if use_dynamic_pivot and pivot_points_adjusted:
+                    current_pivot = pivot_points_adjusted[frame_index]
+
+                # --- Determine target point for this path and frame (relative to its p0_original) ---
+                target_point_relative_to_p0 = None
+                num_control_points = len(control_points)
+
+                if frame_index == 0:
+                    target_point_relative_to_p0 = p1_initial - p0_original
+                elif num_control_points >= 3:
+                    # --- Interpolate to find target point ---
+                    num_animation_segments = num_control_points - 2 # Segments p1->p2, p2->p3, ...
+                    num_animation_frames = total_frames - 1 # Frames 1 to total_frames-1
+
+                    if num_animation_segments > 0 and num_animation_frames > 0:
+                        # Find which segment and t value corresponds to frame_index
+                        target_frame_in_animation = frame_index # (since frame_index starts at 0, frame 1 is target 1)
+                        cumulative_frames = 0
+                        segment_found = False
+                        for k in range(num_animation_segments):
+                            base_frames_per_segment = num_animation_frames // num_animation_segments
+                            remainder_frames = num_animation_frames % num_animation_segments
+                            num_steps_this_segment = base_frames_per_segment + (1 if k < remainder_frames else 0)
+                            
+                            if num_steps_this_segment == 0: continue
+
+                            if target_frame_in_animation <= cumulative_frames + num_steps_this_segment:
+                                # Target frame falls within this segment (k)
+                                p_segment_start = control_points[k + 1]
+                                p_segment_end = control_points[k + 2]
+                                frame_within_segment = target_frame_in_animation - cumulative_frames
+                                
+                                t = frame_within_segment / num_steps_this_segment # Linear t [slightly > 0 to 1.0]
+                                eased_t = 0.0
+
+                                if bounce_between > 0.0 and num_steps_this_segment > 1: # Need at least 2 steps to bounce
+                                    target_t_near = 1.0 - bounce_between * 0.5
+                                    target_t_near = max(0.01, target_t_near) # Avoid division by zero or extreme scaling
+
+                                    # Scale t based on reaching target_t_near
+                                    current_t_scaled_for_ease = min(1.0, t / target_t_near) if target_t_near > 0 else 1.0
+                                    eased_t_part1 = ease_out(current_t_scaled_for_ease)
+
+                                    # Calculate bounce phase if t is past target_t_near
+                                    bounce_phase_t = max(0.0, (t - target_t_near) / (1.0 - target_t_near)) if (1.0 - target_t_near) > 1e-6 else 0.0
+                                    
+                                    # Apply bounce curve (cosine based)
+                                    # Change overshoot factor to directly use bounce_between for amplitude
+                                    bounce_curve = 0.5 * (1 - np.cos(bounce_phase_t * np.pi))
+                                    
+                                    # Blend between eased approach and bounce motion
+                                    # Target amplitude of bounce relative to segment length
+                                    target_overshoot_displacement = (p_segment_end - p_segment_start) * bounce_between 
+                                    
+                                    # Calculate position based on eased part and add bounce displacement
+                                    position_at_eased_t = p_segment_start + (p_segment_end - p_segment_start) * eased_t_part1
+                                    
+                                    # Direction of bounce is typically along the segment direction
+                                    segment_vector = p_segment_end - p_segment_start
+                                    segment_direction = segment_vector / np.linalg.norm(segment_vector) if np.linalg.norm(segment_vector) > 0 else np.array([0,0])
+
+                                    # Apply bounce displacement along the segment direction
+                                    bounce_displacement_vector = segment_direction * bounce_curve * np.linalg.norm(target_overshoot_displacement) * bounce_phase_t
+                                    p_interpolated = position_at_eased_t + bounce_displacement_vector
+                                else: # No bounce or not enough steps for bounce
+                                    eased_t = apply_easing(t)
+                                    p_interpolated = p_segment_start + (p_segment_end - p_segment_start) * eased_t
+
+                                target_point_relative_to_p0 = p_interpolated - p0_original
+                                segment_found = True
+                                break # Found the segment for this frame
+
+                            cumulative_frames += num_steps_this_segment
+
+                        if not segment_found:
+                            # Should not happen if logic is correct, but fallback to last point relative to p0
+                            target_point_relative_to_p0 = control_points[-1] - p0_original
+                            print(f"Warning: Segment not found for frame {frame_index}, path {path_idx}. Using last point.")
+                    else:
+                        # Not enough segments/frames for animation beyond frame 0
+                        target_point_relative_to_p0 = p1_initial - p0_original # Stay at initial target
+                else:
+                     # Only 2 control points, target stays at p1 relative to p0
+                     target_point_relative_to_p0 = p1_initial - p0_original
+
+                if target_point_relative_to_p0 is None:
+                    print(f"Warning: Could not determine target point for frame {frame_index}, path {path_idx}. Skipping draw.")
+                    continue
+
+                # --- Apply Relative vs Absolute Pivot Logic ---
+                draw_start_point = None
+                draw_end_point = None
+                length_for_draw = 0
+                normalized_v_for_draw = None
+
+                if relative:
+                    # 1. Calculate the shape's geometry based *only* on its own path, originating at p0_original
+                    #    (p0_calc, pn_calc, length_calc, normalized_v_calc)
+                    p0_calc = p0_original
+                    target_calc = p0_calc + target_point_relative_to_p0
+                    v_dir_calc = target_calc - p0_calc
+                    dir_length_calc = np.linalg.norm(v_dir_calc)
+                    pn_calc = p0_calc # Default end point is start
+                    length_calc = 0
+                    normalized_v_calc = None
+
+                    if scaling_enabled:
+                        if dir_length_calc > 0:
+                            pn_calc = target_calc
+                            length_calc = dir_length_calc
+                            normalized_v_calc = v_dir_calc / length_calc
+                    else: # Fixed Length
+                        if fixed_length > 0:
+                            length_calc = fixed_length
+                            if dir_length_calc > 0:
+                                normalized_v_calc = v_dir_calc / dir_length_calc
+                                pn_calc = p0_calc + normalized_v_calc * length_calc
+                            elif fixed_v_normalized is not None:
+                                normalized_v_calc = fixed_v_normalized
+                                pn_calc = p0_calc + normalized_v_calc * length_calc
+
+                    # 2. Determine the initial offset (once per path, could be cached outside frame loop if performance needed)
+                    initial_pivot_point = p0_original # Default if no dynamic pivot used for frame 0
+                    if use_dynamic_pivot and pivot_points_adjusted:
+                        initial_pivot_point = pivot_points_adjusted[0]
+                    initial_offset_vector = p0_original - initial_pivot_point
+
+                    # 3. Apply the *initial* offset to the *current* pivot point to get the draw start point
+                    frame_pivot_point = current_pivot # Already determined for this frame
+                    draw_start_point = frame_pivot_point + initial_offset_vector
+
+                    # 4. Calculate the draw end point by applying the shape's calculated vector to the draw start point
+                    shape_vector = pn_calc - p0_calc
+                    draw_end_point = draw_start_point + shape_vector
+
+                    # 5. Set draw parameters
+                    length_for_draw = length_calc
+                    normalized_v_for_draw = normalized_v_calc
+
+                else: # Absolute pivot positioning (previous logic)
+                    # Calculate offset target based on current pivot
+                    offset_target = current_pivot + target_point_relative_to_p0
+
+                    # Determine vector, length, end point (pn) based on current_pivot, offset_target, scaling
+                    v_dir = offset_target - current_pivot
+                    dir_length = np.linalg.norm(v_dir)
+                    pn = current_pivot # Default end point is the pivot itself
+                    length = 0
+                    normalized_v = None
+
+                    if scaling_enabled:
+                        if dir_length > 0:
+                            pn = offset_target
+                            length = dir_length
+                            normalized_v = v_dir / length
+                    else: # Fixed Length
+                        if fixed_length > 0:
+                            length = fixed_length
+                            if dir_length > 0:
+                                normalized_v = v_dir / dir_length
+                                pn = current_pivot + normalized_v * length
+                            elif fixed_v_normalized is not None:
+                                normalized_v = fixed_v_normalized
+                                pn = current_pivot + normalized_v * length
+
+                    # Set draw parameters
+                    draw_start_point = current_pivot
+                    draw_end_point = pn
+                    length_for_draw = length
+                    normalized_v_for_draw = normalized_v
+
+                # --- Draw the polygon for this path using calculated/offset points ---
+                if length_for_draw > 0 and normalized_v_for_draw is not None and draw_start_point is not None and draw_end_point is not None:
+                    perp_v = np.array([-normalized_v_for_draw[1], normalized_v_for_draw[0]])
+                    
+                    # Calculate half-widths for start and end based on inputs
+                    half_w_start = perp_v * (shape_width / 2.0)
+                    
+                    # Use shape_width_end if > 0, otherwise use shape_width
+                    end_width = shape_width_end if shape_width_end > 0 else shape_width
+                    half_w_end = perp_v * (end_width / 2.0)
+                    
+                    # Use draw_start_point and draw_end_point for corners with respective widths
+                    c1 = tuple((draw_start_point - half_w_start).astype(int))
+                    c2 = tuple((draw_start_point + half_w_start).astype(int))
+                    c3 = tuple((draw_end_point + half_w_end).astype(int)) # Use end width at the end point
+                    c4 = tuple((draw_end_point - half_w_end).astype(int)) # Use end width at the end point
+
+                    draw_frame.polygon([c1, c2, c3, c4], fill=fill_rgb)
+
+            # --- Post-processing for the completed frame ---
+            if blur_radius > 0.0:
+                img_frame = img_frame.filter(ImageFilter.GaussianBlur(blur_radius))
+
+            current_frame_tensor = pil2tensor(img_frame)
+
+            if trailing > 0.0 and previous_frame_tensor is not None:
+                current_frame_tensor = current_frame_tensor + trailing * previous_frame_tensor
+                # Normalize after adding trailing to prevent exceeding 1.0 (or clamp)
+                max_val = torch.max(current_frame_tensor)
+                if max_val > 1.0:
+                    current_frame_tensor = current_frame_tensor / max_val # Normalize
+                # Alternative: Clamping
+                # current_frame_tensor = torch.clamp(current_frame_tensor, 0.0, 1.0)
+
+            previous_frame_tensor = current_frame_tensor.clone() # Store state before intensity multiplication
+
+            current_frame_tensor = current_frame_tensor * intensity
+            # Optional: Clamp again after intensity if intensity > 1.0
+            # current_frame_tensor = torch.clamp(current_frame_tensor, 0.0) # Clamp min at 0?
+
+            output_images.append(current_frame_tensor)
+
+        # --- Final Output ---
+        if not output_images:
+            print("Warning: No frames generated. Returning a single blank image.")
+            img = Image.new('RGB', (frame_width, frame_height), color=bg_color)
+            return (pil2tensor(img),)
+
+        batch_output = torch.cat(output_images, dim=0)
+        return (batch_output,)
+
+class DriverOffsetCoordinates:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "driver_coords": ("STRING", {"multiline": False, "forceInput": True}),
+                "driven_coords": ("STRING", {"multiline": False, "forceInput": True}),
+                "smooth_out": ("FLOAT", {"default": 0.85, "min": 0.0, "max": 1.0, "step": 0.01}),
+                "delay": ("INT", {"default": 0, "min": 0, "max": 100, "step": 1}),
+                "rotate": ("INT", {"default": 0, "min": 0, "max": 360, "step": 1}),
+            }
+        }
+
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("output_coords",)
+    FUNCTION = "execute"
+    CATEGORY = "KJNodes/coords"
+    DESCRIPTION = """Applies rotated, smoothed, and delayed offsets from driver coordinates to driven coordinates."""
+
+    def execute(self, driver_coords, driven_coords, smooth_out, delay, rotate):
+        try:
+            # Use replace("'", '"') for potentially malformed JSON strings
+            D_orig = json.loads(driver_coords.replace("'", '"'))
+            Dn = json.loads(driven_coords.replace("'", '"'))
+        except json.JSONDecodeError as e:
+            print(f"DriverOffsetCoordinates Error: Invalid JSON input - {e}")
+            return (driven_coords,)
+        except Exception as e:
+            print(f"DriverOffsetCoordinates Error: Could not parse coordinates - {e}")
+            return (driven_coords,)
+
+        len_dn = len(Dn)
+        if len_dn == 0:
+            return (driven_coords,)
+
+        len_d_orig = len(D_orig)
+        if len_d_orig == 0:
+            print("DriverOffsetCoordinates Warning: Driver coordinates are empty. Returning driven coordinates unchanged.")
+            return (driven_coords,)
+
+        # --- Rotation Step --- (Operate on a copy)
+        D = [coord.copy() for coord in D_orig] # Work on a copy for rotation
+        len_d = len(D)
+
+        if rotate != 0 and len_d >= 2:
+            try:
+                pivot_x = float(D[0]['x'])
+                pivot_y = float(D[0]['y'])
+                angle_rad = math.radians(rotate)
+                cos_a = math.cos(angle_rad)
+                sin_a = math.sin(angle_rad)
+
+                for j in range(1, len_d):
+                    px = float(D[j]['x'])
+                    py = float(D[j]['y'])
+
+                    rel_x = px - pivot_x
+                    rel_y = py - pivot_y
+
+                    new_rel_x = rel_x * cos_a - rel_y * sin_a
+                    new_rel_y = rel_x * sin_a + rel_y * cos_a
+
+                    D[j]['x'] = new_rel_x + pivot_x
+                    D[j]['y'] = new_rel_y + pivot_y
+            except KeyError as e:
+                print(f"DriverOffsetCoordinates Error: Missing 'x' or 'y' key during rotation - {e}")
+                return (driven_coords,) # Abort if keys are missing
+            except ValueError as e:
+                print(f"DriverOffsetCoordinates Error: Cannot convert coordinate to float during rotation - {e}")
+                return (driven_coords,) # Abort if conversion fails
+
+        # --- Padding Step --- (Use potentially rotated D)
+        if len_d < len_dn:
+            print(f"DriverOffsetCoordinates Info: Driver coords shorter ({len_d}) than driven ({len_dn}). Padding driver with last coordinate.")
+            if len_d > 0:
+                 last_driver_coord = D[-1]
+                 D.extend([last_driver_coord.copy() for _ in range(len_dn - len_d)])
+            else:
+                 # This case should be impossible now due to earlier check
+                 print("DriverOffsetCoordinates Warning: Driver coords empty after rotation (should not happen), padding with {'x':0, 'y':0}.")
+                 D.extend([{'x':0.0, 'y':0.0}] * len_dn)
+            len_d = len(D)
+
+        # --- Smoothing Step --- (Use potentially rotated and padded D)
+        SmoothD = [None] * len_d
+        if len_d > 0:
+            try:
+                # Ensure coords are floats for calculation
+                SmoothD[0] = {'x': float(D[0]['x']), 'y': float(D[0]['y'])}
+                alpha = 1.0 - smooth_out
+                for j in range(1, len_d):
+                    prev_smooth_x = SmoothD[j-1]['x']
+                    prev_smooth_y = SmoothD[j-1]['y']
+                    # Ensure current coords are floats
+                    current_x = float(D[j]['x'])
+                    current_y = float(D[j]['y'])
+                    smooth_x = alpha * current_x + (1.0 - alpha) * prev_smooth_x
+                    smooth_y = alpha * current_y + (1.0 - alpha) * prev_smooth_y
+                    SmoothD[j] = {'x': smooth_x, 'y': smooth_y}
+            except KeyError as e:
+                print(f"DriverOffsetCoordinates Error: Missing 'x' or 'y' key during smoothing - {e}")
+                return (driven_coords,)
+            except ValueError as e:
+                print(f"DriverOffsetCoordinates Error: Cannot convert coordinate to float during smoothing - {e}")
+                return (driven_coords,)
+        else:
+             SmoothD = []
+
+        # --- Offset Application Step ---
+        OutputCoords = [None] * len_dn
+        RefOffsetX = SmoothD[0]['x'] if len(SmoothD) > 0 else 0.0
+        RefOffsetY = SmoothD[0]['y'] if len(SmoothD) > 0 else 0.0
+
+        for i in range(len_dn):
+            try:
+                # Ensure driven coords are floats
+                current_driven_x = float(Dn[i]['x'])
+                current_driven_y = float(Dn[i]['y'])
+
+                if i < delay:
+                    # Keep original driven coord (as float)
+                    OutputCoords[i] = {'x': current_driven_x, 'y': current_driven_y}
+                else:
+                    # Apply offset after delay period
+                    driver_idx = i - delay
+                    if 0 <= driver_idx < len(SmoothD):
+                        driver_smooth_x = SmoothD[driver_idx]['x']
+                        driver_smooth_y = SmoothD[driver_idx]['y']
+                    elif len(SmoothD) > 0:
+                        print(f"DriverOffsetCoordinates Warning: driver_idx {driver_idx} out of bounds for SmoothD (len {len(SmoothD)}). Using last.")
+                        driver_smooth_x = SmoothD[-1]['x']
+                        driver_smooth_y = SmoothD[-1]['y']
+                    else:
+                        driver_smooth_x = 0.0
+                        driver_smooth_y = 0.0
+
+                    offset_x = driver_smooth_x - RefOffsetX
+                    offset_y = driver_smooth_y - RefOffsetY
+
+                    output_x = current_driven_x + offset_x
+                    output_y = current_driven_y + offset_y
+
+                    OutputCoords[i] = {'x': output_x, 'y': output_y}
+            except KeyError as e:
+                print(f"DriverOffsetCoordinates Error: Missing 'x' or 'y' key during offset application - {e}")
+                # Return partially processed coords or original driven? Return original for safety.
+                return (driven_coords,)
+            except ValueError as e:
+                print(f"DriverOffsetCoordinates Error: Cannot convert coordinate to float during offset application - {e}")
+                return (driven_coords,)
+
+        # Format output as JSON string
+        output_json = json.dumps(OutputCoords, separators=(',', ':'))
+
+        return (output_json,)
