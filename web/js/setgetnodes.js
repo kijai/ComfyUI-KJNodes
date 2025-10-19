@@ -103,11 +103,9 @@ app.registerExtension({
 					}
 					//On Connect
 					if (link_info && node.graph && slotType == 1 && isChangeConnect) {
-						const fromNode = node.graph._nodes.find((otherNode) => otherNode.id == link_info.origin_id);
-						
-						if (fromNode && fromNode.outputs && fromNode.outputs[link_info.origin_slot]) {
-							const type = fromNode.outputs[link_info.origin_slot].type;
-						
+						const resolve = link_info.resolve(node.graph)
+						const type = (resolve?.subgraphInput ?? resolve?.output)?.type
+						if (type) {
 							if (this.title === "Set"){
 								this.title = (!disablePrefix ? "Set_" : "") + type;
 							}
