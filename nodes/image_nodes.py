@@ -97,6 +97,10 @@ https://github.com/hahnec/color-matcher/
 """
     
     def colormatch(self, image_ref, image_target, method, strength=1.0, multithread=True):
+        # Skip unnecessary processing
+        if strength == 0:
+            return (image_target,)
+
         try:
             from color_matcher import ColorMatcher
         except:
@@ -117,9 +121,12 @@ https://github.com/hahnec/color-matcher/
             image_target_np_i = images_target_np if batch_size == 1 else images_target[i].numpy()
             image_ref_np_i = image_ref_np if image_ref.size(0) == 1 else images_ref[i].numpy()
             try:
-                image_result = cm.transfer(src=image_target_np_i, ref=image_ref_np_i, method=method)
-                image_result = image_target_np_i + strength * (image_result - image_target_np_i)
+                image_result = cm.transfer(src=image_target_np_i, ref=image_ref_np_i, method=method) # Avoid potential blur when only the fully color-matched image is used
+                if strength != 1:
+                    image_result = image_target_np_i + strength * (image_result - image_target_np_i)
+                    
                 return torch.from_numpy(image_result)
+                
             except Exception as e:
                 print(f"Thread {i} error: {e}")
                 return torch.from_numpy(image_target_np_i)  # fallback
