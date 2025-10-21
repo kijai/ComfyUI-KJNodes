@@ -2475,7 +2475,7 @@ class ImageResizeKJv2:
                 "width": ("INT", { "default": 512, "min": 0, "max": MAX_RESOLUTION, "step": 1, }),
                 "height": ("INT", { "default": 512, "min": 0, "max": MAX_RESOLUTION, "step": 1, }),
                 "upscale_method": (s.upscale_methods,),
-                "keep_proportion": (["stretch", "resize", "pad", "pad_edge", "pad_edge_pixel", "crop", "pillarbox_blur"], { "default": False }),
+                "keep_proportion": (["stretch", "resize", "pad", "pad_edge", "pad_edge_pixel", "crop", "pillarbox_blur", "total_pixels"], { "default": False }),
                 "pad_color": ("STRING", { "default": "0, 0, 0", "tooltip": "Color to use for padding."}),
                 "crop_position": (["center", "top", "bottom", "left", "right"], { "default": "center" }),
                 "divisible_by": ("INT", { "default": 2, "min": 0, "max": 512, "step": 1, }),
@@ -2512,19 +2512,23 @@ highest dimension.
         else:
             device = torch.device("cpu")
 
-        if width == 0:
-            width = W
-        if height == 0:
-            height = H
-
         pillarbox_blur = keep_proportion == "pillarbox_blur"
         
         # Initialize padding variables
         pad_left = pad_right = pad_top = pad_bottom = 0
-        
-        if keep_proportion == "resize" or keep_proportion.startswith("pad") or pillarbox_blur:
+
+        if keep_proportion in ["resize", "total_pixels"] or keep_proportion.startswith("pad") or pillarbox_blur:
+            if keep_proportion == "total_pixels":
+                total_pixels = width * height
+                aspect_ratio = W / H
+                new_height = int(math.sqrt(total_pixels / aspect_ratio))
+                new_width = int(math.sqrt(total_pixels * aspect_ratio))
+                
             # If one of the dimensions is zero, calculate it to maintain the aspect ratio
-            if width == 0 and height != 0:
+            elif width == 0 and height == 0:
+                new_width = W
+                new_height = H
+            elif width == 0 and height != 0:
                 ratio = height / H
                 new_width = round(W * ratio)
                 new_height = height
@@ -2570,6 +2574,11 @@ highest dimension.
 
             width = new_width
             height = new_height
+        else:
+            if width == 0:
+                width = W
+            if height == 0:
+                height = H
 
         if divisible_by > 1:
             width = width - (width % divisible_by)

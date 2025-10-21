@@ -103,11 +103,9 @@ app.registerExtension({
 					}
 					//On Connect
 					if (link_info && node.graph && slotType == 1 && isChangeConnect) {
-						const fromNode = node.graph._nodes.find((otherNode) => otherNode.id == link_info.origin_id);
-						
-						if (fromNode && fromNode.outputs && fromNode.outputs[link_info.origin_slot]) {
-							const type = fromNode.outputs[link_info.origin_slot].type;
-						
+						const resolve = link_info.resolve(node.graph)
+						const type = (resolve?.subgraphInput ?? resolve?.output)?.type
+						if (type) {
 							if (this.title === "Set"){
 								this.title = (!disablePrefix ? "Set_" : "") + type;
 							}
@@ -470,9 +468,8 @@ app.registerExtension({
 				};
 
 				this.goToSetter = function() {
-					const setter = this.findSetter(this.graph);	
-					this.canvas.centerOnNode(setter);
-					this.canvas.selectNode(setter, false);
+					this.canvas.centerOnNode(this.currentSetter);
+					this.canvas.selectNode(this.currentSetter, false);
 				};
 				
 				// This node is purely frontend and does not impact the resulting prompt so should not be serialized
@@ -496,7 +493,8 @@ app.registerExtension({
 			}
 			getExtraMenuOptions(_, options) {
 				let menuEntry = this.drawConnection ? "Hide connections" : "Show connections";
-				
+				this.currentSetter = this.findSetter(this.graph)
+				if (!this.currentSetter) return
 				options.unshift(
 					{
 						content: "Go to setter",
@@ -507,12 +505,9 @@ app.registerExtension({
 					{
 						content: menuEntry,
 						callback: () => {
-							this.currentSetter = this.findSetter(this.graph);
-							if (this.currentSetter.length == 0) return;
-							let linkType = (this.currentSetter.inputs[0].type);	
+							let linkType = (this.currentSetter.inputs[0].type);
 							this.drawConnection = !this.drawConnection;
 							this.slotColor = this.canvas.default_connection_color_byType[linkType]
-							menuEntry = this.drawConnection ? "Hide connections" : "Show connections";
 							this.canvas.setDirty(true, true);
 						},
 					},

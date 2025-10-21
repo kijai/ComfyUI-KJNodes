@@ -709,6 +709,7 @@ class TorchCompileModelFluxAdvancedV2:
                 },
                 "optional": {
                     "dynamo_cache_size_limit": ("INT", {"default": 64, "min": 0, "max": 1024, "step": 1, "tooltip": "torch._dynamo.config.cache_size_limit"}),
+                    "force_parameter_static_shapes": ("BOOLEAN", {"default": True, "tooltip": "torch._dynamo.config.force_parameter_static_shapes"}),
                 }
                 }
     RETURN_TYPES = ("MODEL",)
@@ -717,11 +718,12 @@ class TorchCompileModelFluxAdvancedV2:
     CATEGORY = "KJNodes/torchcompile"
     EXPERIMENTAL = True
 
-    def patch(self, model, backend, mode, fullgraph, single_blocks, double_blocks, dynamic, dynamo_cache_size_limit):
+    def patch(self, model, backend, mode, fullgraph, single_blocks, double_blocks, dynamic, dynamo_cache_size_limit=64, force_parameter_static_shapes=True):
         from comfy_api.torch_helpers import set_torch_compile_wrapper
         m = model.clone()
         diffusion_model = m.get_model_object("diffusion_model")
         torch._dynamo.config.cache_size_limit = dynamo_cache_size_limit
+        torch._dynamo.config.force_parameter_static_shapes = force_parameter_static_shapes
 
         compile_key_list = []
         
@@ -872,6 +874,10 @@ class TorchCompileModelWanVideoV2:
                 "dynamic": ("BOOLEAN", {"default": False, "tooltip": "Enable dynamic mode"}),
                 "compile_transformer_blocks_only": ("BOOLEAN", {"default": True, "tooltip": "Compile only transformer blocks, faster compile and less error prone"}),
                 "dynamo_cache_size_limit": ("INT", {"default": 64, "min": 0, "max": 1024, "step": 1, "tooltip": "torch._dynamo.config.cache_size_limit"}),
+                
+            },
+            "optional": {
+                "force_parameter_static_shapes": ("BOOLEAN", {"default": True, "tooltip": "torch._dynamo.config.force_parameter_static_shapes"}),
             },
         }
     RETURN_TYPES = ("MODEL",)
@@ -880,11 +886,12 @@ class TorchCompileModelWanVideoV2:
     CATEGORY = "KJNodes/torchcompile"
     EXPERIMENTAL = True
 
-    def patch(self, model, backend, fullgraph, mode, dynamic, dynamo_cache_size_limit, compile_transformer_blocks_only):
+    def patch(self, model, backend, fullgraph, mode, dynamic, dynamo_cache_size_limit, compile_transformer_blocks_only, force_parameter_static_shapes=True):
         from comfy_api.torch_helpers import set_torch_compile_wrapper
         m = model.clone()
         diffusion_model = m.get_model_object("diffusion_model")
-        torch._dynamo.config.cache_size_limit = dynamo_cache_size_limit            
+        torch._dynamo.config.cache_size_limit = dynamo_cache_size_limit
+        torch._dynamo.config.force_parameter_static_shapes = force_parameter_static_shapes
         try:
             if compile_transformer_blocks_only:
                 compile_key_list = []
