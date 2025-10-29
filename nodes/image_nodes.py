@@ -1774,6 +1774,84 @@ Returns a range of images from a batch.
             chosen_masks = masks[start_index:end_index]
 
         return (chosen_images, chosen_masks,)
+    
+class ImageBatchExtendWithOverlap:
+    
+    RETURN_TYPES = ("IMAGE", "IMAGE", "IMAGE", )
+    RETURN_NAMES = ("source_images", "start_images", "extended_images")
+    OUTPUT_TOOLTIPS = (
+        "The original source images (passthrough)",
+        "The input images used as the starting point for extension",
+        "The extended images with overlap, if no new images are provided this will be empty",
+    )
+    FUNCTION = "imagesfrombatch"
+    CATEGORY = "KJNodes/image"
+    DESCRIPTION = """
+Helper node for video generation extension   
+First input source and overlap amount to get the starting frames for the extension.  
+Then on another copy of the node provide the newly generated frames and choose how to overlap them.
+"""
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "source_images": ("IMAGE", {"tooltip": "The source images to extend"}),
+                "overlap": ("INT", {"default": 13,"min": 1, "max": 4096, "step": 1, "tooltip": "Number of overlapping frames between source and new images"}),
+                "overlap_side": (["source", "new_images"], {"default": "source", "tooltip": "Which side to overlap on"}),
+                "overlap_mode": (["cut", "linear_blend", "ease_in_out"], {"default": "linear_blend", "tooltip": "Method to use for overlapping frames"}),
+        },
+        "optional": {
+            "new_images": ("IMAGE", {"tooltip": "The new images to extend with"}),
+        }
+    } 
+    
+    def imagesfrombatch(self, source_images, overlap, overlap_side, overlap_mode, new_images=None):
+        if overlap >= len(source_images):
+            return source_images, source_images, source_images
+
+        if new_images is not None:
+            if source_images.shape[1:3] != new_images.shape[1:3]:
+                raise ValueError(f"Source and new images must have the same shape: {source_images.shape[1:3]} vs {new_images.shape[1:3]}")
+            # Determine where to place the overlap
+            prefix = source_images[:-overlap]
+            if overlap_side == "source":
+                blend_src = source_images[-overlap:]
+                blend_dst = new_images[:overlap]
+            elif overlap_side == "new_images":
+                blend_src = new_images[:overlap]
+                blend_dst = source_images[-overlap:]
+            suffix = new_images[overlap:]
+
+            if overlap_mode == "linear_blend":
+                blended_images = [
+                    crossfade(blend_src[i], blend_dst[i], (i + 1) / (overlap + 1))
+                    for i in range(overlap)
+                ]
+                blended_images = torch.stack(blended_images, dim=0)
+                extended_images = torch.cat((prefix, blended_images, suffix), dim=0)
+            elif overlap_mode == "ease_in_out":
+                blended_images = []
+                for i in range(overlap):
+                    t = (i + 1) / (overlap + 1)
+                    eased_t = ease_in_out(t)
+                    blended_image = crossfade(blend_src[i], blend_dst[i], eased_t)
+                    blended_images.append(blended_image)
+                blended_images = torch.stack(blended_images, dim=0)
+                extended_images = torch.cat((prefix, blended_images, suffix), dim=0)
+              
+            elif overlap_mode == "cut":
+                extended_images = torch.cat((prefix, suffix), dim=0)
+                if overlap_side == "new_images":
+                   extended_images = torch.cat((source_images, new_images[overlap:]), dim=0)
+                elif overlap_side == "source":
+                   extended_images = torch.cat((source_images[:-overlap], new_images), dim=0)
+        else:
+            extended_images = torch.zeros((1, 64, 64, 3), device="cpu")
+
+        start_images = source_images[-overlap:]
+
+        return (source_images, start_images, extended_images)
 
 class GetLatentRangeFromBatch:
     
