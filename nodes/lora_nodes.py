@@ -240,6 +240,9 @@ class LoraExtractKJ:
 
         if scaled_fp8_ft is not None and scaled_fp8_orig is not None:
             comfy.model_management.load_models_gpu([finetuned_model, original_model], force_patch_weights=True)
+            logging.info(
+                "LoraExtractKJ: detected scaled fp8 weights on both models; using high-precision diff path."
+            )
             sd_override = _build_scaled_fp8_diff(
                 finetuned_model, original_model, "diffusion_model.", bias_diff
             )
