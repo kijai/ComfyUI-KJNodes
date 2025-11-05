@@ -1,13 +1,15 @@
-import { app } from "../../../scripts/app.js";
+const { app } = window.comfyAPI.app;
 
 //based on diffus3's SetGet: https://github.com/diffus3/ComfyUI-extensions
 
 // Nodes that allow you to tunnel connections for cleaner graphs
 function setColorAndBgColor(type) {
     const colorMap = {
+		"DEFAULT": LGraphCanvas.node_colors.gray,
         "MODEL": LGraphCanvas.node_colors.blue,
         "LATENT": LGraphCanvas.node_colors.purple,
         "VAE": LGraphCanvas.node_colors.red,
+		"WANVAE": LGraphCanvas.node_colors.red,
         "CONDITIONING": LGraphCanvas.node_colors.brown,
         "IMAGE": LGraphCanvas.node_colors.pale_blue,
         "CLIP": LGraphCanvas.node_colors.yellow,
@@ -21,12 +23,17 @@ function setColorAndBgColor(type) {
 		"SIGMAS": { color: "#485248", bgcolor: "#272e27"},
 
     };
-
+	console.log("Setting color for type:", colorMap[type]);
     const colors = colorMap[type];
     if (colors) {
         this.color = colors.color;
         this.bgcolor = colors.bgcolor;
     }
+	else{
+		// Default color
+		this.color = LGraphCanvas.node_colors.gray;
+		this.bgcolor = LGraphCanvas.node_colors.gray;
+	}
 }
 let disablePrefix = app.ui.settings.getSettingValue("KJNodes.disablePrefix")
 const LGraphNode = LiteGraph.LGraphNode

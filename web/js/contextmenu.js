@@ -1,4 +1,4 @@
-import { app } from "../../../scripts/app.js";
+const { app } = window.comfyAPI.app;
 
 // Adds context menu entries, code partly from pyssssscustom-scripts
 

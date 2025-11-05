@@ -1,4 +1,4 @@
-import { app } from '../../../scripts/app.js'
+const { app } = window.comfyAPI.app;
 
 //from melmass
 export function makeUUID() {

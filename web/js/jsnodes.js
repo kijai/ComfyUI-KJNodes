@@ -1,5 +1,5 @@
-import { app } from "../../../scripts/app.js";
-import { applyTextReplacements } from "../../../scripts/utils.js";
+const { app } = window.comfyAPI.app;
+const { applyTextReplacements } = window.comfyAPI.utils;
 
 app.registerExtension({
 	name: "KJNodes.jsnodes",
