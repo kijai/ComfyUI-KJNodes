@@ -661,7 +661,10 @@ class PointsEditor {
   createContextMenu = () => {
     self = this;
     document.addEventListener('contextmenu', function (e) {
+    if (e.target.closest(`#points-editor-${self.node.uuid}`) || 
+        e.target.closest('#context-menu')) {
       e.preventDefault();
+      }
     });
 
     document.addEventListener('click', function (e) {
