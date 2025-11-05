@@ -150,7 +150,7 @@ class PathchSageAttentionKJ():
             "sage_attention": (sageattn_modes, {"default": False, "tooltip": "Global patch comfy attention to use sageattn, once patched to revert back to normal you would need to run this node again with disabled option."}),
         },
         "optional": {
-            "allow_compile": ("BOOLEAN", {"default": False, "tooltip": "Allow the use of torch.compile for the new attention function."})
+            "allow_compile": ("BOOLEAN", {"default": False, "tooltip": "Allow the use of torch.compile for the sage attention function, requires latest sageattn 2.2.0 or higher."})
             }
         }
 
