@@ -65,7 +65,6 @@ def get_sage_func(sage_attention, allow_compile=False):
         else:
             def sage_func(q, k, v, is_causal=False, attn_mask=None, **kwargs):
                 return sageattn3_blackwell(q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2), is_causal=is_causal, attn_mask=attn_mask, per_block_mean=False).transpose(1, 2)
-    logging.info(f"Sage attention function: {sage_func}")
 
     if not allow_compile:
         sage_func = torch.compiler.disable()(sage_func)
@@ -204,7 +203,7 @@ class CheckpointLoaderKJ(BaseLoaderKJ):
         model_options = {}
         if dtype := DTYPE_MAP.get(weight_dtype):
             model_options["dtype"] = dtype
-            print(f"Setting {ckpt_name} weight dtype to {dtype}")
+            logging.info(f"Setting {ckpt_name} weight dtype to {dtype}")
 
         if weight_dtype == "fp8_e4m3fn_fast":
             model_options["dtype"] = torch.float8_e4m3fn
@@ -224,7 +223,7 @@ class CheckpointLoaderKJ(BaseLoaderKJ):
         if dtype := DTYPE_MAP.get(compute_dtype):
             model.set_model_compute_dtype(dtype)
             model.force_cast_weights = False
-            print(f"Setting {ckpt_name} compute dtype to {dtype}")
+            logging.info(f"Setting {ckpt_name} compute dtype to {dtype}")
 
         if enable_fp16_accumulation:
             if hasattr(torch.backends.cuda.matmul, "allow_fp16_accumulation"):
@@ -373,7 +372,7 @@ class DiffusionModelLoaderKJ(BaseLoaderKJ):
         model_options = {}
         if dtype := DTYPE_MAP.get(weight_dtype):
             model_options["dtype"] = dtype
-            print(f"Setting {model_name} weight dtype to {dtype}")
+            logging.info(f"Setting {model_name} weight dtype to {dtype}")
         
         if weight_dtype == "fp8_e4m3fn_fast":
             model_options["dtype"] = torch.float8_e4m3fn
@@ -400,7 +399,7 @@ class DiffusionModelLoaderKJ(BaseLoaderKJ):
         if dtype := DTYPE_MAP.get(compute_dtype):
             model.set_model_compute_dtype(dtype)
             model.force_cast_weights = False
-            print(f"Setting {model_name} compute dtype to {dtype}")
+            logging.info(f"Setting {model_name} compute dtype to {dtype}")
 
         if sage_attention != "disabled":
             new_attention = get_sage_func(sage_attention)
@@ -430,10 +429,10 @@ class ModelPatchTorchSettings:
         model_clone = model.clone()
 
         def patch_enable_fp16_accum(model):
-            print("Patching torch settings: torch.backends.cuda.matmul.allow_fp16_accumulation = True")
+            logging.info("Patching torch settings: torch.backends.cuda.matmul.allow_fp16_accumulation = True")
             torch.backends.cuda.matmul.allow_fp16_accumulation = True
         def patch_disable_fp16_accum(model):
-            print("Patching torch settings: torch.backends.cuda.matmul.allow_fp16_accumulation = False")
+            logging.info("Patching torch settings: torch.backends.cuda.matmul.allow_fp16_accumulation = False")
             torch.backends.cuda.matmul.allow_fp16_accumulation = False
         
         if enable_fp16_accumulation:
@@ -505,12 +504,12 @@ def patched_load_lora_for_models(model, clip, lora, strength_model, strength_cli
     k1 = set(k1)
     for x in loaded:
         if (x not in k) and (x not in k1):
-            print("NOT LOADED {}".format(x))
+            logging.warning("NOT LOADED {}".format(x))
 
     if patch_keys:
         if hasattr(model.model, "compile_settings"):
             compile_settings = getattr(model.model, "compile_settings")
-            print("compile_settings: ", compile_settings)
+            logging.info("compile_settings: ", compile_settings)
             for k in patch_keys:
                 if "diffusion_model." in k:
                     # Remove the prefix to get the attribute path
@@ -541,8 +540,8 @@ class PatchModelPatcherOrder:
     RETURN_TYPES = ("MODEL",)
     FUNCTION = "patch"
     CATEGORY = "KJNodes/experimental"
-    DESCRIPTION = "Patch the comfy patch_model function patching order, useful for torch.compile (used as object_patch) as it should come last if you want to use LoRAs with compile"
-    EXPERIMENTAL = True
+    DESCRIPTION = "NO LONGER NECESSARY, keeping node for backwards compatibility. Use the v2 compile nodes to use LoRA with torch.compile."
+    DEPRECATED = True
 
     def patch(self, model, patch_order, full_load):
         comfy.model_patcher.ModelPatcher.temp_object_patches_backup = {}
