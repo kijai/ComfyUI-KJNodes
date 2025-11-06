@@ -3891,29 +3891,34 @@ class ImagePadKJ:
 class LoadVideosFromFolder:
     @classmethod
     def __init__(cls):
+        cls.vhs_nodes = None
+        vhs_pkg_name = "ComfyUI-VideoHelperSuite"
+        vhs_pkg_name_lower = vhs_pkg_name.lower()
+        vhs_pkg_name_suffix = vhs_pkg_name_lower.split("-")[-1]
+        vhs_submodule_name = "videohelpersuite"
         try:
-            cls.vhs_nodes = importlib.import_module("ComfyUI-VideoHelperSuite.videohelpersuite")
+            cls.vhs_nodes = importlib.import_module(vhs_pkg_name+"."+vhs_submodule_name)
         except ImportError:
             try:
-                cls.vhs_nodes = importlib.import_module("comfyui-videohelpersuite.videohelpersuite")
+                cls.vhs_nodes = importlib.import_module(vhs_pkg_name_lower+"."+vhs_submodule_name)
             except ImportError:
                 # Fallback to sys.modules search for Windows compatibility
                 import sys
                 vhs_module = None
                 for module_name in sys.modules:
-                    if 'videohelpersuite' in module_name and 'videohelpersuite' in sys.modules[module_name].__dict__:
+                    if vhs_pkg_name_lower in module_name and vhs_submodule_name in sys.modules[module_name].__dict__:
                         vhs_module = sys.modules[module_name]
                         break
                 
                 if vhs_module is None:
                     # Try direct access to the videohelpersuite submodule
                     for module_name in sys.modules:
-                        if module_name.endswith('videohelpersuite'):
+                        if module_name.endswith(vhs_pkg_name_suffix):
                             vhs_module = sys.modules[module_name]
                             break
                 
                 if vhs_module is not None:
-                    cls.vhs_nodes = vhs_module
+                    cls.vhs_nodes = importlib.import_module(f"{vhs_module.__name__}.{vhs_submodule_name}")
                 else:
                     raise ImportError("This node requires ComfyUI-VideoHelperSuite to be installed.")
                 
@@ -3949,16 +3954,26 @@ class LoadVideosFromFolder:
     FUNCTION = "load_video"
 
     def load_video(self, output_type, grid_max_columns, add_label=False, **kwargs):
+        VIDEO_EXTS = ['webm', 'mp4', 'mkv', 'gif', 'mov']
         if self.vhs_nodes is None:
             raise ImportError("This node requires ComfyUI-VideoHelperSuite to be installed.")
-        videos_list = []
-        filenames = []
-        for f in os.listdir(kwargs['video']):
-            if os.path.isfile(os.path.join(kwargs['video'], f)):
-                file_parts = f.split('.')
-                if len(file_parts) > 1 and (file_parts[-1].lower() in ['webm', 'mp4', 'mkv', 'gif', 'mov']):
-                    videos_list.append(os.path.join(kwargs['video'], f))
-                    filenames.append(f)
+        root = kwargs['video']
+        pairs = []
+        for f in os.listdir(root):
+            full = os.path.join(root, f)
+            # Skip non-files fast
+            if not os.path.isfile(full):
+                continue
+            # Check extension
+            ext = f.rsplit('.', 1)[-1].lower() if '.' in f else ''
+            if ext in VIDEO_EXTS:
+                pairs.append((full, f))
+        def _natural_key(s):
+            s = os.path.basename(s)
+            return [int(t) if t.isdigit() else t.lower() for t in re.split(r'(\d+)', s)]
+        pairs.sort(key=lambda x: _natural_key(x[1]))
+        videos_list = [p[0] for p in pairs]
+        filenames   = [p[1] for p in pairs]
         print(videos_list)
         kwargs.pop('video')
         loaded_videos = []
