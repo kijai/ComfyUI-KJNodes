@@ -669,12 +669,13 @@ Converts any type to a string.
 """
 
     def stringify(self, input, prefix="", suffix=""):
+		stringified = input
         if isinstance(input, (int, float, bool)):
             stringified = str(input)
         elif isinstance(input, list):
             stringified = ', '.join(str(item) for item in input)
-        else:
-            return
+        # else:
+        #     return
         if prefix: # Check if prefix is not empty
             stringified = prefix + stringified # Add the prefix
         if suffix: # Check if suffix is not empty
