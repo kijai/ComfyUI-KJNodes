@@ -1,4 +1,4 @@
-pillow>=10.3.0
+pillow
 scipy
 color-matcher
 matplotlib
