@@ -2145,8 +2145,8 @@ class ReplaceImagesInBatch:
     FUNCTION = "replace"
     CATEGORY = "KJNodes/image"
     DESCRIPTION = """
-Replaces the images in a batch, starting from the specified start index and step,  
-with the replacement images.
+Replaces the images in a batch, starting from the specified start index with step stride,  
+using the replacement images.
 """
 
     @classmethod
