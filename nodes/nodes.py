@@ -669,7 +669,7 @@ Converts any type to a string.
 """
 
     def stringify(self, input, prefix="", suffix=""):
-        if isinstance(input, (int, float, bool)):
+        if isinstance(input, (int, float, bool, str)):
             stringified = str(input)
         elif isinstance(input, list):
             stringified = ', '.join(str(item) for item in input)
