@@ -20,7 +20,8 @@ except:
 from PIL import ImageGrab, ImageDraw, ImageFont, Image, ImageOps
 
 from nodes import MAX_RESOLUTION, SaveImage
-from comfy_extras.nodes_mask import ImageCompositeMasked
+from comfy_extras.nodes_mask import composite
+import node_helpers
 from comfy.cli_args import args
 from comfy.utils import ProgressBar, common_upscale
 import folder_paths
@@ -1284,8 +1285,11 @@ nodes for example.
             mask_image[:, :, :, 0] = color_list[0] / 255 # Red channel
             mask_image[:, :, :, 1] = color_list[1] / 255 # Green channel
             mask_image[:, :, :, 2] = color_list[2] / 255 # Blue channel
-            
-            preview, = ImageCompositeMasked.composite(self, image, mask_image, 0, 0, True, mask_adjusted)
+
+            destination, source = node_helpers.image_alpha_fix(image, mask_image)
+            destination = destination.clone().movedim(-1, 1)
+            preview = composite(destination, source.movedim(-1, 1), 0, 0, mask_adjusted, 1, True).movedim(1, -1)
+
         if pass_through:
             return (preview, )
         return(self.save_images(preview, filename_prefix, prompt, extra_pnginfo))
