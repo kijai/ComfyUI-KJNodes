@@ -2671,7 +2671,10 @@ class TTM_ApplyModel_Wrapper:
 
         if current_step_index != 0 and current_step_index < self.steps:
             noisy_latent = self.scale_latent_inpaint(x=x, sigma=torch.tensor([next_sigma]), noise=self.noise.to(x), latent_image=self.reference_samples.to(x))
-            x = x * (1-self.motion_mask).to(x) + noisy_latent * self.motion_mask.to(x)
+            if self.motion_mask is not None:
+                x = x * (1-self.motion_mask).to(x) + noisy_latent * self.motion_mask.to(x)
+            else:
+                x = noisy_latent
 
         return executor(x, t, c_concat, c_crossattn, control, transformer_options, **kwargs)
 
