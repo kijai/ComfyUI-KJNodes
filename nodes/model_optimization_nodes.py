@@ -3,14 +3,16 @@ from comfy.ldm.modules import attention as comfy_attention
 import logging
 import torch
 import importlib
+import math
 
 import folder_paths
 import comfy.model_management as mm
 from comfy.cli_args import args
-from comfy.ldm.modules.attention import wrap_attn
+from comfy.ldm.modules.attention import wrap_attn, optimized_attention
 import comfy.model_patcher
 import comfy.utils
 import comfy.sd
+
 
 try:
     from comfy_api.latest import io
@@ -675,6 +677,7 @@ class TorchCompileModelFluxAdvancedV2:
         try:
             if double_blocks:
                 for i, block in enumerate(diffusion_model.double_blocks):
+                    print("Adding double block to compile list", i)
                     compile_key_list.append(f"diffusion_model.double_blocks.{i}")
             if single_blocks:
                 for i, block in enumerate(diffusion_model.single_blocks):
@@ -718,7 +721,7 @@ class TorchCompileModelHyVideo:
         }
     RETURN_TYPES = ("MODEL",)
     FUNCTION = "patch"
-
+    DEPRECATED = True
     CATEGORY = "KJNodes/torchcompile"
     EXPERIMENTAL = True
 
@@ -2005,3 +2008,126 @@ else:
         FUNCTION = ""
         CATEGORY = ""
         DESCRIPTION = "This node requires newer ComfyUI"
+
+
+try:
+    from torch.nn.attention.flex_attention import flex_attention, BlockMask
+except:
+    flex_attention = None
+    BlockMask = None
+
+class NABLA_AttentionKJ():
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": {
+            "model": ("MODEL",),
+            "latent": ("LATENT", {"tooltip": "Only used to get the latent shape"}),
+            "window_time": ("INT", {"default": 11, "min": 1, "tooltip": "Temporal attention window size"}),
+            "window_width": ("INT", {"default": 3, "min": 1, "tooltip": "Spatial attention window size"}),
+            "window_height": ("INT", {"default": 3, "min": 1, "tooltip": "Spatial attention window size"}),
+            "sparsity": ("FLOAT", {"default": 0.9, "min": 0.0, "max": 1.0, "step": 0.01}),
+            "torch_compile": ("BOOLEAN", {"default": True, "tooltip": "Most likely required for reasonable memory usage"})
+        },
+        }
+
+    RETURN_TYPES = ("MODEL", )
+    FUNCTION = "patch"
+    DESCRIPTION = "Experimental node for patching attention mode to use NABLA sparse attention for video models, currently only works with Kadinsky5"
+    CATEGORY = "KJNodes/experimental"
+
+    def patch(self, model, latent, window_time, window_width, window_height, sparsity, torch_compile):
+        if flex_attention is None or BlockMask is None:
+            raise RuntimeError("can't import flex_attention from torch.nn.attention, requires newer pytorch version")
+
+        model_clone = model.clone()
+        samples = latent["samples"]
+
+        sparse_params = get_sparse_params(samples, window_time, window_height, window_width, sparsity)
+        nabla_attention = NABLA_Attention(sparse_params)
+
+        def attention_override_nabla(func, *args, **kwargs):
+            return nabla_attention(*args, **kwargs)
+        
+        if torch_compile:
+            attention_override_nabla = torch.compile(attention_override_nabla, mode="max-autotune-no-cudagraphs", dynamic=True)
+
+        # attention override
+        model_clone.model_options["transformer_options"]["optimized_attention_override"] = attention_override_nabla
+
+        return model_clone,
+
+
+class NABLA_Attention():
+    def __init__(self, sparse_params):
+        self.sparse_params = sparse_params
+
+    def __call__(self, q, k, v, heads, **kwargs):
+        if q.shape[-2] < 3000 or k.shape[-2] < 3000:
+            return optimized_attention(q, k, v, heads, **kwargs)
+        block_mask = self.nablaT_v2(q, k, self.sparse_params["sta_mask"], thr=self.sparse_params["P"])
+        out = flex_attention(q, k, v, block_mask=block_mask).transpose(1, 2).contiguous().flatten(-2, -1)
+        return out
+
+    def nablaT_v2(self, q, k, sta, thr=0.9):
+        # Map estimation
+        BLOCK_SIZE = 64
+        B, h, S, D = q.shape
+        s1 = S // BLOCK_SIZE
+        qa = q.reshape(B, h, s1, BLOCK_SIZE, D).mean(-2)
+        ka = k.reshape(B, h, s1, BLOCK_SIZE, D).mean(-2).transpose(-2, -1)
+        map = qa @ ka
+
+        map = torch.softmax(map / math.sqrt(D), dim=-1)
+        # Map binarization
+        vals, inds = map.sort(-1)
+        cvals = vals.cumsum_(-1)
+        mask = (cvals >= 1 - thr).int()
+        mask = mask.gather(-1, inds.argsort(-1))
+
+        mask = torch.logical_or(mask, sta)
+
+        # BlockMask creation
+        kv_nb = mask.sum(-1).to(torch.int32)
+        kv_inds = mask.argsort(dim=-1, descending=True).to(torch.int32)
+        return BlockMask.from_kv_blocks(torch.zeros_like(kv_nb), kv_inds, kv_nb, kv_inds, BLOCK_SIZE=BLOCK_SIZE, mask_mod=None)
+    
+def fast_sta_nabla(T, H, W, wT=3, wH=3, wW=3):
+    l = torch.Tensor([T, H, W]).amax()
+    r = torch.arange(0, l, 1, dtype=torch.int16, device=mm.get_torch_device())
+    mat = (r.unsqueeze(1) - r.unsqueeze(0)).abs()
+    sta_t, sta_h, sta_w = (
+        mat[:T, :T].flatten(),
+        mat[:H, :H].flatten(),
+        mat[:W, :W].flatten(),
+    )
+    sta_t = sta_t <= wT // 2
+    sta_h = sta_h <= wH // 2
+    sta_w = sta_w <= wW // 2
+    sta_hw = (sta_h.unsqueeze(1) * sta_w.unsqueeze(0)).reshape(H, H, W, W).transpose(1, 2).flatten()
+    sta = (sta_t.unsqueeze(1) * sta_hw.unsqueeze(0)).reshape(T, T, H * W, H * W).transpose(1, 2)
+    return sta.reshape(T * H * W, T * H * W)
+
+
+def get_sparse_params(x, wT, wH, wW, sparsity=0.9):
+    B, C, T, H, W = x.shape
+    print("x shape:", x.shape)
+    patch_size = (1, 2, 2)
+    T, H, W = (
+        T // patch_size[0],
+        H // patch_size[1],
+        W // patch_size[2],
+    )
+    sta_mask = fast_sta_nabla(T, H // 8, W // 8, wT, wH, wW)
+    sparse_params = {
+        "sta_mask": sta_mask.unsqueeze_(0).unsqueeze_(0),
+        "to_fractal": True,
+        "P": sparsity,
+        "wT": wT,
+        "wH": wH,
+        "wW": wW,
+        "add_sta": True,
+        "visual_shape": (T, H, W),
+        "method": "topcdf",
+    }
+
+    return sparse_params
