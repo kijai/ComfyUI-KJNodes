@@ -887,7 +887,7 @@ class TorchCompileModelAdvanced:
 
         try:
             if compile_transformer_blocks_only:
-                layer_types = ["double_blocks", "single_blocks", "layers", "transformer_blocks", "blocks"]
+                layer_types = ["double_blocks", "single_blocks", "layers", "transformer_blocks", "blocks", "visual_transformer_blocks", "text_transformer_blocks"]
                 compile_key_list = []
                 for layer_name in layer_types:
                     if hasattr(diffusion_model, layer_name):
