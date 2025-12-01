@@ -176,7 +176,7 @@ Saves an image and mask as .PNG with the mask as the alpha channel.
         def file_counter():
             max_counter = 0
             # Loop through the existing files
-            for existing_file in os.listdir(full_output_folder):
+            for existing_file in sorted(os.listdir(full_output_folder)):
                 # Check if the file matches the expected format
                 match = re.fullmatch(fr"{filename}_(\d+)_?\.[a-zA-Z0-9]+", existing_file)
                 if match:
@@ -2981,7 +2981,7 @@ class LoadImagesFromFolderKJ:
                         except OSError:
                             pass
         else:
-            for file in os.listdir(folder):
+            for file in sorted(os.listdir(folder)):
                 if any(file.lower().endswith(ext) for ext in valid_extensions):
                     path = os.path.join(folder, file)
                     try:
@@ -3043,7 +3043,7 @@ class LoadImagesFromFolderKJ:
                     if any(file.lower().endswith(ext) for ext in valid_extensions):
                         image_paths.append(os.path.join(root, file))
         else:
-            for file in os.listdir(folder):
+            for file in sorted(os.listdir(folder)):
                 if any(file.lower().endswith(ext) for ext in valid_extensions):
                     image_paths.append(os.path.join(folder, file))
 
@@ -3964,7 +3964,7 @@ class LoadVideosFromFolder:
             raise ImportError("This node requires ComfyUI-VideoHelperSuite to be installed.")
         videos_list = []
         filenames = []
-        for f in os.listdir(kwargs['video']):
+        for f in sorted(os.listdir(kwargs['video'])):
             if os.path.isfile(os.path.join(kwargs['video'], f)):
                 file_parts = f.split('.')
                 if len(file_parts) > 1 and (file_parts[-1].lower() in ['webm', 'mp4', 'mkv', 'gif', 'mov']):
