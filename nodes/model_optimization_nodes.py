@@ -4,6 +4,7 @@ import logging
 import torch
 import importlib
 import math
+import datetime
 
 import folder_paths
 import comfy.model_management as mm
@@ -2103,7 +2104,7 @@ class NABLA_AttentionKJ():
 
         def attention_override_nabla(func, *args, **kwargs):
             return nabla_attention(*args, **kwargs)
-        
+
         if torch_compile:
             attention_override_nabla = torch.compile(attention_override_nabla, mode="max-autotune-no-cudagraphs", dynamic=True)
 
@@ -2146,7 +2147,7 @@ class NABLA_Attention():
         kv_nb = mask.sum(-1).to(torch.int32)
         kv_inds = mask.argsort(dim=-1, descending=True).to(torch.int32)
         return BlockMask.from_kv_blocks(torch.zeros_like(kv_nb), kv_inds, kv_nb, kv_inds, BLOCK_SIZE=BLOCK_SIZE, mask_mod=None)
-    
+
 def fast_sta_nabla(T, H, W, wT=3, wH=3, wW=3):
     l = torch.Tensor([T, H, W]).amax()
     r = torch.arange(0, l, 1, dtype=torch.int16, device=mm.get_torch_device())
@@ -2166,7 +2167,7 @@ def fast_sta_nabla(T, H, W, wT=3, wH=3, wW=3):
 
 def get_sparse_params(x, wT, wH, wW, sparsity=0.9):
     B, C, T, H, W = x.shape
-    print("x shape:", x.shape)
+    #print("x shape:", x.shape)
     patch_size = (1, 2, 2)
     T, H, W = (
         T // patch_size[0],
@@ -2187,3 +2188,118 @@ def get_sparse_params(x, wT, wH, wW, sparsity=0.9):
     }
 
     return sparse_params
+
+from comfy.comfy_types.node_typing import IO
+class StartRecordCUDAMemoryHistory():
+    # @classmethod
+    # def IS_CHANGED(s):
+    #     return True
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "input": (IO.ANY,),
+                "enabled": (["all", "state", "None"], {"default": "all", "tooltip": "None: disable, 'state': keep info for allocated memory, 'all': keep history of all alloc/free calls"}),
+                "context": (["all", "state", "alloc", "None"], {"default": "all", "tooltip": "None: no tracebacks, 'state': tracebacks for allocated memory, 'alloc': for alloc calls, 'all': for free calls"}),
+                "stacks": (["python", "all"], {"default": "all", "tooltip": "'python': Python/TorchScript/inductor frames, 'all': also C++ frames"}),
+                "max_entries": ("INT", {"default": 100000, "min": 1000, "max": 10000000, "tooltip": "Maximum number of entries to record"}),
+            },
+        }
+
+    RETURN_TYPES = (IO.ANY, )
+    RETURN_NAMES = ("input", "output_path",)
+    FUNCTION = "start"
+    CATEGORY = "KJNodes/experimental"
+    DESCRIPTION = "THIS NODE ALWAYS RUNS. Starts recording CUDA memory allocation history, can be ended and saved with EndRecordCUDAMemoryHistory. "
+
+    def start(self, input, enabled, context, stacks, max_entries):
+        mm.soft_empty_cache()
+        torch.cuda.reset_peak_memory_stats(mm.get_torch_device())
+        torch.cuda.memory._record_memory_history(
+            max_entries=max_entries,
+            enabled=enabled if enabled != "None" else None,
+            context=context if context != "None" else None,
+            stacks=stacks
+        )
+        return input,
+
+class EndRecordCUDAMemoryHistory():
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": {
+            "input": (IO.ANY,),
+            "output_path": ("STRING", {"default": "comfy_cuda_memory_history"}, "Base path for saving the CUDA memory history file, timestamp and .pt extension will be added"),
+        },
+        }
+
+    RETURN_TYPES = (IO.ANY, "STRING",)
+    RETURN_NAMES = ("input", "output_path",)
+    FUNCTION = "end"
+    CATEGORY = "KJNodes/experimental"
+    DESCRIPTION = "Records CUDA memory allocation history between start and end, saves to a file that can be analyzed here: https://docs.pytorch.org/memory_viz"
+
+    def end(self, input, output_path):
+        mm.soft_empty_cache()
+        time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_path = f"{output_path}{time}.pt"
+        torch.cuda.memory._dump_snapshot(output_path)
+        torch.cuda.memory._record_memory_history(enabled=None)
+        return input, output_path
+
+
+try:
+    from server import PromptServer
+except:
+    PromptServer = None
+
+class VisualizeCUDAMemoryHistory():
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": {
+            "snapshot_path": ("STRING", ),
+        },
+         "hidden": {
+                "unique_id": "UNIQUE_ID",
+            },
+        }
+
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("output_path",)
+    FUNCTION = "visualize"
+    CATEGORY = "KJNodes/experimental"
+    DESCRIPTION = "Visualizes a CUDA memory allocation history file, opens in browser"
+    OUTPUT_NODE = True
+
+    def visualize(self, snapshot_path, unique_id):
+        import pickle
+        from torch.cuda import _memory_viz
+        import uuid
+
+        from folder_paths import get_output_directory
+        output_dir = get_output_directory()
+
+        with open(snapshot_path, "rb") as f:
+            snapshot = pickle.load(f)
+
+        html = _memory_viz.trace_plot(snapshot)
+        html_filename = f"cuda_memory_history_{uuid.uuid4().hex}.html"
+        output_path = os.path.join(output_dir, "memory_history", html_filename)
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+
+        with open(output_path, "w", encoding="utf-8") as f:
+            f.write(html)
+
+        api_url = f"http://localhost:8188/api/view?type=output&filename={html_filename}&subfolder=memory_history"
+
+        # Progress UI
+        if unique_id and PromptServer is not None:
+            try:
+                PromptServer.instance.send_progress_text(
+                    api_url,
+                    unique_id
+                )
+            except:
+                pass
+
+        return api_url,
