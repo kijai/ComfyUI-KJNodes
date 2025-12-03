@@ -2237,7 +2237,7 @@ class EndRecordCUDAMemoryHistory():
     RETURN_NAMES = ("input", "output_path",)
     FUNCTION = "end"
     CATEGORY = "KJNodes/experimental"
-    DESCRIPTION = "Records CUDA memory allocation history between start and end, saves to a file that can be analyzed here: https://docs.pytorch.org/memory_viz"
+    DESCRIPTION = "Records CUDA memory allocation history between start and end, saves to a file that can be analyzed here: https://docs.pytorch.org/memory_viz or with VisualizeCUDAMemoryHistory node"
 
     def end(self, input, output_path):
         mm.soft_empty_cache()
