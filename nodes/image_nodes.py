@@ -2963,6 +2963,8 @@ class LoadImagesFromFolderKJ:
 
     @classmethod
     def IS_CHANGED(cls, folder, **kwargs):
+        if not os.path.isabs(folder) and args.base_directory:
+            folder = os.path.join(args.base_directory, folder)
         if not os.path.isdir(folder):
             return float("NaN")
         
@@ -3032,6 +3034,8 @@ class LoadImagesFromFolderKJ:
     DESCRIPTION = """Loads images from a folder into a batch, images are resized and loaded into a batch."""
 
     def load_images(self, folder, width, height, image_load_cap, start_index, keep_aspect_ratio, include_subfolders=False):
+        if not os.path.isabs(folder) and args.base_directory:
+            folder = os.path.join(args.base_directory, folder)      
         if not os.path.isdir(folder):
             raise FileNotFoundError(f"Folder '{folder} cannot be found.'")
         
@@ -3335,6 +3339,8 @@ class SaveStringKJ:
         filename_prefix += self.prefix_append
         
         full_output_folder, filename, counter, subfolder, filename_prefix = folder_paths.get_save_image_path(filename_prefix, self.output_dir)
+        if not os.path.isabs(output_folder) and args.base_directory:
+            output_folder = os.path.join(args.base_directory, output_folder)
         if output_folder != "output":
             if not os.path.exists(output_folder):
                 os.makedirs(output_folder, exist_ok=True)
@@ -3960,6 +3966,9 @@ class LoadVideosFromFolder:
     FUNCTION = "load_video"
 
     def load_video(self, output_type, grid_max_columns, add_label=False, **kwargs):
+        if not os.path.isabs(kwargs['video']) and args.base_directory:
+            kwargs['video'] = os.path.join(args.base_directory, kwargs['video'])
+            
         if self.vhs_nodes is None:
             raise ImportError("This node requires ComfyUI-VideoHelperSuite to be installed.")
         videos_list = []
