@@ -904,6 +904,8 @@ class TorchCompileModelAdvanced:
             if not compile_key_list:
                 compile_key_list =["diffusion_model"]
 
+            if not dynamic:
+                dynamic = None
             set_torch_compile_wrapper(model=m, keys=compile_key_list, backend=backend, mode=mode, dynamic=dynamic, fullgraph=fullgraph)           
         except:
             raise RuntimeError("Failed to compile model")
