@@ -3186,7 +3186,6 @@ class LoadImagesFromFolderKJ:
         stat = ImageStat.Stat(edges)
         median = tuple(map(int, stat.median))
         return median
-        
 
 class ImageGridtoBatch:
     @classmethod
@@ -3197,37 +3196,38 @@ class ImageGridtoBatch:
                     "rows": ("INT", {"default": 0, "min": 1, "max": 8, "tooltip": "The number of rows in the grid. Set to 0 for automatic calculation."}),
                   }
                 }
-    
+
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "decompose"
     CATEGORY = "KJNodes/image"
     DESCRIPTION = "Converts a grid of images to a batch of images."
-        
+
     def decompose(self, image, columns, rows):
         B, H, W, C = image.shape
         print("input size: ", image.shape)
-        
+
         # Calculate cell width, rounding down
         cell_width = W // columns
-        
+
         if rows == 0:
             # If rows is 0, calculate number of full rows
+            cell_height = H // columns
             rows = H // cell_height
         else:
             # If rows is specified, adjust cell_height
             cell_height = H // rows
-        
+
         # Crop the image to fit full cells
         image = image[:, :rows*cell_height, :columns*cell_width, :]
-        
+
         # Reshape and permute the image to get the grid
         image = image.view(B, rows, cell_height, columns, cell_width, C)
         image = image.permute(0, 1, 3, 2, 4, 5).contiguous()
         image = image.view(B, rows * columns, cell_height, cell_width, C)
-        
+
         # Reshape to the final batch tensor
         img_tensor = image.view(-1, cell_height, cell_width, C)
-        
+
         return (img_tensor,)
 
 class SaveImageKJ:
