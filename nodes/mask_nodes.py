@@ -881,6 +881,7 @@ class CreateVoronoiMask:
 
     def createvoronoi(self, frames, num_points, line_width, speed, frame_width, frame_height):
         from scipy.spatial import Voronoi
+        from matplotlib import pyplot as plt
         # Define the number of images in the batch
         batch_size = frames
         out = []

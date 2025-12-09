@@ -1,14 +1,12 @@
 import torch
 from torchvision import transforms
 import json
-from PIL import Image, ImageDraw, ImageFont, ImageColor, ImageFilter, ImageChops
+from PIL import Image, ImageDraw, ImageFont, ImageFilter
 import numpy as np
 from ..utility.utility import pil2tensor, tensor2pil
 import folder_paths
 import io
 import base64
-        
-from comfy.utils import common_upscale
 
 def parse_color(color):
     if isinstance(color, str) and ',' in color:
