@@ -1362,19 +1362,7 @@ aggressive values this can happen and the motion suffers. Starting later can hel
 When NOT using coefficients, the threshold value should be  
 about 10 times smaller than the value used with coefficients.  
 
-Official recommended values https://github.com/ali-vilab/TeaCache/tree/main/TeaCache4Wan2.1:
-
-
-<pre style='font-family:monospace'>
-+-------------------+--------+---------+--------+
-|       Model       |  Low   | Medium  |  High  |
-+-------------------+--------+---------+--------+
-| Wan2.1 t2v 1.3B  |  0.05  |  0.07   |  0.08  |
-| Wan2.1 t2v 14B   |  0.14  |  0.15   |  0.20  |
-| Wan2.1 i2v 480P  |  0.13  |  0.19   |  0.26  |
-| Wan2.1 i2v 720P  |  0.18  |  0.20   |  0.30  |
-+-------------------+--------+---------+--------+
-</pre> 
+Official recommended values https://github.com/ali-vilab/TeaCache/tree/main/TeaCache4Wan2.1
 """
     EXPERIMENTAL = True
 
