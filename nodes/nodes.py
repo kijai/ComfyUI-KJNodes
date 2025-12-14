@@ -2821,3 +2821,58 @@ class GetTrackRange(io.ComfyNode):
             "track_visibility": mask_out,
         }
         return io.NodeOutput(out_track)
+
+class AddNoiseToTrackPath(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="AddNoiseToTrackPath",
+            category="conditioning/video_models",
+            inputs=[
+                io.Tracks.Input("tracks"),
+                io.Float.Input("strength", default=1.0, min=0.0, max=100.0, step=0.01),
+                io.Int.Input("seed", default=0, min=0, max=0xffffffffffffffff, step=1),
+                io.Float.Input("noise_x_ratio", default=1.0, min=0.0, max=100.0, step=0.01,
+                             tooltip="Multiplier for horizontal noise component"),
+                io.Float.Input("noise_y_ratio", default=1.0, min=0.0, max=100.0, step=0.01,
+                             tooltip="Multiplier for vertical noise component"),
+                io.Float.Input("noise_temporal_ratio", default=1.0, min=0.0, max=100.0, step=0.01,
+                             tooltip="Multiplier for temporal (frame-to-frame) noise"),
+            ],
+            outputs=[
+                io.Tracks.Output(),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, tracks, strength, seed, noise_x_ratio, noise_y_ratio, noise_temporal_ratio) -> io.NodeOutput:
+        track_path = tracks["track_path"].clone()
+        mask = tracks["track_visibility"]
+
+        torch.manual_seed(seed)
+        noise = torch.randn_like(track_path) * strength
+
+        # Apply directional scaling to noise
+        noise[..., 0] *= noise_x_ratio  # X coordinate noise
+        noise[..., 1] *= noise_y_ratio  # Y coordinate noise
+
+        # Apply temporal smoothing if temporal ratio is less than 1
+        if noise_temporal_ratio < 1.0:
+            num_frames = track_path.shape[0]
+            smoothed_noise = noise.clone()
+            kernel_size = max(1, int((1.0 - noise_temporal_ratio) * 10))
+
+            for i in range(num_frames):
+                start_idx = max(0, i - kernel_size // 2)
+                end_idx = min(num_frames, i + kernel_size // 2 + 1)
+                smoothed_noise[i] = noise[start_idx:end_idx].mean(dim=0)
+
+            noise = smoothed_noise * noise_temporal_ratio + noise * (1 - noise_temporal_ratio)
+
+        track_path = track_path + noise
+
+        out_track = {
+            "track_path": track_path,
+            "track_visibility": mask,
+        }
+        return io.NodeOutput(out_track)

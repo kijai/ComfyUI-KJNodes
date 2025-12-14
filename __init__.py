@@ -227,6 +227,7 @@ NODE_CONFIG = {
 
     #tracks
     "GetTrackRange": {"class": GetTrackRange, "name": "Get Track Range"},
+    "AddNoiseToTrackPath": {"class": AddNoiseToTrackPath, "name": "Add Noise To Track"},
 }
 
 def generate_node_mappings(node_config):
