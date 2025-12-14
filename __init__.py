@@ -129,10 +129,10 @@ NODE_CONFIG = {
     "AppendStringsToList": {"class": AppendStringsToList, "name": "Append Strings To List"},
     "JoinStrings": {"class": JoinStrings, "name": "Join Strings"},
     "JoinStringMulti": {"class": JoinStringMulti, "name": "Join String Multi"},
+    "SimpleCalculatorKJ": {"class": SimpleCalculatorKJ, "name": "Simple Calculator KJ"},
     "SomethingToString": {"class": SomethingToString, "name": "Something To String"},
     "Sleep": {"class": Sleep, "name": "Sleep"},
     "VRAM_Debug": {"class": VRAM_Debug, "name": "VRAM Debug"},
-    "SomethingToString": {"class": SomethingToString, "name": "Something To String"},
     "EmptyLatentImagePresets": {"class": EmptyLatentImagePresets, "name": "Empty Latent Image Presets"},
     "EmptyLatentImageCustomPresets": {"class": EmptyLatentImageCustomPresets, "name": "Empty Latent Image Custom Presets"},
     "ModelPassThrough": {"class": ModelPassThrough, "name": "ModelPass"},
@@ -223,7 +223,10 @@ NODE_CONFIG = {
 
     #lora
     "LoraExtractKJ": {"class": LoraExtractKJ, "name": "LoraExtractKJ"},
-    "LoraReduceRankKJ": {"class": LoraReduceRank, "name": "LoraReduceRank"}
+    "LoraReduceRankKJ": {"class": LoraReduceRank, "name": "LoraReduceRank"},
+
+    #tracks
+    "GetTrackRange": {"class": GetTrackRange, "name": "Get Track Range"},
 }
 
 def generate_node_mappings(node_config):

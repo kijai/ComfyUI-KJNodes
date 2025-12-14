@@ -10,6 +10,7 @@ import folder_paths
 from nodes import MAX_RESOLUTION
 from comfy.utils import common_upscale, ProgressBar, load_torch_file
 from comfy.comfy_types.node_typing import IO
+from comfy_api.latest import io
 
 script_directory = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 folder_paths.add_model_folder_path("kjnodes_fonts", os.path.join(script_directory, "fonts"))
@@ -2703,3 +2704,120 @@ class LatentInpaintTTM:
         m = model.clone()
         m.add_wrapper_with_key(WrappersMP.SAMPLER_SAMPLE, "TTM_SampleWrapper", TTM_SampleWrapper(mask, steps))
         return (m, )
+
+
+class SimpleCalculatorKJ:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "expression": ("STRING", {"default": "a + b", "multiline": True}),
+            },
+            "optional": {
+                "a": (IO.ANY, {"default": 0.0, "min": -1e10, "max": 1e10, "step": 0.01, "forceInput": True}),
+                "b": (IO.ANY, {"default": 0.0, "min": -1e10, "max": 1e10, "step": 0.01, "forceInput": True}),
+            }
+        }
+
+    RETURN_TYPES = ("FLOAT", "INT",)
+    FUNCTION = "calculate"
+    CATEGORY = "KJNodes/misc"
+    DESCRIPTION = "Calculator node that evaluates a mathematical expression using inputs a and b."
+
+    def calculate(self, expression, a=None, b=None):
+
+        import ast
+        import operator
+        import math
+
+        # Allowed operations
+        allowed_operators = {ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.mul,  ast.Div: operator.truediv,
+            ast.Pow: operator.pow, ast.USub: operator.neg, ast.UAdd: operator.pos,
+        }
+
+        # Allowed functions
+        allowed_functions = {
+            'abs': abs, 'round': round, 'min': min, 'max': max,
+            'pow': pow, 'sqrt': math.sqrt, 'sin': math.sin,
+            'cos': math.cos, 'tan': math.tan, 'log': math.log,
+            'log10': math.log10, 'exp': math.exp, 'floor': math.floor,
+            'ceil': math.ceil
+        }
+
+        # Allowed constants
+        allowed_names = {'a': a, 'b': b, 'pi': math.pi, 'e': math.e}
+
+        def eval_node(node):
+            if isinstance(node, ast.Constant):  # Numbers
+                return node.value
+            elif isinstance(node, ast.Name):  # Variables
+                if node.id in allowed_names:
+                    return allowed_names[node.id]
+                raise ValueError(f"Name '{node.id}' is not allowed")
+            elif isinstance(node, ast.BinOp):  # Binary operations
+                if type(node.op) not in allowed_operators:
+                    raise ValueError(f"Operator {type(node.op).__name__} is not allowed")
+                left = eval_node(node.left)
+                right = eval_node(node.right)
+                return allowed_operators[type(node.op)](left, right)
+            elif isinstance(node, ast.UnaryOp):  # Unary operations
+                if type(node.op) not in allowed_operators:
+                    raise ValueError(f"Operator {type(node.op).__name__} is not allowed")
+                operand = eval_node(node.operand)
+                return allowed_operators[type(node.op)](operand)
+            elif isinstance(node, ast.Call):  # Function calls
+                if not isinstance(node.func, ast.Name):
+                    raise ValueError("Only simple function calls are allowed")
+                if node.func.id not in allowed_functions:
+                    raise ValueError(f"Function '{node.func.id}' is not allowed")
+                args = [eval_node(arg) for arg in node.args]
+                return allowed_functions[node.func.id](*args)
+            else:
+                raise ValueError(f"Node type {type(node).__name__} is not allowed")
+
+        try:
+            tree = ast.parse(expression, mode='eval')
+            result = eval_node(tree.body)
+            return (float(result), int(result))
+        except Exception as e:
+            print(f"CalculatorKJ Error: {str(e)}")
+            return (0.0, 0)
+
+
+class GetTrackRange(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="GetTrackRange",
+            category="conditioning/video_models",
+            inputs=[
+                io.Tracks.Input("tracks"),
+                io.Int.Input("start_index", default=24, min=-10000, max=10000, step=1),
+                io.Int.Input("num_frames", default=10, min=1, max=10000, step=1),
+            ],
+            outputs=[
+                io.Tracks.Output(),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, tracks, start_index, num_frames) -> io.NodeOutput:
+        track_path = tracks["track_path"]
+        mask = tracks["track_visibility"]
+        total_frames = track_path.shape[0]
+
+        if start_index < 0:
+            start_index = total_frames + start_index
+        start_index = max(0, min(start_index, total_frames))
+
+        # Clamp end_index
+        end_index = max(0, min(start_index + num_frames, total_frames))
+
+        tracks_out = track_path[start_index:end_index, ...]
+        mask_out = mask[start_index:end_index, ...]
+
+        out_track = {
+            "track_path": tracks_out,
+            "track_visibility": mask_out,
+        }
+        return io.NodeOutput(out_track)
