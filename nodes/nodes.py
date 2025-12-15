@@ -90,14 +90,10 @@ class StringConstantMultiline:
     CATEGORY = "KJNodes/constants"
 
     def stringify(self, string, strip_newlines):
-        new_string = []
-        for line in io.StringIO(string):
-            if not line.strip().startswith("\n") and strip_newlines:
-                line = line.replace("\n", '')
-            new_string.append(line)
-        new_string = "\n".join(new_string)
-
-        return (new_string, )
+        new_string = string
+        if strip_newlines:
+            new_string = new_string.replace('\n', '').strip()
+        return (new_string,)
 
 
     
