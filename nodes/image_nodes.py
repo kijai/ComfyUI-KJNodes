@@ -12,6 +12,8 @@ import re
 import json
 import importlib
 from PIL.PngImagePlugin import PngInfo
+from io import BytesIO
+
 try:
     import cv2
 except:
@@ -3378,7 +3380,7 @@ class FastPreview:
     def preview(self, image, format, quality):        
         pil_image = to_pil_image(image[0].permute(2, 0, 1))
 
-        with io.BytesIO() as buffered:
+        with BytesIO() as buffered:
             pil_image.save(buffered, format=format, quality=quality)
             img_bytes = buffered.getvalue()
 
