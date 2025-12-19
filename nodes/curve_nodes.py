@@ -7,6 +7,8 @@ from ..utility.utility import pil2tensor, tensor2pil
 import folder_paths
 import io
 import base64
+from io import BytesIO
+
 
 def parse_color(color):
     if isinstance(color, str) and ',' in color:
@@ -309,7 +311,7 @@ output types:
         else:
             transform = transforms.ToPILImage()
             image = transform(bg_image[0].permute(2, 0, 1))
-            buffered = io.BytesIO()
+            buffered = BytesIO()
             image.save(buffered, format="JPEG", quality=75)
 
             # Encode the image bytes to a Base64 string
@@ -1526,7 +1528,7 @@ you can clear the image from the context menu by right clicking on the canvas
         else:
             transform = transforms.ToPILImage()
             image = transform(bg_image[0].permute(2, 0, 1))
-            buffered = io.BytesIO()
+            buffered = BytesIO()
             image.save(buffered, format="JPEG", quality=75)
 
             # Step 3: Encode the image bytes to a Base64 string
