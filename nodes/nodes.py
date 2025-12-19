@@ -212,7 +212,7 @@ Combines multiple conditioning nodes into one
         for c in range(1, inputcount):
             new_cond = kwargs[f"conditioning_{c + 1}"]
             if operation == "combine":
-                cond = cond_combine_node.combine(new_cond, cond)[0]
+                cond = cond_combine_node.combine(cond, new_cond)[0]
             elif operation == "concat":
                 cond = cond_concat_node.concat(cond, new_cond)[0]
         return (cond, inputcount,)
