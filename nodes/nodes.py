@@ -2729,7 +2729,7 @@ class SimpleCalculatorKJ:
 
         # Allowed operations
         allowed_operators = {ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.mul,  ast.Div: operator.truediv,
-            ast.Pow: operator.pow, ast.USub: operator.neg, ast.UAdd: operator.pos,
+            ast.Pow: operator.pow, ast.USub: operator.neg, ast.UAdd: operator.pos, ast.LShift: operator.lshift, ast.RShift, operator.rshift,
         }
 
         # Allowed functions
