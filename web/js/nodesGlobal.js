@@ -25,12 +25,20 @@ const varTypes = {};
 // HIDE INTERNAL SLOTS
 // ═══════════════════════════════════════════════════════════════════════════
 function hideInternalSlots(node) {
-    if (node.type === "SetNodeGlobal" && node.outputs) {
-        node.outputs = node.outputs.filter((o, idx) => idx === 0);
+    // Hide trigger outputs/inputs
+    if (node.type === "SetNodeGlobal") {
+        if (node.outputs) {
+            node.outputs = node.outputs.filter(o => o.name === "value");
+        }
+        if (node.inputs) {
+            node.inputs = node.inputs.filter(i => i.name === "value");
+        }
     }
     
-    if (node.type === "GetNodeGlobal" && node.inputs) {
-        node.inputs = node.inputs.filter(i => i.name !== "_dep");
+    if (node.type === "GetNodeGlobal") {
+        if (node.inputs) {
+            node.inputs = node.inputs.filter(i => i.name !== "_dep");
+        }
     }
 }
 
@@ -57,50 +65,57 @@ function getInputTypeFromNode(node) {
     return "*";
 }
 
-function findSetNodeByVar(varName, targetOrder = null) {
-    if (!app.graph?._nodes) return null;
+function findSetNodesByVar(varName) {
+    if (!app.graph?._nodes) return [];
     
-    let bestMatch = null;
-    let bestOrder = -1;
-    
+    const results = [];
     for (const node of app.graph._nodes) {
-        if (node.type === "SetNodeGlobal") {
+        if (node.type === "SetNodeGlobal" && node.mode !== 4) { // mode 4 = bypassed
             const nameWidget = node.widgets?.find(w => w.name === "variable_name");
             const orderWidget = node.widgets?.find(w => w.name === "order");
-            
             if (nameWidget?.value === varName) {
-                const nodeOrder = orderWidget?.value ?? 0;
-                
-                if (targetOrder === null) {
-                    // Return highest order Set
-                    if (nodeOrder > bestOrder) {
-                        bestOrder = nodeOrder;
-                        bestMatch = node;
-                    }
-                } else {
-                    // Return Set with order <= targetOrder, preferring highest
-                    if (nodeOrder <= targetOrder && nodeOrder > bestOrder) {
-                        bestOrder = nodeOrder;
-                        bestMatch = node;
-                    }
-                }
+                results.push({
+                    node,
+                    order: orderWidget?.value ?? 0,
+                    type: getInputTypeFromNode(node)
+                });
             }
         }
     }
-    return bestMatch;
+    return results.sort((a, b) => a.order - b.order);
 }
 
-function getVarType(varName, order = null) {
+function getVarType(varName, targetOrder = null) {
     if (!varName) return "*";
-    const setNode = findSetNodeByVar(varName, order);
-    if (setNode) {
-        const t = getInputTypeFromNode(setNode);
-        if (t !== "*") {
-            varTypes[varName] = t;
-            return t;
+    
+    const sets = findSetNodesByVar(varName);
+    if (sets.length === 0) return varTypes[varName] || "*";
+    
+    if (targetOrder === null) {
+        // Return type from highest order Set
+        const t = sets[sets.length - 1].type;
+        if (t !== "*") varTypes[varName] = t;
+        return t;
+    }
+    
+    // Find Set with same order or highest order < targetOrder
+    let match = null;
+    for (const s of sets) {
+        if (s.order === targetOrder) {
+            match = s;
+            break;
+        }
+        if (s.order < targetOrder) {
+            match = s;
         }
     }
-    return varTypes[varName] || "*";
+    
+    if (match) {
+        if (match.type !== "*") varTypes[varName] = match.type;
+        return match.type;
+    }
+    
+    return sets[0].type || varTypes[varName] || "*";
 }
 
 function updateSlotType(node, slotIdx, typeName) {
@@ -118,67 +133,55 @@ function updateSlotType(node, slotIdx, typeName) {
     }
 }
 
-function updateAllGetNodes(varName, typeName) {
-    if (!app.graph?._nodes) return;
-    for (const node of app.graph._nodes) {
-        if (node.type === "GetNodeGlobal") {
-            const w = node.widgets?.find(w => w.name === "variable_name");
-            if (w?.value === varName) {
-                updateSlotType(node, 0, typeName);
-            }
-        }
-    }
-}
-
 function refreshAllTypes() {
     if (!app.graph?._nodes) return;
     
-    // Collect types from all Set nodes
-    const varTypesByOrder = {};  // varName -> {order: type}
+    // Collect types from active Set nodes
+    const varTypesByOrder = {};
     
     for (const node of app.graph._nodes) {
-        if (node.type === "SetNodeGlobal") {
+        if (node.type === "SetNodeGlobal" && node.mode !== 4) {
             const nameWidget = node.widgets?.find(w => w.name === "variable_name");
             const orderWidget = node.widgets?.find(w => w.name === "order");
             
             if (nameWidget?.value) {
                 const t = getInputTypeFromNode(node);
                 const order = orderWidget?.value ?? 0;
+                const varName = nameWidget.value;
                 
-                if (!varTypesByOrder[nameWidget.value]) {
-                    varTypesByOrder[nameWidget.value] = {};
+                if (!varTypesByOrder[varName]) {
+                    varTypesByOrder[varName] = {};
                 }
-                varTypesByOrder[nameWidget.value][order] = t;
+                varTypesByOrder[varName][order] = t;
                 
                 updateSlotType(node, 0, t);
             }
         }
     }
     
-    // Update varTypes with highest order type
-    for (const [varName, orderTypes] of Object.entries(varTypesByOrder)) {
-        const maxOrder = Math.max(...Object.keys(orderTypes).map(Number));
-        varTypes[varName] = orderTypes[maxOrder];
-    }
-    
-    // Update Get nodes based on their order
+    // Update Get nodes
     for (const node of app.graph._nodes) {
-        if (node.type === "GetNodeGlobal") {
+        if (node.type === "GetNodeGlobal" && node.mode !== 4) {
             const nameWidget = node.widgets?.find(w => w.name === "variable_name");
             const orderWidget = node.widgets?.find(w => w.name === "order");
             
             if (nameWidget?.value) {
+                const varName = nameWidget.value;
                 const order = orderWidget?.value ?? 0;
-                const orderTypes = varTypesByOrder[nameWidget.value] || {};
+                const orderTypes = varTypesByOrder[varName] || {};
                 
-                // Find type from Set with highest order <= this Get's order
+                // Find matching type
                 let matchingType = "*";
-                let bestOrder = -1;
-                for (const [setOrder, setType] of Object.entries(orderTypes)) {
-                    const so = Number(setOrder);
-                    if (so <= order && so > bestOrder) {
-                        bestOrder = so;
-                        matchingType = setType;
+                if (orderTypes[order] !== undefined) {
+                    matchingType = orderTypes[order];
+                } else {
+                    // Find highest order < this order
+                    const orders = Object.keys(orderTypes).map(Number).sort((a,b) => a-b);
+                    for (const o of orders) {
+                        if (o < order) matchingType = orderTypes[o];
+                    }
+                    if (matchingType === "*" && orders.length > 0) {
+                        matchingType = orderTypes[orders[0]];
                     }
                 }
                 
@@ -218,68 +221,48 @@ function patchConnectionMenu() {
 // ═══════════════════════════════════════════════════════════════════════════
 // NODE SETUP
 // ═══════════════════════════════════════════════════════════════════════════
-function setupSetNode(node) {
+function setupNode(node) {
     hideInternalSlots(node);
     
     const nameWidget = node.widgets?.find(w => w.name === "variable_name");
     const orderWidget = node.widgets?.find(w => w.name === "order");
-    if (!nameWidget) return;
     
-    const origOnConn = node.onConnectionsChange;
-    node.onConnectionsChange = function(side, slotIdx, connected, linkInfo, ioSlot) {
-        origOnConn?.apply(this, arguments);
-        if (side === 1) {
-            refreshAllTypes();
-        }
-    };
+    // Refresh on any change
+    const refresh = () => setTimeout(refreshAllTypes, 50);
     
-    // Update on name change
-    const origNameCb = nameWidget.callback;
-    nameWidget.callback = function(value, ...args) {
-        origNameCb?.call(this, value, ...args);
-        refreshAllTypes();
-    };
-    
-    // Update on order change
-    if (orderWidget) {
-        const origOrderCb = orderWidget.callback;
-        orderWidget.callback = function(value, ...args) {
-            origOrderCb?.call(this, value, ...args);
-            refreshAllTypes();
+    if (node.type === "SetNodeGlobal") {
+        const origOnConn = node.onConnectionsChange;
+        node.onConnectionsChange = function(...args) {
+            origOnConn?.apply(this, args);
+            refresh();
         };
     }
     
-    setTimeout(refreshAllTypes, 100);
-}
-
-function setupGetNode(node) {
-    hideInternalSlots(node);
-    
-    const nameWidget = node.widgets?.find(w => w.name === "variable_name");
-    const orderWidget = node.widgets?.find(w => w.name === "order");
-    if (!nameWidget) return;
-    
-    // Update on name change
-    const origNameCb = nameWidget.callback;
-    nameWidget.callback = function(value, ...args) {
-        origNameCb?.call(this, value, ...args);
-        const order = orderWidget?.value ?? 0;
-        updateSlotType(node, 0, getVarType(value, order));
-    };
-    
-    // Update on order change
-    if (orderWidget) {
-        const origOrderCb = orderWidget.callback;
-        orderWidget.callback = function(value, ...args) {
-            origOrderCb?.call(this, value, ...args);
-            updateSlotType(node, 0, getVarType(nameWidget.value, value));
+    // Refresh on widget changes
+    if (nameWidget) {
+        const origCb = nameWidget.callback;
+        nameWidget.callback = function(...args) {
+            origCb?.call(this, ...args);
+            refresh();
         };
     }
     
-    setTimeout(() => {
-        const order = orderWidget?.value ?? 0;
-        updateSlotType(node, 0, getVarType(nameWidget.value, order));
-    }, 100);
+    if (orderWidget) {
+        const origCb = orderWidget.callback;
+        orderWidget.callback = function(...args) {
+            origCb?.call(this, ...args);
+            refresh();
+        };
+    }
+    
+    // Refresh on mode change (bypass/mute)
+    const origOnModeChange = node.onModeChange;
+    node.onModeChange = function(mode) {
+        origOnModeChange?.call(this, mode);
+        refresh();
+    };
+    
+    refresh();
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -292,25 +275,29 @@ app.registerExtension({
         patchConnectionMenu();
         
         api.addEventListener("kjnodes.type_update", (e) => {
-            const { variable_name, type, order } = e.detail;
+            const { variable_name, type } = e.detail;
             varTypes[variable_name] = type;
             refreshAllTypes();
         });
         
         api.addEventListener("executed", refreshAllTypes);
-        setInterval(refreshAllTypes, 2000);
+        
+        // More frequent refresh to catch bypass changes
+        setInterval(refreshAllTypes, 1000);
         setTimeout(refreshAllTypes, 500);
     },
     
     nodeCreated(node) {
-        if (node.type === "SetNodeGlobal") setupSetNode(node);
-        else if (node.type === "GetNodeGlobal") setupGetNode(node);
+        if (node.type === "SetNodeGlobal" || node.type === "GetNodeGlobal") {
+            setupNode(node);
+        }
     },
     
     loadedGraphNode(node) {
-        if (node.type === "SetNodeGlobal") setupSetNode(node);
-        else if (node.type === "GetNodeGlobal") setupGetNode(node);
+        if (node.type === "SetNodeGlobal" || node.type === "GetNodeGlobal") {
+            setupNode(node);
+        }
     },
 });
 
-console.log("✅ [NodesGlobal] Loaded with order support");
+console.log("✅ [NodesGlobal] Loaded");
