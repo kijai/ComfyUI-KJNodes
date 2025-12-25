@@ -75,7 +75,6 @@ class AnyType(str):
 
 any_type = AnyType("*")
 
-# Internal trigger type
 INTERNAL_TRIGGER = "KJNODES_INTERNAL_TRIGGER"
 
 
@@ -91,6 +90,8 @@ class SetNodeGlobal:
             },
             "optional": {
                 "value": (any_type, {}),
+                # Hidden dependency input for chaining Set nodes
+                "_prev": (INTERNAL_TRIGGER, {}),
             },
             "hidden": {
                 "unique_id": "UNIQUE_ID",
@@ -98,15 +99,14 @@ class SetNodeGlobal:
         }
 
     RETURN_TYPES = (any_type, INTERNAL_TRIGGER)
-    RETURN_NAMES = ("value", "_trigger")
+    RETURN_NAMES = ("value", "_next")
     OUTPUT_NODE = True
     FUNCTION = "execute"
     CATEGORY = "KJNodes/Variables"
 
-    def execute(self, variable_name, order=0, unique_id=None, value=None):
+    def execute(self, variable_name, order=0, unique_id=None, value=None, _prev=None):
         if value is not None:
             detected_type = get_comfy_type(value)
-            # Store with order suffix internally for debugging
             GLOBAL_STORE[variable_name] = value
             GLOBAL_TYPES[variable_name] = detected_type
             
@@ -118,7 +118,7 @@ class SetNodeGlobal:
                     "node_id": unique_id,
                 })
             
-            print(f"✅ [Set] '{variable_name}' (order={order}) = {detected_type}")
+            print(f"✅ [Set] '{variable_name}' order={order} → {detected_type}")
         
         return (value, True)
 
@@ -150,7 +150,7 @@ class GetNodeGlobal:
         if variable_name in GLOBAL_STORE:
             value = GLOBAL_STORE[variable_name]
             var_type = GLOBAL_TYPES.get(variable_name, "*")
-            print(f"📥 [Get] '{variable_name}' (order={order}) : {var_type}")
+            print(f"📥 [Get] '{variable_name}' order={order} → {var_type}")
             return (value,)
         else:
             available = list(GLOBAL_STORE.keys())
@@ -174,23 +174,25 @@ if hasattr(PromptServer, "instance"):
         })
 
 
-# --- PROMPT HANDLER WITH ORDER SUPPORT ---
+# --- PROMPT HANDLER ---
 def auto_connect_globals(json_data):
     """
-    Auto-connect Set→Get nodes by variable name AND order.
+    Auto-connect Set→Get and Set→Set nodes by variable name AND order.
     
-    Logic:
-    - Get(order=N) connects to Set with highest order <= N
-    - This allows chaining: Set(0) → Get(0) → [process] → Set(1) → Get(1)
+    Rules:
+    1. Get(var, order=N) connects to Set(var, order=N) with SAME order
+    2. If no Set with same order, connect to Set with highest order < N
+    3. Set(var, order=N) connects to Set(var, order=N-1) for chaining
     """
     try:
         prompt = json_data.get("prompt", json_data)
         if not isinstance(prompt, dict):
             return json_data
         
-        # Collect all Set and Get nodes by variable name
-        var_sets = {}  # var_name -> [(order, node_id), ...]
-        var_gets = {}  # var_name -> [(order, node_id), ...]
+        # Collect all Set and Get nodes grouped by variable name
+        # var_name -> { order -> [(node_id, node_data), ...] }
+        sets_by_var = {}
+        gets_by_var = {}
         
         for node_id, node_data in prompt.items():
             if not isinstance(node_data, dict):
@@ -200,46 +202,78 @@ def auto_connect_globals(json_data):
             inputs = node_data.get("inputs", {})
             var_name = inputs.get("variable_name", "")
             
-            # Get order value (handle both direct value and node connection)
+            if not var_name:
+                continue
+            
+            # Get order value
             order_val = inputs.get("order", 0)
             if isinstance(order_val, list):
-                # It's a connection, use 0 as fallback
                 order_val = 0
             
-            if class_type == "SetNodeGlobal" and var_name:
-                var_sets.setdefault(var_name, []).append((order_val, node_id))
-            elif class_type == "GetNodeGlobal" and var_name:
-                var_gets.setdefault(var_name, []).append((order_val, node_id))
+            if class_type == "SetNodeGlobal":
+                if var_name not in sets_by_var:
+                    sets_by_var[var_name] = {}
+                if order_val not in sets_by_var[var_name]:
+                    sets_by_var[var_name][order_val] = []
+                sets_by_var[var_name][order_val].append((node_id, node_data))
+                
+            elif class_type == "GetNodeGlobal":
+                if var_name not in gets_by_var:
+                    gets_by_var[var_name] = {}
+                if order_val not in gets_by_var[var_name]:
+                    gets_by_var[var_name][order_val] = []
+                gets_by_var[var_name][order_val].append((node_id, node_data))
         
-        # Connect each Get to the appropriate Set based on order
-        for var_name, gets in var_gets.items():
-            sets = var_sets.get(var_name, [])
+        print(f"🔍 [AutoConnect] Found Sets: {[(v, list(o.keys())) for v,o in sets_by_var.items()]}")
+        print(f"🔍 [AutoConnect] Found Gets: {[(v, list(o.keys())) for v,o in gets_by_var.items()]}")
+        
+        # Process each variable
+        for var_name in set(list(sets_by_var.keys()) + list(gets_by_var.keys())):
+            sets = sets_by_var.get(var_name, {})
+            gets = gets_by_var.get(var_name, {})
+            
             if not sets:
                 print(f"⚠️ [AutoConnect] No Set found for variable '{var_name}'")
                 continue
             
-            # Sort sets by order
-            sets_sorted = sorted(sets, key=lambda x: x[0])
+            # Get sorted order list for Sets
+            set_orders = sorted(sets.keys())
             
-            for get_order, get_node_id in gets:
-                # Find Set with highest order <= get_order
-                matching_set = None
-                for set_order, set_node_id in reversed(sets_sorted):
-                    if set_order <= get_order:
-                        matching_set = (set_order, set_node_id)
-                        break
+            # 1. Chain Set nodes: Set(order=N) depends on Set(order=N-1)
+            for i, current_order in enumerate(set_orders):
+                if i > 0:
+                    prev_order = set_orders[i - 1]
+                    # Connect current Set's _prev to previous Set's _next
+                    for set_node_id, set_node_data in sets[current_order]:
+                        # Find one Set from previous order
+                        prev_set_id = sets[prev_order][0][0]
+                        set_node_data["inputs"]["_prev"] = [prev_set_id, 1]
+                        print(f"🔗 [Chain] '{var_name}': Set[{prev_set_id}](order={prev_order}) → Set[{set_node_id}](order={current_order})")
+            
+            # 2. Connect Get nodes to Set nodes with SAME order
+            for get_order, get_nodes in gets.items():
+                # Find Set with same order
+                if get_order in sets:
+                    set_node_id = sets[get_order][0][0]  # First Set with this order
+                    source_order = get_order
+                else:
+                    # Fallback: find Set with highest order < get_order
+                    matching_orders = [o for o in set_orders if o < get_order]
+                    if matching_orders:
+                        source_order = max(matching_orders)
+                        set_node_id = sets[source_order][0][0]
+                    else:
+                        # Last resort: use lowest order Set
+                        source_order = set_orders[0]
+                        set_node_id = sets[source_order][0][0]
                 
-                # If no matching found, use the first Set
-                if matching_set is None:
-                    matching_set = sets_sorted[0]
-                
-                set_order, set_node_id = matching_set
-                
-                # Connect Get's _dep input to Set's _trigger output (index 1)
-                prompt[get_node_id]["inputs"]["_dep"] = [set_node_id, 1]
-                print(f"🔗 [AutoConnect] '{var_name}': Set[{set_node_id}](order={set_order}) → Get[{get_node_id}](order={get_order})")
+                # Connect all Get nodes with this order
+                for get_node_id, get_node_data in get_nodes:
+                    get_node_data["inputs"]["_dep"] = [set_node_id, 1]
+                    print(f"🔗 [Connect] '{var_name}': Set[{set_node_id}](order={source_order}) → Get[{get_node_id}](order={get_order})")
         
         return json_data
+        
     except Exception as e:
         import traceback
         print(f"⚠️ [AutoConnect] Error: {e}")
@@ -249,7 +283,7 @@ def auto_connect_globals(json_data):
 
 if hasattr(PromptServer, "instance"):
     PromptServer.instance.add_on_prompt_handler(auto_connect_globals)
-    print("✅ [NodesGlobal] Initialized with order support")
+    print("✅ [NodesGlobal] Initialized with order chaining")
 
 
 NODE_CLASS_MAPPINGS = {
