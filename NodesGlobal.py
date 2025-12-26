@@ -20,7 +20,7 @@ def get_comfy_type(value):
     
     cls_name = type(value).__name__
     
-    # Check class name first (most reliable for model types)
+    # Check class name first (most reliable)
     type_by_class = {
         'ModelPatcher': 'MODEL',
         'CLIP': 'CLIP',
@@ -32,13 +32,14 @@ def get_comfy_type(value):
         'CLIPVisionModel': 'CLIP_VISION',
         'StyleModel': 'STYLE_MODEL',
         'InsightFace': 'INSIGHTFACE',
+        'FluxClipModel': 'CLIP',
     }
     
     for pattern, comfy_type in type_by_class.items():
         if pattern in cls_name:
             return comfy_type
     
-    # Check for common methods (for wrapped objects)
+    # Check methods
     if hasattr(value, 'tokenize') and hasattr(value, 'encode_from_tokens'):
         return "CLIP"
     if hasattr(value, 'patcher') and hasattr(value, 'model'):
@@ -46,43 +47,32 @@ def get_comfy_type(value):
     if hasattr(value, 'encode') and hasattr(value, 'decode') and hasattr(value, 'first_stage_model'):
         return "VAE"
     
-    # Tensor-like
+    # Tensor
     if hasattr(value, 'shape'):
         shape = value.shape
         ndim = len(shape)
         
         if ndim == 4:
-            # BHWC (batch, height, width, channels)
             if shape[-1] in [1, 3, 4]:
                 return "IMAGE"
-            # BCHW (batch, channels, height, width) - latent
             if shape[1] in [4, 8, 16]:
                 return "LATENT"
             return "IMAGE"
-        
-        if ndim == 3:
-            # BHW - mask
-            return "MASK"
-        
-        if ndim == 2:
+        if ndim == 3 or ndim == 2:
             return "MASK"
     
-    # Dict types
+    # Dict
     if isinstance(value, dict):
         if 'samples' in value:
             return "LATENT"
-        if 'noise_mask' in value:
-            return "LATENT"
         return "*"
     
-    # CONDITIONING is list of [tensor, dict] pairs
+    # CONDITIONING - list of (tensor, dict) tuples
     if isinstance(value, list) and len(value) > 0:
         first = value[0]
-        # Conditioning is list of tuples/lists: [(tensor, {"pooled_output": ...}), ...]
         if isinstance(first, (list, tuple)) and len(first) >= 2:
             if hasattr(first[0], 'shape') and isinstance(first[1], dict):
                 return "CONDITIONING"
-        # Not conditioning, just a list
         return "*"
     
     # Primitives
@@ -140,13 +130,23 @@ class SetNodeGlobal:
     def execute(self, variable_name, order=0, unique_id=None, value=None, _prev=None):
         if value is not None:
             detected_type = get_comfy_type(value)
+            
+            # Unique key for this variable+order
+            key = f"{variable_name}@{order}"
+            
+            GLOBAL_STORE[key] = value
+            GLOBAL_TYPES[key] = detected_type
+            
+            # Also store latest value without order
             GLOBAL_STORE[variable_name] = value
             GLOBAL_TYPES[variable_name] = detected_type
             
-            # Store with order for debugging
-            key_with_order = f"{variable_name}@{order}"
-            GLOBAL_STORE[key_with_order] = value
-            GLOBAL_TYPES[key_with_order] = detected_type
+            # Check if type changed from previous order
+            prev_key = f"{variable_name}@{order-1}" if order > 0 else None
+            if prev_key and prev_key in GLOBAL_TYPES:
+                prev_type = GLOBAL_TYPES[prev_key]
+                if prev_type != detected_type:
+                    print(f"⚠️ [Set] '{variable_name}' TYPE CHANGED: order={order-1} was {prev_type}, order={order} is {detected_type}")
             
             if hasattr(PromptServer, "instance"):
                 PromptServer.instance.send_sync("kjnodes.type_update", {
@@ -157,15 +157,13 @@ class SetNodeGlobal:
                     "class_name": type(value).__name__,
                 })
             
-            print(f"✅ [Set] '{variable_name}' order={order} → {detected_type} ({type(value).__name__})")
-        else:
-            print(f"⚠️ [Set] '{variable_name}' order={order} → value is None!")
+            print(f"✅ [Set] '{variable_name}@{order}' → {detected_type} ({type(value).__name__})")
         
         return (value, True)
 
 
 class GetNodeGlobal:
-    """Gets a global variable by name with order support."""
+    """Gets a global variable by name with order support and type validation."""
     
     @classmethod
     def INPUT_TYPES(cls):
@@ -188,84 +186,68 @@ class GetNodeGlobal:
     CATEGORY = "KJNodes/Variables"
 
     def execute(self, variable_name, order=0, unique_id=None, _dep=None):
-        # Try exact order first
-        key_with_order = f"{variable_name}@{order}"
+        key = f"{variable_name}@{order}"
         
-        if key_with_order in GLOBAL_STORE:
-            value = GLOBAL_STORE[key_with_order]
-            var_type = GLOBAL_TYPES.get(key_with_order, "*")
-            print(f"📥 [Get] '{variable_name}' order={order} → {var_type} ({type(value).__name__})")
+        # Try exact key first
+        if key in GLOBAL_STORE:
+            value = GLOBAL_STORE[key]
+            var_type = GLOBAL_TYPES.get(key, "*")
+            print(f"📥 [Get] '{key}' → {var_type} ({type(value).__name__})")
             return (value,)
         
-        # Fallback to variable without order
+        # Try to find lower order
+        for o in range(order - 1, -1, -1):
+            fallback_key = f"{variable_name}@{o}"
+            if fallback_key in GLOBAL_STORE:
+                value = GLOBAL_STORE[fallback_key]
+                var_type = GLOBAL_TYPES.get(fallback_key, "*")
+                print(f"📥 [Get] '{variable_name}@{order}' (fallback to @{o}) → {var_type} ({type(value).__name__})")
+                return (value,)
+        
+        # Try variable without order
         if variable_name in GLOBAL_STORE:
             value = GLOBAL_STORE[variable_name]
             var_type = GLOBAL_TYPES.get(variable_name, "*")
-            print(f"📥 [Get] '{variable_name}' (fallback) → {var_type} ({type(value).__name__})")
+            print(f"📥 [Get] '{variable_name}' (no order) → {var_type} ({type(value).__name__})")
             return (value,)
         
-        # List available variables
-        available = [k for k in GLOBAL_STORE.keys() if not '@' in k]
-        available_with_order = [k for k in GLOBAL_STORE.keys() if k.startswith(variable_name + '@')]
-        
-        error_msg = f"Variable '{variable_name}' with order={order} not found!\n"
-        error_msg += f"Available variables: {available}\n"
-        error_msg += f"Available orders for '{variable_name}': {available_with_order}\n"
-        error_msg += "Make sure Set node with matching order executes before this Get node."
-        
-        raise ValueError(error_msg)
+        # Error with helpful info
+        available_keys = [k for k in GLOBAL_STORE.keys() if k.startswith(variable_name)]
+        raise ValueError(
+            f"Variable '{variable_name}@{order}' not found!\n"
+            f"Available: {available_keys}\n"
+            f"All variables: {list(GLOBAL_STORE.keys())}"
+        )
 
 
-# --- API ENDPOINTS ---
+# --- API ---
 if hasattr(PromptServer, "instance"):
     
     @PromptServer.instance.routes.get("/kjnodes/global_types")
     async def get_all_types(request):
-        # Return only base variables (without @order suffix)
-        result = {k: v for k, v in GLOBAL_TYPES.items() if '@' not in k}
-        return web.json_response(result)
-    
-    @PromptServer.instance.routes.get("/kjnodes/global_type/{name}")
-    async def get_var_type(request):
-        name = request.match_info.get('name', '')
-        return web.json_response({
-            "name": name,
-            "type": GLOBAL_TYPES.get(name, "*"),
-            "exists": name in GLOBAL_STORE
-        })
+        return web.json_response(GLOBAL_TYPES)
     
     @PromptServer.instance.routes.get("/kjnodes/global_debug")
-    async def get_debug_info(request):
-        """Debug endpoint to see all stored variables."""
+    async def get_debug(request):
         result = {}
         for k, v in GLOBAL_STORE.items():
             result[k] = {
                 "type": GLOBAL_TYPES.get(k, "*"),
-                "class": type(v).__name__ if v is not None else "None",
+                "class": type(v).__name__,
             }
         return web.json_response(result)
 
 
 # --- PROMPT HANDLER ---
 def auto_connect_globals(json_data):
-    """
-    Auto-connect Set→Get and Set→Set nodes by variable name AND order.
-    
-    Rules:
-    1. Get(var, order=N) connects to Set(var, order=N) with SAME order
-    2. If no Set with same order, connect to Set with highest order < N
-    3. Set(var, order=N) connects to Set(var, order=M) where M is max order < N
-    """
+    """Auto-connect Set→Get nodes by variable name AND order."""
     try:
         prompt = json_data.get("prompt", json_data)
         if not isinstance(prompt, dict):
             return json_data
         
-        # Clear old data for fresh execution
-        # Note: We keep the store as cache, but prompt handler ensures correct order
-        
-        # Collect nodes by variable
-        sets_by_var = {}  # var_name -> {order: [(node_id, node_data), ...]}
+        # Collect nodes
+        sets_by_var = {}
         gets_by_var = {}
         
         for node_id, node_data in prompt.items():
@@ -288,68 +270,60 @@ def auto_connect_globals(json_data):
             elif class_type == "GetNodeGlobal":
                 gets_by_var.setdefault(var_name, {}).setdefault(order_val, []).append((node_id, node_data))
         
-        # Debug output
-        for var_name in sets_by_var:
-            orders = sorted(sets_by_var[var_name].keys())
-            print(f"🔍 [AutoConnect] '{var_name}' Set orders: {orders}")
-        for var_name in gets_by_var:
-            orders = sorted(gets_by_var[var_name].keys())
-            print(f"🔍 [AutoConnect] '{var_name}' Get orders: {orders}")
+        # Debug
+        for var_name, orders in sets_by_var.items():
+            print(f"🔍 [AutoConnect] '{var_name}' Set orders: {sorted(orders.keys())}")
+        for var_name, orders in gets_by_var.items():
+            print(f"🔍 [AutoConnect] '{var_name}' Get orders: {sorted(orders.keys())}")
         
-        # Process each variable
-        all_vars = set(list(sets_by_var.keys()) + list(gets_by_var.keys()))
-        
-        for var_name in all_vars:
+        # Process
+        for var_name in set(list(sets_by_var.keys()) + list(gets_by_var.keys())):
             sets = sets_by_var.get(var_name, {})
             gets = gets_by_var.get(var_name, {})
             
             if not sets:
-                print(f"⚠️ [AutoConnect] No Set found for '{var_name}'")
+                print(f"⚠️ [AutoConnect] No Set for '{var_name}'")
                 continue
             
             set_orders = sorted(sets.keys())
             
-            # 1. Chain Set nodes by order
-            for i, current_order in enumerate(set_orders):
+            # Chain Sets
+            for i, order in enumerate(set_orders):
                 if i > 0:
                     prev_order = set_orders[i - 1]
-                    for set_node_id, set_node_data in sets[current_order]:
+                    for set_id, set_data in sets[order]:
                         prev_set_id = sets[prev_order][0][0]
-                        set_node_data["inputs"]["_prev"] = [prev_set_id, 1]
-                        print(f"🔗 [Chain] '{var_name}': Set[{prev_set_id}] order={prev_order} → Set[{set_node_id}] order={current_order}")
+                        set_data["inputs"]["_prev"] = [prev_set_id, 1]
+                        print(f"🔗 [Chain] '{var_name}': Set@{prev_order} → Set@{order}")
             
-            # 2. Connect Get nodes
+            # Connect Gets to matching Sets
             for get_order, get_nodes in gets.items():
-                # Find Set with same order first
+                # Find Set with SAME order
                 if get_order in sets:
                     target_order = get_order
                 else:
                     # Find highest order < get_order
-                    lower_orders = [o for o in set_orders if o < get_order]
-                    if lower_orders:
-                        target_order = max(lower_orders)
-                    else:
-                        # Use lowest available
-                        target_order = set_orders[0]
+                    lower = [o for o in set_orders if o < get_order]
+                    target_order = max(lower) if lower else set_orders[0]
                 
-                set_node_id = sets[target_order][0][0]
+                set_id = sets[target_order][0][0]
                 
-                for get_node_id, get_node_data in get_nodes:
-                    get_node_data["inputs"]["_dep"] = [set_node_id, 1]
-                    print(f"🔗 [Connect] '{var_name}': Set[{set_node_id}] order={target_order} → Get[{get_node_id}] order={get_order}")
+                for get_id, get_data in get_nodes:
+                    get_data["inputs"]["_dep"] = [set_id, 1]
+                    print(f"🔗 [Connect] '{var_name}': Set@{target_order}[{set_id}] → Get@{get_order}[{get_id}]")
         
         return json_data
         
     except Exception as e:
         import traceback
-        print(f"⚠️ [AutoConnect] Error: {e}")
+        print(f"⚠️ [AutoConnect] {e}")
         traceback.print_exc()
         return json_data
 
 
 if hasattr(PromptServer, "instance"):
     PromptServer.instance.add_on_prompt_handler(auto_connect_globals)
-    print("✅ [NodesGlobal] Initialized")
+    print("✅ [NodesGlobal] Ready")
 
 
 NODE_CLASS_MAPPINGS = {
