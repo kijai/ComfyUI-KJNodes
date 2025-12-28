@@ -2930,7 +2930,9 @@ class WanImageToVideoSVIPro(io.ComfyNode):
                 io.Latent.Input("anchor_samples"),
                 io.Latent.Input("prev_samples", optional=True),
                 io.Int.Input("motion_latent_count", default=1, min=0, max=128, step=1),
-                io.Latent.Input("end_samples", optional=True),
+                io.Latent.Input("end_frame_latent", optional=True),
+                io.Float.Input("end_frame_fill", default=1.0, min=0.0, max=1.0, step=0.01, tooltip="Percentage of padding frames to blend end_samples into. 0.5 = last 50% of padding, 1.0 = entire padding"),
+                io.Float.Input("end_frame_max_strength", default=0.5, min=0.0, max=1.0, step=0.01, tooltip="Maximum blend strength for end_samples. 1.0 = 100% end_samples at final frame, 0.5 = 50% max blend"),
             ],
             outputs=[
                 io.Conditioning.Output(display_name="positive"),
@@ -2940,7 +2942,7 @@ class WanImageToVideoSVIPro(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, positive, negative, length, motion_latent_count, anchor_samples, prev_samples=None, end_samples=None) -> io.NodeOutput:
+    def execute(cls, positive, negative, length, motion_latent_count, anchor_samples, end_frame_fill=0.5, end_frame_max_strength=1.0, prev_samples=None, end_frame_latent=None) -> io.NodeOutput:
         anchor_latent = anchor_samples["samples"].clone()
 
         B, C, T, H, W = anchor_latent.shape
@@ -2950,9 +2952,9 @@ class WanImageToVideoSVIPro(io.ComfyNode):
         device = anchor_latent.device
         dtype = anchor_latent.dtype
 
-        # Blend end_samples into the last frames of anchor_samples if provided
-        if end_samples is not None:
-            end_latent = end_samples["samples"].clone()
+        # Blend end_frame_latent into the last frames of anchor_samples if provided
+        if end_frame_latent is not None:
+            end_latent = end_frame_latent["samples"].clone()
             end_frames = end_latent.shape[2]
             num_anchor = anchor_latent.shape[2]
 
@@ -2978,7 +2980,27 @@ class WanImageToVideoSVIPro(io.ComfyNode):
             padding_size = total_latents - anchor_latent.shape[2] - motion_latent.shape[2]
             image_cond_latent = torch.cat([anchor_latent, motion_latent], dim=2)
 
-        padding = torch.zeros(1, C, padding_size, H, W, dtype=dtype, device=device)
+        padding = torch.zeros(B, C, padding_size, H, W, dtype=dtype, device=device)
+
+        # Blend end_frame_latent into the last frames of padding (regardless of anchor blending)
+        if end_frame_latent is not None and padding_size > 0:
+            end_latent = end_frame_latent["samples"].clone()
+            end_frames = end_latent.shape[2]
+
+            # Calculate how many padding frames to blend based on end_frame_fill
+            blend_frames = max(1, int(padding_size * end_frame_fill))
+            blend_frames = min(blend_frames, end_frames, padding_size)
+            padding_blend_start = padding_size - blend_frames
+
+            for frame_idx in range(blend_frames):
+                padding_frame_idx = padding_blend_start + frame_idx
+                # Blend factor increases from 0 to strength across the blended padding frames
+                blend_factor = ((frame_idx + 1) / blend_frames) * end_frame_max_strength
+                padding[:, :, padding_frame_idx] = (
+                    (1 - blend_factor) * padding[:, :, padding_frame_idx] +
+                    blend_factor * end_latent[:, :, frame_idx]
+                )
+
         padding = comfy.latent_formats.Wan21().process_out(padding)
         image_cond_latent = torch.cat([image_cond_latent, padding], dim=2)
 
