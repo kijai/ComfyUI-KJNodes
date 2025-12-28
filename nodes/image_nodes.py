@@ -1245,7 +1245,7 @@ class ImageAndMaskPreview(SaveImage):
         return {
             "required": {
                 "mask_opacity": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}),
-                "mask_color": ("STRING", {"default": "255, 255, 255"}),
+                "mask_color": ("STRING", {"default": "255, 255, 255", "tooltip": "RGB (255,255,255) or RGBA (255,255,255,128) or Hex (#RRGGBB / #RRGGBBAA)"}),
                 "pass_through": ("BOOLEAN", {"default": False}),
              },
             "optional": {
@@ -1265,6 +1265,7 @@ with pass_through on the preview is disabled and the
 composite is returned from the composite slot instead,  
 this allows for the preview to be passed for video combine  
 nodes for example.
+Supports RGBA for mask_color to adjust transparency per color.
 """
 
     def execute(self, mask_opacity, mask_color, pass_through, filename_prefix="ComfyUI", image=None, mask=None, prompt=None, extra_pnginfo=None):
@@ -1276,16 +1277,39 @@ nodes for example.
             mask_adjusted = mask * mask_opacity
             mask_image = mask.reshape((-1, 1, mask.shape[-2], mask.shape[-1])).movedim(1, -1).expand(-1, -1, -1, 3).clone()
 
+            # --- Color Parsing Logic Updated for RGBA ---
+            color_list = [255, 255, 255] # Default fallback
             if ',' in mask_color:
-                color_list = np.clip([int(channel) for channel in mask_color.split(',')], 0, 255) # RGB format
+                # Handle CSV format (e.g., "255, 0, 0" or "255, 0, 0, 128")
+                try:
+                    color_list = [int(channel.strip()) for channel in mask_color.split(',')]
+                except ValueError:
+                    print(f"Invalid mask_color format: {mask_color}")
             else:
+                # Handle Hex format
                 mask_color = mask_color.lstrip('#')
-                color_list = [int(mask_color[i:i+2], 16) for i in (0, 2, 4)] # Hex format
+                if len(mask_color) == 6: # #RRGGBB
+                    color_list = [int(mask_color[i:i+2], 16) for i in (0, 2, 4)]
+                elif len(mask_color) == 8: # #RRGGBBAA
+                    color_list = [int(mask_color[i:i+2], 16) for i in (0, 2, 4, 6)]
+            
+            color_list = np.clip(color_list, 0, 255)
+
+            # Apply RGB channels
             mask_image[:, :, :, 0] = color_list[0] / 255 # Red channel
             mask_image[:, :, :, 1] = color_list[1] / 255 # Green channel
             mask_image[:, :, :, 2] = color_list[2] / 255 # Blue channel
             
-            preview, = ImageCompositeMasked.composite(self, image, mask_image, 0, 0, True, mask_adjusted)
+            # Apply Alpha channel if present (4th value)
+            if len(color_list) == 4:
+                alpha_factor = color_list[3] / 255.0
+                mask_adjusted = mask_adjusted * alpha_factor
+            # --------------------------------------------
+            
+            # preview, = ImageCompositeMasked.composite(self, image, mask_image, 0, 0, True, mask_adjusted)
+            # Try removing 'self' from the arguments list
+            preview, = ImageCompositeMasked.composite(image, mask_image, 0, 0, True, mask_adjusted)
+        
         if pass_through:
             return (preview, )
         return(self.save_images(preview, filename_prefix, prompt, extra_pnginfo))

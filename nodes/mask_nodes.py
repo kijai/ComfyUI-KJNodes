@@ -1527,7 +1527,7 @@ class DrawMaskOnImage:
         return {"required": {
                     "image": ("IMAGE", ),
                     "mask": ("MASK", ),
-                    "color": ("STRING", {"default": "0, 0, 0", "tooltip": "Color as RGB values in range 0-255 or 0.0-1.0, separated by commas."}),
+                    "color": ("STRING", {"default": "0, 0, 0", "tooltip": "Color as RGB values (0-255) or RGBA (0-255). Ex: 255, 0, 0, 128"}),
                   }
                 }
     
@@ -1535,7 +1535,7 @@ class DrawMaskOnImage:
     RETURN_NAMES = ("images",)
     FUNCTION = "apply"
     CATEGORY = "KJNodes/masking"
-    DESCRIPTION = "Applies the provided masks to the input images."
+    DESCRIPTION = "Applies the provided masks to the input images with Alpha Blending support."
 
     def apply(self, image, mask, color):
         B, H, W, C = image.shape
@@ -1543,8 +1543,10 @@ class DrawMaskOnImage:
 
         in_masks = mask.clone()
         
+        # Resize mask if dimensions don't match
         if HM != H or WM != W:
             in_masks = F.interpolate(mask.unsqueeze(1), size=(H, W), mode='nearest-exact').squeeze(1)
+        # Handle batch size mismatch
         if B > BM:
             in_masks = in_masks.repeat((B + BM - 1) // BM, 1, 1)[:B]
         elif BM > B:
@@ -1552,34 +1554,66 @@ class DrawMaskOnImage:
         
         output_images = []
         
-        # Parse background color - detect if values are integers or floats
-        bg_values = []
+        # --- 1. Parse Color String (Handle RGB and RGBA) ---
+        color_values = []
         for x in color.split(","):
-            val_str = x.strip()
-            if '.' in val_str:
-                bg_values.append(float(val_str))
-            else:
-                bg_values.append(int(val_str) / 255.0)
+            val = float(x.strip())
+            # Normalize 0-255 to 0.0-1.0
+            if val > 1.0: 
+                val /= 255.0
+            color_values.append(val)
 
-        background_color = torch.tensor(bg_values, dtype=torch.float32, device=image.device)
+        # Extract RGB and Alpha
+        if len(color_values) == 4:
+            rgb = color_values[:3]
+            alpha_val = color_values[3] # This acts as Opacity
+        else:
+            rgb = color_values[:3]
+            alpha_val = 1.0 # Default to fully opaque if no alpha provided
+
+        # Create RGB Color Tensor
+        fill_color = torch.tensor(rgb, dtype=torch.float32, device=image.device)
+        # ---------------------------------------------------
 
         for i in range(B):
-            curr_mask = in_masks[i]
+            curr_mask = in_masks[i] # [H, W]
             img_idx = min(i, B - 1)
-            curr_image = image[img_idx]
-            mask_expanded = curr_mask.unsqueeze(-1).expand(-1, -1, 3)
-            masked_image = curr_image * (1 - mask_expanded) + background_color * (mask_expanded)
+            curr_image = image[img_idx] # [H, W, C]
+            
+            # --- 2. Calculate Blend Factor ---
+            # Mask * Color_Alpha = Final Opacity for the blending
+            # blend_factor shape: [H, W, 1]
+            blend_factor = curr_mask.unsqueeze(-1) * alpha_val
+            
+            img_channels = curr_image.shape[-1]
+            
+            # --- 3. Apply Alpha Blending ---
+            if img_channels == 4:
+                # [RGBA Image Case]
+                img_rgb = curr_image[..., :3]
+                img_a = curr_image[..., 3:]
+                
+                # Blend RGB: Original * (1 - Opacity) + Color * Opacity
+                out_rgb = img_rgb * (1 - blend_factor) + fill_color * blend_factor
+                
+                # Handle Alpha Channel (Simple Max: Ensure drawn area is at least as opaque as the draw alpha)
+                # Or you can keep original alpha: out_a = img_a
+                out_a = torch.maximum(img_a, blend_factor)
+                
+                masked_image = torch.cat((out_rgb, out_a), dim=-1)
+            else:
+                # [RGB Image Case]
+                # Simple Linear Interpolation (Lerp)
+                masked_image = curr_image * (1 - blend_factor) + fill_color * blend_factor
+            
             output_images.append(masked_image)
         
-        # If no masks were processed, return empty tensor
         if not output_images:
-            return (torch.zeros((0, H, W, 3), dtype=image.dtype),)
+            return (torch.zeros((0, H, W, C), dtype=image.dtype),)
 
-        out_rgb = torch.stack(output_images, dim=0)
+        out_tensor = torch.stack(output_images, dim=0)
         
-        return (out_rgb, )
-
-
+        return (out_tensor, )
 class BlockifyMask:
     @classmethod
     def INPUT_TYPES(s):
