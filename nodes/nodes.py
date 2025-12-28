@@ -11,6 +11,7 @@ from nodes import MAX_RESOLUTION
 from comfy.utils import common_upscale, ProgressBar, load_torch_file
 from comfy.comfy_types.node_typing import IO
 from comfy_api.latest import io
+import node_helpers
 from io import BytesIO
 
 script_directory = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -2914,3 +2915,58 @@ class VAEDecodeLoopKJ:
             images = images.reshape(-1, images.shape[-3], images.shape[-2], images.shape[-1])
 
         return (images, )
+
+import comfy.latent_formats
+class WanImageToVideoSVIPro(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="WanImageToVideoSVIPro",
+            category="conditioning/video_models",
+            inputs=[
+                io.Conditioning.Input("positive"),
+                io.Conditioning.Input("negative"),
+                io.Int.Input("length", default=81, min=1, max=MAX_RESOLUTION, step=4),
+                io.Latent.Input("anchor_samples"),
+                io.Latent.Input("prev_samples", optional=True),
+                io.Int.Input("motion_latent_count", default=1, min=0, max=128, step=1),
+            ],
+            outputs=[
+                io.Conditioning.Output(display_name="positive"),
+                io.Conditioning.Output(display_name="negative"),
+                io.Latent.Output(display_name="latent"),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, positive, negative, length, motion_latent_count, anchor_samples, prev_samples=None) -> io.NodeOutput:
+        anchor_latent = anchor_samples["samples"].clone()
+
+        B, C, T, H, W = anchor_latent.shape
+        empty_latent = torch.zeros([B, 16, ((length - 1) // 4) + 1, H, W], device=model_management.intermediate_device())
+
+        total_latents = (length - 1) // 4 + 1
+        device = anchor_latent.device
+        dtype = anchor_latent.dtype
+
+        if prev_samples is None or motion_latent_count == 0:
+            padding_size = total_latents - anchor_latent.shape[2]
+            image_cond_latent = anchor_latent
+        else:
+            motion_latent = prev_samples["samples"][:, :, -motion_latent_count:].clone()
+            padding_size = total_latents - anchor_latent.shape[2] - motion_latent.shape[2]
+            image_cond_latent = torch.cat([anchor_latent, motion_latent], dim=2)
+
+        padding = torch.zeros(1, C, padding_size, H, W, dtype=dtype, device=device)
+        padding = comfy.latent_formats.Wan21().process_out(padding)
+        image_cond_latent = torch.cat([image_cond_latent, padding], dim=2)
+
+        mask = torch.ones((1, 1, empty_latent.shape[2], H, W), device=device, dtype=dtype)
+        mask[:, :, :1] = 0.0
+
+        positive = node_helpers.conditioning_set_values(positive, {"concat_latent_image": image_cond_latent, "concat_mask": mask})
+        negative = node_helpers.conditioning_set_values(negative, {"concat_latent_image": image_cond_latent, "concat_mask": mask})
+
+        out_latent = {}
+        out_latent["samples"] = empty_latent
+        return io.NodeOutput(positive, negative, out_latent)
