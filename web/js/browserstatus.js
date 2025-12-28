@@ -1,5 +1,5 @@
-import { api } from "../../../scripts/api.js";
-import { app } from "../../../scripts/app.js";
+const { api } = window.comfyAPI.api;
+const { app } = window.comfyAPI.app;
 
 app.registerExtension({
     name: "KJNodes.browserstatus",

@@ -71,6 +71,7 @@ NODE_CONFIG = {
     "ImageCropByMaskAndResize": {"class": ImageCropByMaskAndResize, "name": "Image Crop By Mask And Resize"},
     "ImageCropByMaskBatch": {"class": ImageCropByMaskBatch, "name": "Image Crop By Mask Batch"},
     "ImageUncropByMask": {"class": ImageUncropByMask, "name": "Image Uncrop By Mask"},
+    "ImageBatchExtendWithOverlap": {"class": ImageBatchExtendWithOverlap, "name": "Image Batch Extend With Overlap"},
     "ImageGrabPIL": {"class": ImageGrabPIL, "name": "Image Grab PIL"},
     "ImageGridComposite2x2": {"class": ImageGridComposite2x2, "name": "Image Grid Composite 2x2"},
     "ImageGridComposite3x3": {"class": ImageGridComposite3x3, "name": "Image Grid Composite 3x3"},
@@ -128,10 +129,10 @@ NODE_CONFIG = {
     "AppendStringsToList": {"class": AppendStringsToList, "name": "Append Strings To List"},
     "JoinStrings": {"class": JoinStrings, "name": "Join Strings"},
     "JoinStringMulti": {"class": JoinStringMulti, "name": "Join String Multi"},
+    "SimpleCalculatorKJ": {"class": SimpleCalculatorKJ, "name": "Simple Calculator KJ"},
     "SomethingToString": {"class": SomethingToString, "name": "Something To String"},
     "Sleep": {"class": Sleep, "name": "Sleep"},
     "VRAM_Debug": {"class": VRAM_Debug, "name": "VRAM Debug"},
-    "SomethingToString": {"class": SomethingToString, "name": "Something To String"},
     "EmptyLatentImagePresets": {"class": EmptyLatentImagePresets, "name": "Empty Latent Image Presets"},
     "EmptyLatentImageCustomPresets": {"class": EmptyLatentImageCustomPresets, "name": "Empty Latent Image Custom Presets"},
     "ModelPassThrough": {"class": ModelPassThrough, "name": "ModelPass"},
@@ -196,6 +197,7 @@ NODE_CONFIG = {
     "PathchSageAttentionKJ": {"class": PathchSageAttentionKJ, "name": "Patch Sage Attention KJ"},
     "LeapfusionHunyuanI2VPatcher": {"class": LeapfusionHunyuanI2V, "name": "Leapfusion Hunyuan I2V Patcher"},
     "VAELoaderKJ": {"class": VAELoaderKJ, "name": "VAELoader KJ"},
+    "VAEDecodeLoopKJ": {"class": VAEDecodeLoopKJ, "name": "VAE Decode Loop KJ"},
     "ScheduledCFGGuidance": {"class": ScheduledCFGGuidance, "name": "Scheduled CFG Guidance"},
     "ApplyRifleXRoPE_HunuyanVideo": {"class": ApplyRifleXRoPE_HunuyanVideo, "name": "Apply RifleXRoPE HunuyanVideo"},
     "ApplyRifleXRoPE_WanVideo": {"class": ApplyRifleXRoPE_WanVideo, "name": "Apply RifleXRoPE WanVideo"},
@@ -208,6 +210,12 @@ NODE_CONFIG = {
     "ModelPatchTorchSettings": {"class": ModelPatchTorchSettings, "name": "Model Patch Torch Settings"},
     "WanVideoNAG": {"class": WanVideoNAG, "name": "WanVideoNAG"},
     "GGUFLoaderKJ": {"class": GGUFLoaderKJ, "name": "GGUF Loader KJ"},
+    "LatentInpaintTTM": {"class": LatentInpaintTTM, "name": "Latent Inpaint TTM"},
+    "NABLA_AttentionKJ": {"class": NABLA_AttentionKJ, "name": "NABLA Attention KJ"},
+    "TorchCompileModelAdvanced": {"class": TorchCompileModelAdvanced, "name": "TorchCompileModelAdvanced"},
+    "StartRecordCUDAMemoryHistory": {"class": StartRecordCUDAMemoryHistory, "name": "Start Recording CUDAMemory History"},
+    "EndRecordCUDAMemoryHistory": {"class": EndRecordCUDAMemoryHistory, "name": "End Recording CUDAMemory History"},
+    "VisualizeCUDAMemoryHistory": {"class": VisualizeCUDAMemoryHistory, "name": "Visualize CUDAMemory History"},
 
     #instance diffusion
     "CreateInstanceDiffusionTracking": {"class": CreateInstanceDiffusionTracking},
@@ -216,7 +224,11 @@ NODE_CONFIG = {
 
     #lora
     "LoraExtractKJ": {"class": LoraExtractKJ, "name": "LoraExtractKJ"},
-    "LoraReduceRankKJ": {"class": LoraReduceRank, "name": "LoraReduceRank"}
+    "LoraReduceRankKJ": {"class": LoraReduceRank, "name": "LoraReduceRank"},
+
+    #tracks
+    "GetTrackRange": {"class": GetTrackRange, "name": "Get Track Range"},
+    "AddNoiseToTrackPath": {"class": AddNoiseToTrackPath, "name": "Add Noise To Track"},
 }
 
 def generate_node_mappings(node_config):

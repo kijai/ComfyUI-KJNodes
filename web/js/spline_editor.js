@@ -1,4 +1,4 @@
-import { app } from '../../../scripts/app.js'
+const { app } = window.comfyAPI.app;
 
 //from melmass
 export function makeUUID() {
@@ -1024,7 +1024,10 @@ this.lastMousePosition = { x: this.width/2, y: this.height/2 };
     this.node.contextMenu = newMenu;
 
     document.addEventListener('contextmenu', function (e) {
+    if (e.target.closest(`#points-editor-${self.node.uuid}`) || 
+        e.target.closest('#context-menu')) {
       e.preventDefault();
+      }
     });
 
     document.addEventListener('click', function (e) {

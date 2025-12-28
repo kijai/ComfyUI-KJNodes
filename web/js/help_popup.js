@@ -1,4 +1,4 @@
-import { app } from "../../../scripts/app.js";
+const { app } = window.comfyAPI.app;
 
 // code based on mtb nodes by Mel Massadian https://github.com/melMass/comfy_mtb/
 export const loadScript = (

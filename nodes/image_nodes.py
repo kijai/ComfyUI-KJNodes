@@ -12,6 +12,8 @@ import re
 import json
 import importlib
 from PIL.PngImagePlugin import PngInfo
+from io import BytesIO
+
 try:
     import cv2
 except:
@@ -20,7 +22,8 @@ except:
 from PIL import ImageGrab, ImageDraw, ImageFont, Image, ImageOps
 
 from nodes import MAX_RESOLUTION, SaveImage
-from comfy_extras.nodes_mask import ImageCompositeMasked
+from comfy_extras.nodes_mask import composite
+import node_helpers
 from comfy.cli_args import args
 from comfy.utils import ProgressBar, common_upscale
 import folder_paths
@@ -97,6 +100,10 @@ https://github.com/hahnec/color-matcher/
 """
     
     def colormatch(self, image_ref, image_target, method, strength=1.0, multithread=True):
+        # Skip unnecessary processing
+        if strength == 0:
+            return (image_target,)
+
         try:
             from color_matcher import ColorMatcher
         except:
@@ -117,9 +124,12 @@ https://github.com/hahnec/color-matcher/
             image_target_np_i = images_target_np if batch_size == 1 else images_target[i].numpy()
             image_ref_np_i = image_ref_np if image_ref.size(0) == 1 else images_ref[i].numpy()
             try:
-                image_result = cm.transfer(src=image_target_np_i, ref=image_ref_np_i, method=method)
-                image_result = image_target_np_i + strength * (image_result - image_target_np_i)
+                image_result = cm.transfer(src=image_target_np_i, ref=image_ref_np_i, method=method) # Avoid potential blur when only the fully color-matched image is used
+                if strength != 1:
+                    image_result = image_target_np_i + strength * (image_result - image_target_np_i)
+                    
                 return torch.from_numpy(image_result)
+                
             except Exception as e:
                 print(f"Thread {i} error: {e}")
                 return torch.from_numpy(image_target_np_i)  # fallback
@@ -168,7 +178,7 @@ Saves an image and mask as .PNG with the mask as the alpha channel.
         def file_counter():
             max_counter = 0
             # Loop through the existing files
-            for existing_file in os.listdir(full_output_folder):
+            for existing_file in sorted(os.listdir(full_output_folder)):
                 # Check if the file matches the expected format
                 match = re.fullmatch(fr"{filename}_(\d+)_?\.[a-zA-Z0-9]+", existing_file)
                 if match:
@@ -1306,10 +1316,9 @@ Supports RGBA for mask_color to adjust transparency per color.
                 mask_adjusted = mask_adjusted * alpha_factor
             # --------------------------------------------
             
-            # preview, = ImageCompositeMasked.composite(self, image, mask_image, 0, 0, True, mask_adjusted)
-            # Try removing 'self' from the arguments list
-            preview, = ImageCompositeMasked.composite(image, mask_image, 0, 0, True, mask_adjusted)
-        
+            destination, source = node_helpers.image_alpha_fix(image, mask_image)
+            destination = destination.clone().movedim(-1, 1)
+            preview = composite(destination, source.movedim(-1, 1), 0, 0, mask_adjusted, 1, True).movedim(1, -1)
         if pass_through:
             return (preview, )
         return(self.save_images(preview, filename_prefix, prompt, extra_pnginfo))
@@ -1798,6 +1807,84 @@ Returns a range of images from a batch.
             chosen_masks = masks[start_index:end_index]
 
         return (chosen_images, chosen_masks,)
+    
+class ImageBatchExtendWithOverlap:
+    
+    RETURN_TYPES = ("IMAGE", "IMAGE", "IMAGE", )
+    RETURN_NAMES = ("source_images", "start_images", "extended_images")
+    OUTPUT_TOOLTIPS = (
+        "The original source images (passthrough)",
+        "The input images used as the starting point for extension",
+        "The extended images with overlap, if no new images are provided this will be empty",
+    )
+    FUNCTION = "imagesfrombatch"
+    CATEGORY = "KJNodes/image"
+    DESCRIPTION = """
+Helper node for video generation extension   
+First input source and overlap amount to get the starting frames for the extension.  
+Then on another copy of the node provide the newly generated frames and choose how to overlap them.
+"""
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "source_images": ("IMAGE", {"tooltip": "The source images to extend"}),
+                "overlap": ("INT", {"default": 13,"min": 1, "max": 4096, "step": 1, "tooltip": "Number of overlapping frames between source and new images"}),
+                "overlap_side": (["source", "new_images"], {"default": "source", "tooltip": "Which side to overlap on"}),
+                "overlap_mode": (["cut", "linear_blend", "ease_in_out"], {"default": "linear_blend", "tooltip": "Method to use for overlapping frames"}),
+        },
+        "optional": {
+            "new_images": ("IMAGE", {"tooltip": "The new images to extend with"}),
+        }
+    } 
+    
+    def imagesfrombatch(self, source_images, overlap, overlap_side, overlap_mode, new_images=None):
+        if overlap >= len(source_images):
+            return source_images, source_images, source_images
+
+        if new_images is not None:
+            if source_images.shape[1:3] != new_images.shape[1:3]:
+                raise ValueError(f"Source and new images must have the same shape: {source_images.shape[1:3]} vs {new_images.shape[1:3]}")
+            # Determine where to place the overlap
+            prefix = source_images[:-overlap]
+            if overlap_side == "source":
+                blend_src = source_images[-overlap:]
+                blend_dst = new_images[:overlap]
+            elif overlap_side == "new_images":
+                blend_src = new_images[:overlap]
+                blend_dst = source_images[-overlap:]
+            suffix = new_images[overlap:]
+
+            if overlap_mode == "linear_blend":
+                blended_images = [
+                    crossfade(blend_src[i], blend_dst[i], (i + 1) / (overlap + 1))
+                    for i in range(overlap)
+                ]
+                blended_images = torch.stack(blended_images, dim=0)
+                extended_images = torch.cat((prefix, blended_images, suffix), dim=0)
+            elif overlap_mode == "ease_in_out":
+                blended_images = []
+                for i in range(overlap):
+                    t = (i + 1) / (overlap + 1)
+                    eased_t = ease_in_out(t)
+                    blended_image = crossfade(blend_src[i], blend_dst[i], eased_t)
+                    blended_images.append(blended_image)
+                blended_images = torch.stack(blended_images, dim=0)
+                extended_images = torch.cat((prefix, blended_images, suffix), dim=0)
+              
+            elif overlap_mode == "cut":
+                extended_images = torch.cat((prefix, suffix), dim=0)
+                if overlap_side == "new_images":
+                   extended_images = torch.cat((source_images, new_images[overlap:]), dim=0)
+                elif overlap_side == "source":
+                   extended_images = torch.cat((source_images[:-overlap], new_images), dim=0)
+        else:
+            extended_images = torch.zeros((1, 64, 64, 3), device="cpu")
+
+        start_images = source_images[-overlap:]
+
+        return (source_images, start_images, extended_images)
 
 class GetLatentRangeFromBatch:
     
@@ -2492,7 +2579,7 @@ class ImageResizeKJv2:
                 "width": ("INT", { "default": 512, "min": 0, "max": MAX_RESOLUTION, "step": 1, }),
                 "height": ("INT", { "default": 512, "min": 0, "max": MAX_RESOLUTION, "step": 1, }),
                 "upscale_method": (s.upscale_methods,),
-                "keep_proportion": (["stretch", "resize", "pad", "pad_edge", "pad_edge_pixel", "crop", "pillarbox_blur"], { "default": False }),
+                "keep_proportion": (["stretch", "resize", "pad", "pad_edge", "pad_edge_pixel", "crop", "pillarbox_blur", "total_pixels"], { "default": False }),
                 "pad_color": ("STRING", { "default": "0, 0, 0", "tooltip": "Color to use for padding."}),
                 "crop_position": (["center", "top", "bottom", "left", "right"], { "default": "center" }),
                 "divisible_by": ("INT", { "default": 2, "min": 0, "max": 512, "step": 1, }),
@@ -2500,6 +2587,7 @@ class ImageResizeKJv2:
             "optional" : {
                 "mask": ("MASK",),
                 "device": (["cpu", "gpu"],),
+                #"per_batch": ("INT", { "default": 0, "min": 0, "max": MAX_RESOLUTION, "step": 1, "tooltip": "Process images in sub-batches to reduce memory usage. 0 disables sub-batching."}),
             },
              "hidden": {
                 "unique_id": "UNIQUE_ID",
@@ -2518,7 +2606,7 @@ Keep proportions keeps the aspect ratio of the image, by
 highest dimension.  
 """
 
-    def resize(self, image, width, height, keep_proportion, upscale_method, divisible_by, pad_color, crop_position, unique_id, device="cpu", mask=None):
+    def resize(self, image, width, height, keep_proportion, upscale_method, divisible_by, pad_color, crop_position, unique_id, device="cpu", mask=None, per_batch=64):
         B, H, W, C = image.shape
 
         if device == "gpu":
@@ -2528,15 +2616,23 @@ highest dimension.
         else:
             device = torch.device("cpu")
 
-        if width == 0:
-            width = W
-        if height == 0:
-            height = H
-
         pillarbox_blur = keep_proportion == "pillarbox_blur"
-        if keep_proportion == "resize" or keep_proportion.startswith("pad") or pillarbox_blur:
+        
+        # Initialize padding variables
+        pad_left = pad_right = pad_top = pad_bottom = 0
+
+        if keep_proportion in ["resize", "total_pixels"] or keep_proportion.startswith("pad") or pillarbox_blur:
+            if keep_proportion == "total_pixels":
+                total_pixels = width * height
+                aspect_ratio = W / H
+                new_height = int(math.sqrt(total_pixels / aspect_ratio))
+                new_width = int(math.sqrt(total_pixels * aspect_ratio))
+                
             # If one of the dimensions is zero, calculate it to maintain the aspect ratio
-            if width == 0 and height != 0:
+            elif width == 0 and height == 0:
+                new_width = W
+                new_height = H
+            elif width == 0 and height != 0:
                 ratio = height / H
                 new_width = round(W * ratio)
                 new_height = height
@@ -2552,7 +2648,6 @@ highest dimension.
                 new_width = width
                 new_height = height
 
-            pad_left = pad_right = pad_top = pad_bottom = 0
             if keep_proportion.startswith("pad") or pillarbox_blur:
                 # Calculate padding based on position
                 if crop_position == "center":
@@ -2583,76 +2678,136 @@ highest dimension.
 
             width = new_width
             height = new_height
+        else:
+            if width == 0:
+                width = W
+            if height == 0:
+                height = H
 
         if divisible_by > 1:
             width = width - (width % divisible_by)
             height = height - (height % divisible_by)
 
-        out_image = image.clone().to(device)
-        if mask is not None:
-            out_mask = mask.clone().to(device)
+        # Preflight estimate (log-only when batching is active)
+        if per_batch != 0 and B > per_batch:
+            try:
+                bytes_per_elem = image.element_size()  # typically 4 for float32
+                est_total_bytes = B * height * width * C * bytes_per_elem
+                est_mb = est_total_bytes / (1024 * 1024)
+                msg = f"<tr><td>Resize v2</td><td>estimated output ~{est_mb:.2f} MB; batching {per_batch}/{B}</td></tr>"
+                if unique_id and PromptServer is not None:
+                    try:
+                        PromptServer.instance.send_progress_text(msg, unique_id)
+                    except:
+                        pass
+                else:
+                    print(f"[ImageResizeKJv2] estimated output ~{est_mb:.2f} MB; batching {per_batch}/{B}")
+            except:
+                pass
+
+        def _process_subbatch(in_image, in_mask, pad_left, pad_right, pad_top, pad_bottom):
+            # Avoid unnecessary clones; only move if needed
+            out_image = in_image if in_image.device == device else in_image.to(device)
+            out_mask = None if in_mask is None else (in_mask if in_mask.device == device else in_mask.to(device))
+
+            # Crop logic
+            if keep_proportion == "crop":
+                old_height = out_image.shape[-3]
+                old_width = out_image.shape[-2]
+                old_aspect = old_width / old_height
+                new_aspect = width / height
+                if old_aspect > new_aspect:
+                    crop_w = round(old_height * new_aspect)
+                    crop_h = old_height
+                else:
+                    crop_w = old_width
+                    crop_h = round(old_width / new_aspect)
+                if crop_position == "center":
+                    x = (old_width - crop_w) // 2
+                    y = (old_height - crop_h) // 2
+                elif crop_position == "top":
+                    x = (old_width - crop_w) // 2
+                    y = 0
+                elif crop_position == "bottom":
+                    x = (old_width - crop_w) // 2
+                    y = old_height - crop_h
+                elif crop_position == "left":
+                    x = 0
+                    y = (old_height - crop_h) // 2
+                elif crop_position == "right":
+                    x = old_width - crop_w
+                    y = (old_height - crop_h) // 2
+                out_image = out_image.narrow(-2, x, crop_w).narrow(-3, y, crop_h)
+                if out_mask is not None:
+                    out_mask = out_mask.narrow(-1, x, crop_w).narrow(-2, y, crop_h)
+
+            out_image = common_upscale(out_image.movedim(-1,1), width, height, upscale_method, crop="disabled").movedim(1,-1)
+            if out_mask is not None:
+                if upscale_method == "lanczos":
+                    out_mask = common_upscale(out_mask.unsqueeze(1).repeat(1, 3, 1, 1), width, height, upscale_method, crop="disabled").movedim(1,-1)[:, :, :, 0]
+                else:
+                    out_mask = common_upscale(out_mask.unsqueeze(1), width, height, upscale_method, crop="disabled").squeeze(1)
+
+            # Pad logic
+            if (keep_proportion.startswith("pad") or pillarbox_blur) and (pad_left > 0 or pad_right > 0 or pad_top > 0 or pad_bottom > 0):
+                padded_width = width + pad_left + pad_right
+                padded_height = height + pad_top + pad_bottom
+                if divisible_by > 1:
+                    width_remainder = padded_width % divisible_by
+                    height_remainder = padded_height % divisible_by
+                    if width_remainder > 0:
+                        extra_width = divisible_by - width_remainder
+                        pad_right += extra_width
+                    if height_remainder > 0:
+                        extra_height = divisible_by - height_remainder
+                        pad_bottom += extra_height
+
+                pad_mode = (
+                    "pillarbox_blur" if pillarbox_blur else
+                    "edge" if keep_proportion == "pad_edge" else
+                    "edge_pixel" if keep_proportion == "pad_edge_pixel" else
+                    "color"
+                )
+                out_image, out_mask = ImagePadKJ.pad(self, out_image, pad_left, pad_right, pad_top, pad_bottom, 0, pad_color, pad_mode, mask=out_mask)
+
+            return out_image, out_mask
+
+        # If batching disabled (per_batch==0) or batch fits, process whole batch
+        if per_batch == 0 or B <= per_batch:
+            out_image, out_mask = _process_subbatch(image, mask, pad_left, pad_right, pad_top, pad_bottom)
         else:
-            out_mask = None
-
-        # Crop logic
-        if keep_proportion == "crop":
-            old_width = W
-            old_height = H
-            old_aspect = old_width / old_height
-            new_aspect = width / height
-            if old_aspect > new_aspect:
-                crop_w = round(old_height * new_aspect)
-                crop_h = old_height
+            chunks = []
+            mask_chunks = [] if mask is not None else None
+            total_batches = (B + per_batch - 1) // per_batch
+            current_batch = 0
+            for start_idx in range(0, B, per_batch):
+                current_batch += 1
+                end_idx = min(start_idx + per_batch, B)
+                sub_img = image[start_idx:end_idx]
+                sub_mask = mask[start_idx:end_idx] if mask is not None else None
+                sub_out_img, sub_out_mask = _process_subbatch(sub_img, sub_mask, pad_left, pad_right, pad_top, pad_bottom)
+                chunks.append(sub_out_img.cpu())
+                if mask is not None:
+                    mask_chunks.append(sub_out_mask.cpu() if sub_out_mask is not None else None)
+                # Per-batch progress update
+                if unique_id and PromptServer is not None:
+                    try:
+                        PromptServer.instance.send_progress_text(
+                            f"<tr><td>Resize v2</td><td>batch {current_batch}/{total_batches} · images {end_idx}/{B}</td></tr>",
+                            unique_id
+                        )
+                    except:
+                        pass
+                else:
+                    try:
+                        print(f"[ImageResizeKJv2] batch {current_batch}/{total_batches} · images {end_idx}/{B}")
+                    except:
+                        pass
+            out_image = torch.cat(chunks, dim=0)
+            if mask is not None and any(m is not None for m in mask_chunks):
+                out_mask = torch.cat([m for m in mask_chunks if m is not None], dim=0)
             else:
-                crop_w = old_width
-                crop_h = round(old_width / new_aspect)
-            if crop_position == "center":
-                x = (old_width - crop_w) // 2
-                y = (old_height - crop_h) // 2
-            elif crop_position == "top":
-                x = (old_width - crop_w) // 2
-                y = 0
-            elif crop_position == "bottom":
-                x = (old_width - crop_w) // 2
-                y = old_height - crop_h
-            elif crop_position == "left":
-                x = 0
-                y = (old_height - crop_h) // 2
-            elif crop_position == "right":
-                x = old_width - crop_w
-                y = (old_height - crop_h) // 2
-            out_image = out_image.narrow(-2, x, crop_w).narrow(-3, y, crop_h)
-            if mask is not None:
-                out_mask = out_mask.narrow(-1, x, crop_w).narrow(-2, y, crop_h)
-
-        out_image = common_upscale(out_image.movedim(-1,1), width, height, upscale_method, crop="disabled").movedim(1,-1)
-        if mask is not None:
-            if upscale_method == "lanczos":
-                out_mask = common_upscale(out_mask.unsqueeze(1).repeat(1, 3, 1, 1), width, height, upscale_method, crop="disabled").movedim(1,-1)[:, :, :, 0]
-            else:
-                out_mask = common_upscale(out_mask.unsqueeze(1), width, height, upscale_method, crop="disabled").squeeze(1)
-
-        # Pad logic
-        if (keep_proportion.startswith("pad") or pillarbox_blur) and (pad_left > 0 or pad_right > 0 or pad_top > 0 or pad_bottom > 0):
-            padded_width = width + pad_left + pad_right
-            padded_height = height + pad_top + pad_bottom
-            if divisible_by > 1:
-                width_remainder = padded_width % divisible_by
-                height_remainder = padded_height % divisible_by
-                if width_remainder > 0:
-                    extra_width = divisible_by - width_remainder
-                    pad_right += extra_width
-                if height_remainder > 0:
-                    extra_height = divisible_by - height_remainder
-                    pad_bottom += extra_height
-
-            pad_mode = (
-                "pillarbox_blur" if pillarbox_blur else
-                "edge" if keep_proportion == "pad_edge" else
-                "edge_pixel" if keep_proportion == "pad_edge_pixel" else
-                "color"
-            )
-            out_image, out_mask = ImagePadKJ.pad(self, out_image, pad_left, pad_right, pad_top, pad_bottom, 0, pad_color, pad_mode, mask=out_mask)
+                out_mask = None
 
         # Progress UI
         if unique_id and PromptServer is not None:
@@ -2830,7 +2985,9 @@ class LoadImagesFromFolderKJ:
 
     @classmethod
     def IS_CHANGED(cls, folder, **kwargs):
-        if not os.path.isdir(folder):
+        if folder and not os.path.isabs(folder) and args.base_directory:
+            folder = os.path.join(args.base_directory, folder)
+        if not folder or not os.path.isdir(folder):
             return float("NaN")
         
         valid_extensions = ['.jpg', '.jpeg', '.png', '.webp', '.tga']
@@ -2848,7 +3005,7 @@ class LoadImagesFromFolderKJ:
                         except OSError:
                             pass
         else:
-            for file in os.listdir(folder):
+            for file in sorted(os.listdir(folder)):
                 if any(file.lower().endswith(ext) for ext in valid_extensions):
                     path = os.path.join(folder, file)
                     try:
@@ -2898,9 +3055,11 @@ class LoadImagesFromFolderKJ:
     CATEGORY = "KJNodes/image"
     DESCRIPTION = """Loads images from a folder into a batch, images are resized and loaded into a batch."""
 
-    def load_images(self, folder, width, height, image_load_cap, start_index, keep_aspect_ratio, include_subfolders=False):
-        if not os.path.isdir(folder):
-            raise FileNotFoundError(f"Folder '{folder} cannot be found.'")
+    def load_images(self, folder, width, height, image_load_cap, start_index, keep_aspect_ratio, include_subfolders=False):    
+        if folder and not os.path.isabs(folder) and args.base_directory:
+            folder = os.path.join(args.base_directory, folder)
+        if not folder or not os.path.isdir(folder):
+            raise FileNotFoundError(f"Folder '{folder}' cannot be found.")
         
         valid_extensions = ['.jpg', '.jpeg', '.png', '.webp', '.tga']
         image_paths = []
@@ -2910,7 +3069,7 @@ class LoadImagesFromFolderKJ:
                     if any(file.lower().endswith(ext) for ext in valid_extensions):
                         image_paths.append(os.path.join(root, file))
         else:
-            for file in os.listdir(folder):
+            for file in sorted(os.listdir(folder)):
                 if any(file.lower().endswith(ext) for ext in valid_extensions):
                     image_paths.append(os.path.join(folder, file))
 
@@ -3049,7 +3208,6 @@ class LoadImagesFromFolderKJ:
         stat = ImageStat.Stat(edges)
         median = tuple(map(int, stat.median))
         return median
-        
 
 class ImageGridtoBatch:
     @classmethod
@@ -3060,37 +3218,38 @@ class ImageGridtoBatch:
                     "rows": ("INT", {"default": 0, "min": 1, "max": 8, "tooltip": "The number of rows in the grid. Set to 0 for automatic calculation."}),
                   }
                 }
-    
+
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "decompose"
     CATEGORY = "KJNodes/image"
     DESCRIPTION = "Converts a grid of images to a batch of images."
-        
+
     def decompose(self, image, columns, rows):
         B, H, W, C = image.shape
         print("input size: ", image.shape)
-        
+
         # Calculate cell width, rounding down
         cell_width = W // columns
-        
+
         if rows == 0:
             # If rows is 0, calculate number of full rows
+            cell_height = H // columns
             rows = H // cell_height
         else:
             # If rows is specified, adjust cell_height
             cell_height = H // rows
-        
+
         # Crop the image to fit full cells
         image = image[:, :rows*cell_height, :columns*cell_width, :]
-        
+
         # Reshape and permute the image to get the grid
         image = image.view(B, rows, cell_height, columns, cell_width, C)
         image = image.permute(0, 1, 3, 2, 4, 5).contiguous()
         image = image.view(B, rows * columns, cell_height, cell_width, C)
-        
+
         # Reshape to the final batch tensor
         img_tensor = image.view(-1, cell_height, cell_width, C)
-        
+
         return (img_tensor,)
 
 class SaveImageKJ:
@@ -3202,6 +3361,8 @@ class SaveStringKJ:
         filename_prefix += self.prefix_append
         
         full_output_folder, filename, counter, subfolder, filename_prefix = folder_paths.get_save_image_path(filename_prefix, self.output_dir)
+        if output_folder and not os.path.isabs(output_folder) and args.base_directory:
+            output_folder = os.path.join(args.base_directory, output_folder)
         if output_folder != "output":
             if not os.path.exists(output_folder):
                 os.makedirs(output_folder, exist_ok=True)
@@ -3239,7 +3400,7 @@ class FastPreview:
     def preview(self, image, format, quality):        
         pil_image = to_pil_image(image[0].permute(2, 0, 1))
 
-        with io.BytesIO() as buffered:
+        with BytesIO() as buffered:
             pil_image.save(buffered, format=format, quality=quality)
             img_bytes = buffered.getvalue()
 
@@ -3827,11 +3988,14 @@ class LoadVideosFromFolder:
     FUNCTION = "load_video"
 
     def load_video(self, output_type, grid_max_columns, add_label=False, **kwargs):
+        if kwargs.get('video') and not os.path.isabs(kwargs['video']) and args.base_directory:
+            kwargs['video'] = os.path.join(args.base_directory, kwargs['video'])
+            
         if self.vhs_nodes is None:
             raise ImportError("This node requires ComfyUI-VideoHelperSuite to be installed.")
         videos_list = []
         filenames = []
-        for f in os.listdir(kwargs['video']):
+        for f in sorted(os.listdir(kwargs['video'])):
             if os.path.isfile(os.path.join(kwargs['video'], f)):
                 file_parts = f.split('.')
                 if len(file_parts) > 1 and (file_parts[-1].lower() in ['webm', 'mp4', 'mkv', 'gif', 'mov']):

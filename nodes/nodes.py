@@ -3,7 +3,6 @@ import torch.nn as nn
 import numpy as np
 from PIL import Image
 import json, re, os, io, time
-import re
 import importlib
 
 from comfy import model_management
@@ -11,6 +10,8 @@ import folder_paths
 from nodes import MAX_RESOLUTION
 from comfy.utils import common_upscale, ProgressBar, load_torch_file
 from comfy.comfy_types.node_typing import IO
+from comfy_api.latest import io
+from io import BytesIO
 
 script_directory = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 folder_paths.add_model_folder_path("kjnodes_fonts", os.path.join(script_directory, "fonts"))
@@ -90,14 +91,10 @@ class StringConstantMultiline:
     CATEGORY = "KJNodes/constants"
 
     def stringify(self, string, strip_newlines):
-        new_string = []
-        for line in io.StringIO(string):
-            if not line.strip().startswith("\n") and strip_newlines:
-                line = line.replace("\n", '')
-            new_string.append(line)
-        new_string = "\n".join(new_string)
-
-        return (new_string, )
+        new_string = string
+        if strip_newlines:
+            new_string = new_string.replace('\n', '').strip()
+        return (new_string,)
 
 
     
@@ -216,7 +213,7 @@ Combines multiple conditioning nodes into one
         for c in range(1, inputcount):
             new_cond = kwargs[f"conditioning_{c + 1}"]
             if operation == "combine":
-                cond = cond_combine_node.combine(new_cond, cond)[0]
+                cond = cond_combine_node.combine(cond, new_cond)[0]
             elif operation == "concat":
                 cond = cond_concat_node.concat(cond, new_cond)[0]
         return (cond, inputcount,)
@@ -669,12 +666,12 @@ Converts any type to a string.
 """
 
     def stringify(self, input, prefix="", suffix=""):
-        if isinstance(input, (int, float, bool)):
+        if isinstance(input, (int, float, bool, str)):
             stringified = str(input)
         elif isinstance(input, list):
             stringified = ', '.join(str(item) for item in input)
         else:
-            return
+            return input,
         if prefix: # Check if prefix is not empty
             stringified = prefix + stringified # Add the prefix
         if suffix: # Check if suffix is not empty
@@ -1636,7 +1633,7 @@ or a .txt file with RealEstate camera intrinsics and coordinates, in a 3D plot.
         
         plt.title('')
         plt.draw()
-        buf = io.BytesIO()
+        buf = BytesIO()
         plt.savefig(buf, format='png', bbox_inches='tight', pad_inches=0)
         buf.seek(0)
         img = Image.open(buf)
@@ -2325,14 +2322,18 @@ class Guider_ScheduledCFG(CFGGuider):
 
     def predict_noise(self, x, timestep, model_options={}, seed=None):
         steps = model_options["transformer_options"]["sample_sigmas"]
-        matched_step_index = (steps == timestep).nonzero()
+        if isinstance(timestep, torch.Tensor):
+            timestep_value = timestep.reshape(-1)[0].to(steps)
+        else:
+            timestep_value = torch.tensor(timestep, device=steps.device, dtype=steps.dtype)
+        matched_step_index = torch.isclose(steps, timestep_value).nonzero()
         assert not (isinstance(self.cfg, list) and len(self.cfg) != (len(steps) - 1)), "cfg list length must match step count"
         if len(matched_step_index) > 0:
             current_step_index = matched_step_index.item()
         else:
             for i in range(len(steps) - 1):
                 # walk from beginning of steps until crossing the timestep
-                if (steps[i] - timestep[0]) * (steps[i + 1] - timestep[0]) <= 0:
+                if (steps[i] - timestep_value) * (steps[i + 1] - timestep_value) <= 0:
                     current_step_index = i
                     break
             else:
@@ -2623,3 +2624,293 @@ class LazySwitchKJ:
     def switch(self, switch, on_false = None, on_true=None):
         value = on_true if switch else on_false
         return (value,)
+
+
+from comfy.patcher_extension import WrappersMP
+from comfy.sampler_helpers import prepare_mask
+class TTM_SampleWrapper:
+    def __init__(self, mask, steps):
+        self.mask = mask
+        self.steps = steps
+
+    def __call__(self, sampler, guider, sigmas, extra_args, callback, noise, latent_image, denoise_mask, disable_pbar):
+        model_options = extra_args["model_options"]
+        wrappers = model_options["transformer_options"]["wrappers"]
+        w = wrappers.setdefault(WrappersMP.APPLY_MODEL, {})
+
+        if self.mask is not None:
+            motion_mask = self.mask.reshape((-1, 1, self.mask.shape[-2], self.mask.shape[-1]))
+            motion_mask = prepare_mask(motion_mask, noise.shape, noise.device)
+
+        scale_latent_inpaint = guider.model_patcher.model.scale_latent_inpaint
+        w["TTM_ApplyModel_Wrapper"] = [TTM_ApplyModel_Wrapper(latent_image, noise, motion_mask, self.steps, scale_latent_inpaint)]
+
+        out = sampler(guider, sigmas, extra_args, callback, noise, latent_image, denoise_mask, disable_pbar)
+
+        return out
+
+
+class TTM_ApplyModel_Wrapper:
+    def __init__(self, reference_samples, noise, motion_mask, steps, scale_latent_inpaint):
+        self.reference_samples = reference_samples
+        self.noise = noise
+        self.motion_mask = motion_mask
+        self.steps = steps
+        self.scale_latent_inpaint = scale_latent_inpaint
+
+    def __call__(self, executor, x, t, c_concat, c_crossattn, control, transformer_options, **kwargs):
+        sigmas = transformer_options["sample_sigmas"]
+
+        matched = (sigmas == t).nonzero(as_tuple=True)[0]
+        if matched.numel() > 0:
+            current_step_index = matched.item()
+        else:
+            crossing = ((sigmas[:-1] - t) * (sigmas[1:] - t) <= 0).nonzero(as_tuple=True)[0]
+            current_step_index = crossing.item() if crossing.numel() > 0 else 0
+
+        next_sigma = sigmas[current_step_index + 1] if current_step_index < len(sigmas) - 1 else sigmas[current_step_index]
+
+        if current_step_index != 0 and current_step_index < self.steps:
+            noisy_latent = self.scale_latent_inpaint(x=x, sigma=torch.tensor([next_sigma]), noise=self.noise.to(x), latent_image=self.reference_samples.to(x))
+            if self.motion_mask is not None:
+                x = x * (1-self.motion_mask).to(x) + noisy_latent * self.motion_mask.to(x)
+            else:
+                x = noisy_latent
+
+        return executor(x, t, c_concat, c_crossattn, control, transformer_options, **kwargs)
+
+
+class LatentInpaintTTM:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": {
+                        "model": ("MODEL", ),
+                        "steps": ("INT", {"default": 7, "min": 0, "max": 888, "step": 1, "tooltip": "Number of steps to apply TTM inpainting for."}),
+                        },
+                "optional": {
+                        "mask": ("MASK", {"tooltip": "Latent mask where white (1.0) is the area to inpaint and black (0.0) is the area to keep unchanged."}),
+                        }
+                }
+    RETURN_TYPES = ("MODEL",)
+    FUNCTION = "patch"
+    EXPERIMENTAL = True
+    DESCRIPTION = "https://github.com/time-to-move/TTM"
+    CATEGORY = "KJNodes/experimental"
+
+    def patch(self, model, steps, mask=None):
+        m = model.clone()
+        m.add_wrapper_with_key(WrappersMP.SAMPLER_SAMPLE, "TTM_SampleWrapper", TTM_SampleWrapper(mask, steps))
+        return (m, )
+
+
+class SimpleCalculatorKJ:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "expression": ("STRING", {"default": "a + b", "multiline": True}),
+            },
+            "optional": {
+                "a": (IO.ANY, {"default": 0.0, "min": -1e10, "max": 1e10, "step": 0.01, "forceInput": True}),
+                "b": (IO.ANY, {"default": 0.0, "min": -1e10, "max": 1e10, "step": 0.01, "forceInput": True}),
+            }
+        }
+
+    RETURN_TYPES = ("FLOAT", "INT",)
+    FUNCTION = "calculate"
+    CATEGORY = "KJNodes/misc"
+    DESCRIPTION = "Calculator node that evaluates a mathematical expression using inputs a and b."
+
+    def calculate(self, expression, a=None, b=None):
+
+        import ast
+        import operator
+        import math
+
+        # Allowed operations
+        allowed_operators = {ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.mul,  ast.Div: operator.truediv,
+            ast.Pow: operator.pow, ast.USub: operator.neg, ast.UAdd: operator.pos, ast.LShift: operator.lshift, ast.RShift: operator.rshift,
+        }
+
+        # Allowed functions
+        allowed_functions = {
+            'abs': abs, 'round': round, 'min': min, 'max': max,
+            'pow': pow, 'sqrt': math.sqrt, 'sin': math.sin,
+            'cos': math.cos, 'tan': math.tan, 'log': math.log,
+            'log10': math.log10, 'exp': math.exp, 'floor': math.floor,
+            'ceil': math.ceil
+        }
+
+        # Allowed constants
+        allowed_names = {'a': a, 'b': b, 'pi': math.pi, 'e': math.e}
+
+        def eval_node(node):
+            if isinstance(node, ast.Constant):  # Numbers
+                return node.value
+            elif isinstance(node, ast.Name):  # Variables
+                if node.id in allowed_names:
+                    return allowed_names[node.id]
+                raise ValueError(f"Name '{node.id}' is not allowed")
+            elif isinstance(node, ast.BinOp):  # Binary operations
+                if type(node.op) not in allowed_operators:
+                    raise ValueError(f"Operator {type(node.op).__name__} is not allowed")
+                left = eval_node(node.left)
+                right = eval_node(node.right)
+                return allowed_operators[type(node.op)](left, right)
+            elif isinstance(node, ast.UnaryOp):  # Unary operations
+                if type(node.op) not in allowed_operators:
+                    raise ValueError(f"Operator {type(node.op).__name__} is not allowed")
+                operand = eval_node(node.operand)
+                return allowed_operators[type(node.op)](operand)
+            elif isinstance(node, ast.Call):  # Function calls
+                if not isinstance(node.func, ast.Name):
+                    raise ValueError("Only simple function calls are allowed")
+                if node.func.id not in allowed_functions:
+                    raise ValueError(f"Function '{node.func.id}' is not allowed")
+                args = [eval_node(arg) for arg in node.args]
+                return allowed_functions[node.func.id](*args)
+            else:
+                raise ValueError(f"Node type {type(node).__name__} is not allowed")
+
+        try:
+            tree = ast.parse(expression, mode='eval')
+            result = eval_node(tree.body)
+            return (float(result), int(result))
+        except Exception as e:
+            print(f"CalculatorKJ Error: {str(e)}")
+            return (0.0, 0)
+
+
+class GetTrackRange(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="GetTrackRange",
+            category="conditioning/video_models",
+            inputs=[
+                io.Tracks.Input("tracks"),
+                io.Int.Input("start_index", default=24, min=-10000, max=10000, step=1),
+                io.Int.Input("num_frames", default=10, min=1, max=10000, step=1),
+            ],
+            outputs=[
+                io.Tracks.Output(),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, tracks, start_index, num_frames) -> io.NodeOutput:
+        track_path = tracks["track_path"]
+        mask = tracks["track_visibility"]
+        total_frames = track_path.shape[0]
+
+        if start_index < 0:
+            start_index = total_frames + start_index
+        start_index = max(0, min(start_index, total_frames))
+
+        # Clamp end_index
+        end_index = max(0, min(start_index + num_frames, total_frames))
+
+        tracks_out = track_path[start_index:end_index, ...]
+        mask_out = mask[start_index:end_index, ...]
+
+        out_track = {
+            "track_path": tracks_out,
+            "track_visibility": mask_out,
+        }
+        return io.NodeOutput(out_track)
+
+class AddNoiseToTrackPath(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="AddNoiseToTrackPath",
+            category="conditioning/video_models",
+            inputs=[
+                io.Tracks.Input("tracks"),
+                io.Float.Input("strength", default=1.0, min=0.0, max=100.0, step=0.01),
+                io.Int.Input("seed", default=0, min=0, max=0xffffffffffffffff, step=1),
+                io.Float.Input("noise_x_ratio", default=1.0, min=0.0, max=100.0, step=0.01,
+                             tooltip="Multiplier for horizontal noise component"),
+                io.Float.Input("noise_y_ratio", default=1.0, min=0.0, max=100.0, step=0.01,
+                             tooltip="Multiplier for vertical noise component"),
+                io.Float.Input("noise_temporal_ratio", default=1.0, min=0.0, max=100.0, step=0.01,
+                             tooltip="Multiplier for temporal (frame-to-frame) noise"),
+            ],
+            outputs=[
+                io.Tracks.Output(),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, tracks, strength, seed, noise_x_ratio, noise_y_ratio, noise_temporal_ratio) -> io.NodeOutput:
+        track_path = tracks["track_path"].clone()
+        mask = tracks["track_visibility"]
+
+        torch.manual_seed(seed)
+        noise = torch.randn_like(track_path) * strength
+
+        # Apply directional scaling to noise
+        noise[..., 0] *= noise_x_ratio  # X coordinate noise
+        noise[..., 1] *= noise_y_ratio  # Y coordinate noise
+
+        # Apply temporal smoothing if temporal ratio is less than 1
+        if noise_temporal_ratio < 1.0:
+            num_frames = track_path.shape[0]
+            smoothed_noise = noise.clone()
+            kernel_size = max(1, int((1.0 - noise_temporal_ratio) * 10))
+
+            for i in range(num_frames):
+                start_idx = max(0, i - kernel_size // 2)
+                end_idx = min(num_frames, i + kernel_size // 2 + 1)
+                smoothed_noise[i] = noise[start_idx:end_idx].mean(dim=0)
+
+            noise = smoothed_noise * noise_temporal_ratio + noise * (1 - noise_temporal_ratio)
+
+        track_path = track_path + noise
+
+        out_track = {
+            "track_path": track_path,
+            "track_visibility": mask,
+        }
+        return io.NodeOutput(out_track)
+
+
+class VAEDecodeLoopKJ:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "samples": ("LATENT", {"tooltip": "The latent to be decoded."}),
+                "vae": ("VAE", {"tooltip": "The VAE model used for decoding the latent."}),
+                "overlap_latent_frames": ("INT", {"default": 2, "min": 2, "max": 8, "step": 1, "tooltip": "Number of frames to blend for seamless loop, for Wan 2 works and HunyuanVideo 1.5 should use 4"}),
+            }
+        }
+    RETURN_TYPES = ("IMAGE",)
+    OUTPUT_TOOLTIPS = ("The decoded images.",)
+    FUNCTION = "decode"
+    CATEGORY = "KJNodes/vae"
+    DESCRIPTION = "Video latent VAE decoding to fix artifacts on loop seams."
+
+    def decode(self, vae, samples, overlap_latent_frames):
+        latents = samples["samples"]
+
+        images = vae.decode(latents)
+        if overlap_latent_frames <= 0:
+            if len(images.shape) == 5:
+                images = images.reshape(-1, images.shape[-3], images.shape[-2], images.shape[-1])
+            return (images, )
+
+        end_frames = overlap_latent_frames + 1
+        start_frames = overlap_latent_frames
+
+        temp_images = vae.decode(torch.cat([latents[:, :, -end_frames:]] + [latents[:, :, :start_frames]], dim=2)).cpu().float()
+
+        total_concat = end_frames + start_frames
+        temp_start = total_concat * 2 - 1
+        main_start = total_concat + (overlap_latent_frames if overlap_latent_frames > 2 else 0)
+
+        images = torch.cat([temp_images[:, temp_start:].to(images), images[:, main_start:]], dim=1)
+        if len(images.shape) == 5:
+            images = images.reshape(-1, images.shape[-3], images.shape[-2], images.shape[-1])
+
+        return (images, )
