@@ -2930,6 +2930,7 @@ class WanImageToVideoSVIPro(io.ComfyNode):
                 io.Latent.Input("anchor_samples"),
                 io.Latent.Input("prev_samples", optional=True),
                 io.Int.Input("motion_latent_count", default=1, min=0, max=128, step=1),
+                io.Latent.Input("end_samples", optional=True),
             ],
             outputs=[
                 io.Conditioning.Output(display_name="positive"),
@@ -2939,7 +2940,7 @@ class WanImageToVideoSVIPro(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, positive, negative, length, motion_latent_count, anchor_samples, prev_samples=None) -> io.NodeOutput:
+    def execute(cls, positive, negative, length, motion_latent_count, anchor_samples, prev_samples=None, end_samples=None) -> io.NodeOutput:
         anchor_latent = anchor_samples["samples"].clone()
 
         B, C, T, H, W = anchor_latent.shape
@@ -2948,6 +2949,26 @@ class WanImageToVideoSVIPro(io.ComfyNode):
         total_latents = (length - 1) // 4 + 1
         device = anchor_latent.device
         dtype = anchor_latent.dtype
+
+        # Blend end_samples into the last frames of anchor_samples if provided
+        if end_samples is not None:
+            end_latent = end_samples["samples"].clone()
+            end_frames = end_latent.shape[2]
+            num_anchor = anchor_latent.shape[2]
+
+            # Calculate where to start blending (last N frames of anchor)
+            blend_start_idx = max(0, num_anchor - end_frames)
+
+            # Blend the overlapping frames: gradual transition from anchor to end
+            for frame_idx in range(end_frames):
+                anchor_frame_idx = blend_start_idx + frame_idx
+                if anchor_frame_idx < num_anchor:
+                    # Blend factor increases from 0 to 1 as we go through end frames
+                    blend_factor = (frame_idx + 1) / end_frames
+                    anchor_latent[:, :, anchor_frame_idx] = (
+                        (1 - blend_factor) * anchor_latent[:, :, anchor_frame_idx] +
+                        blend_factor * end_latent[:, :, frame_idx]
+                    )
 
         if prev_samples is None or motion_latent_count == 0:
             padding_size = total_latents - anchor_latent.shape[2]
@@ -2962,7 +2983,7 @@ class WanImageToVideoSVIPro(io.ComfyNode):
         image_cond_latent = torch.cat([image_cond_latent, padding], dim=2)
 
         mask = torch.ones((1, 1, empty_latent.shape[2], H, W), device=device, dtype=dtype)
-        mask[:, :, :1] = 0.0
+        mask[:, :, :anchor_latent.shape[2]] = 0.0
 
         positive = node_helpers.conditioning_set_values(positive, {"concat_latent_image": image_cond_latent, "concat_mask": mask})
         negative = node_helpers.conditioning_set_values(negative, {"concat_latent_image": image_cond_latent, "concat_mask": mask})
