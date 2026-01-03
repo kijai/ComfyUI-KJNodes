@@ -2917,6 +2917,8 @@ class VAEDecodeLoopKJ:
         return (images, )
 
 import comfy.latent_formats
+import torch.nn.functional as F
+
 class WanImageToVideoSVIPro(io.ComfyNode):
     @classmethod
     def define_schema(cls):
@@ -2930,6 +2932,8 @@ class WanImageToVideoSVIPro(io.ComfyNode):
                 io.Latent.Input("anchor_samples"),
                 io.Latent.Input("prev_samples", optional=True),
                 io.Int.Input("motion_latent_count", default=1, min=0, max=128, step=1),
+                io.Float.Input("structural_repulsion_boost", default=1.0, min=1.0, max=2.0, step=0.05),
+                io.Image.Input("anchor_image", optional=True),
             ],
             outputs=[
                 io.Conditioning.Output(display_name="positive"),
@@ -2939,12 +2943,11 @@ class WanImageToVideoSVIPro(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, positive, negative, length, motion_latent_count, anchor_samples, prev_samples=None) -> io.NodeOutput:
+    def execute(cls, positive, negative, length, motion_latent_count, anchor_samples, prev_samples=None, 
+                structural_repulsion_boost=1.0, anchor_image=None) -> io.NodeOutput:
         anchor_latent = anchor_samples["samples"].clone()
-
         B, C, T, H, W = anchor_latent.shape
         empty_latent = torch.zeros([B, 16, ((length - 1) // 4) + 1, H, W], device=model_management.intermediate_device())
-
         total_latents = (length - 1) // 4 + 1
         device = anchor_latent.device
         dtype = anchor_latent.dtype
@@ -2961,8 +2964,30 @@ class WanImageToVideoSVIPro(io.ComfyNode):
         padding = comfy.latent_formats.Wan21().process_out(padding)
         image_cond_latent = torch.cat([image_cond_latent, padding], dim=2)
 
-        mask = torch.ones((1, 1, empty_latent.shape[2], H, W), device=device, dtype=dtype)
+        mask = torch.ones((1, 1, total_latents, H, W), device=device, dtype=dtype)
         mask[:, :, :1] = 0.0
+        
+        if structural_repulsion_boost > 1.001 and total_latents > 1 and anchor_image is not None:
+            boost_factor = structural_repulsion_boost - 1.0
+            anchor_img = anchor_image[0:1].to(device)
+            img_tensor = anchor_img[0].permute(2, 0, 1).unsqueeze(0)
+            
+            sobel_x = torch.tensor([[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]], dtype=dtype, device=device).view(1, 1, 3, 3)
+            sobel_y = torch.tensor([[-1, -2, -1], [0, 0, 0], [1, 2, 1]], dtype=dtype, device=device).view(1, 1, 3, 3)
+            
+            gray = img_tensor.mean(dim=1, keepdim=True)
+            pad_gray = F.pad(gray, (1, 1, 1, 1), mode='replicate')
+            edge_x = F.conv2d(pad_gray, sobel_x)
+            edge_y = F.conv2d(pad_gray, sobel_y)
+            edge_magnitude = torch.sqrt(edge_x ** 2 + edge_y ** 2)
+            edge_normalized = (edge_magnitude - edge_magnitude.min()) / (edge_magnitude.max() - edge_magnitude.min() + 1e-8)
+            edge_scaled = F.interpolate(edge_normalized, size=(H, W), mode='bilinear', align_corners=False)
+            
+            spatial_gradient = 1.0 - edge_scaled[0, 0] * boost_factor * 2.5
+            spatial_gradient = torch.clamp(spatial_gradient, 0.02, 1.0)
+            
+            for t in range(1, total_latents):
+                mask[:, :, t, :, :] = mask[:, :, t, :, :] * spatial_gradient
 
         positive = node_helpers.conditioning_set_values(positive, {"concat_latent_image": image_cond_latent, "concat_mask": mask})
         negative = node_helpers.conditioning_set_values(negative, {"concat_latent_image": image_cond_latent, "concat_mask": mask})
