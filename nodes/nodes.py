@@ -2970,3 +2970,18 @@ class WanImageToVideoSVIPro(io.ComfyNode):
         out_latent = {}
         out_latent["samples"] = empty_latent
         return io.NodeOutput(positive, negative, out_latent)
+
+class DeprecatedCompileNodeKJ:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+        "required": {
+            "model": (IO.ANY,),
+        },
+    }
+    RETURN_TYPES = (IO.ANY,)
+    FUNCTION = "passthrough"
+    CATEGORY = "KJNodes/deprecated"
+    DESCRIPTION = "This node has been replaced with TorchCompileModelAdvanced node, please use that instead."
+    def passthrough(self, model):
+        return (model,)

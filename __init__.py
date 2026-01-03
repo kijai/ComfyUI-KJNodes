@@ -184,16 +184,9 @@ NODE_CONFIG = {
     "CustomControlNetWeightsFluxFromList": {"class": CustomControlNetWeightsFluxFromList, "name": "Custom ControlNet Weights Flux From List"},
     "CheckpointLoaderKJ": {"class": CheckpointLoaderKJ, "name": "CheckpointLoaderKJ"},
     "DiffusionModelLoaderKJ": {"class": DiffusionModelLoaderKJ, "name": "Diffusion Model Loader KJ"},
-    "TorchCompileModelFluxAdvanced": {"class": TorchCompileModelFluxAdvanced, "name": "TorchCompileModelFluxAdvanced"},
     "TorchCompileModelFluxAdvancedV2": {"class": TorchCompileModelFluxAdvancedV2, "name": "TorchCompileModelFluxAdvancedV2"},
-    "TorchCompileModelHyVideo": {"class": TorchCompileModelHyVideo, "name": "TorchCompileModelHyVideo"},
     "TorchCompileVAE": {"class": TorchCompileVAE, "name": "TorchCompileVAE"},
     "TorchCompileControlNet": {"class": TorchCompileControlNet, "name": "TorchCompileControlNet"},
-    "PatchModelPatcherOrder": {"class": PatchModelPatcherOrder, "name": "Patch Model Patcher Order"},
-    "TorchCompileLTXModel": {"class": TorchCompileLTXModel, "name": "TorchCompileLTXModel"},
-    "TorchCompileCosmosModel": {"class": TorchCompileCosmosModel, "name": "TorchCompileCosmosModel"},
-    "TorchCompileModelQwenImage": {"class": TorchCompileModelQwenImage, "name": "TorchCompileModelQwenImage"},
-    "TorchCompileModelWanVideo": {"class": TorchCompileModelWanVideo, "name": "TorchCompileModelWanVideo"},
     "TorchCompileModelWanVideoV2": {"class": TorchCompileModelWanVideoV2, "name": "TorchCompileModelWanVideoV2"},
     "PathchSageAttentionKJ": {"class": PathchSageAttentionKJ, "name": "Patch Sage Attention KJ"},
     "LeapfusionHunyuanI2VPatcher": {"class": LeapfusionHunyuanI2V, "name": "Leapfusion Hunyuan I2V Patcher"},
@@ -230,6 +223,15 @@ NODE_CONFIG = {
     #tracks
     "GetTrackRange": {"class": GetTrackRange, "name": "Get Track Range"},
     "AddNoiseToTrackPath": {"class": AddNoiseToTrackPath, "name": "Add Noise To Track"},
+
+    # deprecated
+    "PatchModelPatcherOrder": {"class": PatchModelPatcherOrder, "name": "Patch Model Patcher Order"},
+    "TorchCompileModelFluxAdvanced": {"class": DeprecatedCompileNodeKJ, "name": "TorchCompileModelFluxAdvanced"},
+    "TorchCompileLTXModel": {"class": DeprecatedCompileNodeKJ, "name": "TorchCompileLTXModel"},
+    "TorchCompileCosmosModel": {"class": DeprecatedCompileNodeKJ, "name": "TorchCompileCosmosModel"},
+    "TorchCompileModelHyVideo": {"class": DeprecatedCompileNodeKJ, "name": "TorchCompileModelHyVideo"},
+    "TorchCompileModelQwenImage": {"class": TorchCompileModelQwenImage, "name": "TorchCompileModelQwenImage"},
+    "TorchCompileModelWanVideo": {"class": DeprecatedCompileNodeKJ, "name": "TorchCompileModelWanVideo"},
 }
 
 def generate_node_mappings(node_config):
