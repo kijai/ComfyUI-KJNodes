@@ -62,12 +62,10 @@ def get_sage_func(sage_attention, allow_compile=False):
             return sageattn_qk_int8_pv_fp8_cuda(q, k, v, is_causal=is_causal, attn_mask=attn_mask, pv_accum_dtype="fp32+fp16", tensor_layout=tensor_layout)
     elif "sageattn3" in sage_attention:
         from sageattn3 import sageattn3_blackwell
-        if sage_attention == "sageattn3_per_block_mean":
-            def sage_func(q, k, v, is_causal=False, attn_mask=None, **kwargs):
-                return sageattn3_blackwell(q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2), is_causal=is_causal, attn_mask=attn_mask, per_block_mean=True).transpose(1, 2)
-        else:
-            def sage_func(q, k, v, is_causal=False, attn_mask=None, **kwargs):
-                return sageattn3_blackwell(q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2), is_causal=is_causal, attn_mask=attn_mask, per_block_mean=False).transpose(1, 2)
+        def sage_func(q, k, v, is_causal=False, attn_mask=None, tensor_layout="NHD", **kwargs):
+            q, k, v = [x.transpose(1, 2) if tensor_layout == "NHD" else x for x in (q, k, v)]
+            out = sageattn3_blackwell(q, k, v, is_causal=is_causal, attn_mask=attn_mask, per_block_mean=(sage_attention == "sageattn3_per_block_mean"))
+            return out.transpose(1, 2) if tensor_layout == "NHD" else out
 
     if not allow_compile:
         sage_func = torch.compiler.disable()(sage_func)
