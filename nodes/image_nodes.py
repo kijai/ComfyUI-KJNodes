@@ -3,7 +3,6 @@ import time
 import torch
 import torch.nn.functional as F
 import torchvision.transforms as T
-import io
 import base64
 import random
 import math
@@ -23,11 +22,12 @@ from PIL import ImageGrab, ImageDraw, ImageFont, Image, ImageOps
 
 from nodes import MAX_RESOLUTION, SaveImage
 from comfy_extras.nodes_mask import composite
-import node_helpers
 from comfy.cli_args import args
 from comfy.utils import ProgressBar, common_upscale
-import folder_paths
 from comfy import model_management
+import node_helpers
+import folder_paths
+
 try:
     from server import PromptServer
 except:
@@ -1803,9 +1803,9 @@ Returns a range of images from a batch.
             chosen_masks = masks[start_index:end_index]
 
         return (chosen_images, chosen_masks,)
-    
+
 class ImageBatchExtendWithOverlap:
-    
+
     RETURN_TYPES = ("IMAGE", "IMAGE", "IMAGE", )
     RETURN_NAMES = ("source_images", "start_images", "extended_images")
     OUTPUT_TOOLTIPS = (
@@ -1828,13 +1828,13 @@ Then on another copy of the node provide the newly generated frames and choose h
                 "source_images": ("IMAGE", {"tooltip": "The source images to extend"}),
                 "overlap": ("INT", {"default": 13,"min": 1, "max": 4096, "step": 1, "tooltip": "Number of overlapping frames between source and new images"}),
                 "overlap_side": (["source", "new_images"], {"default": "source", "tooltip": "Which side to overlap on"}),
-                "overlap_mode": (["cut", "linear_blend", "ease_in_out"], {"default": "linear_blend", "tooltip": "Method to use for overlapping frames"}),
+                "overlap_mode": (["cut", "linear_blend", "ease_in_out", "filmic_crossfade", "perceptual_crossfade"], {"default": "linear_blend", "tooltip": "Method to use for overlapping frames"}),
         },
         "optional": {
             "new_images": ("IMAGE", {"tooltip": "The new images to extend with"}),
         }
-    } 
-    
+    }
+
     def imagesfrombatch(self, source_images, overlap, overlap_side, overlap_mode, new_images=None):
         if overlap >= len(source_images):
             return source_images, source_images, source_images
@@ -1853,28 +1853,54 @@ Then on another copy of the node provide the newly generated frames and choose h
             suffix = new_images[overlap:]
 
             if overlap_mode == "linear_blend":
-                blended_images = [
-                    crossfade(blend_src[i], blend_dst[i], (i + 1) / (overlap + 1))
-                    for i in range(overlap)
-                ]
-                blended_images = torch.stack(blended_images, dim=0)
+                # Vectorized version - process all frames at once
+                alpha = torch.linspace(0, 1, overlap + 2, device=blend_src.device, dtype=blend_src.dtype)[1:-1]
+                alpha = alpha.view(-1, 1, 1, 1)  # Shape: [overlap, 1, 1, 1]
+                blended_images = (1 - alpha) * blend_src + alpha * blend_dst
                 extended_images = torch.cat((prefix, blended_images, suffix), dim=0)
+
+            elif overlap_mode == "filmic_crossfade":
+                gamma = 2.2
+                alpha = torch.linspace(0, 1, overlap + 2, device=blend_src.device, dtype=blend_src.dtype)[1:-1]
+                alpha = alpha.view(-1, 1, 1, 1)
+                linear_src = torch.pow(blend_src, gamma)
+                linear_dst = torch.pow(blend_dst, gamma)
+                blended = (1 - alpha) * linear_src + alpha * linear_dst
+                blended_images = torch.pow(blended, 1.0 / gamma)
+                extended_images = torch.cat((prefix, blended_images, suffix), dim=0)
+
+            elif overlap_mode == "perceptual_crossfade":
+                import kornia
+                alpha = torch.linspace(0, 1, overlap + 2, device=blend_src.device, dtype=blend_src.dtype)[1:-1]
+
+                src_nchw = blend_src.movedim(-1, 1)
+                dst_nchw = blend_dst.movedim(-1, 1)
+                lab_src = kornia.color.rgb_to_lab(src_nchw)
+                lab_dst = kornia.color.rgb_to_lab(dst_nchw)
+
+                # Blend in LAB space
+                alpha = alpha.view(-1, 1, 1, 1)  # [N,1,1,1] for broadcasting
+                blended_lab = (1 - alpha) * lab_src + alpha * lab_dst
+
+                # Convert back to RGB and reshape
+                blended_rgb = kornia.color.lab_to_rgb(blended_lab)
+                blended_images = blended_rgb.movedim(1, -1)  # [N,C,H,W] -> [N,H,W,C]
+                extended_images = torch.cat((prefix, blended_images, suffix), dim=0)
+
             elif overlap_mode == "ease_in_out":
-                blended_images = []
-                for i in range(overlap):
-                    t = (i + 1) / (overlap + 1)
-                    eased_t = ease_in_out(t)
-                    blended_image = crossfade(blend_src[i], blend_dst[i], eased_t)
-                    blended_images.append(blended_image)
-                blended_images = torch.stack(blended_images, dim=0)
+                # Vectorized ease_in_out
+                t = torch.linspace(0, 1, overlap + 2, device=blend_src.device, dtype=blend_src.dtype)[1:-1]
+                eased_t = 3 * t * t - 2 * t * t * t  # ease_in_out formula
+                eased_t = eased_t.view(-1, 1, 1, 1)
+                blended_images = (1 - eased_t) * blend_src + eased_t * blend_dst
                 extended_images = torch.cat((prefix, blended_images, suffix), dim=0)
-              
+
             elif overlap_mode == "cut":
                 extended_images = torch.cat((prefix, suffix), dim=0)
                 if overlap_side == "new_images":
-                   extended_images = torch.cat((source_images, new_images[overlap:]), dim=0)
+                    extended_images = torch.cat((source_images, new_images[overlap:]), dim=0)
                 elif overlap_side == "source":
-                   extended_images = torch.cat((source_images[:-overlap], new_images), dim=0)
+                    extended_images = torch.cat((source_images[:-overlap], new_images), dim=0)
         else:
             extended_images = torch.zeros((1, 64, 64, 3), device="cpu")
 
