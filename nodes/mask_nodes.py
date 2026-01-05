@@ -1558,11 +1558,28 @@ class DrawMaskOnImage:
 
         output_images = []
 
-        # Parse Color String (Handle RGB and RGBA)
+        # Parse Color String (Handle RGB, RGBA, and Hex formats)
+        color = color.strip()
         color_values = []
-        for x in color.split(","):
-            val = float(x.strip())
-            color_values.append(val / 255.0 if val > 1.0 else val)
+
+        if color.startswith('#'):
+            # Handle hex format (#RGB, #RGBA, #RRGGBB, #RRGGBBAA)
+            hex_color = color.lstrip('#')
+            if len(hex_color) == 3:  # #RGB
+                color_values = [int(c*2, 16) / 255.0 for c in hex_color]
+            elif len(hex_color) == 4:  # #RGBA
+                color_values = [int(c*2, 16) / 255.0 for c in hex_color]
+            elif len(hex_color) == 6:  # #RRGGBB
+                color_values = [int(hex_color[i:i+2], 16) / 255.0 for i in (0, 2, 4)]
+            elif len(hex_color) == 8:  # #RRGGBBAA
+                color_values = [int(hex_color[i:i+2], 16) / 255.0 for i in (0, 2, 4, 6)]
+            else:
+                raise ValueError(f"Invalid hex color format: {color}")
+        else:
+            # Handle comma-separated RGB/RGBA format
+            for x in color.split(","):
+                val = float(x.strip())
+                color_values.append(val / 255.0 if val > 1.0 else val)
 
         rgb = color_values[:3]
         alpha_val = color_values[3] if len(color_values) == 4 else 1.0
