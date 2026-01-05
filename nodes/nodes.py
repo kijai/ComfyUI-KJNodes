@@ -820,7 +820,6 @@ class WidgetToString:
                          "any_input": (IO.ANY, ),
                          "node_title": ("STRING", {"multiline": False}),
                          "allowed_float_decimals": ("INT", {"default": 2, "min": 0, "max": 10, "tooltip": "Number of decimal places to display for float values"}),
-                         
                          },
             "hidden": {"extra_pnginfo": "EXTRA_PNGINFO",
                        "prompt": "PROMPT",
@@ -844,11 +843,52 @@ The 'any_input' is required for making sure the node you want the value from exi
         workflow = extra_pnginfo["workflow"]
         #print(json.dumps(workflow, indent=4))
         results = []
-        node_id = None  # Initialize node_id to handle cases where no match is found
-        link_id = None
+        node_id = link_id = subgraph_prefix = None
         link_to_node_map = {}
+        node_to_subgraph_map = {}  # Track which subgraph each node belongs to
 
-        for node in workflow["nodes"]:
+        # Parse unique_id - handle both "parent:id" format and simple int format
+        if isinstance(unique_id, str) and ":" in unique_id:
+            unique_id_parts = unique_id.split(":")
+            unique_id_int = int(unique_id_parts[-1])  # Use the last part as the node id
+            subgraph_prefix = ":".join(unique_id_parts[:-1])  # Store the parent prefix (e.g., "14")
+        else:
+            unique_id_int = int(unique_id)
+
+        # Collect all nodes from main workflow and subgraphs
+        all_nodes = list(workflow.get("nodes", []))
+        definitions = workflow.get("definitions", {})
+        subgraphs = definitions.get("subgraphs", [])
+
+        # Find which main workflow node references each subgraph
+        subgraph_id_to_parent = {}
+        for node in workflow.get("nodes", []):
+            node_type = node.get("type", "")
+            # Subgraph nodes have a UUID as their type
+            if "-" in node_type and len(node_type) == 36:  # UUID format check
+                subgraph_id_to_parent[node_type] = node["id"]
+
+        for subgraph in subgraphs:
+            subgraph_id = subgraph.get("id", "")
+            parent_node_id = subgraph_id_to_parent.get(subgraph_id)
+
+            subgraph_nodes = subgraph.get("nodes", [])
+            for node in subgraph_nodes:
+                # Track which subgraph (parent node) this node belongs to
+                if parent_node_id is not None:
+                    node_to_subgraph_map[node["id"]] = parent_node_id
+            all_nodes.extend(subgraph_nodes)
+
+            # Also build link_to_node_map from subgraph links
+            subgraph_links = subgraph.get("links", [])
+            for link in subgraph_links:
+                # link format: [link_id, origin_id, origin_slot, target_id, target_slot, type]
+                if isinstance(link, dict):
+                    link_to_node_map[link["id"]] = link["origin_id"]
+                elif isinstance(link, list) and len(link) >= 2:
+                    link_to_node_map[link[0]] = link[1]
+
+        for node in all_nodes:
             if node_title:
                 if "title" in node:
                     if node["title"] == node_title:
@@ -861,11 +901,11 @@ The 'any_input' is required for making sure the node you want the value from exi
                     node_id = id
                     break
             elif any_input is not None:
-                if node["type"] == "WidgetToString" and node["id"] == int(unique_id) and not link_id:
+                if node["type"] == "WidgetToString" and node["id"] == unique_id_int and not link_id:
                     for node_input in node["inputs"]:
                         if node_input["name"] == "any_input":
                             link_id = node_input["link"]
-                    
+
                 # Construct a map of links to node IDs for future reference
                 node_outputs = node.get("outputs", None)
                 if not node_outputs:
@@ -878,14 +918,34 @@ The 'any_input' is required for making sure the node you want the value from exi
                         link_to_node_map[link] = node["id"]
                         if link_id and link == link_id:
                             break
-        
+
         if link_id:
             node_id = link_to_node_map.get(link_id, None)
 
         if node_id is None:
             raise ValueError("No matching node found for the given title or id")
 
-        values = prompt[str(node_id)]
+        # Determine the correct prompt key
+        # First check if the target node is in a subgraph
+        target_subgraph_parent = node_to_subgraph_map.get(node_id)
+
+        if target_subgraph_parent is not None:
+            # Target node is in a subgraph, use the parent node id as prefix
+            prompt_key = f"{target_subgraph_parent}:{node_id}"
+        elif subgraph_prefix is not None:
+            # We're in a subgraph, use our prefix
+            prompt_key = f"{subgraph_prefix}:{node_id}"
+        else:
+            prompt_key = str(node_id)
+
+        # Try the prefixed key first, then fall back to just the node_id
+        if prompt_key not in prompt:
+            prompt_key = str(node_id)
+
+        if prompt_key not in prompt:
+            raise KeyError(f"Node not found in prompt. Tried keys: '{target_subgraph_parent}:{node_id}' and '{node_id}'")
+
+        values = prompt[prompt_key]
         if "inputs" in values:
             inputs = values["inputs"]
 
