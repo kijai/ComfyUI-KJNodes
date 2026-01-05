@@ -833,9 +833,10 @@ class WidgetToString:
     DESCRIPTION = """
 Selects a node and it's specified widget and outputs the value as a string.  
 If no node id or title is provided it will use the 'any_input' link and use that node.  
-To see node id's, enable node id display from Manager badge menu.  
+To see node id's, enable "Node ID Badge Mode" in main settings.
 Alternatively you can search with the node title. Node titles ONLY exist if they  
-are manually edited!  
+are manually edited!
+'widget_name' can be a comma separated list.
 The 'any_input' is required for making sure the node you want the value from exists in the workflow.
 """
 
@@ -886,26 +887,57 @@ The 'any_input' is required for making sure the node you want the value from exi
 
         values = prompt[str(node_id)]
         if "inputs" in values:
+            inputs = values["inputs"]
+
+            # support comma-separated list and trim whitespace
+            widget_names = []
+            if widget_name:
+                widget_names = [w.strip() for w in widget_name.split(",") if w.strip()]
+
             if return_all:
                 # Format items based on type
                 formatted_items = []
-                for k, v in values["inputs"].items():
+                for k, v in inputs.items():
                     if isinstance(v, float):
                         item = f"{k}: {v:.{allowed_float_decimals}f}"
                     else:
                         item = f"{k}: {str(v)}"
                     formatted_items.append(item)
-                results.append(', '.join(formatted_items))
-            elif widget_name in values["inputs"]:
-                v = values["inputs"][widget_name]
-                if isinstance(v, float):
-                    v = f"{v:.{allowed_float_decimals}f}"
+                results.append(", ".join(formatted_items))
+
+            # Single widget name (trimmed)
+            elif len(widget_names) == 1:
+                name = widget_names[0]
+                if name in inputs:
+                    v = inputs[name]
+                    if isinstance(v, float):
+                        v = f"{v:.{allowed_float_decimals}f}"
+                    else:
+                        v = str(v)
+                    return (v, )
                 else:
-                    v = str(v)
-                return (v, )
+                    raise NameError(f"Widget not found: {node_id}.{name}")
+
+            # Multiple widget names: return "name: value" pairs
+            elif len(widget_names) > 1:
+                formatted_items = []
+                for name in widget_names:
+                    if name not in inputs:
+                        raise NameError(f"Widget not found: {node_id}.{name}")
+                    v = inputs[name]
+                    if isinstance(v, float):
+                        v = f"{v:.{allowed_float_decimals}f}"
+                    else:
+                        v = str(v)
+                    formatted_items.append(f"{name}: {v}")
+                return (", ".join(formatted_items), )
+
             else:
+                # No valid widget name provided
                 raise NameError(f"Widget not found: {node_id}.{widget_name}")
-        return (', '.join(results).strip(', '), )
+
+        return (", ".join(results).strip(", "), )
+
 
 class DummyOut:
 
