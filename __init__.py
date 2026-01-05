@@ -230,7 +230,7 @@ NODE_CONFIG = {
     "TorchCompileLTXModel": {"class": DeprecatedCompileNodeKJ, "name": "TorchCompileLTXModel"},
     "TorchCompileCosmosModel": {"class": DeprecatedCompileNodeKJ, "name": "TorchCompileCosmosModel"},
     "TorchCompileModelHyVideo": {"class": DeprecatedCompileNodeKJ, "name": "TorchCompileModelHyVideo"},
-    "TorchCompileModelQwenImage": {"class": TorchCompileModelQwenImage, "name": "TorchCompileModelQwenImage"},
+    "TorchCompileModelQwenImage": {"class": DeprecatedCompileNodeKJ, "name": "TorchCompileModelQwenImage"},
     "TorchCompileModelWanVideo": {"class": DeprecatedCompileNodeKJ, "name": "TorchCompileModelWanVideo"},
 }
 
