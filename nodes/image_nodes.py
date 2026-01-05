@@ -2838,6 +2838,7 @@ class LoadAndResizeImage:
         
         import node_helpers
         img = node_helpers.pillow(Image.open, image_path)
+        img = ImageOps.exif_transpose(img)
 
         # Process the background_color
         if background_color:
