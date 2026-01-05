@@ -1241,7 +1241,7 @@ class ImagePrepForICLora:
                 padded_mask[:, :, :new_width] = 0
 
         return (padded_image, padded_mask)
-        
+
 
 class ImageAndMaskPreview(SaveImage):
     def __init__(self):
@@ -1260,7 +1260,7 @@ class ImageAndMaskPreview(SaveImage):
              },
             "optional": {
                 "image": ("IMAGE",),
-                "mask": ("MASK",),                
+                "mask": ("MASK",),
             },
             "hidden": {"prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO"},
         }
@@ -1274,8 +1274,7 @@ composites the mask on top of the image.
 with pass_through on the preview is disabled and the  
 composite is returned from the composite slot instead,  
 this allows for the preview to be passed for video combine  
-nodes for example.
-Supports RGBA for mask_color to adjust transparency per color.
+nodes for example. Supports RGBA for mask_color to adjust transparency per color.  
 """
 
     def execute(self, mask_opacity, mask_color, pass_through, filename_prefix="ComfyUI", image=None, mask=None, prompt=None, extra_pnginfo=None):
@@ -1287,7 +1286,6 @@ Supports RGBA for mask_color to adjust transparency per color.
             mask_adjusted = mask * mask_opacity
             mask_image = mask.reshape((-1, 1, mask.shape[-2], mask.shape[-1])).movedim(1, -1).expand(-1, -1, -1, 3).clone()
 
-            # --- Color Parsing Logic Updated for RGBA ---
             color_list = [255, 255, 255] # Default fallback
             if ',' in mask_color:
                 # Handle CSV format (e.g., "255, 0, 0" or "255, 0, 0, 128")
@@ -1302,20 +1300,18 @@ Supports RGBA for mask_color to adjust transparency per color.
                     color_list = [int(mask_color[i:i+2], 16) for i in (0, 2, 4)]
                 elif len(mask_color) == 8: # #RRGGBBAA
                     color_list = [int(mask_color[i:i+2], 16) for i in (0, 2, 4, 6)]
-            
+
             color_list = np.clip(color_list, 0, 255)
 
             # Apply RGB channels
             mask_image[:, :, :, 0] = color_list[0] / 255 # Red channel
             mask_image[:, :, :, 1] = color_list[1] / 255 # Green channel
             mask_image[:, :, :, 2] = color_list[2] / 255 # Blue channel
-            
-            # Apply Alpha channel if present (4th value)
-            if len(color_list) == 4:
+
+            if len(color_list) == 4: # Apply Alpha channel if present
                 alpha_factor = color_list[3] / 255.0
                 mask_adjusted = mask_adjusted * alpha_factor
-            # --------------------------------------------
-            
+
             destination, source = node_helpers.image_alpha_fix(image, mask_image)
             destination = destination.clone().movedim(-1, 1)
             preview = composite(destination, source.movedim(-1, 1), 0, 0, mask_adjusted, 1, True).movedim(1, -1)
