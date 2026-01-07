@@ -1029,7 +1029,7 @@ def modified_wan_self_attention_forward(self, x, freqs, transformer_options={}):
     q, k = apply_rope(q, k, freqs)
 
     feta_scores = get_feta_scores(q, k, self.num_frames, self.enhance_weight)
-    
+
     try:
         x = comfy.ldm.modules.attention.optimized_attention(
             q.view(b, s, n * d),
@@ -1052,14 +1052,22 @@ def modified_wan_self_attention_forward(self, x, freqs, transformer_options={}):
     x *= feta_scores
 
     return x
-    
+
 from einops import rearrange
-def get_feta_scores(query, key, num_frames, enhance_weight):
+def get_feta_scores(query, key, num_frames, enhance_weight, num_heads=12):
     img_q, img_k = query, key #torch.Size([2, 9216, 12, 128])
-    
-    _, ST, num_heads, head_dim = img_q.shape
-    spatial_dim = ST / num_frames
-    spatial_dim = int(spatial_dim)
+
+    if img_q.ndim == 4:
+        B, ST, num_heads, head_dim = img_q.shape
+    elif img_q.ndim == 3:
+        B, ST, hidden_dim = img_q.shape
+        head_dim = hidden_dim // num_heads
+
+        # Reshape from [B, ST, hidden_dim] to [B, ST, num_heads, head_dim]
+        img_q = img_q.view(B, ST, num_heads, head_dim)
+        img_k = img_k.view(B, ST, num_heads, head_dim)
+
+    spatial_dim = ST // num_frames
 
     query_image = rearrange(
         img_q, "B (T S) N C -> (B S) N T C", T=num_frames, S=spatial_dim, N=num_heads, C=head_dim
@@ -1101,7 +1109,7 @@ class WanAttentionPatch:
     def __init__(self, num_frames, weight):
         self.num_frames = num_frames
         self.enhance_weight = weight
-        
+
     def __get__(self, obj, objtype=None):
         # Create bound method with stored parameters
         def wrapped_attention(self_module, *args, **kwargs):
@@ -1120,7 +1128,7 @@ class WanVideoEnhanceAVideoKJ:
                 "weight": ("FLOAT", {"default": 2.0, "min": 0.0, "max": 10.0, "step": 0.001, "tooltip": "Strength of the enhance effect"}),
            }
         }
-    
+
     RETURN_TYPES = ("MODEL",)
     RETURN_NAMES = ("model",)
     FUNCTION = "enhance"
@@ -1131,7 +1139,7 @@ class WanVideoEnhanceAVideoKJ:
     def enhance(self, model, weight, latent):
         if weight == 0:
             return (model,)
-        
+
         num_frames = latent["samples"].shape[2]
 
         model_clone = model.clone()
@@ -1145,11 +1153,84 @@ class WanVideoEnhanceAVideoKJ:
             patched_attn = WanAttentionPatch(num_frames, weight).__get__(block.self_attn, block.__class__)
             if compile_settings is not None:
                 patched_attn = torch.compile(patched_attn, mode=compile_settings["mode"], dynamic=compile_settings["dynamic"], fullgraph=compile_settings["fullgraph"], backend=compile_settings["backend"])
-            
+
             model_clone.add_object_patch(f"diffusion_model.blocks.{idx}.self_attn.forward", patched_attn)
-            
+
         return (model_clone,)
-    
+
+from comfy.ldm.lightricks.model import apply_rotary_emb
+
+
+def ltxv_feta_forward(self, x, context=None, mask=None, pe=None, k_pe=None, transformer_options={}):
+    q = self.to_q(x)
+    context = x if context is None else context
+    k = self.to_k(context)
+    v = self.to_v(context)
+
+    q = self.q_norm(q)
+    k = self.k_norm(k)
+
+    if pe is not None:
+        q = apply_rotary_emb(q, pe)
+        k = apply_rotary_emb(k, pe if k_pe is None else k_pe)
+
+    feta_scores = get_feta_scores(q, k, self.num_frames, self.enhance_weight, self.heads)
+
+    if mask is None:
+        out = comfy.ldm.modules.attention.optimized_attention(q, k, v, self.heads, attn_precision=self.attn_precision, transformer_options=transformer_options)
+    else:
+        out = comfy.ldm.modules.attention.optimized_attention_masked(q, k, v, self.heads, mask, attn_precision=self.attn_precision, transformer_options=transformer_options)
+    return self.to_out(out * feta_scores)
+
+
+class LTXCrossAttentionPatch:
+    def __init__(self, num_frames, weight):
+        self.num_frames = num_frames
+        self.enhance_weight = weight
+
+    def __get__(self, obj, objtype=None):
+        # Create bound method with stored parameters
+        def wrapped_attention(self_module, *args, **kwargs):
+            self_module.num_frames = self.num_frames
+            self_module.enhance_weight = self.enhance_weight
+            return ltxv_feta_forward(self_module, *args, **kwargs)
+        return types.MethodType(wrapped_attention, obj)
+
+class LTXVEnhanceAVideoKJ:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "model": ("MODEL",),
+                "latent": ("LATENT", {"tooltip": "Only used to get the latent count"}),
+                "weight": ("FLOAT", {"default": 2.0, "min": 0.0, "max": 10.0, "step": 0.001, "tooltip": "Strength of the enhance effect"}),
+           }
+        }
+
+    RETURN_TYPES = ("MODEL",)
+    RETURN_NAMES = ("model",)
+    FUNCTION = "enhance"
+    CATEGORY = "KJNodes/experimental"
+    DESCRIPTION = "https://github.com/NUS-HPC-AI-Lab/Enhance-A-Video"
+    EXPERIMENTAL = True
+
+    def enhance(self, model, weight, latent):
+        if weight == 0:
+            return (model,)
+
+        num_frames = latent["samples"].shape[2]
+
+        model_clone = model.clone()
+        if 'transformer_options' not in model_clone.model_options:
+            model_clone.model_options['transformer_options'] = {}
+        model_clone.model_options["transformer_options"]["enhance_weight"] = weight
+        diffusion_model = model_clone.get_model_object("diffusion_model")
+
+        for idx, block in enumerate(diffusion_model.transformer_blocks):
+            patched_attn1 = LTXCrossAttentionPatch(num_frames, weight).__get__(block.attn1, block.__class__)
+            model_clone.add_object_patch(f"diffusion_model.transformer_blocks.{idx}.attn1.forward", patched_attn1)
+        return (model_clone,)
+
 def normalized_attention_guidance(self, query, context_positive, context_negative, transformer_options={}):
     k_positive = self.norm_k(self.k(context_positive))
     v_positive = self.v(context_positive)
