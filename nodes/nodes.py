@@ -3077,3 +3077,104 @@ class DeprecatedCompileNodeKJ:
     DESCRIPTION = "This node has been replaced with TorchCompileModelAdvanced node, please use that instead."
     def passthrough(self, model):
         return (model,)
+
+
+class VisualizeSigmasKJ(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="VisualizeSigmasKJ",
+            category="KJNodes/misc",
+            inputs=[
+                io.Sigmas.Input("sigmas"),
+                io.Int.Input("start_step", default=0, min=-1, max=1000, step=1,
+                             tooltip="Step index to mark as the start of a range (inclusive). Set to -1 to disable."),
+                io.Int.Input("end_step", default=-1, min=-1, max=1000, step=1,
+                             tooltip="Step index to mark as the end of a range (inclusive). Set to - 1 to disable."),
+            ],
+            outputs=[
+                io.Sigmas.Output(display_name="sigmas_out"),
+                io.Image.Output(display_name="image"),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, sigmas, start_step=0, end_step=-1) -> io.NodeOutput:
+
+        start_idx = 0
+        end_idx = len(sigmas) - 1
+
+        if isinstance(start_step, float):
+            idxs = (sigmas <= start_step).nonzero(as_tuple=True)[0]
+            if len(idxs) > 0:
+                start_idx = idxs[0].item()
+        elif isinstance(start_step, int):
+            if start_step > 0:
+                start_idx = start_step
+
+        if isinstance(end_step, float):
+            idxs = (sigmas >= end_step).nonzero(as_tuple=True)[0]
+            if len(idxs) > 0:
+                end_idx = idxs[-1].item()
+        elif isinstance(end_step, int):
+            if end_step != -1:
+                end_idx = end_step - 1
+
+        import matplotlib.pyplot as plt
+        sigmas_np = sigmas.cpu().numpy()
+        if not np.isclose(sigmas_np[-1], 0.0, atol=1e-6):
+            sigmas_np = np.append(sigmas_np, 0.0)
+        buf = BytesIO()
+        fig = plt.figure(facecolor='#353535')
+        ax = fig.add_subplot(111)
+        ax.set_facecolor('#353535')  # Set axes background color
+        x_values = range(0, len(sigmas_np))
+        ax.plot(x_values, sigmas_np)
+        # Annotate each sigma value
+        ax.scatter(x_values, sigmas_np, color='white', s=20, zorder=3)  # Small dots at each sigma
+        for x, y in zip(x_values, sigmas_np):
+            # Show all annotations if few steps, or just show split step annotations
+            show_annotation = len(sigmas_np) <= 10
+            is_split_step = (start_idx > 0 and x == start_idx) or (end_idx != -1 and x == end_idx + 1)
+
+            if show_annotation or is_split_step:
+                color = 'orange'
+                if is_split_step:
+                    color = 'yellow'
+                ax.annotate(f"{y:.3f}", (x, y), textcoords="offset points", xytext=(10, 1), ha='center', color=color, fontsize=12)
+        ax.set_xticks(x_values)
+        ax.set_title("Sigmas", color='white')           # Title font color
+        ax.set_xlabel("Step", color='white')            # X label font color
+        ax.set_ylabel("Sigma Value", color='white')     # Y label font color
+        ax.tick_params(axis='x', colors='white', labelsize=10)        # X tick color
+        ax.tick_params(axis='y', colors='white', labelsize=10)        # Y tick color
+        # Add split point if end_step is defined
+        end_idx += 1
+        if end_idx != -1 and 0 <= end_idx < len(sigmas_np) - 1:
+            ax.axvline(end_idx, color='red', linestyle='--', linewidth=2, label='end_step split')
+        # Add split point if start_step is defined
+        if start_idx > 0 and 0 <= start_idx < len(sigmas_np):
+            ax.axvline(start_idx, color='green', linestyle='--', linewidth=2, label='start_step split')
+        if (end_idx != -1 and 0 <= end_idx < len(sigmas_np)) or (start_idx > 0 and 0 <= start_idx < len(sigmas_np)):
+            handles, labels = ax.get_legend_handles_labels()
+            if labels:
+                ax.legend()
+        # Draw shaded range
+        range_start_idx = start_idx if start_idx > 0 else 0
+        range_end_idx = end_idx if end_idx > 0 and end_idx < len(sigmas_np) else len(sigmas_np) - 1
+        if range_start_idx < range_end_idx:
+            ax.axvspan(range_start_idx, range_end_idx, color='lightblue', alpha=0.1, label='Sampled Range')
+
+
+        plt.tight_layout()
+        fig.canvas.draw()
+        w, h = fig.canvas.get_width_height()
+        buf = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
+        buf = buf.reshape(h, w, 3).copy()
+        image = torch.from_numpy(buf).float() / 255.0
+        image = image.unsqueeze(0) #(H, W, C) -> (1, H, W, C)
+        plt.close(fig)
+
+        sigmas_out = sigmas[start_idx:end_idx + 1] if end_idx != -1 else sigmas[start_idx:]
+
+        return io.NodeOutput(sigmas_out,image)

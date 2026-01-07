@@ -142,6 +142,7 @@ NODE_CONFIG = {
     "StyleModelApplyAdvanced": {"class": StyleModelApplyAdvanced, "name": "Style Model Apply Advanced"},
     "DiffusionModelSelector": {"class": DiffusionModelSelector, "name": "Diffusion Model Selector"},
     "LazySwitchKJ": {"class": LazySwitchKJ, "name": "Lazy Switch KJ"},
+    "VisualizeSigmasKJ": {"class": VisualizeSigmasKJ, "name": "Visualize Sigmas KJ"},
     #audioscheduler stuff
     "NormalizedAmplitudeToMask": {"class": NormalizedAmplitudeToMask},
     "NormalizedAmplitudeToFloatList": {"class": NormalizedAmplitudeToFloatList},
