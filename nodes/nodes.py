@@ -2385,7 +2385,7 @@ class VAELoaderKJ:
                           "weight_dtype": (["bf16", "fp16", "fp32" ],),
                          }
             }
-        
+
     RETURN_TYPES = ("VAE",)
     FUNCTION = "load_vae"
     CATEGORY = "KJNodes/vae"
@@ -2401,8 +2401,13 @@ class VAELoaderKJ:
             sd = self.load_taesd(vae_name)
         else:
             vae_path = folder_paths.get_full_path_or_raise("vae", vae_name)
-            sd = load_torch_file(vae_path)
-        vae = VAE(sd=sd, device=device, dtype=dtype)
+            sd, metadata = comfy.utils.load_torch_file(vae_path, return_metadata=True)
+
+        if "vocoder.conv_post.weight" in sd:
+            from comfy.ldm.lightricks.vae.audio_vae import AudioVAE
+            vae = AudioVAE(sd, metadata)
+        else:
+            vae = VAE(sd=sd, device=device, dtype=dtype)
         return (vae,)
 
 from comfy.samplers import sampling_function, CFGGuider
