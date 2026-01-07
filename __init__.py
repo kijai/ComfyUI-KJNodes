@@ -213,6 +213,8 @@ NODE_CONFIG = {
     "VisualizeCUDAMemoryHistory": {"class": VisualizeCUDAMemoryHistory, "name": "Visualize CUDAMemory History"},
     "LTXVEnhanceAVideoKJ": {"class": LTXVEnhanceAVideoKJ, "name": "LTXV Enhance A Video KJ"},
     "LTXVAddGuideMulti": {"class": LTXVAddGuideMulti, "name": "LTXV Add Guide Multi"},
+    "LTXVAddGuidesFromBatch": {"class": LTXVAddGuidesFromBatch, "name": "LTXV Add Guides From Batch"},
+
 
     #instance diffusion
     "CreateInstanceDiffusionTracking": {"class": CreateInstanceDiffusionTracking},

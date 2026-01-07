@@ -3268,3 +3268,63 @@ class LTXVAddGuideMulti(LTXVAddGuide):
             )
 
         return io.NodeOutput(positive, negative, {"samples": latent_image, "noise_mask": noise_mask})
+
+class LTXVAddGuidesFromBatch(LTXVAddGuide):
+
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="LTXVAddGuidesFromBatch",
+            category="conditioning/video_models",
+            inputs=[
+                io.Conditioning.Input("positive"),
+                io.Conditioning.Input("negative"),
+                io.Vae.Input("vae"),
+                io.Latent.Input("latent"),
+                io.Image.Input("images", tooltip="Batch of images - non-black images will be used as guides"),
+                io.Float.Input("strength", default=1.0, min=0.0, max=1.0, step=0.01),
+            ],
+            outputs=[
+                io.Conditioning.Output(display_name="positive"),
+                io.Conditioning.Output(display_name="negative"),
+                io.Latent.Output(display_name="latent"),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, positive, negative, vae, latent, images, strength) -> io.NodeOutput:
+        scale_factors = vae.downscale_index_formula
+        latent_image = latent["samples"]
+        noise_mask = get_noise_mask(latent)
+
+        _, _, latent_length, latent_height, latent_width = latent_image.shape
+
+        # Process each image in the batch
+        batch_size = images.shape[0]
+
+        for i in range(batch_size):
+            img = images[i:i+1]
+
+            # Check if image is not black and use batch index as frame index
+            if img.max() > 0.001:
+                f_idx = i
+
+                image_1, t = cls.encode(vae, latent_width, latent_height, img, scale_factors)
+
+                frame_idx, latent_idx = cls.get_latent_index(positive, latent_length, len(image_1), f_idx, scale_factors)
+
+                if latent_idx + t.shape[2] <= latent_length:
+                    positive, negative, latent_image, noise_mask = cls.append_keyframe(
+                        positive,
+                        negative,
+                        frame_idx,
+                        latent_image,
+                        noise_mask,
+                        t,
+                        strength,
+                        scale_factors,
+                    )
+                else:
+                    print(f"Warning: Skipping guide at index {i} - conditioning frames exceed latent sequence length")
+
+        return io.NodeOutput(positive, negative, {"samples": latent_image, "noise_mask": noise_mask})
