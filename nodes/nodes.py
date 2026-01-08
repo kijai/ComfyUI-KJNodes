@@ -3183,3 +3183,31 @@ class VisualizeSigmasKJ(io.ComfyNode):
         sigmas_out = sigmas[start_idx:end_idx + 1] if end_idx != -1 else sigmas[start_idx:]
 
         return io.NodeOutput(sigmas_out,image)
+
+class PreviewLatentNoiseMask(io.ComfyNode):
+
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="PreviewLatentNoiseMask",
+            category="KJNodes/latent",
+            description="Previews the latent noise mask",
+            inputs=[
+                io.Latent.Input("latent",),
+            ],
+            outputs=[
+                io.Mask.Output(display_name="mask"),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, latent) -> io.NodeOutput:
+        noise_mask = latent.get("noise_mask", None)
+        if noise_mask is None:
+            return io.NodeOutput(torch.zeros((1, 64, 64)))
+        noise_mask = noise_mask.clone()
+
+        if noise_mask.ndim == 5:
+            noise_mask = noise_mask[0, 0]
+
+        return io.NodeOutput(noise_mask)
