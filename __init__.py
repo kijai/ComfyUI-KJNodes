@@ -7,6 +7,7 @@ from .nodes.intrinsic_lora_nodes import *
 from .nodes.mask_nodes import *
 from .nodes.model_optimization_nodes import *
 from .nodes.lora_nodes import *
+from .nodes.ltxv_nodes import *
 NODE_CONFIG = {
     #constants
     "BOOLConstant": {"class": BOOLConstant, "name": "BOOL Constant"},
@@ -211,9 +212,12 @@ NODE_CONFIG = {
     "StartRecordCUDAMemoryHistory": {"class": StartRecordCUDAMemoryHistory, "name": "Start Recording CUDAMemory History"},
     "EndRecordCUDAMemoryHistory": {"class": EndRecordCUDAMemoryHistory, "name": "End Recording CUDAMemory History"},
     "VisualizeCUDAMemoryHistory": {"class": VisualizeCUDAMemoryHistory, "name": "Visualize CUDAMemory History"},
+
+    #ltxv
     "LTXVEnhanceAVideoKJ": {"class": LTXVEnhanceAVideoKJ, "name": "LTXV Enhance A Video KJ"},
     "LTXVAddGuideMulti": {"class": LTXVAddGuideMulti, "name": "LTXV Add Guide Multi"},
     "LTXVAddGuidesFromBatch": {"class": LTXVAddGuidesFromBatch, "name": "LTXV Add Guides From Batch"},
+    "LTXVAudioVideoMask": {"class": LTXVAudioVideoMask, "name": "LTXV Audio Video Mask"},
 
 
     #instance diffusion
