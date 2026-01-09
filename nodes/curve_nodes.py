@@ -94,7 +94,11 @@ def plot_coordinates_to_tensor(coordinates, height, width, bbox_height, bbox_wid
                                             color=color,
                                             mutation_scale=20))
             canvas.draw()
-            image_np = np.frombuffer(canvas.tostring_rgb(), dtype='uint8').reshape(int(height), int(width), 3).copy()
+            try:
+                image_np = np.frombuffer(canvas.tostring_rgb(), dtype='uint8').reshape(int(height), int(width), 3).copy()
+            except:
+                image_np = np.frombuffer(canvas.tostring_argb(), dtype='uint8').reshape(int(height), int(width), 4)
+                image_np = image_np[:, :, [1, 2, 3]]  # Convert ARGB to RGB
             image_tensor = torch.from_numpy(image_np).float() / 255.0
             image_tensor = image_tensor.unsqueeze(0)
             image_batch.append(image_tensor)

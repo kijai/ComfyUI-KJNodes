@@ -3174,8 +3174,13 @@ class VisualizeSigmasKJ(io.ComfyNode):
         plt.tight_layout()
         fig.canvas.draw()
         w, h = fig.canvas.get_width_height()
-        buf = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
-        buf = buf.reshape(h, w, 3).copy()
+        try:
+            buf = np.frombuffer(fig.canvas.tostring_argb(), dtype=np.uint8)
+            buf = buf.reshape(h, w, 4)
+            buf = buf[:, :, [1, 2, 3]]  # Convert ARGB to RGB
+        except:
+            buf = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
+            buf = buf.reshape(h, w, 3).copy()
         image = torch.from_numpy(buf).float() / 255.0
         image = image.unsqueeze(0) #(H, W, C) -> (1, H, W, C)
         plt.close(fig)
