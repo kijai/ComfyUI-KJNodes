@@ -231,40 +231,34 @@ creates animation between them.
             image = Image.new("RGB", (width, height), "black")
             draw = ImageDraw.Draw(image)
             font = ImageFont.truetype(font_path, font_size)
-            
-            # Split the text into words
-            words = text.split()
-            
-            # Initialize variables for line creation
+
+            # Split the text into lines and wrap words to fit width
+            text_lines = text.split('\n')
             lines = []
-            current_line = []
-            current_line_width = 0
-            try: #new pillow  
-                # Iterate through words to create lines
+            for text_line in text_lines:
+                if text_line.strip() == "":
+                    # Preserve empty lines for multiple newlines
+                    lines.append("")
+                    continue
+                words = text_line.split()
+                current_line = []
                 for word in words:
-                    word_width = font.getbbox(word)[2]
-                    if current_line_width + word_width <= width - 2 * text_x:
+                    if current_line:
+                        test_line = " ".join(current_line + [word])
+                    else:
+                        test_line = word
+                    try:
+                        test_line_width = font.getbbox(test_line)[2]
+                    except Exception:
+                        test_line_width = font.getsize(test_line)[0]
+                    if test_line_width <= width - 2 * text_x:
                         current_line.append(word)
-                        current_line_width += word_width + font.getbbox(" ")[2] # Add space width
                     else:
                         lines.append(" ".join(current_line))
                         current_line = [word]
-                        current_line_width = word_width
-            except: #old pillow             
-                for word in words:
-                    word_width = font.getsize(word)[0]
-                    if current_line_width + word_width <= width - 2 * text_x:
-                        current_line.append(word)
-                        current_line_width += word_width + font.getsize(" ")[0] # Add space width
-                    else:
-                        lines.append(" ".join(current_line))
-                        current_line = [word]
-                        current_line_width = word_width
-            
-            # Add the last line if it's not empty
-            if current_line:
-                lines.append(" ".join(current_line))
-            
+                if current_line:
+                    lines.append(" ".join(current_line))
+
             # Draw each line of text separately
             y_offset = text_y
             for line in lines:
@@ -277,17 +271,17 @@ creates animation between them.
                 except:
                     draw.text((text_x, y_offset), line, font=font, fill=font_color)
                 y_offset += text_height # Move to the next line
-            
+
             if start_rotation != end_rotation:
                 image = image.rotate(rotation, center=(text_center_x, text_center_y))
                 rotation += rotation_increment
-            
+
             image = np.array(image).astype(np.float32) / 255.0
             image = torch.from_numpy(image)[None,]
             mask = image[:, :, :, 0] 
             masks.append(mask)
             out.append(image)
-            
+
         if invert:
             return (1.0 - torch.cat(out, dim=0), 1.0 - torch.cat(masks, dim=0),)
         return (torch.cat(out, dim=0),torch.cat(masks, dim=0),)
