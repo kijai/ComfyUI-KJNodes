@@ -316,8 +316,8 @@ def ltxv_crossattn_forward_nag(self, x, context, mask=None, transformer_options=
 
     # Negative
     if x_neg is not None and context_neg is not None:
-        q_neg = self.q_norm(self.q(x_neg))
-        k_neg = self.k_norm(self.k(context_neg))
+        q_neg = self.q_norm(self.to_q(x_neg))
+        k_neg = self.k_norm(self.to_k(context_neg))
         v_neg = self.to_v(context_neg)
 
         x_neg_out = comfy.ldm.modules.attention.optimized_attention(q_neg, k_neg, v_neg, heads=self.heads, transformer_options=transformer_options)
