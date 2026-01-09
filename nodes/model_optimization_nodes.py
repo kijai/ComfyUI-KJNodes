@@ -1158,7 +1158,10 @@ class WanVideoEnhanceAVideoKJ:
 
         return (model_clone,)
 
-from comfy.ldm.lightricks.model import apply_rotary_emb
+try:
+    from comfy.ldm.lightricks.model import apply_rotary_emb
+except:
+    apply_rotary_emb = None
 
 
 def ltxv_feta_forward(self, x, context=None, mask=None, pe=None, k_pe=None, transformer_options={}):

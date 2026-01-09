@@ -7,7 +7,8 @@ from .nodes.intrinsic_lora_nodes import *
 from .nodes.mask_nodes import *
 from .nodes.model_optimization_nodes import *
 from .nodes.lora_nodes import *
-from .nodes.ltxv_nodes import *
+
+
 NODE_CONFIG = {
     #constants
     "BOOLConstant": {"class": BOOLConstant, "name": "BOOL Constant"},
@@ -214,13 +215,6 @@ NODE_CONFIG = {
     "VisualizeCUDAMemoryHistory": {"class": VisualizeCUDAMemoryHistory, "name": "Visualize CUDAMemory History"},
     "PreviewLatentNoiseMask": {"class": PreviewLatentNoiseMask, "name": "Preview Latent Noise Mask"},
 
-    #ltxv
-    "LTXVEnhanceAVideoKJ": {"class": LTXVEnhanceAVideoKJ, "name": "LTXV Enhance A Video KJ"},
-    "LTXVAddGuideMulti": {"class": LTXVAddGuideMulti, "name": "LTXV Add Guide Multi"},
-    "LTXVAddGuidesFromBatch": {"class": LTXVAddGuidesFromBatch, "name": "LTXV Add Guides From Batch"},
-    "LTXVAudioVideoMask": {"class": LTXVAudioVideoMask, "name": "LTXV Audio Video Mask"},
-
-
     #instance diffusion
     "CreateInstanceDiffusionTracking": {"class": CreateInstanceDiffusionTracking},
     "AppendInstanceDiffusionTracking": {"class": AppendInstanceDiffusionTracking},
@@ -243,6 +237,18 @@ NODE_CONFIG = {
     "TorchCompileModelQwenImage": {"class": DeprecatedCompileNodeKJ, "name": "TorchCompileModelQwenImage"},
     "TorchCompileModelWanVideo": {"class": DeprecatedCompileNodeKJ, "name": "TorchCompileModelWanVideo"},
 }
+
+#ltxv
+try:
+    from .nodes.ltxv_nodes import *
+    NODE_CONFIG.update({
+    "LTXVEnhanceAVideoKJ": {"class": LTXVEnhanceAVideoKJ, "name": "LTXV Enhance A Video KJ"},
+    "LTXVAddGuideMulti": {"class": LTXVAddGuideMulti, "name": "LTXV Add Guide Multi"},
+    "LTXVAddGuidesFromBatch": {"class": LTXVAddGuidesFromBatch, "name": "LTXV Add Guides From Batch"},
+    "LTXVAudioVideoMask": {"class": LTXVAudioVideoMask, "name": "LTXV Audio Video Mask"},
+    })
+except ImportError:
+    pass
 
 def generate_node_mappings(node_config):
     node_class_mappings = {}
