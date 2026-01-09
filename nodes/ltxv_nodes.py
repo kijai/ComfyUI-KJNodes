@@ -1,7 +1,10 @@
 from comfy_extras.nodes_lt import get_noise_mask, LTXVAddGuide
+import types
+import comfy
 from comfy_api.latest import io
 import numpy as np
 import torch
+import comfy.model_management as mm
 
 class LTXVAddGuideMulti(LTXVAddGuide):
 
@@ -268,3 +271,137 @@ class LTXVAudioVideoMask(io.ComfyNode):
             audio_latent["noise_mask"] = audio_mask
 
         return io.NodeOutput(video_latent, audio_latent)
+
+def normalized_attention_guidance(self, query, context_positive, nag_context, transformer_options={}):
+    k_positive = self.k_norm(self.to_k(context_positive)).to(query.dtype)
+    v_positive = self.to_v(context_positive).to(query.dtype)
+    k_negative = self.k_norm(self.to_k(nag_context)).to(query.dtype)
+    v_negative = self.to_v(nag_context).to(query.dtype)
+
+    x_positive = comfy.ldm.modules.attention.optimized_attention(query, k_positive, v_positive, heads=self.heads, transformer_options=transformer_options).flatten(2)
+    x_negative = comfy.ldm.modules.attention.optimized_attention(query, k_negative, v_negative, heads=self.heads, transformer_options=transformer_options).flatten(2)
+
+    nag_guidance = x_positive * self.nag_scale - x_negative * (self.nag_scale - 1)
+
+    norm_positive = torch.norm(x_positive, p=1, dim=-1, keepdim=True).expand_as(x_positive)
+    norm_guidance = torch.norm(nag_guidance, p=1, dim=-1, keepdim=True).expand_as(nag_guidance)
+
+    scale = torch.nan_to_num(norm_guidance / norm_positive, nan=10.0)
+
+    mask = scale > self.nag_tau
+    adjustment = (norm_positive * self.nag_tau) / (norm_guidance + 1e-7)
+    nag_guidance = torch.where(mask, nag_guidance * adjustment, nag_guidance)
+
+    x = nag_guidance * self.nag_alpha + x_positive * (1 - self.nag_alpha)
+    del nag_guidance
+
+    return x
+
+#region NAG
+def ltxv_crossattn_forward_nag(self, x, context, mask=None, transformer_options={}, **kwargs):
+
+    # Single or [pos, neg] pair
+    if context.shape[0] == 1:
+        x_pos, context_pos = x, context
+        x_neg, context_neg = None, None
+    else:
+        x_pos, x_neg = torch.chunk(x, 2, dim=0)
+        context_pos, context_neg = torch.chunk(context, 2, dim=0)
+
+    # Positive
+    q_pos = self.q_norm(self.to_q(x_pos))
+    nag_context = self.nag_context
+
+    x_pos_out = normalized_attention_guidance(self, q_pos, context_pos, nag_context, transformer_options=transformer_options)
+
+    # Negative
+    if x_neg is not None and context_neg is not None:
+        q_neg = self.q_norm(self.q(x_neg))
+        k_neg = self.k_norm(self.k(context_neg))
+        v_neg = self.to_v(context_neg)
+
+        x_neg_out = comfy.ldm.modules.attention.optimized_attention(q_neg, k_neg, v_neg, heads=self.heads, transformer_options=transformer_options)
+        x = torch.cat([x_pos_out, x_neg_out], dim=0)
+    else:
+        x = x_pos_out
+
+    return self.to_out(x)
+
+
+class LTXVCrossAttentionPatch:
+    def __init__(self, context, nag_scale, nag_alpha, nag_tau):
+        self.nag_context = context
+        self.nag_scale = nag_scale
+        self.nag_alpha = nag_alpha
+        self.nag_tau = nag_tau
+
+    def __get__(self, obj, objtype=None):
+        # Create bound method with stored parameters
+        def wrapped_attention(self_module, *args, **kwargs):
+            self_module.nag_context = self.nag_context
+            self_module.nag_scale = self.nag_scale
+            self_module.nag_alpha = self.nag_alpha
+            self_module.nag_tau = self.nag_tau
+
+            return ltxv_crossattn_forward_nag(self_module, *args, **kwargs)
+        return types.MethodType(wrapped_attention, obj)
+
+class LTX2_NAG(io.ComfyNode):
+
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="LTX2_NAG",
+            display_name="LTX2 NAG",
+            category="KJNodes/ltxv",
+            description="https://github.com/ChenDarYen/Normalized-Attention-Guidance",
+            is_experimental=True,
+            inputs=[
+                io.Model.Input("model"),
+                io.Float.Input("nag_scale", default=11.0, min=0.0, max=100.0, step=0.001, tooltip="Strength of negative guidance effect"),
+                io.Float.Input("nag_alpha", default=0.25, min=0.0, max=1.0, step=0.001, tooltip="Mixing coefficient in that controls the balance between the normalized guided representation and the original positive representation."),
+                io.Float.Input("nag_tau", default=2.5, min=0.0, max=10.0, step=0.001, tooltip="Clipping threshold that controls how much the guided attention can deviate from the positive attention."),
+                io.Conditioning.Input("nag_cond_video", optional=True),
+                io.Conditioning.Input("nag_cond_audio", optional=True),
+            ],
+            outputs=[
+                io.Model.Output(display_name="model"),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, model, nag_scale, nag_alpha, nag_tau, nag_cond_video=None, nag_cond_audio=None) -> io.NodeOutput:
+        if nag_scale == 0:
+            return io.NodeOutput(model)
+
+        device = mm.get_torch_device()
+        dtype = mm.unet_dtype()
+
+        model_clone = model.clone()
+
+        diffusion_model = model_clone.get_model_object("diffusion_model")
+        img_dim = diffusion_model.inner_dim
+        audio_dim = diffusion_model.audio_inner_dim
+        diffusion_model.caption_projection.to(device)
+
+        context_video = context_audio = None
+
+        if nag_cond_video is not None:
+            context_video = nag_cond_video[0][0].to(device, dtype)
+            v_context, _ = torch.split(context_video, int(context_video.shape[-1] / 2), len(context_video.shape) - 1)
+            context_video = diffusion_model.caption_projection(v_context)
+            context_video = context_video.view(1, -1, img_dim)
+            for idx, block in enumerate(diffusion_model.transformer_blocks):
+                patched_attn2 = LTXVCrossAttentionPatch(context_video, nag_scale, nag_alpha, nag_tau).__get__(block.attn2, block.__class__)
+                model_clone.add_object_patch(f"diffusion_model.transformer_blocks.{idx}.attn2.forward", patched_attn2)
+
+        if nag_cond_audio is not None and diffusion_model.audio_caption_projection is not None:
+            context_audio = nag_cond_audio[0][0].to(device, dtype)
+            _, a_context = torch.split(context_audio, int(context_audio.shape[-1] / 2), len(context_audio.shape) - 1)
+            context_audio = diffusion_model.audio_caption_projection(a_context)
+            context_audio = context_audio.view(1, -1, audio_dim)
+            for idx, block in enumerate(diffusion_model.transformer_blocks):
+                patched_audio_attn2 = LTXVCrossAttentionPatch(context_audio, nag_scale, nag_alpha, nag_tau).__get__(block.audio_attn2, block.__class__)
+                model_clone.add_object_patch(f"diffusion_model.transformer_blocks.{idx}.audio_attn2.forward", patched_audio_attn2)
+
+        return io.NodeOutput(model_clone)
