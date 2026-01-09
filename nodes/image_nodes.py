@@ -703,32 +703,39 @@ Note that this changes the input image's height!
 Fonts are loaded from this folder:  
 ComfyUI/custom_nodes/ComfyUI-KJNodes/fonts
 """
-        
+
     def addlabel(self, image, text_x, text_y, text, height, font_size, font_color, label_color, font, direction, caption=""):
         batch_size = image.shape[0]
         width = image.shape[2]
-        
+
         font_path = os.path.join(script_directory, "fonts", "TTNorms-Black.otf") if font == "TTNorms-Black.otf" else folder_paths.get_full_path("kjnodes_fonts", font)
-        
+
         def process_image(input_image, caption_text):
             font = ImageFont.truetype(font_path, font_size)
-            words = caption_text.split()
             lines = []
-            current_line = []
-            current_line_width = 0
-
-            for word in words:
-                word_width = font.getbbox(word)[2]
-                if current_line_width + word_width <= width - 2 * text_x:
-                    current_line.append(word)
-                    current_line_width += word_width + font.getbbox(" ")[2]  # Add space width
-                else:
+            for text_line in caption_text.split('\n'):
+                if text_line.strip() == "":
+                    # Preserve empty lines for multiple newlines
+                    lines.append("")
+                    continue
+                words = text_line.split()
+                current_line = []
+                for word in words:
+                    if current_line:
+                        test_line = " ".join(current_line + [word])
+                    else:
+                        test_line = word
+                    try:
+                        test_line_width = font.getbbox(test_line)[2]
+                    except Exception:
+                        test_line_width = font.getsize(test_line)[0]
+                    if test_line_width <= width - 2 * text_x:
+                        current_line.append(word)
+                    else:
+                        lines.append(" ".join(current_line))
+                        current_line = [word]
+                if current_line:
                     lines.append(" ".join(current_line))
-                    current_line = [word]
-                    current_line_width = word_width
-
-            if current_line:
-                lines.append(" ".join(current_line))
 
             if direction == 'overlay':
                 pil_image = Image.fromarray((input_image.cpu().numpy() * 255).astype(np.uint8))
@@ -744,7 +751,7 @@ ComfyUI/custom_nodes/ComfyUI-KJNodes/fonts
                     pil_image = label_image
 
             draw = ImageDraw.Draw(pil_image)
-            
+
 
             y_offset = text_y
             for line in lines:
@@ -756,7 +763,7 @@ ComfyUI/custom_nodes/ComfyUI-KJNodes/fonts
 
             processed_image = torch.from_numpy(np.array(pil_image).astype(np.float32) / 255.0).unsqueeze(0)
             return processed_image
-        
+
         if caption == "":
             processed_images = [process_image(img, text) for img in image]
         else:
