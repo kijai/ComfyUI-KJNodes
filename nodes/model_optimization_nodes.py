@@ -293,7 +293,7 @@ class DiffusionModelLoaderKJ():
 
         unet_path = folder_paths.get_full_path_or_raise("diffusion_models", model_name)
 
-        sd = comfy.utils.load_torch_file(unet_path)
+        sd, metadata = comfy.utils.load_torch_file(unet_path, return_metadata=True)
         if extra_state_dict is not None:
             # If the model is a checkpoint, strip additional non-diffusion model entries before adding extra state dict
             from comfy import model_detection
@@ -307,7 +307,7 @@ class DiffusionModelLoaderKJ():
             sd.update(extra_sd)
             del extra_sd
 
-        model = comfy.sd.load_diffusion_model_state_dict(sd, model_options=model_options)
+        model = comfy.sd.load_diffusion_model_state_dict(sd, model_options=model_options, metadata=metadata)
         if dtype := DTYPE_MAP.get(compute_dtype):
             model.set_model_compute_dtype(dtype)
             model.force_cast_weights = False
