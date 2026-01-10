@@ -520,7 +520,22 @@ def resize_lora_model(lora_sd, new_rank, save_dtype, device, dynamic_method, dyn
             conv2d = len(lora_down_weight.size()) == 4
             old_rank = lora_down_weight.size()[0]
             max_old_rank = max(max_old_rank or 0, old_rank)
-            
+
+            # Skip if merged weight would be too large (>100k elements in any dimension)
+            if conv2d:
+                in_rank, in_size, kernel_size, _ = lora_down_weight.shape
+                out_size, out_rank, _, _ = lora_up_weight.shape
+                merged_size = out_size * in_size * kernel_size * kernel_size
+            else:
+                in_rank, in_size = lora_down_weight.shape
+                out_size, out_rank = lora_up_weight.shape
+                merged_size = out_size * in_size
+
+            if merged_size > 100_000_000:  # Skip if >100M elements
+                logging.warning(f"Skipping {block_down_name}: merged weight too large ({merged_size:,} elements)")
+                tqdm.write(f"SKIPPED: {block_down_name} - too large ({merged_size:,} elements)")
+                pbar.update(1)
+                continue
 
             if lora_alpha is None:
                 scale = 1.0
