@@ -804,7 +804,7 @@ The choices are loaded from 'custom_dimensions.json' in the nodes folder.
 
 class WidgetToString:
     @classmethod
-    def IS_CHANGED(cls,*,id,node_title,any_input,**kwargs):
+    def IS_CHANGED(cls,*,id,node_title,any_input=None,**kwargs):
         if any_input is not None and (id != 0 or node_title != ""):
             return float("NaN")
 
@@ -888,23 +888,22 @@ The 'any_input' is required for making sure the node you want the value from exi
                 elif isinstance(link, list) and len(link) >= 2:
                     link_to_node_map[link[0]] = link[1]
 
-        for node in all_nodes:
-            if node_title:
-                if "title" in node:
-                    if node["title"] == node_title:
-                        node_id = node["id"]
-                        break
-                else:
-                    print("Node title not found.")
-            elif id != 0:
-                if node["id"] == id:
-                    node_id = id
+        # Search by title if provided and not empty
+        if node_title and node_title.strip():
+            for node in all_nodes:
+                if "title" in node and node["title"] == node_title:
+                    node_id = node["id"]
                     break
-            elif any_input is not None:
+
+        # Search by any_input link if provided
+        if node_id is None and any_input is not None:
+            for node in all_nodes:
                 if node["type"] == "WidgetToString" and node["id"] == unique_id_int and not link_id:
-                    for node_input in node["inputs"]:
-                        if node_input["name"] == "any_input":
-                            link_id = node_input["link"]
+                    node_inputs = node.get("inputs", [])
+                    for node_input in node_inputs:
+                        if node_input.get("name") == "any_input":
+                            link_id = node_input.get("link")
+                            break
 
                 # Construct a map of links to node IDs for future reference
                 node_outputs = node.get("outputs", None)
@@ -916,36 +915,71 @@ The 'any_input' is required for making sure the node you want the value from exi
                         continue
                     for link in node_links:
                         link_to_node_map[link] = node["id"]
-                        if link_id and link == link_id:
-                            break
 
-        if link_id:
-            node_id = link_to_node_map.get(link_id, None)
+            if link_id:
+                node_id = link_to_node_map.get(link_id, None)
+
+        # If still not found and id is provided, use the id
+        if node_id is None and id != 0:
+            node_id = id
 
         if node_id is None:
             raise ValueError("No matching node found for the given title or id")
 
-        # Determine the correct prompt key
-        # First check if the target node is in a subgraph
-        target_subgraph_parent = node_to_subgraph_map.get(node_id)
+        # Find the correct prompt key - handles multi-level nested subgraphs
+        prompt_key = None
 
-        if target_subgraph_parent is not None:
-            # Target node is in a subgraph, use the parent node id as prefix
-            prompt_key = f"{target_subgraph_parent}:{node_id}"
-        elif subgraph_prefix is not None:
-            # We're in a subgraph, use our prefix
-            prompt_key = f"{subgraph_prefix}:{node_id}"
-        else:
+        # First, try the direct ID (for top-level nodes)
+        if str(node_id) in prompt:
             prompt_key = str(node_id)
 
-        # Try the prefixed key first, then fall back to just the node_id
-        if prompt_key not in prompt:
-            prompt_key = str(node_id)
+        # If not found, search for it in subgraph format
+        if prompt_key is None:
+            # Determine context - prefer nodes in same subgraph as WidgetToString
+            widget_context = ""
+            for key in prompt.keys():
+                if ':' in key and key.split(':')[-1] == str(unique_id_int):
+                    parts = key.split(':')
+                    widget_context = ':'.join(parts[:-1]) + ':'
+                    break
 
-        if prompt_key not in prompt:
-            raise KeyError(f"Node not found in prompt. Tried keys: '{target_subgraph_parent}:{node_id}' and '{node_id}'")
+            # Try with context first if we're in a subgraph
+            if widget_context:
+                preferred_key = widget_context + str(node_id)
+                if preferred_key in prompt:
+                    prompt_key = preferred_key
+
+            # Search all prompt keys for matches (handles any nesting level)
+            if prompt_key is None:
+                matching_keys = []
+                for key in prompt.keys():
+                    if key == str(node_id):
+                        matching_keys.append(key)
+                    elif ':' in key and key.split(':')[-1] == str(node_id):
+                        matching_keys.append(key)
+
+                if matching_keys:
+                    # Prefer same context, otherwise use first match
+                    if len(matching_keys) == 1:
+                        prompt_key = matching_keys[0]
+                    else:
+                        for key in matching_keys:
+                            if widget_context and key.startswith(widget_context):
+                                prompt_key = key
+                                break
+                        if prompt_key is None:
+                            prompt_key = matching_keys[0]
+
+        if prompt_key is None:
+            raise KeyError(f"Node {node_id} not found in prompt keys: {list(prompt.keys())}")
 
         values = prompt[prompt_key]
+
+        # Check if this is a Primitive node (they don't store values in the prompt)
+        class_type = values.get("class_type", "")
+        if "Primitive" in class_type:
+            print(f"WARNING: Node {node_id} is a Primitive node (type: {class_type}). Primitive nodes don't store their values in the prompt - they pass values to connected nodes. Connect WidgetToString to the node receiving the primitive's value instead, or use a non-primitive node like 'String Constant Multiline'.")
+
         if "inputs" in values:
             inputs = values["inputs"]
 
@@ -955,15 +989,18 @@ The 'any_input' is required for making sure the node you want the value from exi
                 widget_names = [w.strip() for w in widget_name.split(",") if w.strip()]
 
             if return_all:
-                # Format items based on type
+                # Format items based on type, skip linked inputs (which are lists)
                 formatted_items = []
                 for k, v in inputs.items():
+                    # Skip linked inputs - they're lists like ["15", 0]
+                    if isinstance(v, list):
+                        continue
                     if isinstance(v, float):
                         item = f"{k}: {v:.{allowed_float_decimals}f}"
                     else:
                         item = f"{k}: {str(v)}"
                     formatted_items.append(item)
-                results.append(", ".join(formatted_items))
+                return (", ".join(formatted_items), )
 
             # Single widget name (trimmed)
             elif len(widget_names) == 1:
