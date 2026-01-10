@@ -3027,6 +3027,7 @@ class WanImageToVideoSVIPro(io.ComfyNode):
                 io.Latent.Input("anchor_samples"),
                 io.Latent.Input("prev_samples", optional=True),
                 io.Int.Input("motion_latent_count", default=1, min=0, max=128, step=1),
+                io.Int.Input("anchor_frame_count", default=1, min=1, max=128, step=1, tooltip="Number of anchor frames to use from anchor_samples as reference conditioning. Remaining frames (if any) are used as starting frames when prev_samples is not connected. Default=1 (recommended). Values >1 are experimental and may cause blending artifacts between reference frames."),
             ],
             outputs=[
                 io.Conditioning.Output(display_name="positive"),
@@ -3036,7 +3037,7 @@ class WanImageToVideoSVIPro(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, positive, negative, length, motion_latent_count, anchor_samples, prev_samples=None) -> io.NodeOutput:
+    def execute(cls, positive, negative, length, motion_latent_count, anchor_samples, prev_samples=None, anchor_frame_count=1) -> io.NodeOutput:
         anchor_latent = anchor_samples["samples"].clone()
 
         B, C, T, H, W = anchor_latent.shape
@@ -3054,12 +3055,26 @@ class WanImageToVideoSVIPro(io.ComfyNode):
             padding_size = total_latents - anchor_latent.shape[2] - motion_latent.shape[2]
             image_cond_latent = torch.cat([anchor_latent, motion_latent], dim=2)
 
-        padding = torch.zeros(1, C, padding_size, H, W, dtype=dtype, device=device)
-        padding = comfy.latent_formats.Wan21().process_out(padding)
-        image_cond_latent = torch.cat([image_cond_latent, padding], dim=2)
+        # Handle case where anchor has more frames than target
+        if padding_size < 0:
+            print(f"[WanImageToVideoSVIPro] Anchor has {image_cond_latent.shape[2]} frames but target is {total_latents} frames.")
+            print(f"[WanImageToVideoSVIPro] Using all {image_cond_latent.shape[2]} anchor frames as reference conditioning.")
+            # Keep all anchor frames, don't truncate
+            padding_size = 0
 
-        mask = torch.ones((1, 1, empty_latent.shape[2], H, W), device=device, dtype=dtype)
-        mask[:, :, :1] = 0.0
+        if padding_size > 0:
+            padding = torch.zeros(B, C, padding_size, H, W, dtype=dtype, device=device)
+            padding = comfy.latent_formats.Wan21().process_out(padding)
+            image_cond_latent = torch.cat([image_cond_latent, padding], dim=2)
+
+        # Determine how many frames to mark as anchor in the mask
+        frames_to_mark = min(anchor_frame_count, image_cond_latent.shape[2])
+
+        print(f"[WanImageToVideoSVIPro] Marking {frames_to_mark} frame(s) as anchor out of {image_cond_latent.shape[2]} total conditioning frames")
+
+        # Create mask that matches the conditioning latent dimensions
+        mask = torch.ones((B, 1, image_cond_latent.shape[2], H, W), device=device, dtype=dtype)
+        mask[:, :, :frames_to_mark] = 0.0
 
         positive = node_helpers.conditioning_set_values(positive, {"concat_latent_image": image_cond_latent, "concat_mask": mask})
         negative = node_helpers.conditioning_set_values(negative, {"concat_latent_image": image_cond_latent, "concat_mask": mask})
@@ -3067,6 +3082,77 @@ class WanImageToVideoSVIPro(io.ComfyNode):
         out_latent = {}
         out_latent["samples"] = empty_latent
         return io.NodeOutput(positive, negative, out_latent)
+
+class StandardLatentToWanVideoLatent:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "latents": ("LATENT",),
+                "frames_per_image": ("STRING", {"default": "4,1", "multiline": False}),
+            }
+        }
+
+    RETURN_TYPES = ("LATENT",)
+    FUNCTION = "convert"
+    CATEGORY = "KJNodes/latents"
+    DESCRIPTION = """
+Converts standard VAE latents (from batched images) to Wan video latent format.
+Takes N standard latents [N, C, H, W] and creates a video latent [1, C, T, H, W]
+where each latent is repeated according to frames_per_image to create discrete frames.
+
+Examples:
+- "4,1" with 2 images = [img1×4, img2×1] = 5 frames → 2 latent frames
+- "1,4" with 2 images = [img1×1, img2×4] = 5 frames → 2 latent frames
+- "8,1" with 2 images = 9 frames → 3 latent frames
+
+Use this when you encode images with standard VAE instead of Wan VAE.
+The frames are created by repeating latents, no interpolation.
+"""
+
+    def convert(self, latents, frames_per_image):
+        samples = latents["samples"]
+        # Standard VAE output: [B, C, H, W] (4D)
+        if samples.dim() == 5:
+            # Already video latent format
+            print("Warning: Input is already in video latent format [B, C, T, H, W]")
+            return (latents,)
+
+        B, C, H, W = samples.shape
+
+        # Parse frames_per_image string
+        try:
+            frame_counts = [int(x.strip()) for x in frames_per_image.split(",")]
+        except:
+            raise ValueError(f"Invalid frames_per_image format: '{frames_per_image}'. Use comma-separated integers like '4,1'")
+
+        if len(frame_counts) != B:
+            raise ValueError(f"frames_per_image has {len(frame_counts)} values but you provided {B} images. They must match!")
+
+        if any(x <= 0 for x in frame_counts):
+            raise ValueError(f"All frame counts must be positive integers. Got: {frame_counts}")
+
+        total_frames = sum(frame_counts)
+        expected_latents = (total_frames - 1) // 4 + 1
+
+        print(f"StandardLatentToWanVideoLatent: Creating {total_frames} frames from {B} latents")
+        print(f"Frame distribution: {frame_counts}")
+        print(f"Will produce {expected_latents} latent frames")
+
+        # Repeat each latent according to frame_counts
+        repeated_latents = []
+        for i in range(B):
+            repeat_count = frame_counts[i]
+            for _ in range(repeat_count):
+                repeated_latents.append(samples[i:i+1])
+
+        # Stack along batch dimension then reshape to video format
+        stacked = torch.cat(repeated_latents, dim=0)  # [total_frames, C, H, W]
+
+        # Reshape to [1, C, T, H, W] video format
+        video_latent = stacked.unsqueeze(0).permute(0, 2, 1, 3, 4)  # [1, C, total_frames, H, W]
+
+        return ({"samples": video_latent},)
 
 class DeprecatedCompileNodeKJ:
     @classmethod

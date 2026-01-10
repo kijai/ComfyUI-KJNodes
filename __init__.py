@@ -24,6 +24,7 @@ NODE_CONFIG = {
     "ConditioningSetMaskAndCombine5": {"class": ConditioningSetMaskAndCombine5, "name": "ConditioningSetMaskAndCombine5"},
     "CondPassThrough": {"class": CondPassThrough},
     "WanImageToVideoSVIPro": {"class": WanImageToVideoSVIPro, "name": "Wan Image To Video SVIPro"},
+    "StandardLatentToWanVideoLatent": {"class": StandardLatentToWanVideoLatent, "name": "Standard Latent To Wan Video Latent"},
     #masking
     "DrawMaskOnImage": {"class": DrawMaskOnImage, "name": "Draw Mask On Image"},
     "DownloadAndLoadCLIPSeg": {"class": DownloadAndLoadCLIPSeg, "name": "(Down)load CLIPSeg"},
