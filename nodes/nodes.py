@@ -3083,7 +3083,7 @@ class WanImageToVideoSVIPro(io.ComfyNode):
         out_latent["samples"] = empty_latent
         return io.NodeOutput(positive, negative, out_latent)
 
-class StandardLatentToWanVideoLatent:
+class BatchLatentToWanVideoLatent:
     @classmethod
     def INPUT_TYPES(s):
         return {
@@ -3135,7 +3135,7 @@ The frames are created by repeating latents, no interpolation.
         total_frames = sum(frame_counts)
         expected_latents = (total_frames - 1) // 4 + 1
 
-        print(f"StandardLatentToWanVideoLatent: Creating {total_frames} frames from {B} latents")
+        print(f"BatchLatentToWanVideoLatent: Creating {total_frames} frames from {B} latents")
         print(f"Frame distribution: {frame_counts}")
         print(f"Will produce {expected_latents} latent frames")
 
