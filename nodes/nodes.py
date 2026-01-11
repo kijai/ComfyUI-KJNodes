@@ -3089,7 +3089,6 @@ class BatchLatentToWanVideoLatent:
         return {
             "required": {
                 "latents": ("LATENT",),
-                "frames_per_image": ("STRING", {"default": "4,1", "multiline": False}),
             }
         }
 
@@ -3097,60 +3096,36 @@ class BatchLatentToWanVideoLatent:
     FUNCTION = "convert"
     CATEGORY = "KJNodes/latents"
     DESCRIPTION = """
-Converts standard VAE latents (from batched images) to Wan video latent format.
-Takes N standard latents [N, C, H, W] and creates a video latent [1, C, T, H, W]
-where each latent is repeated according to frames_per_image to create discrete frames.
+Converts batched standard VAE latents to Wan video latent format.
 
-Examples:
-- "4,1" with 2 images = [img1×4, img2×1] = 5 frames → 2 latent frames
-- "1,4" with 2 images = [img1×1, img2×4] = 5 frames → 2 latent frames
-- "8,1" with 2 images = 9 frames → 3 latent frames
+Transforms: [B, C, H, W] → [1, C, B, H, W]
 
-Use this when you encode images with standard VAE instead of Wan VAE.
-The frames are created by repeating latents, no interpolation.
+This allows using multiple images as multi-frame anchors for WanImageToVideoSVIPro.
+Simply batch your images (e.g., [reference, start, start, start, start]), encode with
+standard VAE, then convert with this node.
+
+Use case: Create reference-influenced video generation similar to IP-Adapter.
+Example: 1 reference image + 4 repeated start images = 5-frame anchor for SVI Pro.
 """
 
-    def convert(self, latents, frames_per_image):
+    def convert(self, latents):
         samples = latents["samples"]
-        # Standard VAE output: [B, C, H, W] (4D)
+
+        # Check if already in video format
         if samples.dim() == 5:
-            # Already video latent format
-            print("Warning: Input is already in video latent format [B, C, T, H, W]")
+            print("[BatchLatentToWanVideoLatent] Warning: Input is already in video latent format [B, C, T, H, W]")
             return (latents,)
+
+        if samples.dim() != 4:
+            raise ValueError(f"Expected 4D tensor [B, C, H, W], got {samples.dim()}D tensor with shape {samples.shape}")
 
         B, C, H, W = samples.shape
 
-        # Parse frames_per_image string
-        try:
-            frame_counts = [int(x.strip()) for x in frames_per_image.split(",")]
-        except:
-            raise ValueError(f"Invalid frames_per_image format: '{frames_per_image}'. Use comma-separated integers like '4,1'")
+        print(f"[BatchLatentToWanVideoLatent] Converting {B} image latents to video format")
+        print(f"[BatchLatentToWanVideoLatent] Output shape: [1, {C}, {B}, {H}, {W}]")
 
-        if len(frame_counts) != B:
-            raise ValueError(f"frames_per_image has {len(frame_counts)} values but you provided {B} images. They must match!")
-
-        if any(x <= 0 for x in frame_counts):
-            raise ValueError(f"All frame counts must be positive integers. Got: {frame_counts}")
-
-        total_frames = sum(frame_counts)
-        expected_latents = (total_frames - 1) // 4 + 1
-
-        print(f"BatchLatentToWanVideoLatent: Creating {total_frames} frames from {B} latents")
-        print(f"Frame distribution: {frame_counts}")
-        print(f"Will produce {expected_latents} latent frames")
-
-        # Repeat each latent according to frame_counts
-        repeated_latents = []
-        for i in range(B):
-            repeat_count = frame_counts[i]
-            for _ in range(repeat_count):
-                repeated_latents.append(samples[i:i+1])
-
-        # Stack along batch dimension then reshape to video format
-        stacked = torch.cat(repeated_latents, dim=0)  # [total_frames, C, H, W]
-
-        # Reshape to [1, C, T, H, W] video format
-        video_latent = stacked.unsqueeze(0).permute(0, 2, 1, 3, 4)  # [1, C, total_frames, H, W]
+        # Convert batch dimension to temporal dimension: [B, C, H, W] → [1, C, B, H, W]
+        video_latent = samples.unsqueeze(0).permute(0, 2, 1, 3, 4)
 
         return ({"samples": video_latent},)
 
