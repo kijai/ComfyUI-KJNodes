@@ -405,3 +405,61 @@ class LTX2_NAG(io.ComfyNode):
                 model_clone.add_object_patch(f"diffusion_model.transformer_blocks.{idx}.audio_attn2.forward", patched_audio_attn2)
 
         return io.NodeOutput(model_clone)
+
+
+def ffn_chunked_forward(self, x):
+    if x.shape[1] > self.dim_threshold:
+        chunks = torch.chunk(x, self.num_chunks, dim=1)
+        output_chunks = []
+        for chunk in chunks:
+            output_chunks.append(self.net(chunk))
+        chunked = torch.cat(output_chunks, dim=1)
+        return chunked
+    else:
+        return self.net(x)
+
+class LTXVffnChunkPatch:
+    def __init__(self, num_chunks, dim_threshold=4096):
+        self.num_chunks = num_chunks
+        self.dim_threshold = dim_threshold
+
+    def __get__(self, obj, objtype=None):
+        def wrapped_forward(self_module, *args, **kwargs):
+            self_module.num_chunks = self.num_chunks
+            self_module.dim_threshold = self.dim_threshold
+            return ffn_chunked_forward(self_module, *args, **kwargs)
+        return types.MethodType(wrapped_forward, obj)
+
+class LTXVChunkFeedForward(io.ComfyNode):
+
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="LTXVChunkFeedForward",
+            display_name="LTXV Chunk FeedForward",
+            category="KJNodes/ltxv",
+            description="EXPERIMENTAL AND MAY CHANGE THE MODEL OUTPUT!! Chunks feedforward activations to reduce peak VRAM usage.",
+            is_experimental=True,
+            inputs=[
+                io.Model.Input("model"),
+                io.Int.Input("chunks", default=4, min=1, max=100, step=1, tooltip="Number of chunks to split the feedforward activations into to reduce peak VRAM usage."),
+                io.Int.Input("dim_threshold", default=4096, min=1024, max=16384, step=256, tooltip="Dimension threshold above which to apply chunking."),
+            ],
+            outputs=[
+                io.Model.Output(display_name="model"),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, model, chunks, dim_threshold) -> io.NodeOutput:
+        if chunks == 1:
+            return io.NodeOutput(model)
+
+        model_clone = model.clone()
+        diffusion_model = model_clone.get_model_object("diffusion_model")
+
+        for idx, block in enumerate(diffusion_model.transformer_blocks):
+            patched_attn2 = LTXVffnChunkPatch(chunks, dim_threshold).__get__(block.ff, block.__class__)
+            model_clone.add_object_patch(f"diffusion_model.transformer_blocks.{idx}.ff.forward", patched_attn2)
+
+        return io.NodeOutput(model_clone)
