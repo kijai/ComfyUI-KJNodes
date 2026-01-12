@@ -247,6 +247,7 @@ try:
     "LTXVAddGuidesFromBatch": {"class": LTXVAddGuidesFromBatch, "name": "LTXV Add Guides From Batch"},
     "LTXVAudioVideoMask": {"class": LTXVAudioVideoMask, "name": "LTXV Audio Video Mask"},
     "LTX2_NAG": {"class": LTX2_NAG, "name": "LTX2 NAG"},
+    "LTXVChunkFeedForward": {"class": LTXVChunkFeedForward, "name": "LTXV Chunk Feed Forward"},
     })
 except ImportError:
     pass
