@@ -543,6 +543,8 @@ class PointsEditor {
     svgElement.style['zIndex'] = "2"
     svgElement.style['position'] = "relative"
     this.node.pointsEditor.element.appendChild(svgElement);
+    // Mark container for vueNodes protovis coordinate fix
+    this.node.pointsEditor.element.setAttribute('data-vue-dom-widget-protovis', 'true');
 
     if (this.width > 256) {
       this.node.setSize([this.width + 45, this.node.size[1]]);
