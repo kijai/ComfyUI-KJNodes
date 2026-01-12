@@ -651,6 +651,8 @@ this.lastMousePosition = { x: this.width/2, y: this.height/2 };
       svgElement.style['zIndex'] = "2"
       svgElement.style['position'] = "relative"
       this.node.splineEditor.element.appendChild(svgElement);
+      // Mark container for vueNodes protovis coordinate fix
+      this.node.splineEditor.element.setAttribute('data-vue-dom-widget-protovis', 'true');
       this.pathElements = svgElement.getElementsByTagName('path'); // Get all path elements
 
       if (this.width > 256) {
