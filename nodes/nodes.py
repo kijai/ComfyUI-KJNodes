@@ -2407,7 +2407,7 @@ class VAELoaderKJ:
             from comfy.ldm.lightricks.vae.audio_vae import AudioVAE
             vae = AudioVAE(sd, metadata)
         else:
-            vae = VAE(sd=sd, device=device, dtype=dtype)
+            vae = VAE(sd=sd, device=device, dtype=dtype, metadata=metadata)
         return (vae,)
 
 from comfy.samplers import sampling_function, CFGGuider
