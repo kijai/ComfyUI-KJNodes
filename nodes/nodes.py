@@ -2307,8 +2307,10 @@ class ImageNoiseAugmentation:
         return image_out,
 
 class VAELoaderKJ:
+    video_taes = ["taehv", "lighttaew2_2", "lighttaew2_1", "lighttaehy1_5"]
+    image_taes = ["taesd", "taesdxl", "taesd3", "taef1"]
     @staticmethod
-    def vae_list():
+    def vae_list(s):
         vaes = folder_paths.get_filename_list("vae")
         approx_vaes = folder_paths.get_filename_list("vae_approx")
         sdxl_taesd_enc = False
@@ -2337,6 +2339,11 @@ class VAELoaderKJ:
                 f1_taesd_dec = True
             elif v.startswith("taef1_decoder."):
                 f1_taesd_enc = True
+            else:
+                for tae in s.video_taes:
+                    if v.startswith(tae):
+                        vaes.append(v)
+
         if sd1_taesd_dec and sd1_taesd_enc:
             vaes.append("taesd")
         if sdxl_taesd_dec and sdxl_taesd_enc:
@@ -2345,6 +2352,7 @@ class VAELoaderKJ:
             vaes.append("taesd3")
         if f1_taesd_dec and f1_taesd_enc:
             vaes.append("taef1")
+        vaes.append("pixel_space")
         return vaes
 
     @staticmethod
@@ -2355,11 +2363,11 @@ class VAELoaderKJ:
         encoder = next(filter(lambda a: a.startswith("{}_encoder.".format(name)), approx_vaes))
         decoder = next(filter(lambda a: a.startswith("{}_decoder.".format(name)), approx_vaes))
 
-        enc = load_torch_file(folder_paths.get_full_path_or_raise("vae_approx", encoder))
+        enc = comfy.utils.load_torch_file(folder_paths.get_full_path_or_raise("vae_approx", encoder))
         for k in enc:
             sd["taesd_encoder.{}".format(k)] = enc[k]
 
-        dec = load_torch_file(folder_paths.get_full_path_or_raise("vae_approx", decoder))
+        dec = comfy.utils.load_torch_file(folder_paths.get_full_path_or_raise("vae_approx", decoder))
         for k in dec:
             sd["taesd_decoder.{}".format(k)] = dec[k]
 
@@ -2380,7 +2388,7 @@ class VAELoaderKJ:
     @classmethod
     def INPUT_TYPES(s):
         return {
-            "required": { "vae_name": (s.vae_list(), ),
+            "required": { "vae_name": (s.vae_list(s), ),
                           "device": (["main_device", "cpu"],),
                           "weight_dtype": (["bf16", "fp16", "fp32" ],),
                          }
@@ -2392,15 +2400,23 @@ class VAELoaderKJ:
 
     def load_vae(self, vae_name, device, weight_dtype):
         from comfy.sd import VAE
+        metadata = None
         dtype = {"bf16": torch.bfloat16, "fp16": torch.float16, "fp32": torch.float32}[weight_dtype]
         if device == "main_device":
             device = model_management.get_torch_device()
         elif device == "cpu":
             device = torch.device("cpu")
-        if vae_name in ["taesd", "taesdxl", "taesd3", "taef1"]:
+
+        if vae_name == "pixel_space":
+            sd = {}
+            sd["pixel_space_vae"] = torch.tensor(1.0)
+        elif vae_name in self.image_taes:
             sd = self.load_taesd(vae_name)
         else:
-            vae_path = folder_paths.get_full_path_or_raise("vae", vae_name)
+            if os.path.splitext(vae_name)[0] in self.video_taes:
+                vae_path = folder_paths.get_full_path_or_raise("vae_approx", vae_name)
+            else:
+                vae_path = folder_paths.get_full_path_or_raise("vae", vae_name)
             sd, metadata = comfy.utils.load_torch_file(vae_path, return_metadata=True)
 
         if "vocoder.conv_post.weight" in sd:
@@ -2408,6 +2424,7 @@ class VAELoaderKJ:
             vae = AudioVAE(sd, metadata)
         else:
             vae = VAE(sd=sd, device=device, dtype=dtype, metadata=metadata)
+            vae.throw_exception_if_invalid()
         return (vae,)
 
 from comfy.samplers import sampling_function, CFGGuider
@@ -2449,7 +2466,7 @@ class Guider_ScheduledCFG(CFGGuider):
             cfg = 1.0
 
         return sampling_function(self.inner_model, x, timestep, uncond, self.conds.get("positive", None), cfg, model_options=model_options, seed=seed)            
-  
+
 class ScheduledCFGGuidance:
     @classmethod
     def INPUT_TYPES(s):
@@ -2475,7 +2492,7 @@ cfg input can be a list of floats matching step count, or a single float for all
         guider.set_conds(positive, negative)
         guider.set_cfg(cfg, start_percent, end_percent)
         return (guider, )
-    
+
 
 class ApplyRifleXRoPE_WanVideo:
     @classmethod
