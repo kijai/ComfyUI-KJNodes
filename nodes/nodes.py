@@ -2743,24 +2743,26 @@ class LazySwitchKJ:
 
 from comfy.patcher_extension import WrappersMP
 from comfy.sampler_helpers import prepare_mask
-class TTM_SampleWrapper:
+class TTM_OuterSampleWrapper:
     def __init__(self, mask, steps):
         self.mask = mask
         self.steps = steps
 
-    def __call__(self, sampler, guider, sigmas, extra_args, callback, noise, latent_image, denoise_mask, disable_pbar):
-        model_options = extra_args["model_options"]
-        wrappers = model_options["transformer_options"]["wrappers"]
+    def __call__(self, executor, noise, latent_image, sampler, sigmas, denoise_mask, callback, disable_pbar, seed, latent_shapes):
+        guider = executor.class_obj
+        guider.model_options
+        wrappers = guider.model_options["transformer_options"]["wrappers"]
         w = wrappers.setdefault(WrappersMP.APPLY_MODEL, {})
 
         if self.mask is not None:
             motion_mask = self.mask.reshape((-1, 1, self.mask.shape[-2], self.mask.shape[-1]))
-            motion_mask = prepare_mask(motion_mask, noise.shape, noise.device)
+            shape = latent_shapes[0]
+            motion_mask = prepare_mask(motion_mask, shape, noise.device)
 
         scale_latent_inpaint = guider.model_patcher.model.scale_latent_inpaint
         w["TTM_ApplyModel_Wrapper"] = [TTM_ApplyModel_Wrapper(latent_image, noise, motion_mask, self.steps, scale_latent_inpaint)]
 
-        out = sampler(guider, sigmas, extra_args, callback, noise, latent_image, denoise_mask, disable_pbar)
+        out = executor(noise, latent_image, sampler, sigmas, denoise_mask, callback, disable_pbar, seed, latent_shapes=latent_shapes)
 
         return out
 
@@ -2814,7 +2816,7 @@ class LatentInpaintTTM:
 
     def patch(self, model, steps, mask=None):
         m = model.clone()
-        m.add_wrapper_with_key(WrappersMP.SAMPLER_SAMPLE, "TTM_SampleWrapper", TTM_SampleWrapper(mask, steps))
+        m.add_wrapper_with_key(WrappersMP.OUTER_SAMPLE, "TTM_OuterSampleWrapper", TTM_OuterSampleWrapper(mask, steps))
         return (m, )
 
 
