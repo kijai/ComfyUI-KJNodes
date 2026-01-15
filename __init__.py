@@ -248,6 +248,7 @@ try:
     "LTXVAudioVideoMask": {"class": LTXVAudioVideoMask, "name": "LTXV Audio Video Mask"},
     "LTX2_NAG": {"class": LTX2_NAG, "name": "LTX2 NAG"},
     "LTXVChunkFeedForward": {"class": LTXVChunkFeedForward, "name": "LTXV Chunk Feed Forward"},
+    "LTX2SamplingPreviewOverride": {"class": LTX2SamplingPreviewOverride, "name": "LTX2 Sampling Preview Override"},
     })
 except ImportError:
     pass
