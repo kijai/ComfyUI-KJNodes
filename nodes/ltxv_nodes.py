@@ -467,3 +467,287 @@ class LTXVChunkFeedForward(io.ComfyNode):
             model_clone.add_object_patch(f"diffusion_model.transformer_blocks.{idx}.ff.forward", patched_attn2)
 
         return io.NodeOutput(model_clone)
+
+import math
+
+#borrowed VideoHelperSuite https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite/blob/main/videohelpersuite/latent_preview.py
+import server
+from threading import Thread
+import torch.nn.functional as F
+import time
+import struct
+from PIL import Image
+from io import BytesIO
+serv = server.PromptServer.instance
+
+class WrappedPreviewer():
+    def __init__(self, latent_rgb_factors, latent_rgb_factors_bias, rate=8):
+        self.first_preview = True
+        self.last_time = 0
+        self.c_index = 0
+        self.rate = rate
+        self.latent_rgb_factors = torch.tensor(latent_rgb_factors, device="cpu").transpose(0, 1)
+        self.latent_rgb_factors_bias = torch.tensor(latent_rgb_factors_bias, device="cpu") if latent_rgb_factors_bias is not None else None
+
+    def decode_latent_to_preview_image(self, preview_format, x0):
+        if x0.ndim == 5:
+            #Keep batch major
+            x0 = x0.movedim(2,1)
+            x0 = x0.reshape((-1,)+x0.shape[-3:])
+        num_images = x0.size(0)
+        new_time = time.time()
+        num_previews = int((new_time - self.last_time) * self.rate)
+        self.last_time = self.last_time + num_previews/self.rate
+        if num_previews > num_images:
+            num_previews = num_images
+        elif num_previews <= 0:
+            return None
+        if self.first_preview:
+            self.first_preview = False
+            serv.send_sync('VHS_latentpreview', {'length':num_images, 'rate': self.rate, 'id': serv.last_node_id})
+            self.last_time = new_time + 1/self.rate
+        if self.c_index + num_previews > num_images:
+            x0 = x0.roll(-self.c_index, 0)[:num_previews]
+        else:
+            x0 = x0[self.c_index:self.c_index + num_previews]
+        Thread(target=self.process_previews, args=(x0, self.c_index,
+                                                   num_images)).run()
+        self.c_index = (self.c_index + num_previews) % num_images
+        return None
+    def process_previews(self, image_tensor, ind, leng):
+        max_size = 256
+        image_tensor = self.decode_latent_to_preview(image_tensor)
+        if image_tensor.size(1) > max_size or image_tensor.size(2) > max_size:
+            image_tensor = image_tensor.movedim(-1,0)
+            if image_tensor.size(2) < image_tensor.size(3):
+                height = (max_size * image_tensor.size(2)) // image_tensor.size(3)
+                image_tensor = F.interpolate(image_tensor, (height,max_size), mode='bilinear')
+            else:
+                width = (max_size * image_tensor.size(3)) // image_tensor.size(2)
+                image_tensor = F.interpolate(image_tensor, (max_size, width), mode='bilinear')
+            image_tensor = image_tensor.movedim(0,-1)
+        previews_ubyte = (image_tensor.clamp(0, 1)
+                         .mul(0xFF)  # to 0..255
+                         ).to(device="cpu", dtype=torch.uint8)
+
+        # Send VHS preview
+        for preview in previews_ubyte:
+            i = Image.fromarray(preview.numpy())
+            message = BytesIO()
+            message.write((1).to_bytes(length=4, byteorder='big')*2)
+            message.write(ind.to_bytes(length=4, byteorder='big'))
+            message.write(struct.pack('16p', serv.last_node_id.encode('ascii')))
+            i.save(message, format="JPEG", quality=95, compress_level=1)
+            #NOTE: send sync already uses call_soon_threadsafe
+            serv.send_sync(server.BinaryEventTypes.PREVIEW_IMAGE,
+                           message.getvalue(), serv.client_id)
+            if self.rate == 16:
+                ind = (ind + 1) % ((leng-1) * 4 - 1)
+            else:
+                ind = (ind + 1) % leng
+
+    def decode_latent_to_preview(self, x0):
+        self.latent_rgb_factors = self.latent_rgb_factors.to(dtype=x0.dtype, device=x0.device)
+        if self.latent_rgb_factors_bias is not None:
+            self.latent_rgb_factors_bias = self.latent_rgb_factors_bias.to(dtype=x0.dtype, device=x0.device)
+        latent_image = F.linear(x0.movedim(1, -1), self.latent_rgb_factors,
+                                bias=self.latent_rgb_factors_bias)
+        latent_image = (latent_image + 1.0) / 2.0
+        return latent_image
+
+
+def prepare_callback(model, steps, x0_output_dict=None, shape=None, latent_upscale_model=None, vae=None, rate=8):
+    latent_rgb_factors = [
+            [ 0.0350,  0.0159,  0.0132],
+            [ 0.0025, -0.0021, -0.0003],
+            [ 0.0286,  0.0028,  0.0020],
+            [ 0.0280, -0.0114, -0.0202],
+            [-0.0186,  0.0073,  0.0092],
+            [ 0.0027,  0.0097, -0.0113],
+            [-0.0069, -0.0032, -0.0024],
+            [-0.0323, -0.0370, -0.0457],
+            [ 0.0174,  0.0164,  0.0106],
+            [-0.0097,  0.0061,  0.0035],
+            [-0.0130, -0.0042, -0.0012],
+            [-0.0102, -0.0002, -0.0091],
+            [-0.0025,  0.0063,  0.0161],
+            [ 0.0003,  0.0037,  0.0108],
+            [ 0.0152,  0.0082,  0.0143],
+            [ 0.0317,  0.0203,  0.0312],
+            [-0.0092, -0.0233, -0.0119],
+            [-0.0405, -0.0226, -0.0023],
+            [ 0.0376,  0.0397,  0.0352],
+            [ 0.0171, -0.0043, -0.0095],
+            [ 0.0482,  0.0341,  0.0213],
+            [ 0.0031, -0.0046, -0.0018],
+            [-0.0486, -0.0383, -0.0294],
+            [-0.0071, -0.0272, -0.0123],
+            [ 0.0320,  0.0218,  0.0289],
+            [ 0.0327,  0.0088, -0.0116],
+            [-0.0098, -0.0240, -0.0111],
+            [ 0.0094, -0.0116,  0.0021],
+            [ 0.0309,  0.0092,  0.0165],
+            [-0.0065, -0.0077, -0.0107],
+            [ 0.0179,  0.0114,  0.0038],
+            [-0.0018, -0.0030, -0.0026],
+            [-0.0002,  0.0076, -0.0029],
+            [-0.0131, -0.0059, -0.0170],
+            [ 0.0055,  0.0066, -0.0038],
+            [ 0.0154,  0.0063,  0.0090],
+            [ 0.0186,  0.0175,  0.0188],
+            [-0.0166, -0.0381, -0.0428],
+            [ 0.0121,  0.0015, -0.0153],
+            [ 0.0118,  0.0050,  0.0019],
+            [ 0.0125,  0.0259,  0.0231],
+            [ 0.0046,  0.0130,  0.0081],
+            [ 0.0271,  0.0250,  0.0250],
+            [-0.0054, -0.0347, -0.0326],
+            [-0.0438, -0.0262, -0.0228],
+            [-0.0191, -0.0256, -0.0173],
+            [-0.0205, -0.0058,  0.0042],
+            [ 0.0404,  0.0434,  0.0346],
+            [-0.0242, -0.0177, -0.0146],
+            [ 0.0161,  0.0223,  0.0168],
+            [-0.0240, -0.0320, -0.0299],
+            [-0.0019,  0.0043,  0.0008],
+            [-0.0060, -0.0133, -0.0244],
+            [-0.0048, -0.0225, -0.0167],
+            [ 0.0267,  0.0133,  0.0152],
+            [ 0.0222,  0.0167,  0.0028],
+            [ 0.0015, -0.0062,  0.0013],
+            [-0.0241, -0.0178, -0.0079],
+            [ 0.0040, -0.0081, -0.0097],
+            [-0.0064,  0.0133, -0.0011],
+            [-0.0204, -0.0231, -0.0304],
+            [ 0.0011, -0.0011,  0.0145],
+            [-0.0283, -0.0259, -0.0260],
+            [ 0.0038,  0.0171, -0.0029],
+            [ 0.0637,  0.0424,  0.0409],
+            [ 0.0092,  0.0163,  0.0188],
+            [ 0.0082,  0.0055, -0.0179],
+            [-0.0177, -0.0286, -0.0147],
+            [ 0.0171,  0.0242,  0.0398],
+            [-0.0129,  0.0095, -0.0071],
+            [-0.0154,  0.0036,  0.0128],
+            [-0.0081, -0.0009,  0.0118],
+            [-0.0067, -0.0178, -0.0230],
+            [-0.0022, -0.0125, -0.0003],
+            [-0.0032, -0.0039, -0.0022],
+            [-0.0005, -0.0127, -0.0131],
+            [-0.0143, -0.0157, -0.0165],
+            [-0.0262, -0.0263, -0.0270],
+            [ 0.0063,  0.0127,  0.0178],
+            [ 0.0092,  0.0133,  0.0150],
+            [-0.0106, -0.0068,  0.0032],
+            [-0.0214, -0.0022,  0.0171],
+            [-0.0104, -0.0266, -0.0362],
+            [ 0.0021,  0.0048, -0.0005],
+            [ 0.0345,  0.0431,  0.0402],
+            [-0.0275, -0.0110, -0.0195],
+            [ 0.0203,  0.0251,  0.0224],
+            [ 0.0016, -0.0037, -0.0094],
+            [ 0.0241,  0.0198,  0.0114],
+            [-0.0003,  0.0027,  0.0141],
+            [ 0.0012, -0.0052, -0.0084],
+            [ 0.0057, -0.0028, -0.0163],
+            [-0.0488, -0.0545, -0.0509],
+            [-0.0076, -0.0025, -0.0014],
+            [-0.0249, -0.0142, -0.0367],
+            [ 0.0136,  0.0041,  0.0135],
+            [ 0.0007,  0.0034, -0.0053],
+            [-0.0068, -0.0109,  0.0029],
+            [ 0.0006, -0.0237, -0.0094],
+            [-0.0149, -0.0177, -0.0131],
+            [-0.0105,  0.0039,  0.0216],
+            [ 0.0242,  0.0200,  0.0180],
+            [-0.0339, -0.0153, -0.0195],
+            [ 0.0104,  0.0151,  0.0120],
+            [-0.0043,  0.0089,  0.0047],
+            [ 0.0157, -0.0030,  0.0008],
+            [ 0.0126,  0.0102, -0.0040],
+            [ 0.0040,  0.0114,  0.0137],
+            [ 0.0423,  0.0473,  0.0436],
+            [-0.0128, -0.0066, -0.0152],
+            [-0.0337, -0.0087, -0.0026],
+            [-0.0052,  0.0235,  0.0291],
+            [ 0.0079,  0.0154,  0.0260],
+            [-0.0539, -0.0377, -0.0358],
+            [-0.0188,  0.0062, -0.0035],
+            [-0.0186,  0.0041, -0.0083],
+            [ 0.0045, -0.0049,  0.0053],
+            [ 0.0172,  0.0071,  0.0042],
+            [-0.0003, -0.0078, -0.0096],
+            [-0.0209, -0.0132, -0.0135],
+            [-0.0074,  0.0017,  0.0099],
+            [-0.0038,  0.0070,  0.0014],
+            [-0.0013, -0.0017,  0.0073],
+            [ 0.0030,  0.0105,  0.0105],
+            [ 0.0154, -0.0168, -0.0235],
+            [-0.0108, -0.0038,  0.0047],
+            [-0.0298, -0.0347, -0.0436],
+            [-0.0206, -0.0189, -0.0139]
+        ]
+    latent_rgb_factors_bias = [0.2796, 0.1101, -0.0047]
+    preview_format = "JPEG"
+    if preview_format not in ["JPEG", "PNG"]:
+        preview_format = "JPEG"
+
+    previewer = WrappedPreviewer(latent_rgb_factors, latent_rgb_factors_bias, rate=rate)
+
+    pbar = comfy.utils.ProgressBar(steps)
+    def callback(step, x0, x, total_steps):
+        if x0_output_dict is not None:
+            x0_output_dict["x0"] = x0
+
+        if x0 is not None and shape is not None:
+            cut = math.prod(shape[1:])
+            x0 = x0[:, :, :cut].reshape([x0.shape[0]] + list(shape)[1:])
+
+        if latent_upscale_model is not None:
+            x0 = vae.first_stage_model.per_channel_statistics.un_normalize(x0)
+            x0 =  latent_upscale_model(x0.to(torch.bfloat16))
+            x0 = vae.first_stage_model.per_channel_statistics.normalize(x0)
+
+        preview_bytes = None
+        if previewer:
+            preview_bytes = previewer.decode_latent_to_preview_image(preview_format, x0)
+        pbar.update_absolute(step + 1, total_steps, preview_bytes)
+    return callback
+
+class OuterSampleCallbackWrapper:
+    def __init__(self, latent_upscale_model=None, vae=None, preview_rate=8):
+        self.latent_upscale_model = latent_upscale_model.to(torch.device("cuda")) if latent_upscale_model is not None else None
+        self.vae = vae
+        self.preview_rate = preview_rate
+
+    def __call__(self, executor, noise, latent_image, sampler, sigmas, denoise_mask, callback, disable_pbar, seed, latent_shapes):
+        guider = executor.class_obj
+        callback = prepare_callback(guider.model_patcher, len(sigmas) -1, shape=latent_shapes[0] if len(latent_shapes) > 1 else latent_shapes, latent_upscale_model=self.latent_upscale_model, vae=self.vae, rate=self.preview_rate)
+        return executor(noise, latent_image, sampler, sigmas, denoise_mask, callback, disable_pbar, seed, latent_shapes=latent_shapes)
+
+
+class LTX2SamplingPreviewOverride(io.ComfyNode):
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="LTX2SamplingPreviewOverride",
+            display_name="LTX2 Sampling Preview Override",
+            description="Overrides the LTX2 preview sampling preview function, temporary measure until previews are in comfy core",
+            category="KJNodes/experimental",
+            is_experimental=True,
+            inputs=[
+                io.Model.Input("model", tooltip="The model to add preview override to."),
+                io.Int.Input("preview_rate", default=8, min=1, max=60, step=1, tooltip="Preview frame rate."),
+                io.LatentUpscaleModel.Input("latent_upscale_model", optional=True, tooltip="Optional upscale model to use for higher resolution previews."),
+                io.Vae.Input("vae", optional=True, tooltip="VAE model to use normalizing the latents for the upscale model."),
+            ],
+            outputs=[
+                io.Model.Output(tooltip="The model with Sampling Preview Override."),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, model, preview_rate, latent_upscale_model=None, vae=None) -> io.NodeOutput:
+        model = model.clone()
+        model.add_wrapper_with_key(comfy.patcher_extension.WrappersMP.OUTER_SAMPLE, "sampling_preview", OuterSampleCallbackWrapper(latent_upscale_model, vae, preview_rate))
+        return io.NodeOutput(model)
