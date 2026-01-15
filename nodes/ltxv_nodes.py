@@ -375,30 +375,34 @@ class LTX2_NAG(io.ComfyNode):
             return io.NodeOutput(model)
 
         device = mm.get_torch_device()
-        dtype = mm.unet_dtype()
+        offload_device = mm.unet_offload_device()
+        dtype = model.model.diffusion_model.dtype
 
         model_clone = model.clone()
 
         diffusion_model = model_clone.get_model_object("diffusion_model")
         img_dim = diffusion_model.inner_dim
         audio_dim = diffusion_model.audio_inner_dim
-        diffusion_model.caption_projection.to(device)
 
         context_video = context_audio = None
 
         if nag_cond_video is not None:
+            diffusion_model.caption_projection.to(device)
             context_video = nag_cond_video[0][0].to(device, dtype)
             v_context, _ = torch.split(context_video, int(context_video.shape[-1] / 2), len(context_video.shape) - 1)
             context_video = diffusion_model.caption_projection(v_context)
+            diffusion_model.caption_projection.to(offload_device)
             context_video = context_video.view(1, -1, img_dim)
             for idx, block in enumerate(diffusion_model.transformer_blocks):
                 patched_attn2 = LTXVCrossAttentionPatch(context_video, nag_scale, nag_alpha, nag_tau).__get__(block.attn2, block.__class__)
                 model_clone.add_object_patch(f"diffusion_model.transformer_blocks.{idx}.attn2.forward", patched_attn2)
 
         if nag_cond_audio is not None and diffusion_model.audio_caption_projection is not None:
+            diffusion_model.audio_caption_projection.to(device)
             context_audio = nag_cond_audio[0][0].to(device, dtype)
             _, a_context = torch.split(context_audio, int(context_audio.shape[-1] / 2), len(context_audio.shape) - 1)
             context_audio = diffusion_model.audio_caption_projection(a_context)
+            diffusion_model.audio_caption_projection.to(offload_device)
             context_audio = context_audio.view(1, -1, audio_dim)
             for idx, block in enumerate(diffusion_model.transformer_blocks):
                 patched_audio_attn2 = LTXVCrossAttentionPatch(context_audio, nag_scale, nag_alpha, nag_tau).__get__(block.audio_attn2, block.__class__)
