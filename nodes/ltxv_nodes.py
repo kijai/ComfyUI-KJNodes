@@ -696,9 +696,6 @@ def prepare_callback(model, steps, x0_output_dict=None, shape=None, latent_upsca
 
     pbar = comfy.utils.ProgressBar(steps)
     def callback(step, x0, x, total_steps):
-        if x0_output_dict is not None:
-            x0_output_dict["x0"] = x0
-
         if x0 is not None and shape is not None:
             cut = math.prod(shape[1:])
             x0 = x0[:, :, :cut].reshape([x0.shape[0]] + list(shape)[1:])
@@ -719,12 +716,20 @@ class OuterSampleCallbackWrapper:
         self.latent_upscale_model = latent_upscale_model.to(torch.device("cuda")) if latent_upscale_model is not None else None
         self.vae = vae
         self.preview_rate = preview_rate
+        self.x0_output = {}
 
     def __call__(self, executor, noise, latent_image, sampler, sigmas, denoise_mask, callback, disable_pbar, seed, latent_shapes):
         guider = executor.class_obj
-        callback = prepare_callback(guider.model_patcher, len(sigmas) -1, shape=latent_shapes[0] if len(latent_shapes) > 1 else latent_shapes, latent_upscale_model=self.latent_upscale_model, vae=self.vae, rate=self.preview_rate)
-        return executor(noise, latent_image, sampler, sigmas, denoise_mask, callback, disable_pbar, seed, latent_shapes=latent_shapes)
+        original_callback = callback
+        new_callback = prepare_callback(guider.model_patcher, len(sigmas) -1, shape=latent_shapes[0] if len(latent_shapes) > 1 else latent_shapes, x0_output_dict=self.x0_output, latent_upscale_model=self.latent_upscale_model, vae=self.vae, rate=self.preview_rate)
 
+        # Wrapper that calls both callbacks
+        def combined_callback(step, x0, x, total_steps):
+            new_callback(step, x0, x, total_steps)
+            if original_callback is not None:
+                original_callback(step, x0, x, total_steps)
+
+        return executor(noise, latent_image, sampler, sigmas, denoise_mask, combined_callback, disable_pbar, seed, latent_shapes=latent_shapes)
 
 class LTX2SamplingPreviewOverride(io.ComfyNode):
     @classmethod
