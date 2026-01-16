@@ -5,6 +5,7 @@ from comfy_api.latest import io
 import numpy as np
 import torch
 import comfy.model_management as mm
+import latent_preview
 
 class LTXVAddGuideMulti(LTXVAddGuide):
 
@@ -755,4 +756,95 @@ class LTX2SamplingPreviewOverride(io.ComfyNode):
     def execute(cls, model, preview_rate, latent_upscale_model=None, vae=None) -> io.NodeOutput:
         model = model.clone()
         model.add_wrapper_with_key(comfy.patcher_extension.WrappersMP.OUTER_SAMPLE, "sampling_preview", OuterSampleCallbackWrapper(latent_upscale_model, vae, preview_rate))
+        return io.NodeOutput(model)
+
+
+# based on https://github.com/Lightricks/ComfyUI-LTXVideo/blob/cd5d371518afb07d6b3641be8012f644f25269fc/easy_samplers.py#L916
+class OuterSampleAudioNormalizationWrapper:
+    def __init__(self, audio_normalization_factors):
+        self.audio_normalization_factors = audio_normalization_factors
+
+    def __call__(self, executor, noise, latent_image, sampler, sigmas, denoise_mask, callback, disable_pbar, seed, latent_shapes):
+        guider = executor.class_obj
+        ltxav = guider.model_patcher.model.diffusion_model
+
+        x0_output = {}
+        self.total_steps = sigmas.shape[-1] - 1
+        pbar = comfy.utils.ProgressBar(self.total_steps)
+        self.full_step = 0
+
+        previewer = latent_preview.get_previewer(guider.model_patcher.load_device, guider.model_patcher.model.latent_format)
+        def custom_callback(step, x0, x, total_steps):
+            if x0_output is not None:
+                x0_output["x0"] = x0
+
+            preview_bytes = None
+            if previewer:
+                preview_bytes = previewer.decode_latent_to_preview_image("JPEG", x0)
+            self.full_step += 1
+            pbar.update_absolute(self.full_step, self.total_steps, preview_bytes)
+
+        callback = custom_callback
+
+        audio_normalization_factors = self.audio_normalization_factors.strip().split(",")
+        audio_normalization_factors = [float(factor) for factor in audio_normalization_factors]
+
+        # Extend normalization factors to match the length of sigmas
+        sigmas_len = self.total_steps
+        if len(audio_normalization_factors) < sigmas_len and len(audio_normalization_factors) > 0:
+            audio_normalization_factors.extend([audio_normalization_factors[-1]] * (sigmas_len - len(audio_normalization_factors)))
+
+        # Calculate indices where normalization factors are not 1.0
+        sampling_split_indices = [i + 1 for i, a in enumerate(audio_normalization_factors) if a != 1.0]
+
+        # Split sigmas at normalization points
+        if sampling_split_indices:
+            sigmas_chunks = torch.tensor_split(sigmas, sorted(set(sampling_split_indices)))
+        else:
+            sigmas_chunks = [sigmas]
+
+        i = 0
+        for sigmas_chunk in sigmas_chunks:
+            i += len(sigmas_chunk) - 1
+            latent_image = executor(noise, latent_image, sampler, sigmas_chunk, denoise_mask, callback, disable_pbar, seed, latent_shapes=latent_shapes)
+
+            if "x0" in x0_output:
+                latent_image = guider.model_patcher.model.process_latent_out(x0_output["x0"])
+
+            if i - 1 < len(audio_normalization_factors):
+                vx, ax = ltxav.separate_audio_and_video_latents(comfy.utils.unpack_latents(latent_image, latent_shapes), None)
+                if denoise_mask is not None:
+                    audio_mask = ltxav.separate_audio_and_video_latents(comfy.utils.unpack_latents(denoise_mask, latent_shapes), None)[1]
+                    ax = ax * audio_mask * audio_normalization_factors[i - 1] + ax * (1 - audio_mask)
+                else:
+                    ax = ax * audio_normalization_factors[i - 1]
+                latent_image = comfy.utils.pack_latents(ltxav.recombine_audio_and_video_latents(vx, ax))[0]
+
+                print("After %d steps, the audio latent was normalized by %f" % (i, audio_normalization_factors[i - 1]))
+
+        return latent_image
+
+
+class LTX2AudioLatentNormalizingSampling(io.ComfyNode):
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="LTX2AudioLatentNormalizingSampling",
+            display_name="LTX2 Audio Latent Normalizing Sampling",
+            description="Improves LTX2 generated audio quality by normalizing audio latents at specified sampling steps.",
+            category="KJNodes/experimental",
+            is_experimental=True,
+            inputs=[
+                io.Model.Input("model", tooltip="The model to add preview override to."),
+                io.String.Input("audio_normalization_factors", default="1,1,0.25,1,1,0.25,1,1", tooltip="Comma-separated list of audio normalization factors to apply at each sampling step. For example, '1,1,0.25,1,1,0.25,1,1' will apply a factor of 0.25 at the 3rd and 6th steps."),
+            ],
+            outputs=[
+                io.Model.Output(tooltip="The model with Audio Latent Normalizing Sampling."),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, model, audio_normalization_factors) -> io.NodeOutput:
+        model = model.clone()
+        model.add_wrapper_with_key(comfy.patcher_extension.WrappersMP.OUTER_SAMPLE, "ltx2_audio_normalization", OuterSampleAudioNormalizationWrapper(audio_normalization_factors))
         return io.NodeOutput(model)
