@@ -794,14 +794,29 @@ class OuterSampleAudioNormalizationWrapper:
         if len(audio_normalization_factors) < sigmas_len and len(audio_normalization_factors) > 0:
             audio_normalization_factors.extend([audio_normalization_factors[-1]] * (sigmas_len - len(audio_normalization_factors)))
 
-        # Calculate indices where normalization factors are not 1.0
+        # Calculate indices where both normalization factors are not 1.0
         sampling_split_indices = [i + 1 for i, a in enumerate(audio_normalization_factors) if a != 1.0]
 
-        # Split sigmas at normalization points
-        if sampling_split_indices:
-            sigmas_chunks = torch.tensor_split(sigmas, sorted(set(sampling_split_indices)))
-        else:
-            sigmas_chunks = [sigmas]
+        # Split sigmas according to sampling_split_indices
+        def split_by_indices(arr, indices):
+            """
+            Splits arr into chunks according to indices (split points).
+            Indices are treated as starting a new chunk at each index in the list.
+            """
+            if not indices:
+                return [arr]
+            split_points = sorted(set(indices))
+            chunks = []
+            prev = 0
+            for idx in split_points:
+                if prev < idx:
+                    chunks.append(arr[prev : idx + 1])
+                prev = idx
+            if prev < len(arr):
+                chunks.append(arr[prev:])
+            return chunks
+
+        sigmas_chunks = split_by_indices(sigmas, sampling_split_indices)
 
         i = 0
         for sigmas_chunk in sigmas_chunks:
