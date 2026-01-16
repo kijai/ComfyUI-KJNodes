@@ -716,7 +716,7 @@ def prepare_callback(model, steps, x0_output_dict=None, shape=None, latent_upsca
 
 class OuterSampleCallbackWrapper:
     def __init__(self, latent_upscale_model=None, vae=None, preview_rate=8):
-        self.latent_upscale_model = latent_upscale_model.to(torch.device("cuda")) if latent_upscale_model is not None else None
+        self.latent_upscale_model = latent_upscale_model
         self.vae = vae
         self.preview_rate = preview_rate
         self.x0_output = {}
@@ -724,6 +724,8 @@ class OuterSampleCallbackWrapper:
     def __call__(self, executor, noise, latent_image, sampler, sigmas, denoise_mask, callback, disable_pbar, seed, latent_shapes):
         guider = executor.class_obj
         original_callback = callback
+        if self.latent_upscale_model is not None:
+            self.latent_upscale_model.to(mm.get_torch_device())
         new_callback = prepare_callback(guider.model_patcher, len(sigmas) -1, shape=latent_shapes[0] if len(latent_shapes) > 1 else latent_shapes, x0_output_dict=self.x0_output, latent_upscale_model=self.latent_upscale_model, vae=self.vae, rate=self.preview_rate)
 
         # Wrapper that calls both callbacks
@@ -731,8 +733,10 @@ class OuterSampleCallbackWrapper:
             new_callback(step, x0, x, total_steps)
             if original_callback is not None:
                 original_callback(step, x0, x, total_steps)
-
-        return executor(noise, latent_image, sampler, sigmas, denoise_mask, combined_callback, disable_pbar, seed, latent_shapes=latent_shapes)
+        out = executor(noise, latent_image, sampler, sigmas, denoise_mask, combined_callback, disable_pbar, seed, latent_shapes=latent_shapes)
+        if self.latent_upscale_model is not None:
+            self.latent_upscale_model.to(mm.unet_offload_device())
+        return out
 
 class LTX2SamplingPreviewOverride(io.ComfyNode):
     @classmethod
