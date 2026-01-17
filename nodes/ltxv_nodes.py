@@ -546,8 +546,8 @@ class WrappedPreviewer():
             #NOTE: send sync already uses call_soon_threadsafe
             serv.send_sync(server.BinaryEventTypes.PREVIEW_IMAGE,
                            message.getvalue(), serv.client_id)
-            if self.rate == 16:
-                ind = (ind + 1) % ((leng-1) * 4 - 1)
+            if self.taeltx is not None:
+                ind = (ind + 1) % ((leng-1) * 8 + 1)
             else:
                 ind = (ind + 1) % leng
 
