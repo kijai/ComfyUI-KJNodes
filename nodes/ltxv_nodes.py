@@ -5,6 +5,7 @@ from comfy_api.latest import io
 import numpy as np
 import torch
 import comfy.model_management as mm
+device = mm.get_torch_device()
 import latent_preview
 
 class LTXVAddGuideMulti(LTXVAddGuide):
@@ -484,8 +485,9 @@ from io import BytesIO
 serv = server.PromptServer.instance
 
 class WrappedPreviewer():
-    def __init__(self, latent_rgb_factors, latent_rgb_factors_bias, rate=8):
+    def __init__(self, latent_rgb_factors, latent_rgb_factors_bias, rate=8, taeltx=None):
         self.first_preview = True
+        self.taeltx = taeltx
         self.last_time = 0
         self.c_index = 0
         self.rate = rate
@@ -550,16 +552,22 @@ class WrappedPreviewer():
                 ind = (ind + 1) % leng
 
     def decode_latent_to_preview(self, x0):
-        self.latent_rgb_factors = self.latent_rgb_factors.to(dtype=x0.dtype, device=x0.device)
-        if self.latent_rgb_factors_bias is not None:
-            self.latent_rgb_factors_bias = self.latent_rgb_factors_bias.to(dtype=x0.dtype, device=x0.device)
-        latent_image = F.linear(x0.movedim(1, -1), self.latent_rgb_factors,
-                                bias=self.latent_rgb_factors_bias)
-        latent_image = (latent_image + 1.0) / 2.0
-        return latent_image
+        if self.taeltx is not None:
+            x0 = x0.unsqueeze(0).to(dtype=self.taeltx.vae_dtype, device=device)
+            print("x0 device:", x0.device, "dtype:", x0.dtype)
+            x_sample = self.taeltx.first_stage_model.decode(x0)[0].permute(1, 2, 3, 0)
+            return x_sample
+        else:
+            self.latent_rgb_factors = self.latent_rgb_factors.to(dtype=x0.dtype, device=x0.device)
+            if self.latent_rgb_factors_bias is not None:
+                self.latent_rgb_factors_bias = self.latent_rgb_factors_bias.to(dtype=x0.dtype, device=x0.device)
+            latent_image = F.linear(x0.movedim(1, -1), self.latent_rgb_factors,
+                                    bias=self.latent_rgb_factors_bias)
+            latent_image = (latent_image + 1.0) / 2.0
+            return latent_image
 
 
-def prepare_callback(model, steps, x0_output_dict=None, shape=None, latent_upscale_model=None, vae=None, rate=8):
+def prepare_callback(model, steps, x0_output_dict=None, shape=None, latent_upscale_model=None, vae=None, rate=8, taeltx=False):
     latent_rgb_factors = [
             [ 0.0350,  0.0159,  0.0132],
             [ 0.0025, -0.0021, -0.0003],
@@ -695,7 +703,7 @@ def prepare_callback(model, steps, x0_output_dict=None, shape=None, latent_upsca
     if preview_format not in ["JPEG", "PNG"]:
         preview_format = "JPEG"
 
-    previewer = WrappedPreviewer(latent_rgb_factors, latent_rgb_factors_bias, rate=rate)
+    previewer = WrappedPreviewer(latent_rgb_factors, latent_rgb_factors_bias, rate=rate, taeltx=vae if taeltx else None)
 
     pbar = comfy.utils.ProgressBar(steps)
     def callback(step, x0, x, total_steps):
@@ -715,19 +723,21 @@ def prepare_callback(model, steps, x0_output_dict=None, shape=None, latent_upsca
     return callback
 
 class OuterSampleCallbackWrapper:
-    def __init__(self, latent_upscale_model=None, vae=None, preview_rate=8):
+    def __init__(self, latent_upscale_model=None, vae=None, preview_rate=8, taeltx=False):
         self.latent_upscale_model = latent_upscale_model
         self.vae = vae
         self.preview_rate = preview_rate
+        self.taeltx = taeltx
         self.x0_output = {}
 
     def __call__(self, executor, noise, latent_image, sampler, sigmas, denoise_mask, callback, disable_pbar, seed, latent_shapes):
         guider = executor.class_obj
         original_callback = callback
         if self.latent_upscale_model is not None:
-            self.latent_upscale_model.to(mm.get_torch_device())
-        new_callback = prepare_callback(guider.model_patcher, len(sigmas) -1, shape=latent_shapes[0] if len(latent_shapes) > 1 else latent_shapes, x0_output_dict=self.x0_output, latent_upscale_model=self.latent_upscale_model, vae=self.vae, rate=self.preview_rate)
-
+            self.latent_upscale_model.to(device)
+        if self.vae is not None and self.taeltx:
+            self.vae.first_stage_model.to(device)
+        new_callback = prepare_callback(guider.model_patcher, len(sigmas) -1, shape=latent_shapes[0] if len(latent_shapes) > 1 else latent_shapes, x0_output_dict=self.x0_output, latent_upscale_model=self.latent_upscale_model, vae=self.vae, rate=self.preview_rate, taeltx=self.taeltx)
         # Wrapper that calls both callbacks
         def combined_callback(step, x0, x, total_steps):
             new_callback(step, x0, x, total_steps)
@@ -761,7 +771,11 @@ class LTX2SamplingPreviewOverride(io.ComfyNode):
     @classmethod
     def execute(cls, model, preview_rate, latent_upscale_model=None, vae=None) -> io.NodeOutput:
         model = model.clone()
-        model.add_wrapper_with_key(comfy.patcher_extension.WrappersMP.OUTER_SAMPLE, "sampling_preview", OuterSampleCallbackWrapper(latent_upscale_model, vae, preview_rate))
+        taeltx = False
+        if vae is not None:
+            if vae.__class__.__name__ != "TAEHV":
+                taeltx = True
+        model.add_wrapper_with_key(comfy.patcher_extension.WrappersMP.OUTER_SAMPLE, "sampling_preview", OuterSampleCallbackWrapper(latent_upscale_model, vae, preview_rate, taeltx))
         return io.NodeOutput(model)
 
 
