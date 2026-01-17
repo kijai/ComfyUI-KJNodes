@@ -274,25 +274,34 @@ class LTXVAudioVideoMask(io.ComfyNode):
 
         return io.NodeOutput(video_latent, audio_latent)
 
-def normalized_attention_guidance(self, query, context_positive, nag_context, transformer_options={}):
-    k_positive = self.k_norm(self.to_k(context_positive)).to(query.dtype)
-    v_positive = self.to_v(context_positive).to(query.dtype)
-    k_negative = self.k_norm(self.to_k(nag_context)).to(query.dtype)
-    v_negative = self.to_v(nag_context).to(query.dtype)
+def _compute_attention(self, query, context, transformer_options={}):
+    """Compute attention and return the result. Cleans up intermediate tensors."""
+    k = self.k_norm(self.to_k(context)).to(query.dtype)
+    v = self.to_v(context).to(query.dtype)
+    x = comfy.ldm.modules.attention.optimized_attention(query, k, v, heads=self.heads, transformer_options=transformer_options).flatten(2)
+    del k, v
+    return x
 
-    x_positive = comfy.ldm.modules.attention.optimized_attention(query, k_positive, v_positive, heads=self.heads, transformer_options=transformer_options).flatten(2)
-    x_negative = comfy.ldm.modules.attention.optimized_attention(query, k_negative, v_negative, heads=self.heads, transformer_options=transformer_options).flatten(2)
+def normalized_attention_guidance(self, query, context_positive, nag_context, transformer_options={}):
+    x_positive = _compute_attention(self, query, context_positive, transformer_options)
+    x_negative = _compute_attention(self, query, nag_context, transformer_options)
+    del query, context_positive, nag_context
 
     nag_guidance = x_positive * self.nag_scale - x_negative * (self.nag_scale - 1)
+    del x_negative
 
     norm_positive = torch.norm(x_positive, p=1, dim=-1, keepdim=True).expand_as(x_positive)
     norm_guidance = torch.norm(nag_guidance, p=1, dim=-1, keepdim=True).expand_as(nag_guidance)
 
     scale = torch.nan_to_num(norm_guidance / norm_positive, nan=10.0)
-
     mask = scale > self.nag_tau
+    del scale
+
     adjustment = (norm_positive * self.nag_tau) / (norm_guidance + 1e-7)
+    del norm_positive, norm_guidance
+
     nag_guidance = torch.where(mask, nag_guidance * adjustment, nag_guidance)
+    del mask, adjustment
 
     x = nag_guidance * self.nag_alpha + x_positive * (1 - self.nag_alpha)
     del nag_guidance
@@ -312,9 +321,10 @@ def ltxv_crossattn_forward_nag(self, x, context, mask=None, transformer_options=
 
     # Positive
     q_pos = self.q_norm(self.to_q(x_pos))
-    nag_context = self.nag_context
+    del x_pos
 
-    x_pos_out = normalized_attention_guidance(self, q_pos, context_pos, nag_context, transformer_options=transformer_options)
+    x_pos_out = normalized_attention_guidance(self, q_pos, context_pos, self.nag_context, transformer_options=transformer_options)
+    del q_pos, context_pos
 
     # Negative
     if x_neg is not None and context_neg is not None:
