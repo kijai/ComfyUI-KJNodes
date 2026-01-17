@@ -554,7 +554,6 @@ class WrappedPreviewer():
     def decode_latent_to_preview(self, x0):
         if self.taeltx is not None:
             x0 = x0.unsqueeze(0).to(dtype=self.taeltx.vae_dtype, device=device)
-            print("x0 device:", x0.device, "dtype:", x0.dtype)
             x_sample = self.taeltx.first_stage_model.decode(x0)[0].permute(1, 2, 3, 0)
             return x_sample
         else:
