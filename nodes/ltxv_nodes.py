@@ -904,7 +904,7 @@ class LTXVImgToVideoInplaceKJ(io.ComfyNode):
             image_inputs = []
             for i in range(1, num_images + 1):
                 image_inputs.extend([
-                    io.Image.Input(f"image_{i}"),
+                    io.Image.Input(f"image_{i}", optional=True, tooltip=f"Image {i} to insert into the video latent."),
                     io.Int.Input(
                         f"index_{i}",
                         default=0,
@@ -912,6 +912,7 @@ class LTXVImgToVideoInplaceKJ(io.ComfyNode):
                         max=100000,
                         step=1,
                         tooltip=f"Index of the frame to replace with image {i}.",
+                        optional=True,
                     ),
                     io.Float.Input(f"strength_{i}", default=1.0, min=0.0, max=1.0, step=0.01, tooltip=f"Strength for image {i}."),
                 ])
@@ -969,6 +970,8 @@ class LTXVImgToVideoInplaceKJ(io.ComfyNode):
             i = img_key.split('_')[1]
 
             image = num_images[f"image_{i}"]
+            if image is None:
+                continue
             index = num_images[f"index_{i}"]
             strength = num_images[f"strength_{i}"]
 
