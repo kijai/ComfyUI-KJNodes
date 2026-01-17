@@ -388,9 +388,7 @@ class LTX2_NAG(io.ComfyNode):
 
         device = mm.get_torch_device()
         offload_device = mm.unet_offload_device()
-        dtype = model.model.diffusion_model.dtype
-        if dtype in [torch.float8_e4m3fn, torch.float8_e5m2]: # fallback for now
-            dtype = torch.bfloat16
+        dtype = model.model.manual_cast_dtype
 
         model_clone = model.clone()
 
