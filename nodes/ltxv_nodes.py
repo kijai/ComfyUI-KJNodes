@@ -908,10 +908,10 @@ class LTXVImgToVideoInplaceKJ(io.ComfyNode):
                     io.Int.Input(
                         f"index_{i}",
                         default=0,
-                        min=-10000,
-                        max=100000,
+                        min=-9999,
+                        max=9999,
                         step=1,
-                        tooltip=f"Index of the frame to replace with image {i}.",
+                        tooltip=f"Frame index for image {i} (in pixel space).",
                         optional=True,
                     ),
                     io.Float.Input(f"strength_{i}", default=1.0, min=0.0, max=1.0, step=0.01, tooltip=f"Strength for image {i}."),
@@ -943,9 +943,8 @@ class LTXVImgToVideoInplaceKJ(io.ComfyNode):
     def execute(cls, vae, latent, num_images) -> io.NodeOutput:
 
         samples = latent["samples"].clone()
-        _, height_scale_factor, width_scale_factor = (
-            vae.downscale_index_formula
-        )
+        scale_factors = vae.downscale_index_formula
+        _, height_scale_factor, width_scale_factor = scale_factors
 
         batch, _, latent_frames, latent_height, latent_width = samples.shape
         width = latent_width * width_scale_factor
@@ -962,7 +961,7 @@ class LTXVImgToVideoInplaceKJ(io.ComfyNode):
             )
 
         # num_images is a dict containing the inputs from the selected option
-        # e.g., {'image_1': tensor, 'index_1': 0, 'strength_1': 1.0, 'image_2': tensor, 'index_2': 20, 'strength_2': 0.8, ...}
+        # e.g., {'image_1': tensor, 'frame_idx_1': 0, 'strength_1': 1.0, 'image_2': tensor, 'frame_idx_2': 20, 'strength_2': 0.8, ...}
 
         image_keys = sorted([k for k in num_images.keys() if k.startswith('image_')])
 
@@ -972,7 +971,9 @@ class LTXVImgToVideoInplaceKJ(io.ComfyNode):
             image = num_images[f"image_{i}"]
             if image is None:
                 continue
-            index = num_images[f"index_{i}"]
+            index = num_images.get(f"index_{i}")
+            if index is None:
+                continue
             strength = num_images[f"strength_{i}"]
 
             if image.shape[1] != height or image.shape[2] != width:
@@ -982,20 +983,27 @@ class LTXVImgToVideoInplaceKJ(io.ComfyNode):
             encode_pixels = pixels[:, :, :, :3]
             t = vae.encode(encode_pixels)
 
-            # Handle negative indexing
-            if index < 0:
-                index = latent_frames + index
+            # Convert pixel frame index to latent index
+            time_scale_factor = scale_factors[0]
 
-            # Clamp index to valid range
-            index = max(0, min(index, latent_frames - 1))
+            # Handle negative indexing in pixel space
+            pixel_frame_count = (latent_frames - 1) * time_scale_factor + 1
+            if index < 0:
+                index = pixel_frame_count + index
+
+            # Convert to latent index
+            latent_idx = index // time_scale_factor
+
+            # Clamp to valid range
+            latent_idx = max(0, min(latent_idx, latent_frames - 1))
 
             # Calculate end index, ensuring we don't exceed latent_frames
-            end_index = min(index + t.shape[2], latent_frames)
+            end_index = min(latent_idx + t.shape[2], latent_frames)
 
             # Replace samples at the specified index range
-            samples[:, :, index:end_index] = t[:, :, :end_index - index]
+            samples[:, :, latent_idx:end_index] = t[:, :, :end_index - latent_idx]
 
             # Update mask at the specified index range
-            conditioning_latent_frames_mask[:, :, index:end_index] = 1.0 - strength
+            conditioning_latent_frames_mask[:, :, latent_idx:end_index] = 1.0 - strength
 
         return io.NodeOutput({"samples": samples, "noise_mask": conditioning_latent_frames_mask})
