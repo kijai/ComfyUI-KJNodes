@@ -282,11 +282,12 @@ def _compute_attention(self, query, context, transformer_options={}):
     del k, v
     return x
 
-def normalized_attention_guidance(self, query, context_positive, nag_context, transformer_options={}):
+def nag_attention(self, query, context_positive, nag_context, transformer_options={}):
     x_positive = _compute_attention(self, query, context_positive, transformer_options)
     x_negative = _compute_attention(self, query, nag_context, transformer_options)
-    del query, context_positive, nag_context
+    return x_positive, x_negative
 
+def normalized_attention_guidance(self, x_positive, x_negative):
     nag_guidance = x_positive * self.nag_scale - x_negative * (self.nag_scale - 1)
     del x_negative
 
@@ -323,8 +324,11 @@ def ltxv_crossattn_forward_nag(self, x, context, mask=None, transformer_options=
     q_pos = self.q_norm(self.to_q(x_pos))
     del x_pos
 
-    x_pos_out = normalized_attention_guidance(self, q_pos, context_pos, self.nag_context, transformer_options=transformer_options)
-    del q_pos, context_pos
+    x_positive, x_negative = nag_attention(self, q_pos, context_pos, self.nag_context, transformer_options=transformer_options)
+    del context_pos, q_pos
+
+    x_pos_out = normalized_attention_guidance(self, x_positive, x_negative)
+    del x_positive, x_negative
 
     # Negative
     if x_neg is not None and context_neg is not None:
