@@ -894,3 +894,105 @@ class LTX2AudioLatentNormalizingSampling(io.ComfyNode):
         model = model.clone()
         model.add_wrapper_with_key(comfy.patcher_extension.WrappersMP.OUTER_SAMPLE, "ltx2_audio_normalization", OuterSampleAudioNormalizationWrapper(audio_normalization_factors))
         return io.NodeOutput(model)
+
+
+class LTXVImgToVideoInplaceKJ(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        options = []
+        for num_images in range(1, 21):  # 1 to 20 images
+            image_inputs = []
+            for i in range(1, num_images + 1):
+                image_inputs.extend([
+                    io.Image.Input(f"image_{i}"),
+                    io.Int.Input(
+                        f"index_{i}",
+                        default=0,
+                        min=-10000,
+                        max=100000,
+                        step=1,
+                        tooltip=f"Index of the frame to replace with image {i}.",
+                    ),
+                    io.Float.Input(f"strength_{i}", default=1.0, min=0.0, max=1.0, step=0.01, tooltip=f"Strength for image {i}."),
+                ])
+            options.append(io.DynamicCombo.Option(
+                key=str(num_images),
+                inputs=image_inputs
+            ))
+
+        return io.Schema(
+            node_id="LTXVImgToVideoInplaceKJ",
+            category="KJNodes/ltxv",
+            inputs=[
+                io.Vae.Input("vae"),
+                io.Latent.Input("latent"),
+                io.DynamicCombo.Input(
+                    "num_images",
+                    options=options,
+                    display_name="Number of Images",
+                    tooltip="Select how many images to insert",
+                ),
+            ],
+            outputs=[
+                io.Latent.Output(display_name="latent"),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, vae, latent, num_images) -> io.NodeOutput:
+
+        samples = latent["samples"].clone()
+        _, height_scale_factor, width_scale_factor = (
+            vae.downscale_index_formula
+        )
+
+        batch, _, latent_frames, latent_height, latent_width = samples.shape
+        width = latent_width * width_scale_factor
+        height = latent_height * height_scale_factor
+
+        # Get existing noise mask if present, otherwise create new one
+        if "noise_mask" in latent:
+            conditioning_latent_frames_mask = latent["noise_mask"].clone()
+        else:
+            conditioning_latent_frames_mask = torch.ones(
+                (batch, 1, latent_frames, 1, 1),
+                dtype=torch.float32,
+                device=samples.device,
+            )
+
+        # num_images is a dict containing the inputs from the selected option
+        # e.g., {'image_1': tensor, 'index_1': 0, 'strength_1': 1.0, 'image_2': tensor, 'index_2': 20, 'strength_2': 0.8, ...}
+
+        image_keys = sorted([k for k in num_images.keys() if k.startswith('image_')])
+
+        for img_key in image_keys:
+            i = img_key.split('_')[1]
+
+            image = num_images[f"image_{i}"]
+            index = num_images[f"index_{i}"]
+            strength = num_images[f"strength_{i}"]
+
+            if image.shape[1] != height or image.shape[2] != width:
+                pixels = comfy.utils.common_upscale(image.movedim(-1, 1), width, height, "bilinear", "center").movedim(1, -1)
+            else:
+                pixels = image
+            encode_pixels = pixels[:, :, :, :3]
+            t = vae.encode(encode_pixels)
+
+            # Handle negative indexing
+            if index < 0:
+                index = latent_frames + index
+
+            # Clamp index to valid range
+            index = max(0, min(index, latent_frames - 1))
+
+            # Calculate end index, ensuring we don't exceed latent_frames
+            end_index = min(index + t.shape[2], latent_frames)
+
+            # Replace samples at the specified index range
+            samples[:, :, index:end_index] = t[:, :, :end_index - index]
+
+            # Update mask at the specified index range
+            conditioning_latent_frames_mask[:, :, index:end_index] = 1.0 - strength
+
+        return io.NodeOutput({"samples": samples, "noise_mask": conditioning_latent_frames_mask})

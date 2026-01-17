@@ -250,6 +250,7 @@ try:
     "LTXVChunkFeedForward": {"class": LTXVChunkFeedForward, "name": "LTXV Chunk Feed Forward"},
     "LTX2SamplingPreviewOverride": {"class": LTX2SamplingPreviewOverride, "name": "LTX2 Sampling Preview Override"},
     "LTX2AudioLatentNormalizingSampling": {"class": LTX2AudioLatentNormalizingSampling, "name": "LTX2 Audio Latent Normalizing Sampling"},
+    "LTXVImgToVideoInplaceKJ": {"class": LTXVImgToVideoInplaceKJ, "name": "LTXV Img To Video Inplace KJ"},
     })
 except ImportError:
     pass
