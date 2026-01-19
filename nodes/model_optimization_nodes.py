@@ -1909,3 +1909,34 @@ class VisualizeCUDAMemoryHistory():
                 pass
 
         return api_url,
+
+
+class ModelMemoryUseReportPatch:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": {
+            "model": ("MODEL",),
+        }}
+
+    RETURN_TYPES = ("MODEL",)
+    FUNCTION = "patch"
+    DESCRIPTION = "Adds callbacks to model to report memory usage during after sampling"
+    EXPERIMENTAL = True
+    CATEGORY = "KJNodes/experimental"
+
+    def patch(self, model):
+        model_clone = model.clone()
+        device = mm.get_torch_device()
+
+        def reset_mem_usage(model):
+            torch.cuda.reset_peak_memory_stats(device)
+        def report_mem_usage(model):
+            max_memory = torch.cuda.max_memory_allocated(device) / 1024**3
+            max_reserved = torch.cuda.max_memory_reserved(device) / 1024**3
+            logging.info(f"Sampling max allocated memory: {max_memory=:.3f} GB")
+            logging.info(f"Sampling max reserved memory: {max_reserved=:.3f} GB")
+
+        model_clone.add_callback(CallbacksMP.ON_PRE_RUN, reset_mem_usage)
+        model_clone.add_callback(CallbacksMP.ON_CLEANUP, report_mem_usage)
+
+        return (model_clone,)
