@@ -229,7 +229,24 @@ class LTXVAudioVideoMask(io.ComfyNode):
             video_latent_frame_index_start = max(0, video_latent_frame_index_start)
             video_latent_frame_index_end = min(video_latent_frame_index_end, video_latent_frame_count)
 
-            video_mask = torch.zeros_like(video_samples)
+            # Get existing noise mask if present, otherwise create new one
+            if "noise_mask" in video_latent:
+                video_mask = video_latent["noise_mask"].clone()
+                # Pad the mask if we padded the samples
+                if max_length == "pad" and video_samples.shape[2] > video_latent["samples"].shape[2]:
+                    mask_padding = torch.zeros(
+                        video_mask.shape[0],
+                        video_mask.shape[1],
+                        video_samples.shape[2] - video_mask.shape[2],
+                        video_mask.shape[3],
+                        video_mask.shape[4],
+                        dtype=video_mask.dtype,
+                        device=video_mask.device
+                    )
+                    video_mask = torch.cat([video_mask, mask_padding], dim=2)
+            else:
+                video_mask = torch.zeros_like(video_samples)[:, :1]
+
             video_mask[:, :, video_latent_frame_index_start:video_latent_frame_index_end] = 1.0
             # ensure all padded frames are also masked
             if max_length == "pad" and video_samples.shape[2] > video_latent["samples"].shape[2]:
@@ -263,7 +280,23 @@ class LTXVAudioVideoMask(io.ComfyNode):
             audio_latent_frame_index_start = max(0, audio_latent_frame_index_start)
             audio_latent_frame_index_end = min(audio_latent_frame_index_end, audio_latent_frame_count)
 
-            audio_mask = torch.zeros_like(audio_samples)
+            # Get existing noise mask if present, otherwise create new one
+            if "noise_mask" in audio_latent:
+                audio_mask = audio_latent["noise_mask"].clone()
+                # Pad the mask if we padded the samples
+                if max_length == "pad" and audio_samples.shape[2] > audio_latent["samples"].shape[2]:
+                    mask_padding = torch.zeros(
+                        audio_mask.shape[0],
+                        audio_mask.shape[1],
+                        audio_samples.shape[2] - audio_mask.shape[2],
+                        audio_mask.shape[3],
+                        dtype=audio_mask.dtype,
+                        device=audio_mask.device
+                    )
+                    audio_mask = torch.cat([audio_mask, mask_padding], dim=2)
+            else:
+                audio_mask = torch.zeros_like(audio_samples)
+
             audio_mask[:, :, audio_latent_frame_index_start:audio_latent_frame_index_end] = 1.0
             # ensure all padded frames are also masked
             if max_length == "pad" and audio_samples.shape[2] > audio_latent["samples"].shape[2]:
