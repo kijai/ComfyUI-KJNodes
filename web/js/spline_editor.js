@@ -1,4 +1,5 @@
 const { app } = window.comfyAPI.app;
+import { getLocalMouse } from './protovisUtil.js';
 
 //from melmass
 export function makeUUID() {
@@ -382,10 +383,11 @@ this.lastMousePosition = { x: this.width/2, y: this.height/2 };
   .antialias(false)
   .margin(10)
   .event("mousedown", function () {
+    let mouse = getLocalMouse(this);
     if (pv.event.shiftKey) { // Use pv.event to access the event object
         let scaledMouse = {
-        x: this.mouse().x / app.canvas.ds.scale,
-        y: this.mouse().y / app.canvas.ds.scale
+        x: mouse.x / app.canvas.ds.scale,
+        y: mouse.y / app.canvas.ds.scale
         };
         i = self.splines[self.activeSplineIndex].points.push(scaledMouse) - 1;
         self.updatePath();
@@ -394,8 +396,8 @@ this.lastMousePosition = { x: this.width/2, y: this.height/2 };
     else if (pv.event.ctrlKey) {
        // Capture the clicked location
        let clickedPoint = {
-        x: this.mouse().x / app.canvas.ds.scale,
-        y: this.mouse().y / app.canvas.ds.scale
+        x: mouse.x / app.canvas.ds.scale,
+        y: mouse.y / app.canvas.ds.scale
         };
 
         // Find the two closest points to the clicked location
@@ -416,8 +418,8 @@ this.lastMousePosition = { x: this.width/2, y: this.height/2 };
     else if (pv.event.button === 2) {
       // Store the current mouse position adjusted for scale
       self.lastMousePosition = {
-        x: this.mouse().x / app.canvas.ds.scale,
-        y: this.mouse().y / app.canvas.ds.scale
+        x: mouse.x / app.canvas.ds.scale,
+        y: mouse.y / app.canvas.ds.scale
       };
 
       self.node.contextMenu.style.display = 'block';
@@ -547,8 +549,9 @@ this.lastMousePosition = { x: this.width/2, y: this.height/2 };
         isDragging = false;
     })
     .event("drag", function () {
-      let adjustedX = this.mouse().x / app.canvas.ds.scale; // Adjust the new X position by the inverse of the scale factor
-      let adjustedY = this.mouse().y / app.canvas.ds.scale; // Adjust the new Y position by the inverse of the scale factor
+      let mouse = getLocalMouse(this);
+      let adjustedX = mouse.x / app.canvas.ds.scale; // Adjust the new X position by the inverse of the scale factor
+      let adjustedY = mouse.y / app.canvas.ds.scale; // Adjust the new Y position by the inverse of the scale factor
        // Determine the bounds of the vis.Panel
       const panelWidth = self.vis.width();
       const panelHeight = self.vis.height();
@@ -619,9 +622,10 @@ this.lastMousePosition = { x: this.width/2, y: this.height/2 };
         return this;
       })
       .event("drag", function(d) {
-        let adjustedX = this.mouse().x / app.canvas.ds.scale;
-        let adjustedY = this.mouse().y / app.canvas.ds.scale;
-        
+        let mouse = getLocalMouse(this);
+        let adjustedX = mouse.x / app.canvas.ds.scale;
+        let adjustedY = mouse.y / app.canvas.ds.scale;
+
         // Determine the bounds of the vis.Panel
         const panelWidth = self.vis.width();
         const panelHeight = self.vis.height();
@@ -651,8 +655,6 @@ this.lastMousePosition = { x: this.width/2, y: this.height/2 };
       svgElement.style['zIndex'] = "2"
       svgElement.style['position'] = "relative"
       this.node.splineEditor.element.appendChild(svgElement);
-      // Mark container for vueNodes protovis coordinate fix
-      this.node.splineEditor.element.setAttribute('data-vue-dom-widget-protovis', 'true');
       this.pathElements = svgElement.getElementsByTagName('path'); // Get all path elements
 
       if (this.width > 256) {

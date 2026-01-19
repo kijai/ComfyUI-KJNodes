@@ -1,4 +1,5 @@
 const { app } = window.comfyAPI.app;
+import { getLocalMouse } from './protovisUtil.js';
 
 //from melmass
 export function makeUUID() {
@@ -331,11 +332,12 @@ class PointsEditor {
       .lineWidth(2)
       .antialias(false)
       .margin(10)
-      .event("mousedown", function () { 
+      .event("mousedown", function () {
+        let mouse = getLocalMouse(this);
         if (pv.event.shiftKey && pv.event.button === 2) { // Use pv.event to access the event object
           let scaledMouse = {
-            x: this.mouse().x / app.canvas.ds.scale,
-            y: this.mouse().y / app.canvas.ds.scale
+            x: mouse.x / app.canvas.ds.scale,
+            y: mouse.y / app.canvas.ds.scale
           };
           i = self.neg_points.push(scaledMouse) - 1;
           self.updateData();
@@ -343,18 +345,18 @@ class PointsEditor {
         }
         else if (pv.event.shiftKey) {
           let scaledMouse = {
-            x: this.mouse().x / app.canvas.ds.scale,
-            y: this.mouse().y / app.canvas.ds.scale
+            x: mouse.x / app.canvas.ds.scale,
+            y: mouse.y / app.canvas.ds.scale
           };
           i = self.points.push(scaledMouse) - 1;
           self.updateData();
           return this;
         }
         else if (pv.event.ctrlKey) {
-          console.log("start drawing at " + this.mouse().x / app.canvas.ds.scale + ", " + this.mouse().y / app.canvas.ds.scale);
+          console.log("start drawing at " + mouse.x / app.canvas.ds.scale + ", " + mouse.y / app.canvas.ds.scale);
           drawing = true;
-          self.bbox[0].startX = this.mouse().x / app.canvas.ds.scale;
-          self.bbox[0].startY = this.mouse().y / app.canvas.ds.scale;
+          self.bbox[0].startX = mouse.x / app.canvas.ds.scale;
+          self.bbox[0].startY = mouse.y / app.canvas.ds.scale;
         }
         else if (pv.event.button === 2) {
           self.node.contextMenu.style.display = 'block';
@@ -364,13 +366,15 @@ class PointsEditor {
       })
       .event("mousemove", function () {
         if (drawing) {
-          self.bbox[0].endX = this.mouse().x / app.canvas.ds.scale;
-          self.bbox[0].endY = this.mouse().y / app.canvas.ds.scale;
+          let mouse = getLocalMouse(this);
+          self.bbox[0].endX = mouse.x / app.canvas.ds.scale;
+          self.bbox[0].endY = mouse.y / app.canvas.ds.scale;
           self.vis.render();
         }
       })
       .event("mouseup", function () {
-        console.log("end drawing at " + this.mouse().x / app.canvas.ds.scale + ", " + this.mouse().y / app.canvas.ds.scale);
+        let mouse = getLocalMouse(this);
+        console.log("end drawing at " + mouse.x / app.canvas.ds.scale + ", " + mouse.y / app.canvas.ds.scale);
         drawing = false;
         self.updateData();
       });
@@ -414,14 +418,15 @@ class PointsEditor {
         .fillStyle(function () { return "rgba(100, 100, 100, 0.6)"; })
         .event("mousedown", pv.Behavior.drag())
         .event("drag", function () {
-          let adjustedX = this.mouse().x / app.canvas.ds.scale; // Adjust the new position by the inverse of the scale factor
-          let adjustedY = this.mouse().y / app.canvas.ds.scale; 
+          let mouse = getLocalMouse(this);
+          let adjustedX = mouse.x / app.canvas.ds.scale; // Adjust the new position by the inverse of the scale factor
+          let adjustedY = mouse.y / app.canvas.ds.scale;
 
           // Adjust the new position if it would place the dot outside the bounds of the vis.Panel
           adjustedX = Math.max(0, Math.min(self.vis.width(), adjustedX));
           adjustedY = Math.max(0, Math.min(self.vis.height(), adjustedY));
-          self.bbox[0].endX = this.mouse().x / app.canvas.ds.scale;
-          self.bbox[0].endY = this.mouse().y / app.canvas.ds.scale;
+          self.bbox[0].endX = adjustedX;
+          self.bbox[0].endY = adjustedY;
           self.vis.render();
         })
         .event("dragend", function () {
@@ -452,8 +457,9 @@ class PointsEditor {
 
       })
       .event("drag", function () {
-        let adjustedX = this.mouse().x / app.canvas.ds.scale; // Adjust the new X position by the inverse of the scale factor
-        let adjustedY = this.mouse().y / app.canvas.ds.scale; // Adjust the new Y position by the inverse of the scale factor
+        let mouse = getLocalMouse(this);
+        let adjustedX = mouse.x / app.canvas.ds.scale; // Adjust the new X position by the inverse of the scale factor
+        let adjustedY = mouse.y / app.canvas.ds.scale; // Adjust the new Y position by the inverse of the scale factor
         // Determine the bounds of the vis.Panel
         const panelWidth = self.vis.width();
         const panelHeight = self.vis.height();
@@ -506,8 +512,9 @@ class PointsEditor {
 
       })
       .event("drag", function () {
-        let adjustedX = this.mouse().x / app.canvas.ds.scale; // Adjust the new X position by the inverse of the scale factor
-        let adjustedY = this.mouse().y / app.canvas.ds.scale; // Adjust the new Y position by the inverse of the scale factor
+        let mouse = getLocalMouse(this);
+        let adjustedX = mouse.x / app.canvas.ds.scale; // Adjust the new X position by the inverse of the scale factor
+        let adjustedY = mouse.y / app.canvas.ds.scale; // Adjust the new Y position by the inverse of the scale factor
         // Determine the bounds of the vis.Panel
         const panelWidth = self.vis.width();
         const panelHeight = self.vis.height();
@@ -543,8 +550,6 @@ class PointsEditor {
     svgElement.style['zIndex'] = "2"
     svgElement.style['position'] = "relative"
     this.node.pointsEditor.element.appendChild(svgElement);
-    // Mark container for vueNodes protovis coordinate fix
-    this.node.pointsEditor.element.setAttribute('data-vue-dom-widget-protovis', 'true');
 
     if (this.width > 256) {
       this.node.setSize([this.width + 45, this.node.size[1]]);
