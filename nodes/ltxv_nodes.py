@@ -4,6 +4,7 @@ import comfy
 from comfy_api.latest import io
 import numpy as np
 import torch
+import logging
 import comfy.model_management as mm
 device = mm.get_torch_device()
 import latent_preview
@@ -1040,3 +1041,149 @@ class LTXVImgToVideoInplaceKJ(io.ComfyNode):
             conditioning_latent_frames_mask[:, :, latent_idx:end_index] = 1.0 - strength
 
         return io.NodeOutput({"samples": samples, "noise_mask": conditioning_latent_frames_mask})
+
+
+from typing import Tuple
+def ltx2_forward(
+        self, x: Tuple[torch.Tensor, torch.Tensor], v_context=None, a_context=None, attention_mask=None, v_timestep=None, a_timestep=None,
+        v_pe=None, a_pe=None, v_cross_pe=None, a_cross_pe=None, v_cross_scale_shift_timestep=None, a_cross_scale_shift_timestep=None,
+        v_cross_gate_timestep=None, a_cross_gate_timestep=None, transformer_options=None,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        run_vx = transformer_options.get("run_vx", True)
+        run_ax = transformer_options.get("run_ax", True)
+
+        vx, ax = x
+        run_ax = run_ax and ax.numel() > 0
+        run_a2v = run_vx and transformer_options.get("a2v_cross_attn", True) and ax.numel() > 0
+        run_v2a = run_ax and transformer_options.get("v2a_cross_attn", True)
+
+        # Video self-attention.
+        if run_vx:
+            vshift_msa, vscale_msa, vgate_msa = (self.get_ada_values(self.scale_shift_table, vx.shape[0], v_timestep, slice(0, 3)))
+
+            norm_vx = comfy.ldm.common_dit.rms_norm(vx) * (1 + vscale_msa) + vshift_msa
+            del vshift_msa, vscale_msa
+            video_scale = getattr(self, 'video_scale', 1.0)
+            vx.addcmul_(self.attn1(norm_vx, pe=v_pe, transformer_options=transformer_options), vgate_msa, value=video_scale)
+            del vgate_msa, norm_vx
+            vx.add_(self.attn2(comfy.ldm.common_dit.rms_norm(vx), context=v_context, mask=attention_mask, transformer_options=transformer_options), alpha=video_scale)
+
+        # Audio self-attention.
+        if run_ax:
+            ashift_msa, ascale_msa, agate_msa = (self.get_ada_values(self.audio_scale_shift_table, ax.shape[0], a_timestep, slice(0, 3)))
+
+            norm_ax = comfy.ldm.common_dit.rms_norm(ax) * (1 + ascale_msa) + ashift_msa
+            del ashift_msa, ascale_msa
+            audio_scale = getattr(self, 'audio_scale', 1.0)
+            ax.addcmul_(self.audio_attn1(norm_ax, pe=a_pe, transformer_options=transformer_options), agate_msa, value=audio_scale)
+            del agate_msa, norm_ax
+            ax.add_(self.audio_attn2(comfy.ldm.common_dit.rms_norm(ax), context=a_context, mask=attention_mask, transformer_options=transformer_options), alpha=audio_scale)
+
+        # Audio - Video cross attention.
+        if run_a2v or run_v2a:
+            vx_norm3 = comfy.ldm.common_dit.rms_norm(vx)
+            ax_norm3 = comfy.ldm.common_dit.rms_norm(ax)
+
+            scale_ca_audio_hidden_states_a2v, shift_ca_audio_hidden_states_a2v, scale_ca_audio_hidden_states_v2a, shift_ca_audio_hidden_states_v2a, gate_out_v2a = self.get_av_ca_ada_values(
+                self.scale_shift_table_a2v_ca_audio, ax.shape[0], a_cross_scale_shift_timestep, a_cross_gate_timestep)
+
+            scale_ca_video_hidden_states_a2v, shift_ca_video_hidden_states_a2v, scale_ca_video_hidden_states_v2a, shift_ca_video_hidden_states_v2a, gate_out_a2v = self.get_av_ca_ada_values(
+                self.scale_shift_table_a2v_ca_video, vx.shape[0], v_cross_scale_shift_timestep, v_cross_gate_timestep)
+
+            # audio to video cross attention
+            if run_a2v:
+                vx_scaled = vx_norm3 * (1 + scale_ca_video_hidden_states_a2v) + shift_ca_video_hidden_states_a2v
+                ax_scaled = ax_norm3 * (1 + scale_ca_audio_hidden_states_a2v) + shift_ca_audio_hidden_states_a2v
+                del scale_ca_video_hidden_states_a2v, shift_ca_video_hidden_states_a2v, scale_ca_audio_hidden_states_a2v, shift_ca_audio_hidden_states_a2v
+                audio_to_video_scale = getattr(self, 'audio_to_video_scale', 1.0)
+                vx.addcmul_(self.audio_to_video_attn(vx_scaled, context=ax_scaled, pe=v_cross_pe, k_pe=a_cross_pe, transformer_options=transformer_options), gate_out_a2v, value=audio_to_video_scale)
+                del gate_out_a2v
+
+            # video to audio cross attention
+            if run_v2a:
+                ax_scaled = ax_norm3 * (1 + scale_ca_audio_hidden_states_v2a) + shift_ca_audio_hidden_states_v2a
+                vx_scaled = vx_norm3 * (1 + scale_ca_video_hidden_states_v2a) + shift_ca_video_hidden_states_v2a
+                del scale_ca_video_hidden_states_v2a, shift_ca_video_hidden_states_v2a, scale_ca_audio_hidden_states_v2a, shift_ca_audio_hidden_states_v2a
+                video_to_audio_scale = getattr(self, 'video_to_audio_scale', 1.0)
+                ax.addcmul_(self.video_to_audio_attn(ax_scaled, context=vx_scaled, pe=a_cross_pe, k_pe=v_cross_pe, transformer_options=transformer_options), gate_out_v2a, value=video_to_audio_scale)
+                del gate_out_v2a
+
+        # video feedforward
+        if run_vx:
+            vshift_mlp, vscale_mlp, vgate_mlp = self.get_ada_values(self.scale_shift_table, vx.shape[0], v_timestep, slice(3, None))
+            vx_scaled = comfy.ldm.common_dit.rms_norm(vx) * (1 + vscale_mlp) + vshift_mlp
+            del vshift_mlp, vscale_mlp
+            vx.addcmul_(self.ff(vx_scaled), vgate_mlp)
+            del vgate_mlp
+
+        # audio feedforward
+        if run_ax:
+            ashift_mlp, ascale_mlp, agate_mlp = self.get_ada_values(self.audio_scale_shift_table, ax.shape[0], a_timestep, slice(3, None))
+            ax_scaled = comfy.ldm.common_dit.rms_norm(ax) * (1 + ascale_mlp) + ashift_mlp
+            ax.addcmul_(self.audio_ff(ax_scaled), agate_mlp)
+            del ashift_mlp, ascale_mlp, agate_mlp
+
+        return vx, ax
+
+class LTX2ForwardPatch:
+    def __init__(self, video, audio, audio_to_video, video_to_audio):
+        self.video_scale = video
+        self.audio_scale = audio
+        self.video_to_audio_scale = video_to_audio
+        self.audio_to_video_scale = audio_to_video
+    def __get__(self, obj, objtype=None):
+        def wrapped_forward(self_module, *args, **kwargs):
+            self_module.video_scale = self.video_scale
+            self_module.audio_scale = self.audio_scale
+            self_module.video_to_audio_scale = self.video_to_audio_scale
+            self_module.audio_to_video_scale = self.audio_to_video_scale
+            return ltx2_forward(self_module, *args, **kwargs)
+        return types.MethodType(wrapped_forward, obj)
+
+class LTX2AttentionTunerPatch(io.ComfyNode):
+
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="LTX2AttentionTunerPatch",
+            display_name="LTX2 Attention Tuner Patch",
+            category="KJNodes/ltxv",
+            description="EXPERIMENTAL AND MAY CHANGE THE MODEL OUTPUT!!",
+            is_experimental=True,
+            inputs=[
+                io.Model.Input("model"),
+                io.String.Input("blocks", default="", tooltip="Comma separated list of transformer block indices to apply the patch to. Leave empty to apply to all blocks."),
+                io.Float.Input("video_scale", default=1.0, min=0.0, max=100, step=0.01, tooltip="Scaling factor for video attention."),
+                io.Float.Input("audio_scale", default=1.0, min=0.0, max=100, step=0.01, tooltip="Scaling factor for audio attention."),
+                io.Float.Input("audio_to_video_scale", default=1.0, min=0.0, max=100, step=0.01, tooltip="Scaling factor for video attention."),
+                io.Float.Input("video_to_audio_scale", default=1.0, min=0.0, max=100, step=0.01, tooltip="Scaling factor for audio attention."),
+
+            ],
+            outputs=[
+                io.Model.Output(display_name="model"),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, model, blocks, video_scale, audio_scale, audio_to_video_scale, video_to_audio_scale) -> io.NodeOutput:
+        model_clone = model.clone()
+        diffusion_model = model_clone.get_model_object("diffusion_model")
+
+        # Parse selected block indices
+        if blocks.strip() == "":
+            selected_blocks = set(range(len(diffusion_model.transformer_blocks)))
+        else:
+            selected_blocks = set(int(idx) for idx in blocks.strip().split(","))
+
+        logging.info(f"Applying LTX2 Attention Tuner Patch with custom scales to blocks: {sorted(selected_blocks)}")
+
+        # Apply patch to all blocks, but use 1.0 scales for non-selected blocks
+        for idx in range(len(diffusion_model.transformer_blocks)):
+            block = diffusion_model.transformer_blocks[idx]
+            if idx in selected_blocks:
+                patched_forward = LTX2ForwardPatch(video_scale, audio_scale, audio_to_video_scale, video_to_audio_scale).__get__(block, block.__class__)
+            else:
+                patched_forward = LTX2ForwardPatch(1.0, 1.0, 1.0, 1.0).__get__(block, block.__class__)
+            model_clone.add_object_patch(f"diffusion_model.transformer_blocks.{idx}.forward", patched_forward)
+
+        return io.NodeOutput(model_clone)
