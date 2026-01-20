@@ -28,6 +28,8 @@ from comfy import model_management
 import node_helpers
 import folder_paths
 
+from ..utility.utility import string_to_color
+
 try:
     from server import PromptServer
 except:
@@ -710,6 +712,14 @@ ComfyUI/custom_nodes/ComfyUI-KJNodes/fonts
 
         font_path = os.path.join(script_directory, "fonts", "TTNorms-Black.otf") if font == "TTNorms-Black.otf" else folder_paths.get_full_path("kjnodes_fonts", font)
 
+        # Parse colors using helper function
+        font_color_rgb = string_to_color(font_color)
+        label_color_rgb = string_to_color(label_color)
+
+        # Convert to tuples for PIL
+        font_color_tuple = tuple(font_color_rgb[:3])  # RGB only
+        label_color_tuple = tuple(label_color_rgb[:3])  # RGB only
+
         def process_image(input_image, caption_text):
             font = ImageFont.truetype(font_path, font_size)
             lines = []
@@ -744,10 +754,10 @@ ComfyUI/custom_nodes/ComfyUI-KJNodes/fonts
                     # Adjust the image height automatically
                     margin = 8
                     required_height = (text_y + len(lines) * font_size) + margin # Calculate required height
-                    pil_image = Image.new("RGB", (width, required_height), label_color)
+                    pil_image = Image.new("RGB", (width, required_height), label_color_tuple)
                 else:
                     # Initialize with a minimal height
-                    label_image = Image.new("RGB", (width, height), label_color)
+                    label_image = Image.new("RGB", (width, height), label_color_tuple)
                     pil_image = label_image
 
             draw = ImageDraw.Draw(pil_image)
@@ -756,9 +766,9 @@ ComfyUI/custom_nodes/ComfyUI-KJNodes/fonts
             y_offset = text_y
             for line in lines:
                 try:
-                    draw.text((text_x, y_offset), line, font=font, fill=font_color, features=['-liga'])
+                    draw.text((text_x, y_offset), line, font=font, fill=font_color_tuple, features=['-liga'])
                 except:
-                    draw.text((text_x, y_offset), line, font=font, fill=font_color)
+                    draw.text((text_x, y_offset), line, font=font, fill=font_color_tuple)
                 y_offset += font_size
 
             processed_image = torch.from_numpy(np.array(pil_image).astype(np.float32) / 255.0).unsqueeze(0)
@@ -1293,22 +1303,8 @@ nodes for example. Supports RGBA for mask_color to adjust transparency per color
             mask_adjusted = mask * mask_opacity
             mask_image = mask.reshape((-1, 1, mask.shape[-2], mask.shape[-1])).movedim(1, -1).expand(-1, -1, -1, 3).clone()
 
-            color_list = [255, 255, 255] # Default fallback
-            if ',' in mask_color:
-                # Handle CSV format (e.g., "255, 0, 0" or "255, 0, 0, 128")
-                try:
-                    color_list = [int(channel.strip()) for channel in mask_color.split(',')]
-                except ValueError:
-                    print(f"Invalid mask_color format: {mask_color}")
-            else:
-                # Handle Hex format
-                mask_color = mask_color.lstrip('#')
-                if len(mask_color) == 6: # #RRGGBB
-                    color_list = [int(mask_color[i:i+2], 16) for i in (0, 2, 4)]
-                elif len(mask_color) == 8: # #RRGGBBAA
-                    color_list = [int(mask_color[i:i+2], 16) for i in (0, 2, 4, 6)]
-
-            color_list = np.clip(color_list, 0, 255)
+            # Use helper function to parse color string
+            color_list = string_to_color(mask_color)
 
             # Apply RGB channels
             mask_image[:, :, :, 0] = color_list[0] / 255 # Red channel
@@ -2646,7 +2642,7 @@ highest dimension.
             device = torch.device("cpu")
 
         pillarbox_blur = keep_proportion == "pillarbox_blur"
-        
+
         # Initialize padding variables
         pad_left = pad_right = pad_top = pad_bottom = 0
 
@@ -2656,7 +2652,7 @@ highest dimension.
                 aspect_ratio = W / H
                 new_height = int(math.sqrt(total_pixels / aspect_ratio))
                 new_width = int(math.sqrt(total_pixels * aspect_ratio))
-                
+
             # If one of the dimensions is zero, calculate it to maintain the aspect ratio
             elif width == 0 and height == 0:
                 new_width = W
@@ -2880,31 +2876,26 @@ class LoadAndResizeImage:
     FUNCTION = "load_image"
 
     def load_image(self, image, resize, width, height, repeat, keep_proportion, divisible_by, mask_channel, background_color):
-        from PIL import ImageColor, Image, ImageOps, ImageSequence
+        from PIL import Image, ImageOps, ImageSequence
         import numpy as np
         import torch
         image_path = folder_paths.get_annotated_filepath(image)
-        
+
         import node_helpers
         img = node_helpers.pillow(Image.open, image_path)
         img = ImageOps.exif_transpose(img)
 
-        # Process the background_color
+        # Process the background_color using the helper function
         if background_color:
-            try:
-                # Try to parse as RGB tuple
-                bg_color_rgba = tuple(int(x.strip()) for x in background_color.split(','))
-            except ValueError:
-                # If parsing fails, it might be a hex color or named color
-                if background_color.startswith('#') or background_color.lower() in ImageColor.colormap:
-                    bg_color_rgba = ImageColor.getrgb(background_color)
-                else:
-                    raise ValueError(f"Invalid background color: {background_color}")
-
-            bg_color_rgba += (255,)  # Add alpha channel
+            color_list = string_to_color(background_color)
+            # Ensure we have RGBA (add alpha if only RGB)
+            if len(color_list) == 3:
+                bg_color_rgba = tuple(color_list) + (255,)
+            else:
+                bg_color_rgba = tuple(color_list)
         else:
             bg_color_rgba = None  # No background color specified
-        
+
         output_images = []
         output_masks = []
         w, h = None, None
@@ -3693,7 +3684,7 @@ class ImageCropByMaskBatch:
                     "height": ("INT", {"default": 512, "min": 0, "max": MAX_RESOLUTION, "step": 8, }),
                     "padding": ("INT", {"default": 0, "min": 0, "max": 4096, "step": 1, }),
                     "preserve_size": ("BOOLEAN", {"default": False}),
-                    "bg_color": ("STRING", {"default": "0, 0, 0", "tooltip": "Color as RGB values in range 0-255, separated by commas."}),
+                    "bg_color": ("STRING", {"default": "0, 0, 0", "tooltip": "Color as RGB values in range 0-255 or 0.0-1.0, or color name or hex code"}),
                   }
                 }
     
@@ -3713,7 +3704,9 @@ class ImageCropByMaskBatch:
         output_images = []
         output_masks = []
 
-        bg_color = [int(x.strip())/255.0 for x in bg_color.split(",")]
+        # Parse background color using helper function
+        color_list = string_to_color(bg_color)
+        bg_color = [x / 255.0 for x in color_list]
         
         # For each mask
         for i in range(mask_count):
@@ -3796,7 +3789,7 @@ class ImagePadKJ:
                     "bottom": ("INT", {"default": 0, "min": 0, "max": MAX_RESOLUTION, "step": 1, }),
                     "extra_padding": ("INT", {"default": 0, "min": 0, "max": MAX_RESOLUTION, "step": 1, }),
                     "pad_mode": (["edge", "edge_pixel", "color", "pillarbox_blur"],),
-                    "color": ("STRING", {"default": "0, 0, 0", "tooltip": "Color as RGB values in range 0-255, separated by commas."}),
+                    "color": ("STRING", {"default": "0, 0, 0", "tooltip": "Color as RGB values in range 0-255 or 0.0-1.0, or color name or hex code"}),
                   },
                 "optional": {
                     "mask": ("MASK", ),
@@ -3819,8 +3812,9 @@ class ImagePadKJ:
             if HM != H or WM != W:
                 mask = F.interpolate(mask.unsqueeze(1), size=(H, W), mode='nearest-exact').squeeze(1)
 
-        # Parse background color
-        bg_color = [int(x.strip())/255.0 for x in color.split(",")]
+        # Parse background color using helper function
+        color_list = string_to_color(color)
+        bg_color = [x / 255.0 for x in color_list]
         if len(bg_color) == 1:
             bg_color = bg_color * 3  # Grayscale to RGB
         bg_color = torch.tensor(bg_color, dtype=image.dtype, device=image.device)
