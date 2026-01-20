@@ -427,6 +427,8 @@ class LTX2_NAG(io.ComfyNode):
         device = mm.get_torch_device()
         offload_device = mm.unet_offload_device()
         dtype = model.model.manual_cast_dtype
+        if dtype is None:
+            dtype = model.model.diffusion_model.dtype
 
         model_clone = model.clone()
 
