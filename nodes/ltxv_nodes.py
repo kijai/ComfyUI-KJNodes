@@ -1280,26 +1280,36 @@ class LTX2MemoryEfficientSageAttentionPatch(io.ComfyNode):
 try:
     from sageattention.core import per_thread_int8_triton, per_warp_int8_cuda,per_block_int8_triton, per_channel_fp8, get_cuda_arch_versions, attn_false
     _cuda_archs = get_cuda_arch_versions()
-    def get_cuda_version():
-        version = torch.version.cuda
-        major, minor = version.split('.')
-        return int(major), int(minor)
 except:
     pass
 try:
     from sageattention.core import _qattn_sm89
-except:
-    pass
+except ImportError:
+    try:
+        from sageattention.core import sm89_compile as _qattn_sm89
+    except ImportError:
+        _qattn_sm89 = None
 try:
     from sageattention.core import _qattn_sm80
-except:
-    pass
+except ImportError:
+    try:
+        from sageattention.core import sm80_compile as _qattn_sm80
+    except ImportError:
+        _qattn_sm80 = None
 try:
     from sageattention.core import  _qattn_sm90
-except:
-    pass
+except ImportError:
+    try:
+        from sageattention.core import sm90_compile as _qattn_sm90
+    except ImportError:
+        _qattn_sm90 = None
 
 from comfy.ldm.lightricks.model import apply_rotary_emb
+
+def get_cuda_version():
+        version = torch.version.cuda
+        major, minor = version.split('.')
+        return int(major), int(minor)
 
 def ltx2_sageattn_forward(self, x, context=None, mask=None, pe=None, k_pe=None, transformer_options={}):
     q = self.to_q(x)
