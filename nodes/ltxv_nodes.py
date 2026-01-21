@@ -340,7 +340,8 @@ def nag_attention(self, query, context_positive, nag_context, transformer_option
     return x_positive, x_negative
 
 def normalized_attention_guidance(self, x_positive, x_negative):
-    nag_guidance = x_positive * self.nag_scale - x_negative * (self.nag_scale - 1)
+    nag_guidance = x_negative.mul_(self.nag_scale - 1).neg_().add_(x_positive, alpha=self.nag_scale)
+
     del x_negative
 
     norm_positive = torch.norm(x_positive, p=1, dim=-1, keepdim=True)
@@ -357,7 +358,7 @@ def normalized_attention_guidance(self, x_positive, x_negative):
     nag_guidance = torch.where(mask, nag_guidance * adjustment, nag_guidance)
     del mask, adjustment
 
-    nag_guidance.mul_(self.nag_alpha).add_(x_positive, alpha=(1 - self.nag_alpha))
+    nag_guidance.sub_(x_positive).mul_(self.nag_alpha).add_(x_positive)
     del x_positive
 
     return nag_guidance
