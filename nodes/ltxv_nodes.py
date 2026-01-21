@@ -1278,6 +1278,7 @@ class LTX2MemoryEfficientSageAttentionPatch(io.ComfyNode):
 
         return io.NodeOutput(model_clone)
 
+sageplus_sm89_available = False
 try:
     from sageattention.core import per_thread_int8_triton, per_warp_int8_cuda,per_block_int8_triton, per_channel_fp8, get_cuda_arch_versions, attn_false
     _cuda_archs = get_cuda_arch_versions()
@@ -1285,6 +1286,8 @@ except:
     pass
 try:
     from sageattention.core import _qattn_sm89
+    sageplus_sm89_available = hasattr(_qattn_sm89, 'qk_int8_sv_f8_accum_f16_fuse_v_scale_attn_inst_buf')
+
 except ImportError:
     try:
         from sageattention.core import sm89_compile as _qattn_sm89
@@ -1369,7 +1372,7 @@ def ltx2_sageattn_forward(self, x, context=None, mask=None, pe=None, k_pe=None, 
         v_fp8, v_scale, _ = per_channel_fp8(v, tensor_layout=tensor_layout, scale_max=quant_v_scale_max, smooth_v=False)
         del v
         o = torch.empty(q_int8.size(), dtype=dtype, device=q_int8.device)
-        if pv_accum_dtype == "fp32+fp16":
+        if pv_accum_dtype == "fp32+fp16" and sageplus_sm89_available:
             _qattn_sm89.qk_int8_sv_f8_accum_f16_fuse_v_scale_attn_inst_buf(q_int8, k_int8, v_fp8, o, q_scale, k_scale, v_scale, _tensor_layout, _is_caual, _qk_quant_gran, sm_scale, _return_lse)
         elif pv_accum_dtype == "fp32+fp32":
             _qattn_sm89.qk_int8_sv_f8_accum_f32_fuse_v_scale_attn_inst_buf(q_int8, k_int8, v_fp8, o, q_scale, k_scale, v_scale, _tensor_layout, _is_caual, _qk_quant_gran, sm_scale, _return_lse)
