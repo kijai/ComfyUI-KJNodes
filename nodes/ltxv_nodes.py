@@ -1399,7 +1399,7 @@ def ltx2_sageattn_forward(self, x, context=None, mask=None, pe=None, k_pe=None, 
         o = torch.empty(q_int8.size(), dtype=dtype, device=q_int8.device)
         if pv_accum_dtype == "fp32":
             _qattn_sm89.qk_int8_sv_f8_accum_f32_fuse_v_scale_attn(q_int8, k_int8, v_fp8, o, q_scale, k_scale, v_scale, _tensor_layout, _is_caual, _qk_quant_gran, sm_scale, _return_lse)
-        elif pv_accum_dtype == "fp32+fp16":
+        elif pv_accum_dtype == "fp32+fp16" and sageplus_sm89_available:
             _qattn_sm89.qk_int8_sv_f8_accum_f16_fuse_v_scale_attn_inst_buf(q_int8, k_int8, v_fp8, o, q_scale, k_scale, v_scale, _tensor_layout, _is_caual, _qk_quant_gran, sm_scale, _return_lse)
         del v_fp8, v_scale
 
