@@ -1307,33 +1307,38 @@ except ImportError:
 from comfy.ldm.lightricks.model import apply_rotary_emb
 
 def get_cuda_version():
-        version = torch.version.cuda
-        major, minor = version.split('.')
-        return int(major), int(minor)
+    version = torch.version.cuda
+    major, minor = version.split('.')
+    return int(major), int(minor)
+
+cuda_version = get_cuda_version()
 
 def ltx2_sageattn_forward(self, x, context=None, mask=None, pe=None, k_pe=None, transformer_options={}):
-    q = self.to_q(x)
-    dtype = q.dtype
+    dtype = x.dtype
     context = x if context is None else context
-    k = self.to_k(context)
-    v = self.to_v(context)
 
+    # query
+    q = self.to_q(x)
     q = self.q_norm(q)
-    k = self.k_norm(k)
-
-    head_dim_og = self.dim_head
-
     if pe is not None:
         q = apply_rotary_emb(q, pe)
+    # key
+    k = self.to_k(context)
+    k = self.k_norm(k)
+    if pe is not None:
         k = apply_rotary_emb(k, pe if k_pe is None else k_pe)
+    # value
+    v = self.to_v(context)
 
     # Reshape from [batch, seq_len, total_dim] to [batch, seq_len, num_heads, head_dim]
     batch_size, seq_len, _ = q.shape
     num_heads = self.heads
+    head_dim_og = self.dim_head
 
     q = q.view(batch_size, seq_len, num_heads, head_dim_og)
     k = k.view(batch_size, k.shape[1], num_heads, head_dim_og)
     v = v.view(batch_size, v.shape[1], num_heads, head_dim_og)
+
     tensor_layout="NHD"
     _tensor_layout = 0 if tensor_layout == "NHD" else 1
     _is_caual = 0
@@ -1350,24 +1355,24 @@ def ltx2_sageattn_forward(self, x, context=None, mask=None, pe=None, k_pe=None, 
     elif _cuda_archs[0] == "sm75":
         q_int8, q_scale, k_int8, k_scale = per_block_int8_triton(q, k, km=None, sm_scale=sm_scale, tensor_layout=tensor_layout)
         del q, k
-        o, lse = attn_false(q_int8, k_int8, v, q_scale, k_scale, tensor_layout=tensor_layout, output_dtype=dtype, attn_mask=None, return_lse=False)
+        o, _ = attn_false(q_int8, k_int8, v, q_scale, k_scale, tensor_layout=tensor_layout, output_dtype=dtype, attn_mask=None, return_lse=False)
         del v
-
     elif _cuda_archs[0] == "sm89":
-        if get_cuda_version() < (12, 8):
+        if cuda_version < (12, 8):
             pv_accum_dtype = "fp32+fp32"
         else:
             pv_accum_dtype = "fp32+fp16"
             quant_v_scale_max = 2.25
         q_int8, q_scale, k_int8, k_scale = per_thread_int8_triton(q, k, None, tensor_layout=tensor_layout, BLKQ=128, WARPQ=32, BLKK=64, WARPK=64)
         del q, k
-        v_fp8, v_scale, vm = per_channel_fp8(v, tensor_layout=tensor_layout, scale_max=quant_v_scale_max, smooth_v=False)
+        v_fp8, v_scale, _ = per_channel_fp8(v, tensor_layout=tensor_layout, scale_max=quant_v_scale_max, smooth_v=False)
         del v
         o = torch.empty(q_int8.size(), dtype=dtype, device=q_int8.device)
         if pv_accum_dtype == "fp32+fp16":
             _qattn_sm89.qk_int8_sv_f8_accum_f16_fuse_v_scale_attn_inst_buf(q_int8, k_int8, v_fp8, o, q_scale, k_scale, v_scale, _tensor_layout, _is_caual, _qk_quant_gran, sm_scale, _return_lse)
         elif pv_accum_dtype == "fp32+fp32":
             _qattn_sm89.qk_int8_sv_f8_accum_f32_fuse_v_scale_attn_inst_buf(q_int8, k_int8, v_fp8, o, q_scale, k_scale, v_scale, _tensor_layout, _is_caual, _qk_quant_gran, sm_scale, _return_lse)
+        del v_fp8, v_scale
     elif _cuda_archs[0] == "sm90":
         q_int8, q_scale, k_int8, k_scale = per_thread_int8_triton(q, k, None, tensor_layout=tensor_layout, BLKQ=64, WARPQ=16, BLKK=128, WARPK=128)
         del q, k,
@@ -1375,8 +1380,9 @@ def ltx2_sageattn_forward(self, x, context=None, mask=None, pe=None, k_pe=None, 
         del v
         o = torch.empty(q_int8.size(), dtype=dtype, device=q_int8.device)
         _qattn_sm90.qk_int8_sv_f8_accum_f32_fuse_v_scale_attn_inst_buf(q_int8, k_int8, v_fp8, o, q_scale, k_scale, v_scale, _tensor_layout, _is_caual, _qk_quant_gran, sm_scale, _return_lse)
+        del v_fp8, v_scale
     elif _cuda_archs[0] == "sm120":
-        if get_cuda_version() < (12, 8):
+        if cuda_version < (12, 8):
             pv_accum_dtype = "fp32"
         else:
             pv_accum_dtype = "fp32+fp16"
@@ -1391,7 +1397,7 @@ def ltx2_sageattn_forward(self, x, context=None, mask=None, pe=None, k_pe=None, 
             _qattn_sm89.qk_int8_sv_f8_accum_f32_fuse_v_scale_attn(q_int8, k_int8, v_fp8, o, q_scale, k_scale, v_scale, _tensor_layout, _is_caual, _qk_quant_gran, sm_scale, _return_lse)
         elif pv_accum_dtype == "fp32+fp16":
             _qattn_sm89.qk_int8_sv_f8_accum_f16_fuse_v_scale_attn_inst_buf(q_int8, k_int8, v_fp8, o, q_scale, k_scale, v_scale, _tensor_layout, _is_caual, _qk_quant_gran, sm_scale, _return_lse)
+        del v_fp8, v_scale
 
-    del q_int8, q_scale, k_int8, k_scale, v_fp8, v_scale
-    out = o[..., :head_dim_og].view(batch_size, seq_len, -1)
-    return self.to_out(out)
+    del q_int8, q_scale, k_int8, k_scale
+    return self.to_out(o[..., :head_dim_og].view(batch_size, seq_len, -1))
