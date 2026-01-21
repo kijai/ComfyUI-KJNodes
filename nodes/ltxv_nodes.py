@@ -172,9 +172,9 @@ class LTXVAudioVideoMask(io.ComfyNode):
                 io.Float.Input("audio_end_time", default=5.0, min=0.0, max=10000.0, step=0.1, tooltip="End time in seconds for the audio mask."),
                 io.Combo.Input(
                     "max_length",
-                    options=["truncate", "pad"],
+                    options=["truncate", "pad", "partial"],
                     default="truncate",
-                    tooltip="Determines how to handle cases where the specified end time exceeds the latent length.",
+                    tooltip="'truncate': cut latent to end_time length. 'pad': extend latent to end_time. 'partial': mask range within existing latent.",
                 ),
             ],
             outputs=[
@@ -201,8 +201,9 @@ class LTXVAudioVideoMask(io.ComfyNode):
             # Calculate required latent frames based on end time
             required_latent_frames = (video_pixel_frame_end_raw - 1) // time_scale_factor + 1
 
-            # Pad video latent if required frames exceed current length
+            # Handle different max_length modes
             if max_length == "pad" and required_latent_frames > video_latent_frame_count:
+                # Pad video latent if required frames exceed current length
                 pad_frames = required_latent_frames - video_latent_frame_count
                 padding = torch.zeros(
                     video_latent["samples"].shape[0],
@@ -215,7 +216,11 @@ class LTXVAudioVideoMask(io.ComfyNode):
                 )
                 video_samples = torch.cat([video_latent["samples"], padding], dim=2)
                 video_latent_frame_count = video_samples.shape[2]
-            else:
+            elif max_length == "truncate":
+                # Truncate to the end_time
+                video_samples = video_latent["samples"][:, :, :required_latent_frames]
+                video_latent_frame_count = video_samples.shape[2]
+            else:  # partial
                 video_samples = video_latent["samples"]
 
             # Now calculate indices based on potentially padded latent
@@ -233,8 +238,9 @@ class LTXVAudioVideoMask(io.ComfyNode):
             # Get existing noise mask if present, otherwise create new one
             if "noise_mask" in video_latent:
                 video_mask = video_latent["noise_mask"].clone()
-                # Pad the mask if we padded the samples
+                # Adjust mask size based on mode
                 if max_length == "pad" and video_samples.shape[2] > video_latent["samples"].shape[2]:
+                    # Pad the mask if we padded the samples
                     mask_padding = torch.zeros(
                         video_mask.shape[0],
                         video_mask.shape[1],
@@ -245,6 +251,9 @@ class LTXVAudioVideoMask(io.ComfyNode):
                         device=video_mask.device
                     )
                     video_mask = torch.cat([video_mask, mask_padding], dim=2)
+                elif max_length == "truncate":
+                    # Truncate the mask to match truncated samples
+                    video_mask = video_mask[:, :, :video_samples.shape[2]]
             else:
                 video_mask = torch.zeros_like(video_samples)[:, :1]
 
@@ -262,8 +271,9 @@ class LTXVAudioVideoMask(io.ComfyNode):
             audio_latent_frame_index_start = int(round(audio_start_time * audio_latents_per_second))
             audio_latent_frame_index_end = int(round(audio_end_time * audio_latents_per_second)) + 1
 
-            # Pad audio latent if end index exceeds current length
+            # Handle different max_length modes
             if max_length == "pad" and audio_latent_frame_index_end > audio_latent_frame_count:
+                # Pad audio latent if end index exceeds current length
                 pad_frames = audio_latent_frame_index_end - audio_latent_frame_count
                 padding = torch.zeros(
                     audio_latent["samples"].shape[0],
@@ -275,7 +285,11 @@ class LTXVAudioVideoMask(io.ComfyNode):
                 )
                 audio_samples = torch.cat([audio_latent["samples"], padding], dim=2)
                 audio_latent_frame_count = audio_samples.shape[2]
-            else:
+            elif max_length == "truncate":
+                # Truncate to the end_time
+                audio_samples = audio_latent["samples"][:, :, :audio_latent_frame_index_end]
+                audio_latent_frame_count = audio_samples.shape[2]
+            else:  # partial
                 audio_samples = audio_latent["samples"]
 
             audio_latent_frame_index_start = max(0, audio_latent_frame_index_start)
@@ -284,8 +298,9 @@ class LTXVAudioVideoMask(io.ComfyNode):
             # Get existing noise mask if present, otherwise create new one
             if "noise_mask" in audio_latent:
                 audio_mask = audio_latent["noise_mask"].clone()
-                # Pad the mask if we padded the samples
+                # Adjust mask size based on mode
                 if max_length == "pad" and audio_samples.shape[2] > audio_latent["samples"].shape[2]:
+                    # Pad the mask if we padded the samples
                     mask_padding = torch.zeros(
                         audio_mask.shape[0],
                         audio_mask.shape[1],
@@ -295,6 +310,9 @@ class LTXVAudioVideoMask(io.ComfyNode):
                         device=audio_mask.device
                     )
                     audio_mask = torch.cat([audio_mask, mask_padding], dim=2)
+                elif max_length == "truncate":
+                    # Truncate the mask to match truncated samples
+                    audio_mask = audio_mask[:, :, :audio_samples.shape[2]]
             else:
                 audio_mask = torch.zeros_like(audio_samples)
 
