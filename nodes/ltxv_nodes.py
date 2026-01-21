@@ -1355,7 +1355,8 @@ def ltx2_sageattn_forward(self, x, context=None, mask=None, pe=None, k_pe=None, 
         q_int8, q_scale, k_int8, k_scale = per_thread_int8_triton(q, k, None, tensor_layout=tensor_layout, BLKQ=128, WARPQ=32, BLKK=64, WARPK=64)
         del q, k
         o = torch.empty(q_int8.size(), dtype=dtype, device=q_int8.device)
-        _qattn_sm80.qk_int8_sv_f16_accum_f32_attn(q_int8, k_int8, v.to(torch.float16), o, q_scale, k_scale, _tensor_layout, _is_caual, _qk_quant_gran, sm_scale, _return_lse)
+        v = v.to(torch.float16)
+        _qattn_sm80.qk_int8_sv_f16_accum_f32_attn(q_int8, k_int8, v, o, q_scale, k_scale, _tensor_layout, _is_caual, _qk_quant_gran, sm_scale, _return_lse)
     elif _cuda_archs[0] == "sm75":
         q_int8, q_scale, k_int8, k_scale = per_block_int8_triton(q, k, km=None, sm_scale=sm_scale, tensor_layout=tensor_layout)
         del q, k
@@ -1404,4 +1405,4 @@ def ltx2_sageattn_forward(self, x, context=None, mask=None, pe=None, k_pe=None, 
         del v_fp8, v_scale
 
     del q_int8, q_scale, k_int8, k_scale
-    return self.to_out(o[..., :head_dim_og].view(batch_size, seq_len, -1))
+    return self.to_out(o.view(batch_size, seq_len, -1))
