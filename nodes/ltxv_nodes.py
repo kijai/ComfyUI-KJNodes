@@ -1073,11 +1073,15 @@ def ltx2_forward(
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         run_vx = transformer_options.get("run_vx", True)
         run_ax = transformer_options.get("run_ax", True)
+        video_scale = getattr(self, 'video_scale', 1.0)
+        audio_scale = getattr(self, 'audio_scale', 1.0)
+        audio_to_video_scale = getattr(self, 'audio_to_video_scale', 1.0)
+        video_to_audio_scale = getattr(self, 'video_to_audio_scale', 1.0)
 
         vx, ax = x
-        run_ax = run_ax and ax.numel() > 0
-        run_a2v = run_vx and transformer_options.get("a2v_cross_attn", True) and ax.numel() > 0
-        run_v2a = run_ax and transformer_options.get("v2a_cross_attn", True)
+        run_ax = run_ax and ax.numel() > 0 and audio_scale != 0.0
+        run_a2v = run_vx and transformer_options.get("a2v_cross_attn", True) and ax.numel() > 0 and audio_to_video_scale != 0.0
+        run_v2a = run_ax and transformer_options.get("v2a_cross_attn", True) and video_to_audio_scale != 0.0
 
         # Video self-attention.
         if run_vx:
@@ -1090,7 +1094,6 @@ def ltx2_forward(
             del norm_vx
 
             vgate_msa = self.get_ada_values(self.scale_shift_table, vx.shape[0], v_timestep, slice(2, 3))[0]
-            video_scale = getattr(self, 'video_scale', 1.0)
             vx.addcmul_(attn1_out, vgate_msa, value=video_scale)
             del vgate_msa, attn1_out
             vx.add_(self.attn2(comfy.ldm.common_dit.rms_norm(vx), context=v_context, mask=attention_mask, transformer_options=transformer_options), alpha=video_scale)
@@ -1106,7 +1109,6 @@ def ltx2_forward(
             del norm_ax
 
             agate_msa = self.get_ada_values(self.audio_scale_shift_table, ax.shape[0], a_timestep, slice(2, 3))[0]
-            audio_scale = getattr(self, 'audio_scale', 1.0)
             ax.addcmul_(attn1_out, agate_msa, value=audio_scale)
             del agate_msa, attn1_out
             ax.add_(self.audio_attn2(comfy.ldm.common_dit.rms_norm(ax), context=a_context, mask=attention_mask, transformer_options=transformer_options), alpha=audio_scale)
@@ -1131,7 +1133,6 @@ def ltx2_forward(
                 del vx_scaled, ax_scaled
 
                 gate_out_a2v = self.get_ada_values(self.scale_shift_table_a2v_ca_video[4:, :], vx.shape[0], v_cross_gate_timestep)[0]
-                audio_to_video_scale = getattr(self, 'audio_to_video_scale', 1.0)
                 vx.addcmul_(a2v_out, gate_out_a2v, value=audio_to_video_scale)
                 del gate_out_a2v, a2v_out
 
@@ -1150,7 +1151,6 @@ def ltx2_forward(
                 del ax_scaled, vx_scaled
 
                 gate_out_v2a = self.get_ada_values(self.scale_shift_table_a2v_ca_audio[4:, :], ax.shape[0], a_cross_gate_timestep)[0]
-                video_to_audio_scale = getattr(self, 'video_to_audio_scale', 1.0)
                 ax.addcmul_(v2a_out, gate_out_v2a, value=video_to_audio_scale)
                 del gate_out_v2a, v2a_out
 
@@ -1207,7 +1207,7 @@ class LTX2AttentionTunerPatch(io.ComfyNode):
             node_id="LTX2AttentionTunerPatch",
             display_name="LTX2 Attention Tuner Patch",
             category="KJNodes/ltxv",
-            description="EXPERIMENTAL AND MAY CHANGE THE MODEL OUTPUT!!",
+            description="EXPERIMENTAL! Custom LTX2 forward pass with attention scaling factors per modality, also reduces peak VRAM usage.",
             is_experimental=True,
             inputs=[
                 io.Model.Input("model"),
@@ -1216,7 +1216,6 @@ class LTX2AttentionTunerPatch(io.ComfyNode):
                 io.Float.Input("audio_scale", default=1.0, min=0.0, max=100, step=0.01, tooltip="Scaling factor for audio attention."),
                 io.Float.Input("audio_to_video_scale", default=1.0, min=0.0, max=100, step=0.01, tooltip="Scaling factor for video attention."),
                 io.Float.Input("video_to_audio_scale", default=1.0, min=0.0, max=100, step=0.01, tooltip="Scaling factor for audio attention."),
-
             ],
             outputs=[
                 io.Model.Output(display_name="model"),
@@ -1246,3 +1245,138 @@ class LTX2AttentionTunerPatch(io.ComfyNode):
             model_clone.add_object_patch(f"diffusion_model.transformer_blocks.{idx}.forward", patched_forward)
 
         return io.NodeOutput(model_clone)
+
+class LTX2MemoryEfficientSageAttentionPatch(io.ComfyNode):
+
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="LTX2MemoryEfficientSageAttentionPatch",
+            display_name="LTX2 Mem Eff Sage Attention Patch",
+            category="KJNodes/ltxv",
+            description="EXPERIMENTAL! Activates custom sageattention to reduce peak VRAM usage, overrides the attention mode",
+            is_experimental=True,
+            inputs=[
+                io.Model.Input("model"),
+            ],
+            outputs=[
+                io.Model.Output(display_name="model"),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, model) -> io.NodeOutput:
+        model_clone = model.clone()
+        diffusion_model = model_clone.get_model_object("diffusion_model")
+
+        logging.info("Applying LTX2 Memory Efficient Sage Attention Patch to all transformer blocks")
+
+        # Apply patch to all blocks, but use 1.0 scales for non-selected blocks
+        for idx, block in enumerate(diffusion_model.transformer_blocks):
+            model_clone.add_object_patch(f"diffusion_model.transformer_blocks.{idx}.attn1.forward", ltx2_sageattn_forward.__get__(block.attn1, block.attn1.__class__))
+
+        return io.NodeOutput(model_clone)
+
+try:
+    from sageattention.core import per_thread_int8_triton, per_warp_int8_cuda,per_block_int8_triton, per_channel_fp8, _cuda_archs, get_cuda_version, attn_false
+except:
+    pass
+try:
+    from sageattention.core import _qattn_sm89
+except:
+    pass
+try:
+    from sageattention.core import _qattn_sm80
+except:
+    pass
+try:
+    from sageattention.core import  _qattn_sm90
+except:
+    pass
+
+from comfy.ldm.lightricks.model import apply_rotary_emb
+
+def ltx2_sageattn_forward(self, x, context=None, mask=None, pe=None, k_pe=None, transformer_options={}):
+    q = self.to_q(x)
+    dtype = q.dtype
+    context = x if context is None else context
+    k = self.to_k(context)
+    v = self.to_v(context)
+
+    q = self.q_norm(q)
+    k = self.k_norm(k)
+
+    head_dim_og = self.dim_head
+
+    if pe is not None:
+        q = apply_rotary_emb(q, pe)
+        k = apply_rotary_emb(k, pe if k_pe is None else k_pe)
+
+    # Reshape from [batch, seq_len, total_dim] to [batch, seq_len, num_heads, head_dim]
+    batch_size, seq_len, _ = q.shape
+    num_heads = self.heads
+
+    q = q.view(batch_size, seq_len, num_heads, head_dim_og)
+    k = k.view(batch_size, k.shape[1], num_heads, head_dim_og)
+    v = v.view(batch_size, v.shape[1], num_heads, head_dim_og)
+    tensor_layout="NHD"
+    _tensor_layout = 0 if tensor_layout == "NHD" else 1
+    _is_caual = 0
+    _qk_quant_gran = 3
+    _return_lse = 0
+    sm_scale = head_dim_og**-0.5
+    quant_v_scale_max = 448.0
+
+    if _cuda_archs[0] in {"sm80", "sm86"}:
+        q_int8, q_scale, k_int8, k_scale = per_thread_int8_triton(q, k, None, tensor_layout=tensor_layout, BLKQ=128, WARPQ=32, BLKK=64, WARPK=64)
+        del q, k
+        o = torch.empty(q_int8.size(), dtype=dtype, device=q_int8.device)
+        _qattn_sm80.qk_int8_sv_f16_accum_f32_attn(q_int8, k_int8, v.to(torch.float16), o, q_scale, k_scale, _tensor_layout, _is_caual, _qk_quant_gran, sm_scale, _return_lse)
+    elif _cuda_archs[0] == "sm75":
+        q_int8, q_scale, k_int8, k_scale = per_block_int8_triton(q, k, km=None, sm_scale=sm_scale, tensor_layout=tensor_layout)
+        del q, k
+        o, lse = attn_false(q_int8, k_int8, v, q_scale, k_scale, tensor_layout=tensor_layout, output_dtype=dtype, attn_mask=None, return_lse=False)
+        del v
+
+    elif _cuda_archs[0] == "sm89":
+        if get_cuda_version() < (12, 8):
+            pv_accum_dtype = "fp32+fp32"
+        else:
+            pv_accum_dtype = "fp32+fp16"
+            quant_v_scale_max = 2.25
+        q_int8, q_scale, k_int8, k_scale = per_thread_int8_triton(q, k, None, tensor_layout=tensor_layout, BLKQ=128, WARPQ=32, BLKK=64, WARPK=64)
+        del q, k
+        v_fp8, v_scale, vm = per_channel_fp8(v, tensor_layout=tensor_layout, scale_max=quant_v_scale_max, smooth_v=False)
+        del v
+        o = torch.empty(q_int8.size(), dtype=dtype, device=q_int8.device)
+        if pv_accum_dtype == "fp32+fp16":
+            _qattn_sm89.qk_int8_sv_f8_accum_f16_fuse_v_scale_attn_inst_buf(q_int8, k_int8, v_fp8, o, q_scale, k_scale, v_scale, _tensor_layout, _is_caual, _qk_quant_gran, sm_scale, _return_lse)
+        elif pv_accum_dtype == "fp32+fp32":
+            _qattn_sm89.qk_int8_sv_f8_accum_f32_fuse_v_scale_attn_inst_buf(q_int8, k_int8, v_fp8, o, q_scale, k_scale, v_scale, _tensor_layout, _is_caual, _qk_quant_gran, sm_scale, _return_lse)
+    elif _cuda_archs[0] == "sm90":
+        q_int8, q_scale, k_int8, k_scale = per_thread_int8_triton(q, k, None, tensor_layout=tensor_layout, BLKQ=64, WARPQ=16, BLKK=128, WARPK=128)
+        del q, k,
+        v_fp8, v_scale, _ = per_channel_fp8(v, tensor_layout=tensor_layout, smooth_v=False)
+        del v
+        o = torch.empty(q_int8.size(), dtype=dtype, device=q_int8.device)
+        _qattn_sm90.qk_int8_sv_f8_accum_f32_fuse_v_scale_attn_inst_buf(q_int8, k_int8, v_fp8, o, q_scale, k_scale, v_scale, _tensor_layout, _is_caual, _qk_quant_gran, sm_scale, _return_lse)
+    elif _cuda_archs[0] == "sm120":
+        if get_cuda_version() < (12, 8):
+            pv_accum_dtype = "fp32"
+        else:
+            pv_accum_dtype = "fp32+fp16"
+            quant_v_scale_max = 2.25
+        _qk_quant_gran = 2 # per warp
+        q_int8, q_scale, k_int8, k_scale = per_warp_int8_cuda(q, k, None, tensor_layout=tensor_layout, BLKQ=128, WARPQ=32, BLKK=64)
+        del q, k
+        v_fp8, v_scale, _ = per_channel_fp8(v, tensor_layout=tensor_layout, scale_max=quant_v_scale_max, smooth_v=False)
+        del v
+        o = torch.empty(q_int8.size(), dtype=dtype, device=q_int8.device)
+        if pv_accum_dtype == "fp32":
+            _qattn_sm89.qk_int8_sv_f8_accum_f32_fuse_v_scale_attn(q_int8, k_int8, v_fp8, o, q_scale, k_scale, v_scale, _tensor_layout, _is_caual, _qk_quant_gran, sm_scale, _return_lse)
+        elif pv_accum_dtype == "fp32+fp16":
+            _qattn_sm89.qk_int8_sv_f8_accum_f16_fuse_v_scale_attn_inst_buf(q_int8, k_int8, v_fp8, o, q_scale, k_scale, v_scale, _tensor_layout, _is_caual, _qk_quant_gran, sm_scale, _return_lse)
+
+    del q_int8, q_scale, k_int8, k_scale, v_fp8, v_scale
+    out = o[..., :head_dim_og].view(batch_size, seq_len, -1)
+    return self.to_out(out)
