@@ -1362,7 +1362,7 @@ def ltx2_sageattn_forward(self, x, context=None, mask=None, pe=None, k_pe=None, 
         o, _ = attn_false(q_int8, k_int8, v, q_scale, k_scale, tensor_layout=tensor_layout, output_dtype=dtype, attn_mask=None, return_lse=False)
         del v
     elif _cuda_archs[0] == "sm89":
-        if cuda_version < (12, 8):
+        if cuda_version < (12, 8) or not sageplus_sm89_available:
             pv_accum_dtype = "fp32+fp32"
         else:
             pv_accum_dtype = "fp32+fp16"
@@ -1372,7 +1372,7 @@ def ltx2_sageattn_forward(self, x, context=None, mask=None, pe=None, k_pe=None, 
         v_fp8, v_scale, _ = per_channel_fp8(v, tensor_layout=tensor_layout, scale_max=quant_v_scale_max, smooth_v=False)
         del v
         o = torch.empty(q_int8.size(), dtype=dtype, device=q_int8.device)
-        if pv_accum_dtype == "fp32+fp16" and sageplus_sm89_available:
+        if pv_accum_dtype == "fp32+fp16":
             _qattn_sm89.qk_int8_sv_f8_accum_f16_fuse_v_scale_attn_inst_buf(q_int8, k_int8, v_fp8, o, q_scale, k_scale, v_scale, _tensor_layout, _is_caual, _qk_quant_gran, sm_scale, _return_lse)
         elif pv_accum_dtype == "fp32+fp32":
             _qattn_sm89.qk_int8_sv_f8_accum_f32_fuse_v_scale_attn_inst_buf(q_int8, k_int8, v_fp8, o, q_scale, k_scale, v_scale, _tensor_layout, _is_caual, _qk_quant_gran, sm_scale, _return_lse)
@@ -1386,7 +1386,7 @@ def ltx2_sageattn_forward(self, x, context=None, mask=None, pe=None, k_pe=None, 
         _qattn_sm90.qk_int8_sv_f8_accum_f32_fuse_v_scale_attn_inst_buf(q_int8, k_int8, v_fp8, o, q_scale, k_scale, v_scale, _tensor_layout, _is_caual, _qk_quant_gran, sm_scale, _return_lse)
         del v_fp8, v_scale
     elif _cuda_archs[0] == "sm120":
-        if cuda_version < (12, 8):
+        if cuda_version < (12, 8) or not sageplus_sm89_available:
             pv_accum_dtype = "fp32"
         else:
             pv_accum_dtype = "fp32+fp16"
@@ -1399,7 +1399,7 @@ def ltx2_sageattn_forward(self, x, context=None, mask=None, pe=None, k_pe=None, 
         o = torch.empty(q_int8.size(), dtype=dtype, device=q_int8.device)
         if pv_accum_dtype == "fp32":
             _qattn_sm89.qk_int8_sv_f8_accum_f32_fuse_v_scale_attn(q_int8, k_int8, v_fp8, o, q_scale, k_scale, v_scale, _tensor_layout, _is_caual, _qk_quant_gran, sm_scale, _return_lse)
-        elif pv_accum_dtype == "fp32+fp16" and sageplus_sm89_available:
+        elif pv_accum_dtype == "fp32+fp16":
             _qattn_sm89.qk_int8_sv_f8_accum_f16_fuse_v_scale_attn_inst_buf(q_int8, k_int8, v_fp8, o, q_scale, k_scale, v_scale, _tensor_layout, _is_caual, _qk_quant_gran, sm_scale, _return_lse)
         del v_fp8, v_scale
 
