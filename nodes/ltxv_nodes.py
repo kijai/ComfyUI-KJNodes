@@ -343,10 +343,11 @@ def normalized_attention_guidance(self, x_positive, x_negative):
     nag_guidance = x_positive * self.nag_scale - x_negative * (self.nag_scale - 1)
     del x_negative
 
-    norm_positive = torch.norm(x_positive, p=1, dim=-1, keepdim=True).expand_as(x_positive)
-    norm_guidance = torch.norm(nag_guidance, p=1, dim=-1, keepdim=True).expand_as(nag_guidance)
+    norm_positive = torch.norm(x_positive, p=1, dim=-1, keepdim=True)
+    norm_guidance = torch.norm(nag_guidance, p=1, dim=-1, keepdim=True)
 
-    scale = torch.nan_to_num(norm_guidance / norm_positive, nan=10.0)
+    scale = norm_guidance / norm_positive
+    torch.nan_to_num_(scale, nan=10.0)
     mask = scale > self.nag_tau
     del scale
 
@@ -356,10 +357,10 @@ def normalized_attention_guidance(self, x_positive, x_negative):
     nag_guidance = torch.where(mask, nag_guidance * adjustment, nag_guidance)
     del mask, adjustment
 
-    x = nag_guidance * self.nag_alpha + x_positive * (1 - self.nag_alpha)
-    del nag_guidance
+    nag_guidance.mul_(self.nag_alpha).add_(x_positive, alpha=(1 - self.nag_alpha))
+    del x_positive
 
-    return x
+    return nag_guidance
 
 #region NAG
 def ltxv_crossattn_forward_nag(self, x, context, mask=None, transformer_options={}, **kwargs):
