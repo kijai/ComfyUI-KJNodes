@@ -1254,7 +1254,7 @@ class LTX2MemoryEfficientSageAttentionPatch(io.ComfyNode):
             node_id="LTX2MemoryEfficientSageAttentionPatch",
             display_name="LTX2 Mem Eff Sage Attention Patch",
             category="KJNodes/ltxv",
-            description="EXPERIMENTAL! Activates custom sageattention to reduce peak VRAM usage, overrides the attention mode",
+            description="EXPERIMENTAL! Activates custom sageattention to reduce peak VRAM usage, overrides the attention mode. Requires latest sageattention version.",
             is_experimental=True,
             inputs=[
                 io.Model.Input("model"),
