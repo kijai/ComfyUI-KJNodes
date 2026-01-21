@@ -253,6 +253,7 @@ try:
     "LTX2AudioLatentNormalizingSampling": {"class": LTX2AudioLatentNormalizingSampling, "name": "LTX2 Audio Latent Normalizing Sampling"},
     "LTXVImgToVideoInplaceKJ": {"class": LTXVImgToVideoInplaceKJ, "name": "LTXV Img To Video Inplace KJ"},
     "LTX2AttentionTunerPatch": {"class": LTX2AttentionTunerPatch, "name": "LTX2 Attention Tuner Patch"},
+    "LTX2MemoryEfficientSageAttentionPatch": {"class": LTX2MemoryEfficientSageAttentionPatch, "name": "LTX2 Memory Efficient Sage Attention Patch"},
     })
 except ImportError:
     pass
