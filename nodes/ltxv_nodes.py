@@ -1278,8 +1278,12 @@ class LTX2MemoryEfficientSageAttentionPatch(io.ComfyNode):
         return io.NodeOutput(model_clone)
 
 try:
-    from sageattention.core import per_thread_int8_triton, per_warp_int8_cuda,per_block_int8_triton, per_channel_fp8, get_cuda_arch_versions, get_cuda_version, attn_false
+    from sageattention.core import per_thread_int8_triton, per_warp_int8_cuda,per_block_int8_triton, per_channel_fp8, get_cuda_arch_versions, attn_false
     _cuda_archs = get_cuda_arch_versions()
+    def get_cuda_version():
+        version = torch.version.cuda
+        major, minor = version.split('.')
+        return int(major), int(minor)
 except:
     pass
 try:
