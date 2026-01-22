@@ -842,6 +842,7 @@ class LTX2SamplingPreviewOverride(io.ComfyNode):
         if vae is not None:
             if vae.first_stage_model.__class__.__name__ == "TAEHV":
                 taeltx = True
+                latent_upscale_model=None
         model.add_wrapper_with_key(comfy.patcher_extension.WrappersMP.OUTER_SAMPLE, "sampling_preview", OuterSampleCallbackWrapper(latent_upscale_model, vae, preview_rate, taeltx))
         return io.NodeOutput(model)
 
