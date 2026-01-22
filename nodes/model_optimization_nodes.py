@@ -1940,3 +1940,47 @@ class ModelMemoryUseReportPatch:
         model_clone.add_callback(CallbacksMP.ON_CLEANUP, report_mem_usage)
 
         return (model_clone,)
+
+
+class MemoryUsageFactorAdjustWrapper:
+    def __init__(self, memory_usage_factor, original_factor):
+        self.memory_usage_factor = memory_usage_factor
+        self.original_factor = original_factor
+
+    def __call__(self, executor, model, noise_shape: torch.Tensor, *args, **kwargs):
+        m = model.clone()
+        m.model.memory_usage_factor = self.memory_usage_factor
+        logging.info(f"Set memory usage factor to {self.memory_usage_factor}")
+        try:
+            result = executor(m, noise_shape, *args, **kwargs)
+        finally:
+            logging.info(f"Restoring original memory usage factor: {self.original_factor}")
+            m.model.memory_usage_factor = self.original_factor
+        return result
+
+class ModelMemoryUsageFactorOverride:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": {
+            "model": ("MODEL",),
+            "memory_usage_factor": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 100.0, "step": 0.001}),
+        }}
+
+    RETURN_TYPES = ("MODEL",)
+    FUNCTION = "patch"
+    DESCRIPTION = "Overrides the memory usage factor of the model during sampling."
+    EXPERIMENTAL = True
+    CATEGORY = "KJNodes/experimental"
+
+    def patch(self, model, memory_usage_factor):
+        model_clone = model.clone()
+        original_memory_usage_factor = model_clone.model.memory_usage_factor
+        logging.info(f"Original memory usage factor: {original_memory_usage_factor}")
+
+        wrapper = MemoryUsageFactorAdjustWrapper(memory_usage_factor, original_memory_usage_factor)
+        model_clone.add_wrapper_with_key(
+            comfy.patcher_extension.WrappersMP.PREPARE_SAMPLING,
+            "memory_usage_factor_adjust_prepare_sampling",
+            wrapper
+        )
+        return (model_clone,)
