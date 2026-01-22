@@ -355,7 +355,7 @@ def normalized_attention_guidance(self, x_positive, x_negative):
     adjustment = (norm_positive * self.nag_tau) / (norm_guidance + 1e-7)
     del norm_positive, norm_guidance
 
-    nag_guidance = torch.where(mask, nag_guidance * adjustment, nag_guidance)
+    nag_guidance.mul_(torch.where(mask, adjustment, 1.0))
     del mask, adjustment
 
     nag_guidance.sub_(x_positive).mul_(self.nag_alpha).add_(x_positive)
