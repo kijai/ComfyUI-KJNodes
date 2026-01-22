@@ -1281,9 +1281,15 @@ class LTX2MemoryEfficientSageAttentionPatch(io.ComfyNode):
 
 
 def get_cuda_version():
-    version = torch.version.cuda
-    major, minor = version.split('.')
-    return int(major), int(minor)
+    try:
+        version = torch.version.cuda
+        if version is not None:
+            major, minor = version.split('.')
+            return int(major), int(minor)
+        else:
+            return 0, 0
+    except Exception:
+        return 0, 0
 
 sageplus_sm89_available = False
 try:
