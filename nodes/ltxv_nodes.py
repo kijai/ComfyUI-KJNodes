@@ -1353,14 +1353,14 @@ def ltx2_sageattn_forward(self, x, context=None, mask=None, pe=None, k_pe=None, 
     quant_v_scale_max = 448.0
 
     if _cuda_archs[0] in {"sm80", "sm86"}:
-        q_int8, q_scale, k_int8, k_scale = per_thread_int8_triton(q, k, None, tensor_layout=tensor_layout, BLKQ=128, WARPQ=32, BLKK=64, WARPK=64)
+        q_int8, q_scale, k_int8, k_scale = per_thread_int8_triton(q, k, km=k.mean(dim=1, keepdim=True), tensor_layout=tensor_layout, BLKQ=128, WARPQ=32, BLKK=64, WARPK=64)
         del q, k
         o = torch.empty(q_int8.size(), dtype=dtype, device=q_int8.device)
         v_fp16 = v.to(torch.float16).contiguous()
         del v
         _qattn_sm80.qk_int8_sv_f16_accum_f32_attn(q_int8, k_int8, v_fp16, o, q_scale, k_scale, _tensor_layout, _is_caual, _qk_quant_gran, sm_scale, _return_lse)
     elif _cuda_archs[0] == "sm75":
-        q_int8, q_scale, k_int8, k_scale = per_block_int8_triton(q, k, km=None, sm_scale=sm_scale, tensor_layout=tensor_layout)
+        q_int8, q_scale, k_int8, k_scale = per_block_int8_triton(q, k, km=k.mean(dim=1, keepdim=True), sm_scale=sm_scale, tensor_layout=tensor_layout)
         del q, k
         o, _ = attn_false(q_int8, k_int8, v, q_scale, k_scale, tensor_layout=tensor_layout, output_dtype=dtype, attn_mask=None, return_lse=False)
         del v
@@ -1370,7 +1370,7 @@ def ltx2_sageattn_forward(self, x, context=None, mask=None, pe=None, k_pe=None, 
         else:
             pv_accum_dtype = "fp32+fp16"
             quant_v_scale_max = 2.25
-        q_int8, q_scale, k_int8, k_scale = per_thread_int8_triton(q, k, None, tensor_layout=tensor_layout, BLKQ=128, WARPQ=32, BLKK=64, WARPK=64)
+        q_int8, q_scale, k_int8, k_scale = per_thread_int8_triton(q, k, km=k.mean(dim=1, keepdim=True), tensor_layout=tensor_layout, BLKQ=128, WARPQ=32, BLKK=64, WARPK=64)
         del q, k
         v_fp8, v_scale, _ = per_channel_fp8(v, tensor_layout=tensor_layout, scale_max=quant_v_scale_max, smooth_v=False)
         del v
@@ -1381,7 +1381,7 @@ def ltx2_sageattn_forward(self, x, context=None, mask=None, pe=None, k_pe=None, 
             _qattn_sm89.qk_int8_sv_f8_accum_f32_fuse_v_scale_attn_inst_buf(q_int8, k_int8, v_fp8, o, q_scale, k_scale, v_scale, _tensor_layout, _is_caual, _qk_quant_gran, sm_scale, _return_lse)
         del v_fp8, v_scale
     elif _cuda_archs[0] == "sm90":
-        q_int8, q_scale, k_int8, k_scale = per_thread_int8_triton(q, k, None, tensor_layout=tensor_layout, BLKQ=64, WARPQ=16, BLKK=128, WARPK=128)
+        q_int8, q_scale, k_int8, k_scale = per_thread_int8_triton(q, k, km=k.mean(dim=1, keepdim=True), tensor_layout=tensor_layout, BLKQ=64, WARPQ=16, BLKK=128, WARPK=128)
         del q, k,
         v_fp8, v_scale, _ = per_channel_fp8(v, tensor_layout=tensor_layout, smooth_v=False)
         del v
@@ -1395,7 +1395,7 @@ def ltx2_sageattn_forward(self, x, context=None, mask=None, pe=None, k_pe=None, 
             pv_accum_dtype = "fp32+fp16"
             quant_v_scale_max = 2.25
         _qk_quant_gran = 2 # per warp
-        q_int8, q_scale, k_int8, k_scale = per_warp_int8_cuda(q, k, None, tensor_layout=tensor_layout, BLKQ=128, WARPQ=32, BLKK=64)
+        q_int8, q_scale, k_int8, k_scale = per_warp_int8_cuda(q, k, km=k.mean(dim=1, keepdim=True), tensor_layout=tensor_layout, BLKQ=128, WARPQ=32, BLKK=64)
         del q, k
         v_fp8, v_scale, _ = per_channel_fp8(v, tensor_layout=tensor_layout, scale_max=quant_v_scale_max, smooth_v=False)
         del v
