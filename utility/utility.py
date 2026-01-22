@@ -86,3 +86,37 @@ def string_to_color(color_string: str) -> List[int]:
     color_list = np.clip(color_list, 0, 255).tolist()
 
     return color_list
+
+_cuda_version_cache = None
+
+def get_cuda_version():
+    """
+    Get CUDA version with robust error handling and caching.
+
+    Returns:
+        tuple: (major, minor) version as integers, or (0, 0) if unavailable
+
+    This function handles:
+    - CPU-only builds where torch.version.cuda is None
+    - Malformed version strings
+    - Caching to avoid repeated parsing
+
+    Example:
+        >>> get_cuda_version()
+        (12, 1)
+        >>> # CPU build
+        >>> get_cuda_version()
+        (0, 0)
+    """
+    global _cuda_version_cache
+    if _cuda_version_cache is None:
+        version = getattr(torch.version, 'cuda', None)
+        if version is None:
+            _cuda_version_cache = (0, 0)
+        else:
+            try:
+                parts = version.split('.')[:2]
+                _cuda_version_cache = (int(parts[0]), int(parts[1]))
+            except (ValueError, IndexError):
+                _cuda_version_cache = (0, 0)
+    return _cuda_version_cache
