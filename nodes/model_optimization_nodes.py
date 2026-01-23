@@ -1950,11 +1950,11 @@ class MemoryUsageFactorAdjustWrapper:
     def __call__(self, executor, model, noise_shape: torch.Tensor, *args, **kwargs):
         m = model.clone()
         m.model.memory_usage_factor = self.memory_usage_factor
-        logging.info(f"Set memory usage factor to {self.memory_usage_factor}")
+        logging.info(f"Temporarily set memory usage factor to {self.memory_usage_factor}")
         try:
             result = executor(m, noise_shape, *args, **kwargs)
         finally:
-            logging.info(f"Restoring original memory usage factor: {self.original_factor}")
+            logging.info(f"Model memory usage calculated, restoring original memory usage factor: {self.original_factor}")
             m.model.memory_usage_factor = self.original_factor
         return result
 
