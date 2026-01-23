@@ -340,7 +340,10 @@ def nag_attention(self, query, context_positive, nag_context, transformer_option
     return x_positive, x_negative
 
 def normalized_attention_guidance(self, x_positive, x_negative):
-    nag_guidance = x_negative.mul_(self.nag_scale - 1).neg_().add_(x_positive, alpha=self.nag_scale)
+    if self.inplace:
+        nag_guidance = x_negative.mul_(self.nag_scale - 1).neg_().add_(x_positive, alpha=self.nag_scale)
+    else:
+        nag_guidance = x_positive * self.nag_scale - x_negative * (self.nag_scale - 1)
 
     del x_negative
 
@@ -358,7 +361,10 @@ def normalized_attention_guidance(self, x_positive, x_negative):
     nag_guidance.mul_(torch.where(mask, adjustment, 1.0))
     del mask, adjustment
 
-    nag_guidance.sub_(x_positive).mul_(self.nag_alpha).add_(x_positive)
+    if self.inplace:
+        nag_guidance.sub_(x_positive).mul_(self.nag_alpha).add_(x_positive)
+    else:
+        nag_guidance = nag_guidance * self.nag_alpha + x_positive * (1 - self.nag_alpha)
     del x_positive
 
     return nag_guidance
@@ -399,11 +405,12 @@ def ltxv_crossattn_forward_nag(self, x, context, mask=None, transformer_options=
 
 
 class LTXVCrossAttentionPatch:
-    def __init__(self, context, nag_scale, nag_alpha, nag_tau):
+    def __init__(self, context, nag_scale, nag_alpha, nag_tau, inplace=True):
         self.nag_context = context
         self.nag_scale = nag_scale
         self.nag_alpha = nag_alpha
         self.nag_tau = nag_tau
+        self.inplace = inplace
 
     def __get__(self, obj, objtype=None):
         # Create bound method with stored parameters
@@ -412,6 +419,7 @@ class LTXVCrossAttentionPatch:
             self_module.nag_scale = self.nag_scale
             self_module.nag_alpha = self.nag_alpha
             self_module.nag_tau = self.nag_tau
+            self_module.inplace = self.inplace
 
             return ltxv_crossattn_forward_nag(self_module, *args, **kwargs)
         return types.MethodType(wrapped_attention, obj)
@@ -433,6 +441,7 @@ class LTX2_NAG(io.ComfyNode):
                 io.Float.Input("nag_tau", default=2.5, min=0.0, max=10.0, step=0.001, tooltip="Clipping threshold that controls how much the guided attention can deviate from the positive attention."),
                 io.Conditioning.Input("nag_cond_video", optional=True),
                 io.Conditioning.Input("nag_cond_audio", optional=True),
+                io.Boolean.Input("inplace", default=True, optional=True, tooltip="If true, modifies tensors in place to save memory. Leads to different numerical results which may change the output slightly."),
             ],
             outputs=[
                 io.Model.Output(display_name="model"),
@@ -440,7 +449,7 @@ class LTX2_NAG(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, model, nag_scale, nag_alpha, nag_tau, nag_cond_video=None, nag_cond_audio=None) -> io.NodeOutput:
+    def execute(cls, model, nag_scale, nag_alpha, nag_tau, nag_cond_video=None, nag_cond_audio=None, inplace=True) -> io.NodeOutput:
         if nag_scale == 0:
             return io.NodeOutput(model)
 
@@ -466,7 +475,7 @@ class LTX2_NAG(io.ComfyNode):
             diffusion_model.caption_projection.to(offload_device)
             context_video = context_video.view(1, -1, img_dim)
             for idx, block in enumerate(diffusion_model.transformer_blocks):
-                patched_attn2 = LTXVCrossAttentionPatch(context_video, nag_scale, nag_alpha, nag_tau).__get__(block.attn2, block.__class__)
+                patched_attn2 = LTXVCrossAttentionPatch(context_video, nag_scale, nag_alpha, nag_tau, inplace=inplace).__get__(block.attn2, block.__class__)
                 model_clone.add_object_patch(f"diffusion_model.transformer_blocks.{idx}.attn2.forward", patched_attn2)
 
         if nag_cond_audio is not None and diffusion_model.audio_caption_projection is not None:
@@ -477,7 +486,7 @@ class LTX2_NAG(io.ComfyNode):
             diffusion_model.audio_caption_projection.to(offload_device)
             context_audio = context_audio.view(1, -1, audio_dim)
             for idx, block in enumerate(diffusion_model.transformer_blocks):
-                patched_audio_attn2 = LTXVCrossAttentionPatch(context_audio, nag_scale, nag_alpha, nag_tau).__get__(block.audio_attn2, block.__class__)
+                patched_audio_attn2 = LTXVCrossAttentionPatch(context_audio, nag_scale, nag_alpha, nag_tau, inplace=inplace).__get__(block.audio_attn2, block.__class__)
                 model_clone.add_object_patch(f"diffusion_model.transformer_blocks.{idx}.audio_attn2.forward", patched_audio_attn2)
 
         return io.NodeOutput(model_clone)
