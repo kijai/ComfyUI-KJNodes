@@ -1984,3 +1984,60 @@ class ModelMemoryUsageFactorOverride:
             wrapper
         )
         return (model_clone,)
+
+def wan_ffn_chunked_forward(self, x):
+    if x.shape[1] > self.dim_threshold:
+        chunks = torch.chunk(x, self.num_chunks, dim=1)
+        output_chunks = []
+        for chunk in chunks:
+            output_chunks.append(torch.nn.Sequential.forward(self, chunk))
+        chunked = torch.cat(output_chunks, dim=1)
+        return chunked
+    else:
+        return torch.nn.Sequential.forward(self, x)
+
+class WanffnChunkPatch:
+    def __init__(self, num_chunks, dim_threshold=4096):
+        self.num_chunks = num_chunks
+        self.dim_threshold = dim_threshold
+
+    def __get__(self, obj, objtype=None):
+        def wrapped_forward(self_module, *args, **kwargs):
+            self_module.num_chunks = self.num_chunks
+            self_module.dim_threshold = self.dim_threshold
+            return wan_ffn_chunked_forward(self_module, *args, **kwargs)
+        return types.MethodType(wrapped_forward, obj)
+
+class WanChunkFeedForward(io.ComfyNode):
+
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="WanChunkFeedForward",
+            display_name="Wan Chunk FeedForward",
+            category="KJNodes/wan",
+            description="EXPERIMENTAL AND MAY CHANGE THE MODEL OUTPUT!! Chunks feedforward activations to reduce peak VRAM usage.",
+            is_experimental=True,
+            inputs=[
+                io.Model.Input("model"),
+                io.Int.Input("chunks", default=2, min=1, max=100, step=1, tooltip="Number of chunks to split the feedforward activations into to reduce peak VRAM usage."),
+                io.Int.Input("dim_threshold", default=4096, min=1024, max=16384, step=256, tooltip="Dimension threshold above which to apply chunking."),
+            ],
+            outputs=[
+                io.Model.Output(display_name="model"),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, model, chunks, dim_threshold) -> io.NodeOutput:
+        if chunks == 1:
+            return io.NodeOutput(model)
+
+        model_clone = model.clone()
+        diffusion_model = model_clone.get_model_object("diffusion_model")
+
+        for idx, block in enumerate(diffusion_model.blocks):
+            patched_ffn = WanffnChunkPatch(chunks, dim_threshold).__get__(block.ffn, block.__class__)
+            model_clone.add_object_patch(f"diffusion_model.blocks.{idx}.ffn.forward", patched_ffn)
+
+        return io.NodeOutput(model_clone)
