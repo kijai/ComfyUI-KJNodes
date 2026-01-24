@@ -3144,6 +3144,8 @@ class VisualizeSigmasKJ(io.ComfyNode):
             if end_step != -1:
                 end_idx = end_step - 1
 
+        import matplotlib
+        matplotlib.use('Agg')
         import matplotlib.pyplot as plt
         sigmas_np = sigmas.cpu().numpy()
         if not np.isclose(sigmas_np[-1], 0.0, atol=1e-6):
