@@ -184,6 +184,7 @@ NODE_CONFIG = {
     "FluxBlockLoraSelect": {"class": FluxBlockLoraSelect, "name": "Flux Block Lora Select"},
     "HunyuanVideoBlockLoraSelect": {"class": HunyuanVideoBlockLoraSelect, "name": "Hunyuan Video Block Lora Select"},
     "Wan21BlockLoraSelect": {"class": Wan21BlockLoraSelect, "name": "Wan21 Block Lora Select"},
+    "LTX2BlockLoraSelect": {"class": LTX2BlockLoraSelect, "name": "LTX2 Block Lora Select"},
     "CustomControlNetWeightsFluxFromList": {"class": CustomControlNetWeightsFluxFromList, "name": "Custom ControlNet Weights Flux From List"},
     "CheckpointLoaderKJ": {"class": CheckpointLoaderKJ, "name": "CheckpointLoaderKJ"},
     "DiffusionModelLoaderKJ": {"class": DiffusionModelLoaderKJ, "name": "Diffusion Model Loader KJ"},

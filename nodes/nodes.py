@@ -1943,6 +1943,29 @@ class Wan21BlockLoraSelect:
 
     def load_lora(self, **kwargs):
         return (kwargs,)
+
+class LTX2BlockLoraSelect:
+    @classmethod
+    def INPUT_TYPES(s):
+        arg_dict = {}
+        argument = ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1000.0, "step": 0.01})
+
+        for i in range(48):
+            arg_dict["blocks.{}.".format(i)] = argument
+
+        return {"required": arg_dict}
+    
+    RETURN_TYPES = ("SELECTEDDITBLOCKS", )
+    RETURN_NAMES = ("blocks", )
+    OUTPUT_TOOLTIPS = ("The modified diffusion model.",)
+    FUNCTION = "load_lora"
+
+    CATEGORY = "KJNodes/experimental"
+    DESCRIPTION = "Select individual block alpha values, value of 0 removes the block altogether"
+
+    def load_lora(self, **kwargs):
+        return (kwargs,)
+
     
 class DiTBlockLoraLoader:
     def __init__(self):
