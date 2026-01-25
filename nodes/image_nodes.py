@@ -891,31 +891,36 @@ with repeats 2 becomes batch of 10 images: 0, 0, 1, 1, 2, 2, 3, 3, 4, 4
 
         print("mask shape", mask.shape)
         return (repeated_images, mask)
-    
+
 class ImageUpscaleWithModelBatched:
     @classmethod
     def INPUT_TYPES(s):
         return {"required": { "upscale_model": ("UPSCALE_MODEL",),
                               "images": ("IMAGE",),
                               "per_batch": ("INT", {"default": 16, "min": 1, "max": 4096, "step": 1}),
-                              }}
+                              },
+                "optional": {
+                    "downscale_ratio": ("FLOAT", {"default": 1.0, "min": 0.01, "max": 1.0, "step": 0.01}),
+                    "downscale_method": (["nearest-exact", "bilinear", "area", "bicubic", "lanczos"], {"default": "lanczos"}),
+                }}
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "upscale"
     CATEGORY = "KJNodes/image"
     DESCRIPTION = """
 Same as ComfyUI native model upscaling node,  
 but allows setting sub-batches for reduced VRAM usage.
+Optionally downscale the result with a ratio.
 """
-    def upscale(self, upscale_model, images, per_batch):
-        
+    def upscale(self, upscale_model, images, per_batch, downscale_ratio=1.0, downscale_method="lanczos"):
+
         device = model_management.get_torch_device()
         upscale_model.to(device)
         in_img = images.movedim(-1,-3)
-        
+
         steps = in_img.shape[0]
         pbar = ProgressBar(steps)
         t = []
-        
+
         for start_idx in range(0, in_img.shape[0], per_batch):
             sub_images = upscale_model(in_img[start_idx:start_idx+per_batch].to(device))
             t.append(sub_images.cpu())
@@ -924,8 +929,18 @@ but allows setting sub-batches for reduced VRAM usage.
             # Update the progress bar by the number of images processed in this batch
             pbar.update(batch_count)
         upscale_model.cpu()
-        
+
         t = torch.cat(t, dim=0).permute(0, 2, 3, 1).cpu()
+
+        # Apply downscaling if ratio is less than 1.0
+        if downscale_ratio < 1.0:
+            original_height = t.shape[1]
+            original_width = t.shape[2]
+            new_height = int(original_height * downscale_ratio)
+            new_width = int(original_width * downscale_ratio)
+            t = t.movedim(-1, 1)
+            t = common_upscale(t, new_width, new_height, downscale_method, "disabled")
+            t = t.movedim(1, -1)
 
         return (t,)
 
