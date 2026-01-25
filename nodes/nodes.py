@@ -2853,15 +2853,27 @@ class SimpleCalculatorKJ:
             "optional": {
                 "a": (IO.ANY, {"default": 0.0, "min": -1e10, "max": 1e10, "step": 0.01, "forceInput": True}),
                 "b": (IO.ANY, {"default": 0.0, "min": -1e10, "max": 1e10, "step": 0.01, "forceInput": True}),
+                "x": (IO.ANY, {"default": 0.0, "min": -1e10, "max": 1e10, "step": 0.01, "forceInput": True}),
+                "y": (IO.ANY, {"default": 0.0, "min": -1e10, "max": 1e10, "step": 0.01, "forceInput": True}),
+                "var1": (IO.ANY, {"default": 0.0, "min": -1e10, "max": 1e10, "step": 0.01, "forceInput": True}),
+                "var2": (IO.ANY, {"default": 0.0, "min": -1e10, "max": 1e10, "step": 0.01, "forceInput": True}),
+                "var3": (IO.ANY, {"default": 0.0, "min": -1e10, "max": 1e10, "step": 0.01, "forceInput": True}),
+                "var4": (IO.ANY, {"default": 0.0, "min": -1e10, "max": 1e10, "step": 0.01, "forceInput": True}),
+                "var5": (IO.ANY, {"default": 0.0, "min": -1e10, "max": 1e10, "step": 0.01, "forceInput": True}),
+                "var6": (IO.ANY, {"default": 0.0, "min": -1e10, "max": 1e10, "step": 0.01, "forceInput": True}),
+                "var7": (IO.ANY, {"default": 0.0, "min": -1e10, "max": 1e10, "step": 0.01, "forceInput": True}),
+                "var8": (IO.ANY, {"default": 0.0, "min": -1e10, "max": 1e10, "step": 0.01, "forceInput": True}),
+                "var9": (IO.ANY, {"default": 0.0, "min": -1e10, "max": 1e10, "step": 0.01, "forceInput": True}),
+                "var10": (IO.ANY, {"default": 0.0, "min": -1e10, "max": 1e10, "step": 0.01, "forceInput": True}),
             }
         }
 
     RETURN_TYPES = ("FLOAT", "INT",)
     FUNCTION = "calculate"
     CATEGORY = "KJNodes/misc"
-    DESCRIPTION = "Calculator node that evaluates a mathematical expression using inputs a and b."
+    DESCRIPTION = "Calculator node that evaluates a mathematical expression. Supports variables: a, b, x, y, var1-var10. Inputs appear dynamically when connected."
 
-    def calculate(self, expression, a=None, b=None):
+    def calculate(self, expression, a=None, b=None, x=None, y=None, **kwargs):
 
         import ast
         import operator
@@ -2882,7 +2894,20 @@ class SimpleCalculatorKJ:
         }
 
         # Allowed constants
-        allowed_names = {'a': a, 'b': b, 'pi': math.pi, 'e': math.e}
+        allowed_names = {'pi': math.pi, 'e': math.e}
+        # Add connected variables only (not None)
+        if a is not None:
+            allowed_names['a'] = a
+        if b is not None:
+            allowed_names['b'] = b
+        if x is not None:
+            allowed_names['x'] = x
+        if y is not None:
+            allowed_names['y'] = y
+        # Add var1-var10 from kwargs
+        for key, value in kwargs.items():
+            if key.startswith('var') and value is not None:
+                allowed_names[key] = value
 
         def eval_node(node):
             if isinstance(node, ast.Constant):  # Numbers
