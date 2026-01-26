@@ -258,8 +258,8 @@ try:
     "LTX2AttentionTunerPatch": {"class": LTX2AttentionTunerPatch, "name": "LTX2 Attention Tuner Patch"},
     "LTX2MemoryEfficientSageAttentionPatch": {"class": LTX2MemoryEfficientSageAttentionPatch, "name": "LTX2 Memory Efficient Sage Attention Patch"},
     })
-except ImportError:
-    pass
+except Exception as e:
+    logging.warning(f"KJNodes: LTXV nodes could not be imported. LTXV nodes will be unavailable. Error: {e}")
 
 def generate_node_mappings(node_config):
     node_class_mappings = {}
