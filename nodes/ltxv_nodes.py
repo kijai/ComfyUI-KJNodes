@@ -494,12 +494,12 @@ class LTX2_NAG(io.ComfyNode):
 
 def ffn_chunked_forward(self, x):
     if x.shape[1] > self.dim_threshold:
-        chunks = torch.chunk(x, self.num_chunks, dim=1)
-        output_chunks = []
-        for chunk in chunks:
-            output_chunks.append(self.net(chunk))
-        chunked = torch.cat(output_chunks, dim=1)
-        return chunked
+        chunk_size = x.shape[1] // self.num_chunks
+        for i in range(self.num_chunks):
+            start_idx = i * chunk_size
+            end_idx = (i + 1) * chunk_size if i < self.num_chunks - 1 else x.shape[1]
+            x[:, start_idx:end_idx] = self.net(x[:, start_idx:end_idx])
+        return x
     else:
         return self.net(x)
 
@@ -527,8 +527,8 @@ class LTXVChunkFeedForward(io.ComfyNode):
             is_experimental=True,
             inputs=[
                 io.Model.Input("model"),
-                io.Int.Input("chunks", default=4, min=1, max=100, step=1, tooltip="Number of chunks to split the feedforward activations into to reduce peak VRAM usage."),
-                io.Int.Input("dim_threshold", default=4096, min=1024, max=16384, step=256, tooltip="Dimension threshold above which to apply chunking."),
+                io.Int.Input("chunks", default=2, min=1, max=100, step=1, tooltip="Number of chunks to split the feedforward activations into to reduce peak VRAM usage."),
+                io.Int.Input("dim_threshold", default=4096, min=0, max=16384, step=256, tooltip="Dimension threshold above which to apply chunking."),
             ],
             outputs=[
                 io.Model.Output(display_name="model"),
@@ -1131,41 +1131,42 @@ def ltx2_forward(
 
             # audio to video cross attention
             if run_a2v:
-                scale_ca_audio_hidden_states_a2v, shift_ca_audio_hidden_states_a2v = self.get_ada_values(
-                    self.scale_shift_table_a2v_ca_audio[:4, :], ax.shape[0], a_cross_scale_shift_timestep)[:2]
                 scale_ca_video_hidden_states_a2v_v, shift_ca_video_hidden_states_a2v_v = self.get_ada_values(
-                    self.scale_shift_table_a2v_ca_video[:4, :], vx.shape[0], v_cross_scale_shift_timestep)[:2]
-
+                    self.scale_shift_table_a2v_ca_video[:4, :], vx.shape[0], v_cross_scale_shift_timestep, slice(0, 2))
                 vx_scaled = vx_norm3 * (1 + scale_ca_video_hidden_states_a2v_v) + shift_ca_video_hidden_states_a2v_v
+                del scale_ca_video_hidden_states_a2v_v, shift_ca_video_hidden_states_a2v_v
+
+                scale_ca_audio_hidden_states_a2v, shift_ca_audio_hidden_states_a2v = self.get_ada_values(
+                    self.scale_shift_table_a2v_ca_audio[:4, :], ax.shape[0], a_cross_scale_shift_timestep, slice(0, 2))
+
                 ax_scaled = ax_norm3 * (1 + scale_ca_audio_hidden_states_a2v) + shift_ca_audio_hidden_states_a2v
-                del scale_ca_video_hidden_states_a2v_v, shift_ca_video_hidden_states_a2v_v, scale_ca_audio_hidden_states_a2v, shift_ca_audio_hidden_states_a2v
+                del scale_ca_audio_hidden_states_a2v, shift_ca_audio_hidden_states_a2v
 
                 a2v_out = self.audio_to_video_attn(vx_scaled, context=ax_scaled, pe=v_cross_pe, k_pe=a_cross_pe, transformer_options=transformer_options)
                 del vx_scaled, ax_scaled
 
-                gate_out_a2v = self.get_ada_values(self.scale_shift_table_a2v_ca_video[4:, :], vx.shape[0], v_cross_gate_timestep)[0]
+                gate_out_a2v = self.get_ada_values(self.scale_shift_table_a2v_ca_video[4:, :], vx.shape[0], v_cross_gate_timestep, slice(0, 1))[0]
                 vx.addcmul_(a2v_out, gate_out_a2v, value=audio_to_video_scale)
                 del gate_out_a2v, a2v_out
 
             # video to audio cross attention
             if run_v2a:
-                scale_ca_audio_hidden_states_v2a, shift_ca_audio_hidden_states_v2a = self.get_ada_values(
-                    self.scale_shift_table_a2v_ca_audio[:4, :], ax.shape[0], a_cross_scale_shift_timestep)[2:4]
                 scale_ca_video_hidden_states_v2a, shift_ca_video_hidden_states_v2a = self.get_ada_values(
-                    self.scale_shift_table_a2v_ca_video[:4, :], vx.shape[0], v_cross_scale_shift_timestep)[2:4]
-
-                ax_scaled = ax_norm3 * (1 + scale_ca_audio_hidden_states_v2a) + shift_ca_audio_hidden_states_v2a
+                    self.scale_shift_table_a2v_ca_video[:4, :], vx.shape[0], v_cross_scale_shift_timestep, slice(2, 4))
                 vx_scaled = vx_norm3 * (1 + scale_ca_video_hidden_states_v2a) + shift_ca_video_hidden_states_v2a
-                del scale_ca_video_hidden_states_v2a, shift_ca_video_hidden_states_v2a, scale_ca_audio_hidden_states_v2a, shift_ca_audio_hidden_states_v2a
+                del scale_ca_video_hidden_states_v2a, shift_ca_video_hidden_states_v2a, vx_norm3
+
+                scale_ca_audio_hidden_states_v2a, shift_ca_audio_hidden_states_v2a = self.get_ada_values(
+                    self.scale_shift_table_a2v_ca_audio[:4, :], ax.shape[0], a_cross_scale_shift_timestep, slice(2, 4))
+                ax_scaled = ax_norm3 * (1 + scale_ca_audio_hidden_states_v2a) + shift_ca_audio_hidden_states_v2a
+                del scale_ca_audio_hidden_states_v2a, shift_ca_audio_hidden_states_v2a, ax_norm3
 
                 v2a_out = self.video_to_audio_attn(ax_scaled, context=vx_scaled, pe=a_cross_pe, k_pe=v_cross_pe, transformer_options=transformer_options)
                 del ax_scaled, vx_scaled
 
-                gate_out_v2a = self.get_ada_values(self.scale_shift_table_a2v_ca_audio[4:, :], ax.shape[0], a_cross_gate_timestep)[0]
+                gate_out_v2a = self.get_ada_values(self.scale_shift_table_a2v_ca_audio[4:, :], ax.shape[0], a_cross_gate_timestep, slice(0, 1))[0]
                 ax.addcmul_(v2a_out, gate_out_v2a, value=video_to_audio_scale)
                 del gate_out_v2a, v2a_out
-
-            del vx_norm3, ax_norm3
 
         # video feedforward
         if run_vx:
