@@ -23,6 +23,30 @@ function addNode(name, nextTo, options) {
 		
 		nextTo.pos[1] + options.shiftY,
 	];
+	
+	// Automatically connect nodes
+	if (options.side === "left") {
+		// New node on left: connect new node's output to nextTo's first available input
+		if (node.outputs && node.outputs.length > 0 && nextTo.inputs && nextTo.inputs.length > 0) {
+			for (let i = 0; i < nextTo.inputs.length; i++) {
+				if (!nextTo.inputs[i].link) {
+					node.connect(0, nextTo, i);
+					break;
+				}
+			}
+		}
+	} else {
+		// New node on right: connect nextTo's output to new node's first available input
+		if (nextTo.outputs && nextTo.outputs.length > 0 && node.inputs && node.inputs.length > 0) {
+			for (let i = 0; i < node.inputs.length; i++) {
+				if (!node.inputs[i].link) {
+					nextTo.connect(0, node, i);
+					break;
+				}
+			}
+		}
+	}
+	
 	if (options.select) {
 		app.canvas.selectNode(node, false);
 	}
@@ -41,7 +65,11 @@ app.registerExtension({
 					},
 					{
 					content: "Add SetNode",
-					callback: () => {addNode("SetNode", this, { side:"right", offset: 30 });
+					callback: () => {addNode("SetNode", this, { side:"right", offset: 30 });}
+					},
+					{
+					content: "Add PreviewAsTextNode",
+					callback: () => {addNode("PreviewAny", this, { side:"right", offset: 30 });
 					},
 				});
 			});
