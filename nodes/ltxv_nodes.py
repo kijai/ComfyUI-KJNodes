@@ -1,5 +1,7 @@
 from comfy_extras.nodes_lt import get_noise_mask, LTXVAddGuide
 import types
+import math
+from typing import Tuple
 import comfy
 from comfy_api.latest import io
 import numpy as np
@@ -549,7 +551,7 @@ class LTXVChunkFeedForward(io.ComfyNode):
 
         return io.NodeOutput(model_clone)
 
-import math
+
 
 #borrowed VideoHelperSuite https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite/blob/main/videohelpersuite/latent_preview.py
 import server
@@ -813,7 +815,8 @@ class OuterSampleCallbackWrapper:
             self.latent_upscale_model.to(device)
         if self.vae is not None and self.taeltx:
             self.vae.first_stage_model.to(device)
-        new_callback = prepare_callback(guider.model_patcher, len(sigmas) -1, shape=latent_shapes[0] if len(latent_shapes) > 1 else latent_shapes, x0_output_dict=self.x0_output, latent_upscale_model=self.latent_upscale_model, vae=self.vae, rate=self.preview_rate, taeltx=self.taeltx)
+        new_callback = prepare_callback(guider.model_patcher, len(sigmas) -1, shape=latent_shapes[0] if len(latent_shapes) > 1 else None,
+                                        x0_output_dict=self.x0_output, latent_upscale_model=self.latent_upscale_model, vae=self.vae, rate=self.preview_rate, taeltx=self.taeltx)
         # Wrapper that calls both callbacks
         def combined_callback(step, x0, x, total_steps):
             new_callback(step, x0, x, total_steps)
@@ -1074,8 +1077,6 @@ class LTXVImgToVideoInplaceKJ(io.ComfyNode):
 
         return io.NodeOutput({"samples": samples, "noise_mask": conditioning_latent_frames_mask})
 
-
-from typing import Tuple
 
 def ltx2_forward(
         self, x: Tuple[torch.Tensor, torch.Tensor], v_context=None, a_context=None, attention_mask=None, v_timestep=None, a_timestep=None,
