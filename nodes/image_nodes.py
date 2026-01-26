@@ -902,6 +902,7 @@ class ImageUpscaleWithModelBatched:
                 "optional": {
                     "downscale_ratio": ("FLOAT", {"default": 1.0, "min": 0.01, "max": 1.0, "step": 0.01}),
                     "downscale_method": (["nearest-exact", "bilinear", "area", "bicubic", "lanczos"], {"default": "lanczos"}),
+                    "precision": (["float32", "float16", "bfloat16"], {"default": "float32"}),
                 }}
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "upscale"
@@ -911,11 +912,11 @@ Same as ComfyUI native model upscaling node,
 but allows setting sub-batches for reduced VRAM usage.
 Optionally downscale the result with a ratio.
 """
-    def upscale(self, upscale_model, images, per_batch, downscale_ratio=1.0, downscale_method="lanczos"):
-
+    def upscale(self, upscale_model, images, per_batch, downscale_ratio=1.0, downscale_method="lanczos", precision="float32"):
+        dtype = torch.float16 if precision == "float16" else torch.bfloat16 if precision == "bfloat16" else torch.float32
         device = model_management.get_torch_device()
-        upscale_model.to(device)
-        in_img = images.movedim(-1,-3)
+        upscale_model.to(device, dtype=dtype)
+        in_img = images.movedim(-1,-3).to(dtype)
 
         steps = in_img.shape[0]
         pbar = ProgressBar(steps)
@@ -930,7 +931,7 @@ Optionally downscale the result with a ratio.
             pbar.update(batch_count)
         upscale_model.cpu()
 
-        t = torch.cat(t, dim=0).permute(0, 2, 3, 1).cpu()
+        t = torch.cat(t, dim=0).permute(0, 2, 3, 1).cpu().float()
 
         # Apply downscaling if ratio is less than 1.0
         if downscale_ratio < 1.0:
