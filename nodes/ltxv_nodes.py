@@ -645,7 +645,7 @@ class WrappedPreviewer():
             return latent_image
 
 
-def prepare_callback(model, steps, x0_output_dict=None, shape=None, latent_upscale_model=None, vae=None, rate=8, taeltx=False):
+def prepare_callback(model, steps, x0_output_dict=None, shape=None, latent_upscale_model=None, vae=None, rate=8, taeltx=False, num_keyframes=0):
     latent_rgb_factors = [
             [ 0.0350,  0.0159,  0.0132],
             [ 0.0025, -0.0021, -0.0003],
@@ -789,6 +789,9 @@ def prepare_callback(model, steps, x0_output_dict=None, shape=None, latent_upsca
             cut = math.prod(shape[1:])
             x0 = x0[:, :, :cut].reshape([x0.shape[0]] + list(shape)[1:])
 
+        if num_keyframes > 0:
+            x0 = x0[:, :, :-num_keyframes]
+
         if latent_upscale_model is not None:
             x0 = vae.first_stage_model.per_channel_statistics.un_normalize(x0)
             x0 =  latent_upscale_model(x0.to(torch.bfloat16))
@@ -815,8 +818,15 @@ class OuterSampleCallbackWrapper:
             self.latent_upscale_model.to(device)
         if self.vae is not None and self.taeltx:
             self.vae.first_stage_model.to(device)
+
+        num_keyframes = 0
+        if 'positive' in guider.conds and len(guider.conds['positive']) > 0:
+            keyframe_idxs = guider.conds['positive'][0].get('keyframe_idxs')
+            if keyframe_idxs is not None:
+                num_keyframes = len(torch.unique(keyframe_idxs[0, 0, :, 0]))
+
         new_callback = prepare_callback(guider.model_patcher, len(sigmas) -1, shape=latent_shapes[0] if len(latent_shapes) > 1 else None,
-                                        x0_output_dict=self.x0_output, latent_upscale_model=self.latent_upscale_model, vae=self.vae, rate=self.preview_rate, taeltx=self.taeltx)
+                                        x0_output_dict=self.x0_output, latent_upscale_model=self.latent_upscale_model, vae=self.vae, rate=self.preview_rate, taeltx=self.taeltx, num_keyframes=num_keyframes)
         # Wrapper that calls both callbacks
         def combined_callback(step, x0, x, total_steps):
             new_callback(step, x0, x, total_steps)
