@@ -257,6 +257,7 @@ try:
     "LTXVImgToVideoInplaceKJ": {"class": LTXVImgToVideoInplaceKJ, "name": "LTXV Img To Video Inplace KJ"},
     "LTX2AttentionTunerPatch": {"class": LTX2AttentionTunerPatch, "name": "LTX2 Attention Tuner Patch"},
     "LTX2MemoryEfficientSageAttentionPatch": {"class": LTX2MemoryEfficientSageAttentionPatch, "name": "LTX2 Memory Efficient Sage Attention Patch"},
+    "LTX2LoraLoaderAdvanced": {"class": LTX2LoraLoaderAdvanced, "name": "LTX2 Lora Loader Advanced"},
     })
 except Exception as e:
     logging.warning(f"KJNodes: LTXV nodes could not be imported. LTXV nodes will be unavailable. Error: {e}")
