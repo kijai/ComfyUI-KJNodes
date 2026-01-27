@@ -1458,6 +1458,7 @@ class LTX2LoraLoaderAdvanced(io.ComfyNode):
                 io.Float.Input("video_to_audio", default=1.0, min=0.0, max=1.0, step=0.01, tooltip="Strength for video to audio cross-attention layers."),
                 io.Float.Input("audio", default=1.0, min=0.0, max=1.0, step=0.01, tooltip="Strength for audio attention layers."),
                 io.Float.Input("audio_to_video", default=1.0, min=0.0, max=1.0, step=0.01, tooltip="Strength for audio to video cross-attention layers."),
+                io.Float.Input("other", default=1.0, min=0.0, max=1.0, step=0.01, tooltip="Strength for layers not caught by other layer filters."),
             ],
             outputs=[
                 io.Model.Output(display_name="model", tooltip="The modified diffusion model."),
@@ -1467,7 +1468,7 @@ class LTX2LoraLoaderAdvanced(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, model, lora_name, strength_model, video, video_to_audio, audio, audio_to_video, opt_lora_path=None, blocks=None) -> io.NodeOutput:
+    def execute(cls, model, lora_name, strength_model, video, video_to_audio, audio, audio_to_video, other, opt_lora_path=None, blocks=None) -> io.NodeOutput:
         from comfy.utils import load_torch_file
         import comfy.lora
 
@@ -1496,7 +1497,7 @@ class LTX2LoraLoaderAdvanced(io.ComfyNode):
         loaded = comfy.lora.load_lora(lora, key_map)
 
         keys_to_delete = []
-        
+
         # First apply blocks filtering if provided
         if blocks is not None:
             for block in blocks:
@@ -1545,6 +1546,9 @@ class LTX2LoraLoaderAdvanced(io.ComfyNode):
             # Video layers (check last - most general)
             elif "attn" in key_str or "ff.net" in key_str:
                 strength_multiplier = video
+            # Everything else not caught by above filters
+            else:
+                strength_multiplier = other
 
             # Apply strength or mark for deletion
             if strength_multiplier is not None:
