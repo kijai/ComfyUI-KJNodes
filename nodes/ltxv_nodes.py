@@ -1119,7 +1119,7 @@ def ltx2_forward(
             del norm_vx
 
             vgate_msa = self.get_ada_values(self.scale_shift_table, vx.shape[0], v_timestep, slice(2, 3))[0]
-            vx.addcmul_(attn1_out, vgate_msa, value=video_scale)
+            vx += attn1_out * vgate_msa * video_scale
             del vgate_msa, attn1_out
             vx.add_(self.attn2(comfy.ldm.common_dit.rms_norm(vx), context=v_context, mask=attention_mask, transformer_options=transformer_options), alpha=video_scale)
 
@@ -1134,7 +1134,7 @@ def ltx2_forward(
             del norm_ax
 
             agate_msa = self.get_ada_values(self.audio_scale_shift_table, ax.shape[0], a_timestep, slice(2, 3))[0]
-            ax.addcmul_(attn1_out, agate_msa, value=audio_scale)
+            ax += attn1_out * agate_msa * audio_scale
             del agate_msa, attn1_out
             ax.add_(self.audio_attn2(comfy.ldm.common_dit.rms_norm(ax), context=a_context, mask=attention_mask, transformer_options=transformer_options), alpha=audio_scale)
 
@@ -1160,7 +1160,7 @@ def ltx2_forward(
                 del vx_scaled, ax_scaled
 
                 gate_out_a2v = self.get_ada_values(self.scale_shift_table_a2v_ca_video[4:, :], vx.shape[0], v_cross_gate_timestep, slice(0, 1))[0]
-                vx.addcmul_(a2v_out, gate_out_a2v, value=audio_to_video_scale)
+                vx += a2v_out * gate_out_a2v * audio_to_video_scale
                 del gate_out_a2v, a2v_out
 
             # video to audio cross attention
@@ -1179,7 +1179,7 @@ def ltx2_forward(
                 del ax_scaled, vx_scaled
 
                 gate_out_v2a = self.get_ada_values(self.scale_shift_table_a2v_ca_audio[4:, :], ax.shape[0], a_cross_gate_timestep, slice(0, 1))[0]
-                ax.addcmul_(v2a_out, gate_out_v2a, value=video_to_audio_scale)
+                ax += v2a_out * gate_out_v2a * video_to_audio_scale
                 del gate_out_v2a, v2a_out
 
         # video feedforward
@@ -1192,7 +1192,7 @@ def ltx2_forward(
             del vx_scaled
 
             vgate_mlp = self.get_ada_values(self.scale_shift_table, vx.shape[0], v_timestep, slice(5, 6))[0]
-            vx.addcmul_(ff_out, vgate_mlp)
+            vx += ff_out * vgate_mlp * video_scale
             del vgate_mlp, ff_out
 
         # audio feedforward
@@ -1205,7 +1205,7 @@ def ltx2_forward(
             del ax_scaled
 
             agate_mlp = self.get_ada_values(self.audio_scale_shift_table, ax.shape[0], a_timestep, slice(5, 6))[0]
-            ax.addcmul_(ff_out, agate_mlp)
+            ax += ff_out * agate_mlp * audio_scale
             del agate_mlp, ff_out
 
         return vx, ax
