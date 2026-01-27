@@ -1292,6 +1292,8 @@ class LTX2MemoryEfficientSageAttentionPatch(io.ComfyNode):
 
     @classmethod
     def execute(cls, model) -> io.NodeOutput:
+        if _cuda_archs is None:
+            raise RuntimeError("sageattention is not new enough version or could not determine CUDA architecture, cannot apply LTX2 Memory Efficient Sage Attention Patch.")
         model_clone = model.clone()
         diffusion_model = model_clone.get_model_object("diffusion_model")
 
@@ -1316,6 +1318,7 @@ def get_cuda_version():
         return 0, 0
 
 sageplus_sm89_available = False
+_cuda_archs = None
 try:
     from sageattention.core import per_thread_int8_triton, per_warp_int8_cuda, per_block_int8_triton, per_channel_fp8, get_cuda_arch_versions, attn_false
     _cuda_archs = get_cuda_arch_versions()
