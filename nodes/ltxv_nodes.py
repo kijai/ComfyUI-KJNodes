@@ -38,11 +38,12 @@ class LTXVAddGuideMulti(LTXVAddGuide):
         return io.Schema(
             node_id="LTXVAddGuideMulti",
             category="KJNodes/ltxv",
+            description="Add multiple guide images at specified frame indices with strengths, uses DynamicCombo which requires ComfyUI 0.8.1 and frontend 1.33.4 or later.",
             inputs=[
-                io.Conditioning.Input("positive"),
-                io.Conditioning.Input("negative"),
-                io.Vae.Input("vae"),
-                io.Latent.Input("latent"),
+                io.Conditioning.Input("positive", tooltip="Positive conditioning to which guide keyframe info will be added"),
+                io.Conditioning.Input("negative", tooltip="Negative conditioning to which guide keyframe info will be added"),
+                io.Vae.Input("vae", tooltip="Video VAE used to encode the guide images"),
+                io.Latent.Input("latent", tooltip="Video latent, guides are added to the end of this latent"),
                 io.DynamicCombo.Input(
                     "num_guides",
                     options=options,
@@ -53,7 +54,7 @@ class LTXVAddGuideMulti(LTXVAddGuide):
             outputs=[
                 io.Conditioning.Output(display_name="positive"),
                 io.Conditioning.Output(display_name="negative"),
-                io.Latent.Output(display_name="latent"),
+                io.Latent.Output(display_name="latent", tooltip="Video latent with added guides"),
             ],
         )
 
@@ -102,6 +103,7 @@ class LTXVAddGuidesFromBatch(LTXVAddGuide):
         return io.Schema(
             node_id="LTXVAddGuidesFromBatch",
             category="conditioning/ltxv",
+            description="Adds multiple guide images from a batch to the latent at corresponding frame indices. Non-black images in the batch are used as guides.",
             inputs=[
                 io.Conditioning.Input("positive"),
                 io.Conditioning.Input("negative"),
@@ -1003,9 +1005,10 @@ class LTXVImgToVideoInplaceKJ(io.ComfyNode):
         return io.Schema(
             node_id="LTXVImgToVideoInplaceKJ",
             category="KJNodes/ltxv",
+            description="Replaces video latent frames with the encoded input images, uses DynamicCombo which requires ComfyUI 0.8.1 and frontend 1.33.4 or later.",
             inputs=[
-                io.Vae.Input("vae"),
-                io.Latent.Input("latent"),
+                io.Vae.Input("vae", tooltip="Video VAE used to encode the images"),
+                io.Latent.Input("latent", tooltip="Video latent to insert images into"),
                 io.DynamicCombo.Input(
                     "num_images",
                     options=options,
@@ -1014,7 +1017,7 @@ class LTXVImgToVideoInplaceKJ(io.ComfyNode):
                 ),
             ],
             outputs=[
-                io.Latent.Output(display_name="latent"),
+                io.Latent.Output(display_name="latent", tooltip="The video latent with the images inserted and latent noise mask updated."),
             ],
         )
 
