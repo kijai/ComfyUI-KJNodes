@@ -11,6 +11,7 @@ from nodes import MAX_RESOLUTION
 from comfy.utils import common_upscale, ProgressBar, load_torch_file
 from comfy.comfy_types.node_typing import IO
 from comfy_api.latest import io
+from comfy_api.latest import _io
 import node_helpers
 from io import BytesIO
 
@@ -2843,38 +2844,30 @@ class LatentInpaintTTM:
         return (m, )
 
 
-class SimpleCalculatorKJ:
+class SimpleCalculatorKJ(io.ComfyNode):
     @classmethod
-    def INPUT_TYPES(s):
-        return {
-            "required": {
-                "expression": ("STRING", {"default": "a + b", "multiline": True}),
-            },
-            "optional": {
-                "a": (IO.ANY, {"default": 0.0, "min": -1e10, "max": 1e10, "step": 0.01, "forceInput": True}),
-                "b": (IO.ANY, {"default": 0.0, "min": -1e10, "max": 1e10, "step": 0.01, "forceInput": True}),
-                "x": (IO.ANY, {"default": 0.0, "min": -1e10, "max": 1e10, "step": 0.01, "forceInput": True}),
-                "y": (IO.ANY, {"default": 0.0, "min": -1e10, "max": 1e10, "step": 0.01, "forceInput": True}),
-                "var1": (IO.ANY, {"default": 0.0, "min": -1e10, "max": 1e10, "step": 0.01, "forceInput": True}),
-                "var2": (IO.ANY, {"default": 0.0, "min": -1e10, "max": 1e10, "step": 0.01, "forceInput": True}),
-                "var3": (IO.ANY, {"default": 0.0, "min": -1e10, "max": 1e10, "step": 0.01, "forceInput": True}),
-                "var4": (IO.ANY, {"default": 0.0, "min": -1e10, "max": 1e10, "step": 0.01, "forceInput": True}),
-                "var5": (IO.ANY, {"default": 0.0, "min": -1e10, "max": 1e10, "step": 0.01, "forceInput": True}),
-                "var6": (IO.ANY, {"default": 0.0, "min": -1e10, "max": 1e10, "step": 0.01, "forceInput": True}),
-                "var7": (IO.ANY, {"default": 0.0, "min": -1e10, "max": 1e10, "step": 0.01, "forceInput": True}),
-                "var8": (IO.ANY, {"default": 0.0, "min": -1e10, "max": 1e10, "step": 0.01, "forceInput": True}),
-                "var9": (IO.ANY, {"default": 0.0, "min": -1e10, "max": 1e10, "step": 0.01, "forceInput": True}),
-                "var10": (IO.ANY, {"default": 0.0, "min": -1e10, "max": 1e10, "step": 0.01, "forceInput": True}),
-            }
-        }
+    def define_schema(cls):
+        template = _io.Autogrow.TemplateNames(
+            input=_io.MultiType.Input("var", types=[io.Float, io.Int]),
+            names=["a", "b", "x", "y", "var1", "var2", "var3", "var4", "var5", "var6", "var7", "var8", "var9", "var10"],
+            min=2
+        )
+        return io.Schema(
+            node_id="SimpleCalculatorKJ",
+            category="KJNodes/misc",
+            description="Calculator node that evaluates a mathematical expression. Supports variables: a, b, x, y, var1-var10. Inputs appear dynamically when connected.",
+            inputs=[
+                io.String.Input("expression", default="a + b", multiline=True),
+                _io.Autogrow.Input("variables", template=template),
+            ],
+            outputs=[
+                io.Float.Output(),
+                io.Int.Output(),
+            ],
+        )
 
-    RETURN_TYPES = ("FLOAT", "INT",)
-    FUNCTION = "calculate"
-    CATEGORY = "KJNodes/misc"
-    DESCRIPTION = "Calculator node that evaluates a mathematical expression. Supports variables: a, b, x, y, var1-var10. Inputs appear dynamically when connected."
-
-    def calculate(self, expression, a=None, b=None, x=None, y=None, **kwargs):
-
+    @classmethod
+    def execute(cls, expression: str, variables: _io.Autogrow.Type) -> io.NodeOutput:
         import ast
         import operator
         import math
@@ -2895,18 +2888,10 @@ class SimpleCalculatorKJ:
 
         # Allowed constants
         allowed_names = {'pi': math.pi, 'e': math.e}
-        # Add connected variables only (not None)
-        if a is not None:
-            allowed_names['a'] = a
-        if b is not None:
-            allowed_names['b'] = b
-        if x is not None:
-            allowed_names['x'] = x
-        if y is not None:
-            allowed_names['y'] = y
-        # Add var1-var10 from kwargs
-        for key, value in kwargs.items():
-            if key.startswith('var') and value is not None:
+        
+        # Add connected variables from the autogrow dict
+        for key, value in variables.items():
+            if value is not None:
                 allowed_names[key] = value
 
         def eval_node(node):
@@ -2940,10 +2925,10 @@ class SimpleCalculatorKJ:
         try:
             tree = ast.parse(expression, mode='eval')
             result = eval_node(tree.body)
-            return (float(result), int(result))
+            return io.NodeOutput(float(result), int(result))
         except Exception as e:
             print(f"CalculatorKJ Error: {str(e)}")
-            return (0.0, 0)
+            return io.NodeOutput(0.0, 0)
 
 
 class GetTrackRange(io.ComfyNode):
