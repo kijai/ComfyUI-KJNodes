@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 from PIL import Image
-import json, re, os, io, time
+import json, re, os, time
 import importlib
 
 from comfy import model_management
@@ -28,6 +28,7 @@ class BOOLConstant:
     RETURN_NAMES = ("value",)
     FUNCTION = "get_value"
     CATEGORY = "KJNodes/constants"
+    SEARCH_ALIASES = ["boolean", "value"]
 
     def get_value(self, value):
         return (value,)
@@ -43,6 +44,7 @@ class INTConstant:
     RETURN_NAMES = ("value",)
     FUNCTION = "get_value"
     CATEGORY = "KJNodes/constants"
+    SEARCH_ALIASES = ["integer", "value"]
 
     def get_value(self, value):
         return (value,)
@@ -59,6 +61,7 @@ class FloatConstant:
     RETURN_NAMES = ("value",)
     FUNCTION = "get_value"
     CATEGORY = "KJNodes/constants"
+    SEARCH_ALIASES = ["float", "value"]
 
     def get_value(self, value):
         return (round(value, 6),)
@@ -74,6 +77,7 @@ class StringConstant:
     RETURN_TYPES = ("STRING",)
     FUNCTION = "passtring"
     CATEGORY = "KJNodes/constants"
+    SEARCH_ALIASES = ["text", "value"]
 
     def passtring(self, string):
         return (string, )
@@ -90,6 +94,7 @@ class StringConstantMultiline:
     RETURN_TYPES = ("STRING",)
     FUNCTION = "stringify"
     CATEGORY = "KJNodes/constants"
+    SEARCH_ALIASES = ["text", "value"]
 
     def stringify(self, string, strip_newlines):
         new_string = string
@@ -2835,6 +2840,7 @@ class LatentInpaintTTM:
     FUNCTION = "patch"
     EXPERIMENTAL = True
     DESCRIPTION = "https://github.com/time-to-move/TTM"
+    SEARCH_ALIASES = ["time to move"]
     CATEGORY = "KJNodes/experimental"
 
     def patch(self, model, steps, mask=None):
@@ -2843,33 +2849,35 @@ class LatentInpaintTTM:
         return (m, )
 
 
-class SimpleCalculatorKJ:
+class SimpleCalculatorKJ(io.ComfyNode):
     @classmethod
-    def INPUT_TYPES(s):
-        return {
-            "required": {
-                "expression": ("STRING", {"default": "a + b", "multiline": True}),
-            },
-            "optional": {
-                "a": (IO.ANY, {"default": 0.0, "min": -1e10, "max": 1e10, "step": 0.01, "forceInput": True}),
-                "b": (IO.ANY, {"default": 0.0, "min": -1e10, "max": 1e10, "step": 0.01, "forceInput": True}),
-            }
-        }
-
-    RETURN_TYPES = ("FLOAT", "INT", "BOOLEAN")
-    FUNCTION = "calculate"
-    CATEGORY = "KJNodes/misc"
-    DESCRIPTION = """
+    def define_schema(cls):
+        template = io.Autogrow.TemplateNames(input=io.MultiType.Input("var", [io.Int, io.Float, io.Boolean], optional=True), names=["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"], min=2)
+        return io.Schema(
+            node_id="SimpleCalculatorKJ",
+            category="KJNodes/misc",
+            description="""
 Calculator node that evaluates a mathematical expression using inputs a and b.  
     Supported operations: +, -, *, /, //, %, **, <<, >>, unary +/-  
     Supported comparisons: ==, !=, <, <=, >, >=  
     Supported logic: and, or, not  
     Supported functions: abs(), round(), min(), max(), pow(), sqrt(), sin(), cos(), tan(), log(), log10(), exp(), floor(), ceil()  
-    Supported constants: pi, e, True, False  
-"""
+    Supported constants: pi, euler, True, False  
+""",
+            search_aliases=["math", "arithmetic", "expression", "logic"],
+            inputs=[
+                io.String.Input("expression", default="a + b", multiline=True),
+                io.Autogrow.Input("variables", template=template),
+            ],
+            outputs=[
+                io.Float.Output(),
+                io.Int.Output(),
+                io.Boolean.Output(),
+            ],
+        )
 
-    def calculate(self, expression, a=None, b=None):
-
+    @classmethod
+    def execute(cls, variables, expression, a=None, b=None) -> io.NodeOutput:
         import ast
         import operator
         import math
@@ -2893,8 +2901,18 @@ Calculator node that evaluates a mathematical expression using inputs a and b.
             'ceil': math.ceil
         }
 
-        # Allowed constants
-        allowed_names = {'a': a, 'b': b, 'pi': math.pi, 'e': math.e, 'True': True, 'False': False}
+        # Allowed constants - start with pi, e, True, False
+        allowed_names = {'pi': math.pi, 'euler': math.e, 'True': True, 'False': False}
+
+        # Add all variables from autogrow to allowed_names
+        for var_name, var_value in variables.items():
+            allowed_names[var_name] = var_value
+
+        # Backwards compatibility: add a and b if they're provided (for old workflows)
+        if a is not None:
+            allowed_names['a'] = a
+        if b is not None:
+            allowed_names['b'] = b
 
         def eval_node(node):
             if isinstance(node, ast.Constant):  # Numbers and booleans
@@ -2946,10 +2964,10 @@ Calculator node that evaluates a mathematical expression using inputs a and b.
         try:
             tree = ast.parse(expression, mode='eval')
             result = eval_node(tree.body)
-            return (float(result), int(result), bool(result))
+            return io.NodeOutput(float(result), int(result), bool(result))
         except Exception as e:
             print(f"CalculatorKJ Error: {str(e)}")
-            return (0.0, 0, False)
+            return io.NodeOutput(0.0, 0, False)
 
 
 class GetTrackRange(io.ComfyNode):
