@@ -2856,10 +2856,17 @@ class SimpleCalculatorKJ:
             }
         }
 
-    RETURN_TYPES = ("FLOAT", "INT",)
+    RETURN_TYPES = ("FLOAT", "INT", "BOOLEAN")
     FUNCTION = "calculate"
     CATEGORY = "KJNodes/misc"
-    DESCRIPTION = "Calculator node that evaluates a mathematical expression using inputs a and b."
+    DESCRIPTION = """
+Calculator node that evaluates a mathematical expression using inputs a and b.
+    Supported operations: +, -, *, /, **, <<, >>, unary +/-  
+    Supported comparisons: ==, !=, <, <=, >, >=  
+    Supported logic: and, or, not  
+    Supported functions: abs(), round(), min(), max(), pow(), sqrt(), sin(), cos(), tan(), log(), log10(), exp(), floor(), ceil()  
+    Supported constants: pi, e, True, False  
+"""
 
     def calculate(self, expression, a=None, b=None):
 
@@ -2868,8 +2875,12 @@ class SimpleCalculatorKJ:
         import math
 
         # Allowed operations
-        allowed_operators = {ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.mul,  ast.Div: operator.truediv,
-            ast.Pow: operator.pow, ast.USub: operator.neg, ast.UAdd: operator.pos, ast.LShift: operator.lshift, ast.RShift: operator.rshift,
+        allowed_operators = {
+            ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.mul, ast.Div: operator.truediv,
+            ast.Pow: operator.pow, ast.USub: operator.neg, ast.UAdd: operator.pos, ast.LShift: operator.lshift, 
+            ast.RShift: operator.rshift, ast.Eq: operator.eq, ast.NotEq: operator.ne, ast.Lt: operator.lt,
+            ast.LtE: operator.le, ast.Gt: operator.gt, ast.GtE: operator.ge, ast.And: operator.and_, 
+            ast.Or: operator.or_, ast.Not: operator.not_,
         }
 
         # Allowed functions
@@ -2882,10 +2893,10 @@ class SimpleCalculatorKJ:
         }
 
         # Allowed constants
-        allowed_names = {'a': a, 'b': b, 'pi': math.pi, 'e': math.e}
+        allowed_names = {'a': a, 'b': b, 'pi': math.pi, 'e': math.e, 'True': True, 'False': False}
 
         def eval_node(node):
-            if isinstance(node, ast.Constant):  # Numbers
+            if isinstance(node, ast.Constant):  # Numbers and booleans
                 return node.value
             elif isinstance(node, ast.Name):  # Variables
                 if node.id in allowed_names:
@@ -2902,6 +2913,25 @@ class SimpleCalculatorKJ:
                     raise ValueError(f"Operator {type(node.op).__name__} is not allowed")
                 operand = eval_node(node.operand)
                 return allowed_operators[type(node.op)](operand)
+            elif isinstance(node, ast.Compare):  # Comparison operations
+                left = eval_node(node.left)
+                for op, comparator in zip(node.ops, node.comparators):
+                    if type(op) not in allowed_operators:
+                        raise ValueError(f"Operator {type(op).__name__} is not allowed")
+                    right = eval_node(comparator)
+                    result = allowed_operators[type(op)](left, right)
+                    if not result:
+                        return False
+                    left = right
+                return True
+            elif isinstance(node, ast.BoolOp):  # Boolean operations (and, or)
+                if type(node.op) not in allowed_operators:
+                    raise ValueError(f"Operator {type(node.op).__name__} is not allowed")
+                values = [eval_node(value) for value in node.values]
+                if isinstance(node.op, ast.And):
+                    return all(values)
+                elif isinstance(node.op, ast.Or):
+                    return any(values)
             elif isinstance(node, ast.Call):  # Function calls
                 if not isinstance(node.func, ast.Name):
                     raise ValueError("Only simple function calls are allowed")
@@ -2915,10 +2945,10 @@ class SimpleCalculatorKJ:
         try:
             tree = ast.parse(expression, mode='eval')
             result = eval_node(tree.body)
-            return (float(result), int(result))
+            return (float(result), int(result), bool(result))
         except Exception as e:
             print(f"CalculatorKJ Error: {str(e)}")
-            return (0.0, 0)
+            return (0.0, 0, False)
 
 
 class GetTrackRange(io.ComfyNode):
