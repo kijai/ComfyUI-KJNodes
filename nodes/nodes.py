@@ -2860,8 +2860,8 @@ class SimpleCalculatorKJ:
     FUNCTION = "calculate"
     CATEGORY = "KJNodes/misc"
     DESCRIPTION = """
-Calculator node that evaluates a mathematical expression using inputs a and b.
-    Supported operations: +, -, *, /, **, <<, >>, unary +/-  
+Calculator node that evaluates a mathematical expression using inputs a and b.  
+    Supported operations: +, -, *, /, //, %, **, <<, >>, unary +/-  
     Supported comparisons: ==, !=, <, <=, >, >=  
     Supported logic: and, or, not  
     Supported functions: abs(), round(), min(), max(), pow(), sqrt(), sin(), cos(), tan(), log(), log10(), exp(), floor(), ceil()  
@@ -2877,7 +2877,8 @@ Calculator node that evaluates a mathematical expression using inputs a and b.
         # Allowed operations
         allowed_operators = {
             ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.mul, ast.Div: operator.truediv,
-            ast.Pow: operator.pow, ast.USub: operator.neg, ast.UAdd: operator.pos, ast.LShift: operator.lshift, 
+            ast.FloorDiv: operator.floordiv, ast.Mod: operator.mod, ast.Pow: operator.pow, 
+            ast.USub: operator.neg, ast.UAdd: operator.pos, ast.LShift: operator.lshift, 
             ast.RShift: operator.rshift, ast.Eq: operator.eq, ast.NotEq: operator.ne, ast.Lt: operator.lt,
             ast.LtE: operator.le, ast.Gt: operator.gt, ast.GtE: operator.ge, ast.And: operator.and_, 
             ast.Or: operator.or_, ast.Not: operator.not_,
