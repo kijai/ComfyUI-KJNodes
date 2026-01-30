@@ -831,7 +831,7 @@ class GetLatentSizeAndCount:
         }}
 
     RETURN_TYPES = ("LATENT","INT", "INT", "INT", "INT", "INT")
-    RETURN_NAMES = ("latent", "batch_size", "channels", "frames", "width", "height")
+    RETURN_NAMES = ("latent", "batch_size", "channels", "frames", "height", "width")
     FUNCTION = "getsize"
     CATEGORY = "KJNodes/image"
     DESCRIPTION = """

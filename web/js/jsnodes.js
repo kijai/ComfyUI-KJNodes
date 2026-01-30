@@ -198,9 +198,11 @@ app.registerExtension({
 					console.log(this)
 					const v = onGetLatentConnectInput? onGetLatentConnectInput.apply(this, arguments): undefined
 					//console.log(this)
-					this.outputs[1]["label"] = "width"
-					this.outputs[2]["label"] = "height" 
-					this.outputs[3]["label"] = "count"
+					this.outputs[1]["label"] = "batch_size"
+					this.outputs[2]["label"] = "channels" 
+					this.outputs[3]["label"] = "frames" 
+					this.outputs[4]["label"] = "height" 
+					this.outputs[5]["label"] = "width"
 					return v;
 				}
 				//const onGetImageSizeExecuted = nodeType.prototype.onExecuted;
