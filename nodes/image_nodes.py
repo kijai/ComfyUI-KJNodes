@@ -3356,7 +3356,7 @@ class SaveImageKJ:
             if caption is not None:
                 txt_file = base_file_name + caption_file_extension
                 file_path = os.path.join(full_output_folder, txt_file)
-                with open(file_path, 'w') as f:
+                with open(file_path, 'w', encoding='utf-8') as f:
                     f.write(caption)
 
             counter += 1
@@ -3408,7 +3408,7 @@ class SaveStringKJ:
 
         txt_file = base_file_name + file_extension
         file_path = os.path.join(full_output_folder, txt_file)
-        with open(file_path, 'w') as f:
+        with open(file_path, 'w', encoding='utf-8') as f:
             f.write(string)
 
         return results,
