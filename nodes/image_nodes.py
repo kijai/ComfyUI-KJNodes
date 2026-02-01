@@ -175,8 +175,6 @@ Saves an image and mask as .PNG with the mask as the alpha channel.
         filename_prefix += self.prefix_append
         full_output_folder, filename, counter, subfolder, filename_prefix = folder_paths.get_save_image_path(filename_prefix, self.output_dir, images[0].shape[1], images[0].shape[0])
         results = list()
-        if mask.dtype == torch.float16:
-            mask = mask.to(torch.float32)
         def file_counter():
             max_counter = 0
             # Loop through the existing files
@@ -193,9 +191,9 @@ Saves an image and mask as .PNG with the mask as the alpha channel.
 
         for image, alpha in zip(images, mask):
             i = 255. * image.cpu().numpy()
-            a = 255. * alpha.cpu().numpy()
+            a = 255. * (1.0 - alpha.cpu().float()).numpy()
             img = Image.fromarray(np.clip(i, 0, 255).astype(np.uint8))
-            
+
              # Resize the mask to match the image size
             a_resized = Image.fromarray(a).resize(img.size, Image.LANCZOS)
             a_resized = np.clip(a_resized, 0, 255).astype(np.uint8)
@@ -208,7 +206,7 @@ Saves an image and mask as .PNG with the mask as the alpha channel.
                 if extra_pnginfo is not None:
                     for x in extra_pnginfo:
                         metadata.add_text(x, json.dumps(extra_pnginfo[x]))
-           
+
             # Increment the counter by 1 to get the next available value
             counter = file_counter() + 1
             file = f"{filename}_{counter:05}.png"
