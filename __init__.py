@@ -218,6 +218,7 @@ NODE_CONFIG = {
     "ModelMemoryUseReportPatch": {"class": ModelMemoryUseReportPatch, "name": "Model Memory Use Report Patch"},
     "ModelMemoryUsageFactorOverride": {"class": ModelMemoryUsageFactorOverride, "name": "Model Memory Usage Factor Override"},
     "WanChunkFeedForward": {"class": WanChunkFeedForward, "name": "Wan ChunkFeedForward"},
+    "SamplerSelfRefineVideo": {"class": SamplerSelfRefineVideo, "name": "Sampler SelfRefineVideo"},
 
     #instance diffusion
     "CreateInstanceDiffusionTracking": {"class": CreateInstanceDiffusionTracking},
