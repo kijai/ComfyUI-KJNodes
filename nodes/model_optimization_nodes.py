@@ -2045,9 +2045,12 @@ class WanChunkFeedForward(io.ComfyNode):
 from comfy.samplers import KSAMPLER
 from comfy.k_diffusion.sampling import to_d
 from tqdm import tqdm
-def sample_selfrefinevideo(model, x, sigmas, stochastic_step_map, certain_percentage=0.999, uncertainty_threshold=0.25, extra_args=None, callback=None, disable=None, verbose=False, video_shape=None):
+def sample_selfrefinevideo(model, x, sigmas, stochastic_step_map, certain_percentage=0.999, uncertainty_threshold=0.25, extra_args=None, callback=None, disable=None, verbose=False, video_shape=None, seed=None):
     extra_args = {} if extra_args is None else extra_args
     sigma_in = x.new_ones([x.shape[0]])
+
+    if seed is not None:
+        generator = torch.Generator(torch.device("cpu")).manual_seed(seed)
 
     pbar = tqdm(total=len(sigmas) - 1, disable=disable, desc="Sampling")
 
@@ -2076,7 +2079,8 @@ def sample_selfrefinevideo(model, x, sigmas, stochastic_step_map, certain_percen
                 break
 
             # Determine input
-            x_in = x if ii == 0 else (1.0 - sigma) * prev_denoised_full + sigma * torch.randn_like(x)
+            noise = torch.randn(x.shape, device=torch.device("cpu"), generator=generator).to(x)
+            x_in = x if ii == 0 else (1.0 - sigma) * prev_denoised_full + sigma * noise
             if ii > 0:
                 x = x_in
 
@@ -2230,12 +2234,13 @@ class SamplerSelfRefineVideo(io.ComfyNode):
                 io.Float.Input("uncertainty_threshold", default=0.2, min=0.0, max=1.0, step=0.01, round=False, tooltip="Threshold of uncertainty to consider a pixel uncertain"),
                 io.Boolean.Input("verbose", default=False, tooltip="Enable verbose logging during sampling"),
                 io.Latent.Input("latent", optional=True, tooltip="Optional latent input to get input shape for LTX2 audio/video separation"),
+                io.Int.Input("seed", default=0, min=0, max=0xffffffffffffffff, step=1, tooltip="Seed for stochastic sampling"),
             ],
             outputs=[io.Sampler.Output()]
         )
 
     @classmethod
-    def execute(cls, input_mode, certain_percentage, uncertainty_threshold, verbose, latent=None) -> io.NodeOutput:
+    def execute(cls, input_mode, certain_percentage, uncertainty_threshold, seed, verbose, latent=None) -> io.NodeOutput:
         video_shape = None
         if latent is not None:
             video_shape = latent["samples"].shape
@@ -2276,5 +2281,6 @@ class SamplerSelfRefineVideo(io.ComfyNode):
             "uncertainty_threshold": uncertainty_threshold,
             "verbose": verbose,
             "video_shape": video_shape,
+            "seed": seed,
         })
         return io.NodeOutput(sampler)
