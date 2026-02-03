@@ -2045,8 +2045,7 @@ class WanChunkFeedForward(io.ComfyNode):
 from comfy.samplers import KSAMPLER
 from comfy.k_diffusion.sampling import to_d
 from tqdm import tqdm
-def sample_selfrefinevideo(model, x, sigmas, stochastic_step_map, certain_percentage=0.999, uncertainty_threshold=0.25, extra_args=None, callback=None, disable=None, verbose=False):
-
+def sample_selfrefinevideo(model, x, sigmas, stochastic_step_map, certain_percentage=0.999, uncertainty_threshold=0.25, extra_args=None, callback=None, disable=None, verbose=False, video_shape=None):
     extra_args = {} if extra_args is None else extra_args
     sigma_in = x.new_ones([x.shape[0]])
 
@@ -2063,7 +2062,9 @@ def sample_selfrefinevideo(model, x, sigmas, stochastic_step_map, certain_percen
 
         prev_certain_mask = None
         prev_denoised = None
-        prev_latents_next = None
+        prev_denoised_full = None
+        prev_x_next = None
+        prev_x_next_video = None
         is_certain = False
 
         for ii in range(m):
@@ -2071,11 +2072,11 @@ def sample_selfrefinevideo(model, x, sigmas, stochastic_step_map, certain_percen
                 pbar.set_description(f"Step {i}/{len(sigmas)-1} (substep {ii+1}/{m})")
             # Early exit if certain threshold reached
             if is_certain:
-                x = prev_latents_next
+                x = prev_x_next
                 break
 
             # Determine input
-            x_in = x if ii == 0 else (1.0 - sigma) * prev_denoised + sigma * torch.randn_like(x)
+            x_in = x if ii == 0 else (1.0 - sigma) * prev_denoised_full + sigma * torch.randn_like(x)
             if ii > 0:
                 x = x_in
 
@@ -2086,13 +2087,28 @@ def sample_selfrefinevideo(model, x, sigmas, stochastic_step_map, certain_percen
 
             # Compute next latents
             d = to_d(x, sigma, denoised)
-            latents_next = x + (sigma_next - sigma) * d
+            x_next = x + (sigma_next - sigma) * d
+
+            # Separate video and audio if joint model
+            if d.ndim == 3 and video_shape is not None:
+                cut = math.prod(video_shape[1:])
+                denoised_video = denoised[:, :, :cut].reshape([denoised.shape[0]] + list(video_shape)[1:])
+                x_next_video = x_next[:, :, :cut].reshape([denoised.shape[0]] + list(video_shape)[1:])
+                denoised_audio = denoised[:, :, cut:]
+                x_next_audio = x_next[:, :, cut:]
+                if verbose:
+                    tqdm.write(f"Video shape: {denoised_video.shape}, Audio shape: {denoised_audio.shape}")
+            else:
+                denoised_video = denoised
+                x_next_video = x_next
+                denoised_audio = None
+                x_next_audio = None
 
             # Stochastic sampling with uncertainty masking
             if use_stochastic and prev_denoised is not None:
-                # Compute uncertainty and masking
-                diff = denoised - prev_denoised
-                uncertainty = torch.sqrt(torch.sum(diff ** 2, dim=1)) / x.shape[1]
+                # Compute uncertainty and masking on video part
+                diff = denoised_video - prev_denoised
+                uncertainty = torch.sqrt(torch.sum(diff ** 2, dim=1)) / denoised_video.shape[1]
                 certain_mask = uncertainty < uncertainty_threshold
 
                 if verbose:
@@ -2110,24 +2126,48 @@ def sample_selfrefinevideo(model, x, sigmas, stochastic_step_map, certain_percen
                     if verbose:
                         tqdm.write(f"{ii}/{current_num_anneal_steps}: Certain region is more than {certain_percentage}, we are certain")
 
-                # Apply masking
+                # Apply masking to video
                 certain_mask_float = certain_mask.float().unsqueeze(1)
-                latents_next = certain_mask_float * prev_latents_next + (1.0 - certain_mask_float) * latents_next
-                denoised = certain_mask_float * prev_denoised + (1.0 - certain_mask_float) * denoised
+                x_next_video = certain_mask_float * prev_x_next_video + (1.0 - certain_mask_float) * x_next_video
+                denoised_video = certain_mask_float * prev_denoised + (1.0 - certain_mask_float) * denoised_video
+
+                # Reconstruct full latents by replacing the video portion
+                if x_next_audio is not None:
+                    # Flatten masked video back to match original format and replace video portion
+                    x_next = x_next.clone()
+                    x_next[:, :, :cut] = x_next_video.reshape([x_next_video.shape[0], x_next.shape[1], -1])
+                    # Also reconstruct full denoised for next iteration input
+                    denoised_full = denoised.clone()
+                    denoised_full[:, :, :cut] = denoised_video.reshape([denoised_video.shape[0], denoised.shape[1], -1])
+                else:
+                    # No audio separation
+                    x_next = x_next_video
+                    denoised_full = denoised_video
 
                 prev_certain_mask = certain_mask
-                prev_denoised = denoised
-                prev_latents_next = latents_next
+                prev_denoised = denoised_video
+                prev_denoised_full = denoised_full
+                prev_x_next_video = x_next_video
+                prev_x_next = x_next
             elif use_stochastic:
+                # For first stochastic step, create denoised_full if we have audio
+                if x_next_audio is not None:
+                    denoised_full = denoised.clone()
+                    denoised_full[:, :, :cut] = denoised_video.reshape([denoised_video.shape[0], denoised.shape[1], -1])
+                else:
+                    denoised_full = denoised_video
+
                 prev_certain_mask = None
-                prev_denoised = denoised
-                prev_latents_next = latents_next
+                prev_denoised = denoised_video
+                prev_denoised_full = denoised_full
+                prev_x_next_video = x_next_video
+                prev_x_next = x_next
 
             # Update x for final step
             if use_stochastic and ii == m - 1:
-                x = prev_latents_next
+                x = prev_x_next
             elif not use_stochastic:
-                x = latents_next
+                x = x_next
 
         pbar.update(1)
         if m == 1:
@@ -2189,12 +2229,17 @@ class SamplerSelfRefineVideo(io.ComfyNode):
                 io.Float.Input("certain_percentage", default=0.999, min=0.0, max=1.0, step=0.001, round=False, tooltip="Percentage of certain pixels to consider the frame as certain and skip further refinement"),
                 io.Float.Input("uncertainty_threshold", default=0.2, min=0.0, max=1.0, step=0.01, round=False, tooltip="Threshold of uncertainty to consider a pixel uncertain"),
                 io.Boolean.Input("verbose", default=False, tooltip="Enable verbose logging during sampling"),
+                io.Latent.Input("latent", optional=True, tooltip="Optional latent input to get input shape for LTX2 audio/video separation"),
             ],
             outputs=[io.Sampler.Output()]
         )
 
     @classmethod
-    def execute(cls, input_mode, certain_percentage, uncertainty_threshold, verbose) -> io.NodeOutput:
+    def execute(cls, input_mode, certain_percentage, uncertainty_threshold, verbose, latent=None) -> io.NodeOutput:
+        video_shape = None
+        if latent is not None:
+            video_shape = latent["samples"].shape
+
         range_keys = sorted([k for k in input_mode.keys() if k.startswith('start_step')])
         stochastic_step_map = {}
         if "stochastic_plan" in input_mode:
@@ -2230,5 +2275,6 @@ class SamplerSelfRefineVideo(io.ComfyNode):
             "certain_percentage": certain_percentage,
             "uncertainty_threshold": uncertainty_threshold,
             "verbose": verbose,
+            "video_shape": video_shape,
         })
         return io.NodeOutput(sampler)
