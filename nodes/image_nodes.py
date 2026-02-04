@@ -10,6 +10,7 @@ import os
 import re
 import json
 import importlib
+import logging
 from PIL.PngImagePlugin import PngInfo
 from io import BytesIO
 
@@ -25,6 +26,7 @@ from comfy_extras.nodes_mask import composite
 from comfy.cli_args import args
 from comfy.utils import ProgressBar, common_upscale
 from comfy import model_management
+from comfy_api.latest import io
 import node_helpers
 import folder_paths
 
@@ -146,7 +148,112 @@ https://github.com/hahnec/color-matcher/
         out = torch.stack(out, dim=0).to(torch.float32)
         out.clamp_(0, 1)
         return (out,)
-    
+
+class ColorMatchV2(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="ColorMatchV2",
+            category="KJNodes/image",
+            description="""
+color-matcher enables color transfer across images which comes in handy for automatic  
+color-grading of photographs, paintings and film sequences as well as light-field  
+and stopmotion corrections.  
+
+The methods behind the mappings are based on the approach from Reinhard et al.,  
+the Monge-Kantorovich Linearization (MKL) as proposed by Pitie et al. and our analytical solution  
+to a Multi-Variate Gaussian Distribution (MVGD) transfer in conjunction with classical histogram   
+matching. As shown below our HM-MVGD-HM compound outperforms existing methods.   
+https://github.com/hahnec/color-matcher/   
+
+'reinhard_lab_gpu' method uses Kornia for GPU-accelerated color transfer in Lab color space.
+""",
+            inputs=[
+                io.Image.Input("image_target"),
+                io.Image.Input("image_ref"),
+                io.Combo.Input("method", 
+                    options=['mkl', 'hm', 'reinhard', 'mvgd', 'hm-mvgd-hm', 'hm-mkl-hm', 'reinhard_lab_gpu'],
+                    default='mkl'),
+                io.Float.Input("strength", default=1.0, min=0.0, max=10.0, step=0.01),
+                io.Boolean.Input("multithread", default=True),
+            ],
+            outputs=[
+                io.Image.Output(display_name="image"),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, image_target, image_ref, method, strength=1.0, multithread=True) -> io.NodeOutput:
+        # Skip unnecessary processing
+        if strength == 0:
+            return io.NodeOutput(image_target)
+
+        if method == "reinhard_lab_gpu":
+            import kornia
+            device = model_management.get_torch_device()
+
+            B, H, W, C = image_target.shape
+
+            src_bchw = image_target.to(device).permute(0, 3, 1, 2).contiguous() # (B, H, W, C) -> (B, C, H, W)
+            ref_bchw = image_ref.to(device).permute(0, 3, 1, 2).contiguous()
+            # RGB->Lab
+            src_lab = kornia.color.rgb_to_lab(src_bchw)
+            ref_lab = kornia.color.rgb_to_lab(ref_bchw)
+
+            src_lab_flat = src_lab.view(B, C, -1)  # (B, C, HW)
+            ref_lab_flat = ref_lab.view(ref_lab.shape[0], C, -1)  # (B or 1, C, HW)
+
+            src_std, src_mean = torch.std_mean(src_lab_flat, dim=-1, keepdim=True, unbiased=False)
+            ref_std, ref_mean = torch.std_mean(ref_lab_flat, dim=-1, keepdim=True, unbiased=False)
+            src_std = src_std.clamp_min_(1e-6)
+
+            if ref_lab.shape[0] == 1 and B > 1:
+                ref_mean = ref_mean.expand(B, -1, -1)
+                ref_std = ref_std.expand(B, -1, -1)
+
+            corrected_lab_flat = (src_lab_flat - src_mean) * (ref_std / src_std) + ref_mean
+            corrected_lab = corrected_lab_flat.view(B, C, H, W)
+
+            # Lab->RGB
+            corrected_rgb_01 = kornia.color.lab_to_rgb(corrected_lab)
+            out = (1.0 - strength) * src_bchw + strength * corrected_rgb_01
+            out = out.permute(0, 2, 3, 1).contiguous() # (B, C, H, W) -> (B, H, W, C)
+
+            return io.NodeOutput(out.cpu().float().clamp_(0, 1))
+
+        try:
+            from color_matcher import ColorMatcher
+        except:
+            raise Exception("Can't import color-matcher, did you install requirements.txt? Manual install: pip install color-matcher")
+
+        batch_size = image_target.size(0)
+        ref_batch_size = image_ref.size(0)
+
+        def process(i):
+            cm = ColorMatcher()
+            image_target_np = image_target[i].cpu().numpy()
+            image_ref_np = image_ref[min(i, ref_batch_size - 1)].cpu().numpy()
+            try:
+                image_result = cm.transfer(src=image_target_np, ref=image_ref_np, method=method)
+                if strength != 1:
+                    image_result = image_target_np + strength * (image_result - image_target_np)
+
+                return torch.from_numpy(image_result)
+
+            except Exception as e:
+                logging.error(f"Thread {i} error: {e}")
+                return torch.from_numpy(image_target_np)  # fallback
+        if multithread and batch_size > 1:
+            max_threads = min(os.cpu_count() or 1, batch_size)
+            with ThreadPoolExecutor(max_workers=max_threads) as executor:
+                out = list(executor.map(process, range(batch_size)))
+        else:
+            out = [process(i) for i in range(batch_size)]
+
+        out = torch.stack(out, dim=0).to(torch.float32).clamp_(0, 1)
+
+        return io.NodeOutput(out)
+
 class SaveImageWithAlpha:
     def __init__(self):
         self.output_dir = folder_paths.get_output_directory()
