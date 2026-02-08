@@ -3564,7 +3564,6 @@ class ImageCropByMaskAndResize:
                 "padding": ("INT", { "default": 0, "min": 0, "max": MAX_RESOLUTION, "step": 1, }),
                 "min_crop_resolution": ("INT", { "default": 128, "min": 0, "max": MAX_RESOLUTION, "step": 8, }),
                 "max_crop_resolution": ("INT", { "default": 512, "min": 0, "max": MAX_RESOLUTION, "step": 8, }),
-           
             },
         }
 
@@ -3573,65 +3572,53 @@ class ImageCropByMaskAndResize:
     FUNCTION = "crop"
     CATEGORY = "KJNodes/image"
 
+    # ----------------------------------------------------
+    # 1. Calculate crop box from mask
+    # ----------------------------------------------------
     def crop_by_mask(self, mask, padding=0, min_crop_resolution=None, max_crop_resolution=None):
         iy, ix = (mask == 1).nonzero(as_tuple=True)
         h0, w0 = mask.shape
 
+        # Empty mask
         if iy.numel() == 0:
             x_c = w0 / 2.0
             y_c = h0 / 2.0
             width = 0
             height = 0
         else:
-            x_min = ix.min().item()
-            x_max = ix.max().item()
-            y_min = iy.min().item()
-            y_max = iy.max().item()
-
-            width = x_max - x_min
+            x_min, x_max = ix.min().item(), ix.max().item()
+            y_min, y_max = iy.min().item(), iy.max().item()
+            width  = x_max - x_min
             height = y_max - y_min
+            x_c    = (x_min + x_max) / 2.0
+            y_c    = (y_min + y_max) / 2.0
 
-            if width > w0 or height > h0:
-                raise Exception("Masked area out of bounds")
-
-            x_c = (x_min + x_max) / 2.0
-            y_c = (y_min + y_max) / 2.0
-
+        # 1. Constrain by min/max crop resolution
         if min_crop_resolution:
-            width = max(width, min_crop_resolution)
+            width  = max(width,  min_crop_resolution)
             height = max(height, min_crop_resolution)
-
         if max_crop_resolution:
-            width = min(width, max_crop_resolution)
+            width  = min(width,  max_crop_resolution)
             height = min(height, max_crop_resolution)
 
-        if w0 <= width:
-            x0 = 0
-            w = w0
-        else:
-            x0 = max(0, x_c - width / 2 - padding)
-            w = width + 2 * padding
-            if x0 + w > w0:
-                x0 = w0 - w
+        # 2. Expand by padding (but not beyond image size)
+        w = min(width  + 2 * padding, w0)
+        h = min(height + 2 * padding, h0)
 
-        if h0 <= height:
-            y0 = 0
-            h = h0
-        else:
-            y0 = max(0, y_c - height / 2 - padding)
-            h = height + 2 * padding
-            if y0 + h > h0:
-                y0 = h0 - h
+        # 3. Compute top-left corner, keep center alignment
+        x0 = int(max(0, min(x_c - w / 2, w0 - w)))
+        y0 = int(max(0, min(y_c - h / 2, h0 - h)))
 
         return (int(x0), int(y0), int(w), int(h))
 
+    # ----------------------------------------------------
+    # 2. Crop each image and mask, then upscale to target size
+    # ----------------------------------------------------
     def crop(self, image, mask, base_resolution, padding=0, min_crop_resolution=128, max_crop_resolution=512):
         mask = mask.round()
-        image_list = []
-        mask_list = []
-        bbox_list = []
+        image_list, mask_list, bbox_list = [], [], []
 
-        # First, collect all bounding boxes
+        # 1. Compute bbox for each image
         bbox_params = []
         aspect_ratios = []
         for i in range(image.shape[0]):
@@ -3639,47 +3626,47 @@ class ImageCropByMaskAndResize:
             bbox_params.append((x0, y0, w, h))
             aspect_ratios.append(w / h)
 
-        # Find maximum width and height
-        max_w = max([w for x0, y0, w, h in bbox_params])
-        max_h = max([h for x0, y0, w, h in bbox_params])
+        # 2. Compute common target size
+        max_w = max([w for _,_,w,_ in bbox_params])
+        max_h = max([h for _,_,_,h in bbox_params])
         max_aspect_ratio = max(aspect_ratios)
 
-        # Ensure dimensions are divisible by 16
         max_w = (max_w + 15) // 16 * 16
         max_h = (max_h + 15) // 16 * 16
-        # Calculate common target dimensions
+
         if max_aspect_ratio > 1:
-            target_width = base_resolution
+            target_width  = base_resolution
             target_height = int(base_resolution / max_aspect_ratio)
         else:
             target_height = base_resolution
-            target_width = int(base_resolution * max_aspect_ratio)
+            target_width  = int(base_resolution * max_aspect_ratio)
 
+        # 3. Crop and upscale each image
         for i in range(image.shape[0]):
             x0, y0, w, h = bbox_params[i]
+            x_center = x0 + w/2
+            y_center = y0 + h/2
 
-            # Adjust cropping to use maximum width and height
-            x_center = x0 + w / 2
-            y_center = y0 + h / 2
-
-            x0_new = int(max(0, x_center - max_w / 2))
-            y0_new = int(max(0, y_center - max_h / 2))
+            # Align to common width/height
+            x0_new = int(max(0, x_center - max_w/2))
+            y0_new = int(max(0, y_center - max_h/2))
             x1_new = int(min(x0_new + max_w, image.shape[2]))
             y1_new = int(min(y0_new + max_h, image.shape[1]))
             x0_new = x1_new - max_w
             y0_new = y1_new - max_h
 
             cropped_image = image[i][y0_new:y1_new, x0_new:x1_new, :]
-            cropped_mask = mask[i][y0_new:y1_new, x0_new:x1_new]
-            
-            # Ensure dimensions are divisible by 16
-            target_width = (target_width + 15) // 16 * 16
+            cropped_mask  = mask[i][y0_new:y1_new, x0_new:x1_new]
+
+            target_width  = (target_width  + 15) // 16 * 16
             target_height = (target_height + 15) // 16 * 16
 
-            cropped_image = cropped_image.unsqueeze(0).movedim(-1, 1)  # Move C to the second position (B, C, H, W)
+            # Upscale image
+            cropped_image = cropped_image.unsqueeze(0).movedim(-1, 1)
             cropped_image = common_upscale(cropped_image, target_width, target_height, "lanczos", "disabled")
             cropped_image = cropped_image.movedim(1, -1).squeeze(0)
 
+            # Upscale mask
             cropped_mask = cropped_mask.unsqueeze(0).unsqueeze(0)
             cropped_mask = common_upscale(cropped_mask, target_width, target_height, 'bilinear', "disabled")
             cropped_mask = cropped_mask.squeeze(0).squeeze(0)
@@ -3687,7 +3674,6 @@ class ImageCropByMaskAndResize:
             image_list.append(cropped_image)
             mask_list.append(cropped_mask)
             bbox_list.append((x0_new, y0_new, x1_new, y1_new))
-
 
         return (torch.stack(image_list), torch.stack(mask_list), bbox_list)
     
