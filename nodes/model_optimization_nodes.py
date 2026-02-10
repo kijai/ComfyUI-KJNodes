@@ -22,7 +22,16 @@ except ImportError:
     v3_available = False
     logging.warning("ComfyUI v3 node API not available, please update ComfyUI to access latest v3 nodes.")
 
-sageattn_modes = ["disabled", "auto", "sageattn_qk_int8_pv_fp16_cuda", "sageattn_qk_int8_pv_fp16_triton", "sageattn_qk_int8_pv_fp8_cuda", "sageattn_qk_int8_pv_fp8_cuda++", "sageattn3", "sageattn3_per_block_mean"]
+_all_sageattn_modes = ["disabled", "auto", "sageattn_qk_int8_pv_fp16_cuda", "sageattn_qk_int8_pv_fp16_triton", "sageattn_qk_int8_pv_fp8_cuda", "sageattn_qk_int8_pv_fp8_cuda++", "sageattn3", "sageattn3_per_block_mean"]
+
+try:
+    import sageattention  # noqa: F401
+    _sageattention_available = True
+except ImportError:
+    _sageattention_available = False
+    logging.info("sageattention not available (requires triton/CUDA), sage attention modes will be disabled")
+
+sageattn_modes = _all_sageattn_modes if _sageattention_available else ["disabled"]
 
 _initialized = False
 _original_functions = {}
@@ -40,6 +49,12 @@ if not _initialized:
 
 def get_sage_func(sage_attention, allow_compile=False):
     logging.info(f"Using sage attention mode: {sage_attention}")
+    if not _sageattention_available:
+        raise RuntimeError(
+            f"sage_attention mode '{sage_attention}' requires the sageattention package "
+            "(which depends on triton/CUDA). Install with: pip install sageattention "
+            "or set sage_attention to 'disabled'."
+        )
     from sageattention import sageattn
     if sage_attention == "auto":
         def sage_func(q, k, v, is_causal=False, attn_mask=None, tensor_layout="NHD"):
