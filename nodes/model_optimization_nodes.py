@@ -477,6 +477,14 @@ class TorchCompileModelWanVideoV2:
     def patch(self, model, backend, fullgraph, mode, dynamic, dynamo_cache_size_limit, compile_transformer_blocks_only, force_parameter_static_shapes=True):
         from comfy_api.torch_helpers import set_torch_compile_wrapper
         m = model.clone()
+
+        # Skip torch.compile on MPS — inductor compilation is 10-100x slower than
+        # CUDA, autotuning is unsupported, and dynamic shapes in video models cause
+        # recompilation storms that make inference slower, not faster.
+        if mm.is_device_mps(mm.get_torch_device()):
+            logging.warning("TorchCompileModelWanVideoV2: Skipping torch.compile on MPS (not beneficial for video models)")
+            return (m, )
+
         diffusion_model = m.get_model_object("diffusion_model")
         torch._dynamo.config.cache_size_limit = dynamo_cache_size_limit
         torch._dynamo.config.force_parameter_static_shapes = force_parameter_static_shapes
@@ -488,7 +496,7 @@ class TorchCompileModelWanVideoV2:
             else:
                 compile_key_list =["diffusion_model"]
 
-            set_torch_compile_wrapper(model=m, keys=compile_key_list, backend=backend, mode=mode, dynamic=dynamic, fullgraph=fullgraph)           
+            set_torch_compile_wrapper(model=m, keys=compile_key_list, backend=backend, mode=mode, dynamic=dynamic, fullgraph=fullgraph)
         except:
             raise RuntimeError("Failed to compile model")
 
