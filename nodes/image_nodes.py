@@ -2324,8 +2324,8 @@ class ReplaceImagesInBatch:
     FUNCTION = "replace"
     CATEGORY = "KJNodes/image"
     DESCRIPTION = """
-Replaces the images in a batch, starting from the specified start index,  
-with the replacement images.
+Replaces the images in a batch, starting from the specified start index with step stride,  
+using the replacement images.
 """
 
     @classmethod
@@ -2333,6 +2333,7 @@ with the replacement images.
         return {
             "required": {
                  "start_index": ("INT", {"default": 1,"min": 0, "max": 4096, "step": 1}),
+                 "step": ("INT", {"default": 1,"min": 1, "max": 4096, "step": 1}),
         },
         "optional": {
             "original_images": ("IMAGE",),
@@ -2342,14 +2343,14 @@ with the replacement images.
         }
     } 
     
-    def replace(self, original_images=None, replacement_images=None, start_index=1, original_masks=None, replacement_masks=None):
+    def replace(self, original_images=None, replacement_images=None, start_index=1, step=1, original_masks=None, replacement_masks=None):
         images = None
         masks = None
         
         if original_images is not None and replacement_images is not None:
             if start_index >= len(original_images):
                 raise ValueError("ReplaceImagesInBatch: Start index is out of range")
-            end_index = start_index + len(replacement_images)
+            end_index = start_index + len(replacement_images) * step
             if end_index > len(original_images):
                 raise ValueError("ReplaceImagesInBatch: End index is out of range")
             
@@ -2357,7 +2358,7 @@ with the replacement images.
             if original_images_copy.shape[2] != replacement_images.shape[2] or original_images_copy.shape[3] != replacement_images.shape[3]:
                 replacement_images = common_upscale(replacement_images.movedim(-1, 1), original_images_copy.shape[1], original_images_copy.shape[2], "lanczos", "center").movedim(1, -1)
             
-            original_images_copy[start_index:end_index] = replacement_images
+            original_images_copy[start_index:end_index:step] = replacement_images
             images = original_images_copy
         else:
             images = torch.zeros((1, 64, 64, 3))
@@ -2365,7 +2366,7 @@ with the replacement images.
         if original_masks is not None and replacement_masks is not None:
             if start_index >= len(original_masks):
                 raise ValueError("ReplaceImagesInBatch: Start index is out of range")
-            end_index = start_index + len(replacement_masks)
+            end_index = start_index + len(replacement_masks) * step
             if end_index > len(original_masks):
                 raise ValueError("ReplaceImagesInBatch: End index is out of range")
 
@@ -2373,7 +2374,7 @@ with the replacement images.
             if original_masks_copy.shape[1] != replacement_masks.shape[1] or original_masks_copy.shape[2] != replacement_masks.shape[2]:
                 replacement_masks = common_upscale(replacement_masks.unsqueeze(1), original_masks_copy.shape[1], original_masks_copy.shape[2], "nearest-exact", "center").squeeze(0)
                 
-            original_masks_copy[start_index:end_index] = replacement_masks
+            original_masks_copy[start_index:end_index:step] = replacement_masks
             masks = original_masks_copy
         else:
             masks = torch.zeros((1, 64, 64))
