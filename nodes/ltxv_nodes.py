@@ -474,6 +474,8 @@ class LTX2_NAG(io.ComfyNode):
         if nag_cond_video is not None:
             diffusion_model.caption_projection.to(device)
             context_video = nag_cond_video[0][0].to(device, dtype)
+            if hasattr(diffusion_model, "preprocess_text_embeds"):
+                context_video = diffusion_model.preprocess_text_embeds(context_video.to(device=device, dtype=dtype))
             v_context, _ = torch.split(context_video, int(context_video.shape[-1] / 2), len(context_video.shape) - 1)
             context_video = diffusion_model.caption_projection(v_context)
             diffusion_model.caption_projection.to(offload_device)
@@ -485,6 +487,8 @@ class LTX2_NAG(io.ComfyNode):
         if nag_cond_audio is not None and diffusion_model.audio_caption_projection is not None:
             diffusion_model.audio_caption_projection.to(device)
             context_audio = nag_cond_audio[0][0].to(device, dtype)
+            if hasattr(diffusion_model, "preprocess_text_embeds"):
+                context_audio = diffusion_model.preprocess_text_embeds(context_audio.to(device=device, dtype=dtype))
             _, a_context = torch.split(context_audio, int(context_audio.shape[-1] / 2), len(context_audio.shape) - 1)
             context_audio = diffusion_model.audio_caption_projection(a_context)
             diffusion_model.audio_caption_projection.to(offload_device)
