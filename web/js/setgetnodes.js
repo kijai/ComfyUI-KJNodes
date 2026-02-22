@@ -128,7 +128,7 @@ app.registerExtension({
 								setColorAndBgColor.call(this, type);	
 							}
 						} else {
-                showAlert("node input undefined.")
+                showAlert(`node ${this.title} input undefined.`)
 						}
 					}
 					if (link_info && node.graph && slotType == 2 && isChangeConnect) {
@@ -140,7 +140,7 @@ app.registerExtension({
 							this.outputs[0].type = type;
 							this.outputs[0].name = type;
 						} else {
-							showAlert('node output undefined');
+							showAlert(`node ${this.title} output undefined.`);
 						}
 					}
 					
