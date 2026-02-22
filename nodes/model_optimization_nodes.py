@@ -1,5 +1,4 @@
 import os
-from comfy.ldm.modules import attention as comfy_attention
 import logging
 import torch
 import importlib
@@ -10,10 +9,8 @@ import folder_paths
 import comfy.model_management as mm
 from comfy.cli_args import args
 from comfy.ldm.modules.attention import wrap_attn, optimized_attention
-import comfy.model_patcher
 import comfy.utils
 import comfy.sd
-
 
 try:
     from comfy_api.latest import io
@@ -23,20 +20,6 @@ except ImportError:
     logging.warning("ComfyUI v3 node API not available, please update ComfyUI to access latest v3 nodes.")
 
 sageattn_modes = ["disabled", "auto", "sageattn_qk_int8_pv_fp16_cuda", "sageattn_qk_int8_pv_fp16_triton", "sageattn_qk_int8_pv_fp8_cuda", "sageattn_qk_int8_pv_fp8_cuda++", "sageattn3", "sageattn3_per_block_mean"]
-
-_initialized = False
-_original_functions = {}
-
-if not _initialized:
-    _original_functions["orig_attention"] = comfy_attention.optimized_attention
-    _original_functions["original_patch_model"] = comfy.model_patcher.ModelPatcher.patch_model
-    _original_functions["original_load_lora_for_models"] = comfy.sd.load_lora_for_models
-    try:
-        _original_functions["original_qwen_forward"] = comfy.ldm.qwen_image.model.Attention.forward
-    except:
-        pass
-    _initialized = True
-
 
 def get_sage_func(sage_attention, allow_compile=False):
     logging.info(f"Using sage attention mode: {sage_attention}")
@@ -295,6 +278,8 @@ class DiffusionModelLoaderKJ():
 
         sd, metadata = comfy.utils.load_torch_file(unet_path, return_metadata=True)
         if extra_state_dict is not None:
+            extra_sd = comfy.utils.load_torch_file(extra_state_dict)
+            sd.update(extra_sd)
             # If the model is a checkpoint, strip additional non-diffusion model entries before adding extra state dict
             from comfy import model_detection
             diffusion_model_prefix = model_detection.unet_prefix_from_state_dict(sd)
@@ -302,9 +287,6 @@ class DiffusionModelLoaderKJ():
                 temp_sd = comfy.utils.state_dict_prefix_replace(sd, {diffusion_model_prefix: ""}, filter_keys=True)
                 if len(temp_sd) > 0:
                     sd = temp_sd
-
-            extra_sd = comfy.utils.load_torch_file(extra_state_dict)
-            sd.update(extra_sd)
             del extra_sd
 
         model = comfy.sd.load_diffusion_model_state_dict(sd, model_options=model_options, metadata=metadata)
