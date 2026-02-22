@@ -205,8 +205,10 @@ class CheckpointLoaderKJ():
 class DiffusionModelSelector():
     @classmethod
     def INPUT_TYPES(s):
+        ltx2_connector_models = folder_paths.get_filename_list("text_encoders")
+        ltx2_connector_models = [m for m in ltx2_connector_models if "connector" in m.lower()]
         return {"required": {
-            "model_name": (folder_paths.get_filename_list("diffusion_models"), {"tooltip": "The name of the checkpoint (model) to load."}),
+            "model_name": (folder_paths.get_filename_list("diffusion_models") + ltx2_connector_models, {"tooltip": "The name of the checkpoint (model) to load."}),
         },
         }
 
@@ -218,7 +220,10 @@ class DiffusionModelSelector():
     CATEGORY = "KJNodes/experimental"
 
     def get_path(self, model_name):
-        model_path = folder_paths.get_full_path_or_raise("diffusion_models", model_name)
+        if "connector" in model_name.lower():
+            model_path = folder_paths.get_full_path_or_raise("text_encoders", model_name)
+        else:
+            model_path = folder_paths.get_full_path_or_raise("diffusion_models", model_name)
         return (model_path,)
 
 class DiffusionModelLoaderKJ():
