@@ -485,6 +485,9 @@ class TorchCompileModelAdvanced:
                 "dynamo_cache_size_limit": ("INT", {"default": 64, "min": 0, "max": 1024, "step": 1, "tooltip": "torch._dynamo.config.cache_size_limit"}),
                 "debug_compile_keys": ("BOOLEAN", {"default": False, "tooltip": "Print the compile keys used for torch.compile"}),
             },
+            "optional": {
+                "disable_dynamic_vram": ("BOOLEAN", {"default": False, "tooltip": "Disable dynamic VRAM feature as it can cause issues with compile"}),
+            }
         }
     RETURN_TYPES = ("MODEL",)
     FUNCTION = "patch"
@@ -492,11 +495,19 @@ class TorchCompileModelAdvanced:
     DESCRIPTION = "Advanced torch.compile patching for diffusion models."
     EXPERIMENTAL = True
 
-    def patch(self, model, backend, fullgraph, mode, dynamic, dynamo_cache_size_limit, compile_transformer_blocks_only, debug_compile_keys):
+    def patch(self, model, backend, fullgraph, mode, dynamic, dynamo_cache_size_limit, compile_transformer_blocks_only, debug_compile_keys, disable_dynamic_vram=False):
         from comfy_api.torch_helpers import set_torch_compile_wrapper
-        m = model.clone()
+        if disable_dynamic_vram:
+            try:
+                m = model.clone(disable_dynamic=True)
+            except TypeError:
+                logging.warning("This ComfyUI version do not support disabling dynamic VRAM through a node. This may cause issues with torch.compile.")
+                m = model.clone()
+        else:
+            m = model.clone()
+
         diffusion_model = m.get_model_object("diffusion_model")
-        torch._dynamo.config.cache_size_limit = dynamo_cache_size_limit   
+        torch._dynamo.config.cache_size_limit = dynamo_cache_size_limit
 
         try:
             if compile_transformer_blocks_only:
@@ -522,7 +533,7 @@ class TorchCompileModelAdvanced:
             except KeyError:
                 raise ValueError(f"Invalid dynamic arg {dynamic}")
 
-            set_torch_compile_wrapper(model=m, keys=compile_key_list, backend=backend, mode=mode, dynamic=dynamic, fullgraph=fullgraph)           
+            set_torch_compile_wrapper(model=m, keys=compile_key_list, backend=backend, mode=mode, dynamic=dynamic, fullgraph=fullgraph)
         except:
             raise RuntimeError("Failed to compile model")
 
