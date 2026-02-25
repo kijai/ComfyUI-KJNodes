@@ -788,8 +788,8 @@ class CreateShapeMask:
     FUNCTION = "createshapemask"
     CATEGORY = "KJNodes/masking/generate"
     DESCRIPTION = """
-Creates a mask or batch of masks with the specified shape.  
-Locations are center locations.  
+Creates a mask or batch of masks with the specified shape and movement trajectory.  
+Locations are the starting center locations.  
 Grow value is the amount to grow the shape on each frame, creating animated masks.
 """
 
@@ -798,25 +798,71 @@ Grow value is the amount to grow the shape on each frame, creating animated mask
         return {
             "required": {
                 "shape": (
-            [   'circle',
-                'square',
-                'triangle',
-            ],
-            {
-            "default": 'circle'
-             }),
-                "frames": ("INT", {"default": 1,"min": 1, "max": 4096, "step": 1}),
-                "location_x": ("INT", {"default": 256,"min": 0, "max": 4096, "step": 1}),
-                "location_y": ("INT", {"default": 256,"min": 0, "max": 4096, "step": 1}),
+                    ['circle', 'square', 'triangle'],
+                    {"default": 'circle'}
+                ),
+                "frames": ("INT", {"default": 1, "min": 1, "max": 4096, "step": 1}),
+                "start_location_x": ("INT", {"default": 256, "min": 0, "max": 4096, "step": 1}),
+                "start_location_y": ("INT", {"default": 256, "min": 0, "max": 4096, "step": 1}),
                 "grow": ("INT", {"default": 0, "min": -512, "max": 512, "step": 1}),
-                "frame_width": ("INT", {"default": 512,"min": 16, "max": 4096, "step": 1}),
-                "frame_height": ("INT", {"default": 512,"min": 16, "max": 4096, "step": 1}),
-                "shape_width": ("INT", {"default": 128,"min": 8, "max": 4096, "step": 1}),
-                "shape_height": ("INT", {"default": 128,"min": 8, "max": 4096, "step": 1}),
-        },
-    } 
+                "frame_width": ("INT", {"default": 512, "min": 16, "max": 4096, "step": 1}),
+                "frame_height": ("INT", {"default": 512, "min": 16, "max": 4096, "step": 1}),
+                "shape_width": ("INT", {"default": 128, "min": 8, "max": 4096, "step": 1}),
+                "shape_height": ("INT", {"default": 128, "min": 8, "max": 4096, "step": 1}),
+                "movement_type": (
+                    ['none', 'linear', 'circular', 'zigzag', 'bounce', 'sinusoidal', 'spiral', 'random'],
+                    {"default": 'none'}
+                ),
+                "end_location_x": ("INT", {"default": 256, "min": 0, "max": 4096, "step": 1}),
+                "end_location_y": ("INT", {"default": 256, "min": 0, "max": 4096, "step": 1}),
+                "radius": ("INT", {"default": 128, "min": 0, "max": 4096, "step": 1}),
+                "angle_step": ("FLOAT", {"default": 10.0, "min": 0.1, "max": 360.0, "step": 0.1}),
+                "zigzag_amplitude": ("INT", {"default": 20, "min": 1, "max": 512, "step": 1}),
+                "bounce_height": ("INT", {"default": 50, "min": 1, "max": 512, "step": 1}),
+                "sin_amplitude": ("INT", {"default": 50, "min": 1, "max": 512, "step": 1}),
+                "spiral_tightness": ("FLOAT", {"default": 0.1, "min": 0.01, "max": 1.0, "step": 0.01}),
+            },
+        }
 
-    def createshapemask(self, frames, frame_width, frame_height, location_x, location_y, shape_width, shape_height, grow, shape):
+    def createshapemask(self, frames, frame_width, frame_height, start_location_x, start_location_y, shape_width, shape_height, grow, shape, movement_type, end_location_x, end_location_y, radius, angle_step, zigzag_amplitude, bounce_height, sin_amplitude, spiral_tightness):
+        from math import sin, cos, radians, pi
+        import random
+        
+        def get_position(i, movement_type, start_x, start_y, end_x, end_y, radius, angle_step, zigzag_amplitude, bounce_height, sin_amplitude, spiral_tightness):
+            if movement_type == 'linear':
+                fraction = i / (frames - 1)
+                return start_x + fraction * (end_x - start_x), start_y + fraction * (end_y - start_y)
+            elif movement_type == 'circular':
+                angle = angle_step * i
+                return start_x + radius * cos(radians(angle)), start_y + radius * sin(radians(angle))
+            elif movement_type == 'zigzag':
+                fraction = i / (frames - 1)
+                zigzag_offset = zigzag_amplitude * sin(2 * pi * fraction * 10)
+                return start_x + fraction * (end_x - start_x), start_y + zigzag_offset
+            elif movement_type == 'bounce':
+                fraction = i / (frames - 1)
+                bounce_offset = bounce_height * abs(sin(pi * fraction * 2))
+                return start_x + fraction * (end_x - start_x), start_y + bounce_offset
+            elif movement_type == 'sinusoidal':
+                fraction = i / (frames - 1)
+                sin_offset = sin_amplitude * sin(2 * pi * fraction)
+                return start_x + fraction * (end_x - start_x), start_y + sin_offset
+            elif movement_type == 'spiral':
+                angle = i * spiral_tightness
+                r = radius * (i / frames)
+                return start_x + r * cos(angle), start_y + r * sin(angle)
+            elif movement_type == 'random':
+                if i == 0:  # initialize previous_positions if first frame
+                    self.previous_positions = (start_x, start_y)
+                else:
+                    prev_x, prev_y = self.previous_positions
+                    new_x = max(0, min(frame_width, prev_x + random.randint(-10, 10)))
+                    new_y = max(0, min(frame_height, prev_y + random.randint(-10, 10)))
+                    self.previous_positions = (new_x, new_y)
+                return self.previous_positions
+            else:
+                return start_x, start_y
+        
         # Define the number of images in the batch
         batch_size = frames
         out = []
@@ -828,6 +874,9 @@ Grow value is the amount to grow the shape on each frame, creating animated mask
             # Calculate the size for this frame and ensure it's not less than 0
             current_width = max(0, shape_width + i*grow)
             current_height = max(0, shape_height + i*grow)
+            
+            # Get the current position based on the movement type
+            location_x, location_y = get_position(i, movement_type, start_location_x, start_location_y, end_location_x, end_location_y, radius, angle_step, zigzag_amplitude, bounce_height, sin_amplitude, spiral_tightness)
 
             if shape == 'circle' or shape == 'square':
                 # Define the bounding box for the shape
