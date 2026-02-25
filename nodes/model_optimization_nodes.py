@@ -4,6 +4,7 @@ import torch
 import importlib
 import math
 import datetime
+from tqdm import tqdm
 
 import folder_paths
 import comfy.model_management as mm
@@ -672,9 +673,8 @@ try:
     from comfy.ldm.wan.model import sinusoidal_embedding_1d
 except:
     pass
-from einops import repeat
+
 from unittest.mock import patch
-from contextlib import nullcontext
 import numpy as np
 
 def relative_l1_distance(last_tensor, current_tensor):
@@ -2043,7 +2043,7 @@ class WanChunkFeedForward(io.ComfyNode):
 
 from comfy.samplers import KSAMPLER
 from comfy.k_diffusion.sampling import to_d
-from tqdm import tqdm
+
 def sample_selfrefinevideo(model, x, sigmas, stochastic_step_map, certain_percentage=0.999, uncertainty_threshold=0.25, extra_args=None, callback=None, disable=None, verbose=False, video_shape=None, seed=None):
     extra_args = {} if extra_args is None else extra_args
     sigma_in = x.new_ones([x.shape[0]])

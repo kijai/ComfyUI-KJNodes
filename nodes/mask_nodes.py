@@ -1305,7 +1305,6 @@ def get_mask_polygon(self, mask_np):
     
     return polygon.squeeze()
 
-import cv2
 class SeparateMasks:
     @classmethod
     def INPUT_TYPES(cls):
@@ -1328,6 +1327,7 @@ class SeparateMasks:
     DESCRIPTION = "Separates a mask into multiple masks based on the size of the connected components."
 
     def polygon_to_mask(self, polygon, shape):
+        import cv2
         mask = np.zeros((shape[0], shape[1]), dtype=np.uint8)  # Fixed shape handling
 
         if len(polygon.shape) == 2:  # Check if polygon points are valid
@@ -1336,6 +1336,7 @@ class SeparateMasks:
         return mask
 
     def get_mask_polygon(self, mask_np, max_points):
+        import cv2
         contours, _ = cv2.findContours(mask_np, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         if not contours:
             return None
@@ -1345,7 +1346,6 @@ class SeparateMasks:
         
         # Initialize with smaller epsilon for more points
         perimeter = cv2.arcLength(hull, True)
-        epsilon = perimeter * 0.01  # Start smaller
         
         min_eps = perimeter * 0.001  # Much smaller minimum
         max_eps = perimeter * 0.2   # Smaller maximum
@@ -1381,9 +1381,6 @@ class SeparateMasks:
         return best_approx.squeeze() if best_approx is not None else hull.squeeze()
 
     def separate(self, mask: torch.Tensor, size_threshold_width: int, size_threshold_height: int, max_poly_points: int, mode: str):
-        from scipy.ndimage import label, center_of_mass
-        import numpy as np
-        
         B, H, W = mask.shape
         separated = []
 
@@ -1392,7 +1389,7 @@ class SeparateMasks:
         for b in range(B):
             mask_np = mask[b].cpu().numpy().astype(np.uint8)
             structure = np.ones((3, 3), dtype=np.int8)
-            labeled, ncomponents = label(mask_np, structure=structure)
+            labeled, ncomponents = scipy.ndimage.label(mask_np, structure=structure)
             pbar = ProgressBar(ncomponents)
             
             for component in range(1, ncomponents + 1):

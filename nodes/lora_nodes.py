@@ -161,14 +161,14 @@ class LoraExtractKJ:
                     "finetuned_model": ("MODEL",),
                     "original_model": ("MODEL",),
                     "filename_prefix": ("STRING", {"default": "loras/ComfyUI_extracted_lora"}),
-                    "rank": ("INT", {"default": 8, "min": 1, "max": 4096, "step": 1, "tooltip": "The rank to use for standard LoRA, or maximum rank limit for adaptive methods."}),
+                    "rank": ("INT", {"default": 64, "min": 1, "max": 4096, "step": 1, "tooltip": "The rank to use for standard LoRA, or maximum rank limit for adaptive methods."}),
                     "lora_type": (["standard", "full", "adaptive_ratio", "adaptive_quantile", "adaptive_energy", "adaptive_fro"],),
-                    "algorithm": (["svd_linalg", "svd_lowrank"], {"default": "svd_linalg", "tooltip": "SVD algorithm to use, svd_lowrank is faster but less accurate."}),
+                    "algorithm": (["svd_linalg", "svd_lowrank"], {"default": "svd_lowrank", "tooltip": "SVD algorithm to use, svd_lowrank is faster but less accurate."}),
                     "lowrank_iters": ("INT", {"default": 7, "min": 1, "max": 100, "step": 1, "tooltip": "The number of subspace iterations for lowrank SVD algorithm."}),
                     "output_dtype": (["fp16", "bf16", "fp32"], {"default": "fp16"}),
                     "bias_diff": ("BOOLEAN", {"default": True}),
                     "adaptive_param": ("FLOAT", {"default": 0.15, "min": 0.0, "max": 1.0, "step": 0.01, "tooltip": "For ratio mode, this is the ratio of the maximum singular value. For quantile mode, this is the quantile of the singular values. For fro mode, this is the Frobenius norm retention ratio."}),
-                    "clamp_quantile": ("BOOLEAN", {"default": True}),
+                    "clamp_quantile": ("BOOLEAN", {"default": False}),
                 },
 
     }

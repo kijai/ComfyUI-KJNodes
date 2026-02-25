@@ -10,8 +10,9 @@ import os
 import re
 import json
 import importlib
+import hashlib
+import pathlib
 import logging
-from PIL.PngImagePlugin import PngInfo
 from io import BytesIO
 
 try:
@@ -19,7 +20,9 @@ try:
 except:
     print("OpenCV not installed")
     pass
-from PIL import ImageGrab, ImageDraw, ImageFont, Image, ImageOps
+
+from PIL import ImageGrab, ImageDraw, ImageFont, Image, ImageOps, ImageSequence, ImageStat
+from PIL.PngImagePlugin import PngInfo
 
 from nodes import MAX_RESOLUTION, SaveImage
 from comfy_extras.nodes_mask import composite
@@ -278,7 +281,6 @@ Saves an image and mask as .PNG with the mask as the alpha channel.
 """
 
     def save_images_alpha(self, images, mask, filename_prefix="ComfyUI_image_with_alpha", prompt=None, extra_pnginfo=None):
-        from PIL.PngImagePlugin import PngInfo
         filename_prefix += self.prefix_append
         full_output_folder, filename, counter, subfolder, filename_prefix = folder_paths.get_save_image_path(filename_prefix, self.output_dir, images[0].shape[1], images[0].shape[0])
         results = list()
@@ -423,8 +425,6 @@ Concatenates the image2 to image1 in the specified direction.
         elif direction == 'up':
             concatenated_image = torch.cat((image2_resized, image1), dim=1)  # Concatenate along height
         return concatenated_image,
-
-import torch  # Make sure you have PyTorch installed
 
 class ImageConcatFromBatch:
     @classmethod
@@ -1652,17 +1652,6 @@ def gaussian_blur(mask, blur_radius):
         mask = F.conv2d(mask, kernel2d, padding=kernel_size // 2, groups=mask.shape[1])
         mask = mask.squeeze(0).permute(1, 2, 0)  # Change back to [H, W, C]
     return mask
-
-easing_functions = {
-    "linear": lambda t: t,
-    "ease_in": ease_in,
-    "ease_out": ease_out,
-    "ease_in_out": ease_in_out,
-    "bounce": bounce,
-    "elastic": elastic,
-    "glitchy": glitchy,
-    "exponential_ease_out": exponential_ease_out,
-}
 
 class TransitionImagesMulti:
     RETURN_TYPES = ("IMAGE",)
@@ -2970,7 +2959,6 @@ highest dimension.
 
         return (out_image.cpu(), out_image.shape[2], out_image.shape[1], out_mask.cpu() if out_mask is not None else torch.zeros(64,64, device=torch.device("cpu"), dtype=torch.float32))
 
-import pathlib    
 class LoadAndResizeImage:
     _color_channels = ["alpha", "red", "green", "blue"]
     @classmethod
@@ -2997,12 +2985,8 @@ class LoadAndResizeImage:
     FUNCTION = "load_image"
 
     def load_image(self, image, resize, width, height, repeat, keep_proportion, divisible_by, mask_channel, background_color):
-        from PIL import Image, ImageOps, ImageSequence
-        import numpy as np
-        import torch
         image_path = folder_paths.get_annotated_filepath(image)
 
-        import node_helpers
         img = node_helpers.pillow(Image.open, image_path)
         img = ImageOps.exif_transpose(img)
 
@@ -3120,7 +3104,6 @@ class LoadAndResizeImage:
 
         return True
 
-import hashlib
 class LoadImagesFromFolderKJ:
     # Dictionary to store folder hashes
     folder_hashes = {}
@@ -3328,7 +3311,6 @@ class LoadImagesFromFolderKJ:
                 padded.paste(img, (padding, 0))
                 return padded
     def get_edge_color(self, img):
-        from PIL import ImageStat
         """Sample edges and return dominant color"""
         width, height = img.size
         img = img.convert('RGBA')

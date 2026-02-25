@@ -5,7 +5,6 @@ from PIL import Image, ImageDraw, ImageFont, ImageFilter
 import numpy as np
 from ..utility.utility import pil2tensor, tensor2pil
 import folder_paths
-import io
 import base64
 from io import BytesIO
 

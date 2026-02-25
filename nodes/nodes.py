@@ -2,15 +2,20 @@ import torch
 import torch.nn as nn
 import numpy as np
 from PIL import Image
-import json, re, os, time
+import json
+import re
+import os
+import time
+import math
 import importlib
 
 from comfy import model_management
 import folder_paths
 from nodes import MAX_RESOLUTION
-from comfy.utils import common_upscale, ProgressBar, load_torch_file
+from comfy.utils import common_upscale, ProgressBar, load_torch_file, save_torch_file
 from comfy.comfy_types.node_typing import IO
 from comfy_api.latest import io
+import comfy.latent_formats
 import node_helpers
 from io import BytesIO
 
@@ -1564,7 +1569,6 @@ class LoadResAdapterNormalization:
             raise Exception("Invalid model path")
         else:
             print("ResAdapter: Loading ResAdapter normalization weights")
-            from comfy.utils import load_torch_file
             prefix_to_remove = 'diffusion_model.'
             model_clone = model.clone()
             norm_state_dict = load_torch_file(resadapter_full_path)
@@ -2167,7 +2171,6 @@ class ModelSaveKJ:
     CATEGORY = "advanced/model_merging"
 
     def save(self, model, filename_prefix, model_key_prefix, prompt=None, extra_pnginfo=None):
-        from comfy.utils import save_torch_file
         full_output_folder, filename, counter, subfolder, filename_prefix = folder_paths.get_save_image_path(filename_prefix, self.output_dir)
     
         output_checkpoint = f"{filename}_{counter:05}_.safetensors"
@@ -2391,11 +2394,11 @@ class VAELoaderKJ:
         encoder = next(filter(lambda a: a.startswith("{}_encoder.".format(name)), approx_vaes))
         decoder = next(filter(lambda a: a.startswith("{}_decoder.".format(name)), approx_vaes))
 
-        enc = comfy.utils.load_torch_file(folder_paths.get_full_path_or_raise("vae_approx", encoder))
+        enc = load_torch_file(folder_paths.get_full_path_or_raise("vae_approx", encoder))
         for k in enc:
             sd["taesd_encoder.{}".format(k)] = enc[k]
 
-        dec = comfy.utils.load_torch_file(folder_paths.get_full_path_or_raise("vae_approx", decoder))
+        dec = load_torch_file(folder_paths.get_full_path_or_raise("vae_approx", decoder))
         for k in dec:
             sd["taesd_decoder.{}".format(k)] = dec[k]
 
@@ -2445,7 +2448,7 @@ class VAELoaderKJ:
                 vae_path = folder_paths.get_full_path_or_raise("vae_approx", vae_name)
             else:
                 vae_path = folder_paths.get_full_path_or_raise("vae", vae_name)
-            sd, metadata = comfy.utils.load_torch_file(vae_path, return_metadata=True)
+            sd, metadata = load_torch_file(vae_path, return_metadata=True)
 
         if "vocoder.conv_post.weight" in sd:
             from comfy.ldm.lightricks.vae.audio_vae import AudioVAE
@@ -2880,7 +2883,6 @@ Calculator node that evaluates a mathematical expression using inputs a and b.
     def execute(cls, variables, expression, a=None, b=None) -> io.NodeOutput:
         import ast
         import operator
-        import math
 
         # Allowed operations
         allowed_operators = {
@@ -3104,7 +3106,6 @@ class VAEDecodeLoopKJ:
 
         return (images, )
 
-import comfy.latent_formats
 class WanImageToVideoSVIPro(io.ComfyNode):
     @classmethod
     def define_schema(cls):
