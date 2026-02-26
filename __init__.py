@@ -293,3 +293,13 @@ if hasattr(PromptServer, "instance"):
         )
     except:
         pass
+
+# ←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←
+# ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ — ДОБАВЛЯЕМ В КОНЕЦ
+# ←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←
+from .NodesGlobal import NODE_CLASS_MAPPINGS as GLOBAL_MAP, NODE_DISPLAY_NAME_MAPPINGS as GLOBAL_NAMES
+
+NODE_CLASS_MAPPINGS.update(GLOBAL_MAP)
+NODE_DISPLAY_NAME_MAPPINGS.update(GLOBAL_NAMES)
+
+print("KJNodes Global Variables — УСПЕШНО ЗАГРУЖЕНЫ!")
