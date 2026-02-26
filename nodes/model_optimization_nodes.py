@@ -288,6 +288,9 @@ class DiffusionModelLoaderKJ():
             sd.update(extra_sd)
             del extra_sd
 
+            diffusion_model_prefix = comfy.sd.model_detection.unet_prefix_from_state_dict(sd)
+            sd = comfy.utils.state_dict_prefix_replace(sd, {diffusion_model_prefix: ""}, filter_keys=False)
+
         model = comfy.sd.load_diffusion_model_state_dict(sd, model_options=model_options, metadata=metadata)
         if dtype := DTYPE_MAP.get(compute_dtype):
             model.set_model_compute_dtype(dtype)
