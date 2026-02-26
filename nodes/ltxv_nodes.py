@@ -1098,7 +1098,7 @@ class LTXVImgToVideoInplaceKJ(io.ComfyNode):
 def ltx2_forward(
         self, x: Tuple[torch.Tensor, torch.Tensor], v_context=None, a_context=None, attention_mask=None, v_timestep=None, a_timestep=None,
         v_pe=None, a_pe=None, v_cross_pe=None, a_cross_pe=None, v_cross_scale_shift_timestep=None, a_cross_scale_shift_timestep=None,
-        v_cross_gate_timestep=None, a_cross_gate_timestep=None, transformer_options=None,
+        v_cross_gate_timestep=None, a_cross_gate_timestep=None, transformer_options=None, self_attention_mask=None, **kwargs
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         run_vx = transformer_options.get("run_vx", True)
         run_ax = transformer_options.get("run_ax", True)
@@ -1119,7 +1119,7 @@ def ltx2_forward(
             norm_vx = comfy.ldm.common_dit.rms_norm(vx) * (1 + vscale_msa) + vshift_msa
             del vshift_msa, vscale_msa
 
-            attn1_out = self.attn1(norm_vx, pe=v_pe, transformer_options=transformer_options)
+            attn1_out = self.attn1(norm_vx, pe=v_pe, mask=self_attention_mask, transformer_options=transformer_options)
             del norm_vx
 
             vgate_msa = self.get_ada_values(self.scale_shift_table, vx.shape[0], v_timestep, slice(2, 3))[0]
