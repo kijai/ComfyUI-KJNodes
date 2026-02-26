@@ -1,6 +1,15 @@
 const { app } = window.comfyAPI.app;
 
 //based on diffus3's SetGet: https://github.com/diffus3/ComfyUI-extensions
+//
+// Fix for ComfyUI frontend 1.35+ compatibility:
+// - Added setComboValues() method to GetNode (was called but never defined)
+// - Changed combo widget from function-based values to array-based with refresh
+// - Added support for Easy-Use setNode type for cross-extension compatibility
+
+// Supported SetNode types (KJNodes + Easy-Use compatibility)
+const SETNODE_TYPES = ['SetNode', 'easy setNode'];
+const GETNODE_TYPES = ['GetNode', 'easy getNode'];
 
 // Nodes that allow you to tunnel connections for cleaner graphs
 function setColorAndBgColor(type) {
@@ -46,6 +55,29 @@ function showAlert(message) {
     life: 5000,
   })
 }
+
+// Helper function to get all SetNode values from graph
+function getSetNodeValues(graph) {
+	if (!graph || !graph._nodes) return [];
+	return graph._nodes
+		.filter(node => SETNODE_TYPES.includes(node.type))
+		.map(node => node.widgets[0].value)
+		.filter(value => value !== '')
+		.sort();
+}
+
+// Helper function to notify all GetNodes to refresh their combo values
+function notifyGetNodes(graph) {
+	if (!graph || !graph._nodes) return;
+	graph._nodes
+		.filter(node => GETNODE_TYPES.includes(node.type))
+		.forEach(node => {
+			if (typeof node.setComboValues === 'function') {
+				node.setComboValues();
+			}
+		});
+}
+
 app.registerExtension({
 	name: "SetNode",
 	registerCustomNodes() {
@@ -70,9 +102,9 @@ app.registerExtension({
 				const node = this;
 
 				this.addWidget(
-					"text", 
-					"Constant", 
-					'', 
+					"text",
+					"Constant",
+					'',
 					(s, t, u, v, x) => {
 						node.validateName(node.graph);
 						if(this.widgets[0].value !== ''){
@@ -80,10 +112,10 @@ app.registerExtension({
 						}
 						this.update();
 						this.properties.previousName = this.widgets[0].value;
-					}, 
+					},
 					{}
 				)
-				
+
 				this.addInput("*", "*");
 				this.addOutput("*", '*');
 
@@ -117,15 +149,15 @@ app.registerExtension({
 								this.title = (!disablePrefix ? "Set_" : "") + type;
 							}
 							if (this.widgets[0].value === '*'){
-								this.widgets[0].value = type	
+								this.widgets[0].value = type
 							}
-							
+
 							this.validateName(node.graph);
 							this.inputs[0].type = type;
 							this.inputs[0].name = type;
-							
+
 							if (app.ui.settings.getSettingValue("KJNodes.nodeAutoColor")){
-								setColorAndBgColor.call(this, type);	
+								setColorAndBgColor.call(this, type);
 							}
 						} else {
                 showAlert(`node ${this.title} input undefined.`)
@@ -133,17 +165,17 @@ app.registerExtension({
 					}
 					if (link_info && node.graph && slotType == 2 && isChangeConnect) {
 						const fromNode = node.graph._nodes.find((otherNode) => otherNode.id == link_info.origin_id);
-						
+
 						if (fromNode && fromNode.inputs && fromNode.inputs[link_info.origin_slot]) {
 							const type = fromNode.inputs[link_info.origin_slot].type;
-							
+
 							this.outputs[0].type = type;
 							this.outputs[0].name = type;
 						} else {
 							showAlert(`node ${this.title} output undefined.`);
 						}
 					}
-					
+
 
 					//Update either way
 					this.update();
@@ -151,22 +183,22 @@ app.registerExtension({
 
 				this.validateName = function(graph) {
 					let widgetValue = node.widgets[0].value;
-				
+
 					if (widgetValue !== '') {
 						let tries = 0;
 						const existingValues = new Set();
-				
+
 						graph._nodes.forEach(otherNode => {
-							if (otherNode !== this && otherNode.type === 'SetNode') {
+							if (otherNode !== this && SETNODE_TYPES.includes(otherNode.type)) {
 								existingValues.add(otherNode.widgets[0].value);
 							}
 						});
-				
+
 						while (existingValues.has(widgetValue)) {
 							widgetValue = node.widgets[0].value + "_" + tries;
 							tries++;
 						}
-				
+
 						node.widgets[0].value = widgetValue;
 						this.update();
 					}
@@ -191,46 +223,42 @@ app.registerExtension({
 					if (!node.graph) {
 						return;
 					}
-				
+
 					const getters = this.findGetters(node.graph);
 					getters.forEach(getter => {
 						getter.setType(this.inputs[0].type);
 					});
-				
+
 					if (this.widgets[0].value) {
 						const gettersWithPreviousName = this.findGetters(node.graph, true);
 						gettersWithPreviousName.forEach(getter => {
 							getter.setName(this.widgets[0].value);
 						});
 					}
-				
-					const allGetters = node.graph._nodes.filter(otherNode => otherNode.type === "GetNode");
-					allGetters.forEach(otherNode => {
-						if (otherNode.setComboValues) {
-							otherNode.setComboValues();
-						}
-					});
+
+					// Notify all GetNodes to refresh their combo values
+					notifyGetNodes(node.graph);
 				}
 
 
 				this.findGetters = function(graph, checkForPreviousName) {
 					const name = checkForPreviousName ? this.properties.previousName : this.widgets[0].value;
-					return graph._nodes.filter(otherNode => otherNode.type === 'GetNode' && otherNode.widgets[0].value === name && name !== '');
+					return graph._nodes.filter(otherNode =>
+						GETNODE_TYPES.includes(otherNode.type) &&
+						otherNode.widgets[0].value === name &&
+						name !== ''
+					);
 				}
 
-				
+
 				// This node is purely frontend and does not impact the resulting prompt so should not be serialized
 				this.isVirtualNode = true;
 			}
-				
+
 
 			onRemoved() {
-				const allGetters = this.graph._nodes.filter((otherNode) => otherNode.type == "GetNode");
-				allGetters.forEach((otherNode) => {
-					if (otherNode.setComboValues) {
-						otherNode.setComboValues([this]);
-					}
-				})
+				// Notify GetNodes that a SetNode was removed
+				notifyGetNodes(this.graph);
 			}
 			getExtraMenuOptions(_, options) {
 				this.menuEntry = this.drawConnection ? "Hide connections" : "Show connections";
@@ -238,19 +266,19 @@ app.registerExtension({
 					{
 						content: this.menuEntry,
 						callback: () => {
-							this.currentGetters = this.findGetters(this.graph);								
+							this.currentGetters = this.findGetters(this.graph);
 							if (this.currentGetters.length == 0) return;
-							let linkType = (this.currentGetters[0].outputs[0].type);	
+							let linkType = (this.currentGetters[0].outputs[0].type);
 							this.slotColor = this.canvas.default_connection_color_byType[linkType]
 							this.menuEntry = this.drawConnection ? "Hide connections" : "Show connections";
 							this.drawConnection = !this.drawConnection;
 							this.canvas.setDirty(true, true);
-							
+
 						},
 						has_submenu: true,
 						submenu: {
 							title: "Color",
-                            options: [ 
+                            options: [
 								{
 								content: "Highlight",
 								callback: () => {
@@ -264,35 +292,37 @@ app.registerExtension({
 					{
 						content: "Hide all connections",
 						callback: () => {
-							const allGetters = this.graph._nodes.filter(otherNode => otherNode.type === "GetNode" || otherNode.type === "SetNode");
+							const allGetters = this.graph._nodes.filter(otherNode =>
+								GETNODE_TYPES.includes(otherNode.type) || SETNODE_TYPES.includes(otherNode.type)
+							);
 							allGetters.forEach(otherNode => {
 								otherNode.drawConnection = false;
 								console.log(otherNode);
 							});
-							
+
 							this.menuEntry = "Show connections";
 							this.drawConnection = false
 							this.canvas.setDirty(true, true);
-							
+
 						},
-					
+
 					},
 				);
 				// Dynamically add a submenu for all getters
 				this.currentGetters = this.findGetters(this.graph);
 				if (this.currentGetters) {
-					
+
 					let gettersSubmenu = this.currentGetters.map(getter => ({
-						
+
 						content: `${getter.title} id: ${getter.id}`,
 						callback: () => {
 							this.canvas.centerOnNode(getter);
 							this.canvas.selectNode(getter, false);
 							this.canvas.setDirty(true, true);
-							
+
 						},
 					}));
-			
+
 					options.unshift({
 						content: "Getters",
 						has_submenu: true,
@@ -303,8 +333,8 @@ app.registerExtension({
 					});
 				}
 			}
-			
-			
+
+
 			onDrawForeground(ctx, lGraphCanvas) {
 				if (this.drawConnection) {
 					this._drawVirtualLinks(lGraphCanvas, ctx);
@@ -326,7 +356,7 @@ app.registerExtension({
 						];
 				}
 				else {
-					
+
 					var start_node_slotpos = [
 						title_width + 55,
 						-15,
@@ -388,6 +418,8 @@ app.registerExtension({
 			slotColor = "#FFF";
 			currentSetter = null;
 			canvas = app.canvas;
+			// Store combo values as instance property for frontend compatibility
+			_comboValues = [];
 
 			constructor(title) {
 				super(title)
@@ -396,6 +428,10 @@ app.registerExtension({
 				}
 				this.properties.showOutputText = GetNode.defaultVisibility;
 				const node = this;
+
+				// Initialize combo values array
+				this._comboValues = [];
+
 				this.addWidget(
 					"combo",
 					"Constant",
@@ -404,14 +440,49 @@ app.registerExtension({
 						this.onRename();
 					},
 					{
-						values: () => {
-                            const setterNodes = node.graph._nodes.filter((otherNode) => otherNode.type == 'SetNode');
-                            return setterNodes.map((otherNode) => otherNode.widgets[0].value).sort();
-                        }
+						// Use array reference instead of function for frontend 1.35+ compatibility
+						// The array is updated by setComboValues() method
+						values: this._comboValues
 					}
 				)
 
-				this.addOutput("*", '*');			
+				this.addOutput("*", '*');
+
+				// Method to refresh combo values - called by SetNode.update() and on graph changes
+				// This fixes the bug where setComboValues was called but never defined
+				this.setComboValues = function(excludeNodes) {
+					if (!node.graph || !node.graph._nodes) return;
+
+					let setterNodes = node.graph._nodes.filter(otherNode =>
+						SETNODE_TYPES.includes(otherNode.type)
+					);
+
+					// Exclude removed nodes if provided
+					if (excludeNodes && Array.isArray(excludeNodes)) {
+						const excludeIds = excludeNodes.map(n => n.id);
+						setterNodes = setterNodes.filter(n => !excludeIds.includes(n.id));
+					}
+
+					const values = setterNodes
+						.map(otherNode => otherNode.widgets[0].value)
+						.filter(v => v !== '')
+						.sort();
+
+					// Update the combo values array in-place to maintain reference
+					node._comboValues.length = 0;
+					node._comboValues.push(...values);
+
+					// Also update widget.options.values directly for maximum compatibility
+					if (node.widgets && node.widgets[0] && node.widgets[0].options) {
+						node.widgets[0].options.values = node._comboValues;
+					}
+
+					// Force canvas redraw
+					if (app.canvas) {
+						app.canvas.setDirty(true, true);
+					}
+				};
+
 				this.onConnectionsChange = function(
 					slotType,	//0 = output, 1 = input
 					slot,	//self-explanatory
@@ -419,7 +490,7 @@ app.registerExtension({
                     link_info,
                     output
 				) {
-					this.validateLinks();	
+					this.validateLinks();
 				}
 
 				this.setName = function(name) {
@@ -427,17 +498,17 @@ app.registerExtension({
 					node.onRename();
 					node.serialize();
 				}
-				
+
 				this.onRename = function() {
 					const setter = this.findSetter(node.graph);
 					if (setter) {
 						let linkType = (setter.inputs[0].type);
-						
+
 						this.setType(linkType);
 						this.title = (!disablePrefix ? "Get_" : "") + setter.widgets[0].value;
-						
+
 						if (app.ui.settings.getSettingValue("KJNodes.nodeAutoColor")){
-							setColorAndBgColor.call(this, linkType);	
+							setColorAndBgColor.call(this, linkType);
 						}
 
 					} else {
@@ -470,7 +541,11 @@ app.registerExtension({
 
 				this.findSetter = function(graph) {
 					const name = this.widgets[0].value;
-					const foundNode = graph._nodes.find(otherNode => otherNode.type === 'SetNode' && otherNode.widgets[0].value === name && name !== '');
+					const foundNode = graph._nodes.find(otherNode =>
+						SETNODE_TYPES.includes(otherNode.type) &&
+						otherNode.widgets[0].value === name &&
+						name !== ''
+					);
 					return foundNode;
 				};
 
@@ -478,14 +553,14 @@ app.registerExtension({
 					this.canvas.centerOnNode(this.currentSetter);
 					this.canvas.selectNode(this.currentSetter, false);
 				};
-				
+
 				// This node is purely frontend and does not impact the resulting prompt so should not be serialized
 				this.isVirtualNode = true;
 			}
-			
+
 			getInputLink(slot) {
 				const setter = this.findSetter(this.graph);
-			
+
 				if (setter) {
 					const slotInfo = setter.inputs[slot];
 					const link = this.graph.links[slotInfo.link];
@@ -496,8 +571,17 @@ app.registerExtension({
 					//throw new Error(errorMessage);
 				}
 			}
+
 			onAdded(graph) {
+				// Initialize combo values when node is added to graph
+				// Use setTimeout to ensure graph is fully ready
+				setTimeout(() => {
+					if (this.setComboValues) {
+						this.setComboValues();
+					}
+				}, 50);
 			}
+
 			getExtraMenuOptions(_, options) {
 				let menuEntry = this.drawConnection ? "Hide connections" : "Show connections";
 				this.currentSetter = this.findSetter(this.graph)
@@ -536,7 +620,7 @@ app.registerExtension({
 
 				// Provide a default link object with necessary properties, to avoid errors as link can't be null anymore
 				const defaultLink = { type: 'default', color: this.slotColor };
-				
+
 				let start_node_slotpos = this.currentSetter.getConnectionPos(false, 0);
 				start_node_slotpos = [
 					start_node_slotpos[0] - this.pos[0],
