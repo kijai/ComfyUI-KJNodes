@@ -18,7 +18,7 @@ from io import BytesIO
 try:
     import cv2
 except:
-    print("OpenCV not installed")
+    logging.warning("OpenCV not installed")
     pass
 
 from PIL import ImageGrab, ImageDraw, ImageFont, Image, ImageOps, ImageSequence, ImageStat
@@ -138,7 +138,7 @@ https://github.com/hahnec/color-matcher/
                 return torch.from_numpy(image_result)
                 
             except Exception as e:
-                print(f"Thread {i} error: {e}")
+                logging.warning(f"Thread {i} error: {e}")
                 return torch.from_numpy(image_target_np_i)  # fallback
 
         if multithread and batch_size > 1:
@@ -449,8 +449,8 @@ class ImageConcatFromBatch:
         batch_size, height, width, channels = images.shape
         num_rows = (batch_size + num_columns - 1) // num_columns  # Calculate number of rows
 
-        print(f"Initial dimensions: batch_size={batch_size}, height={height}, width={width}, channels={channels}")
-        print(f"num_rows={num_rows}, num_columns={num_columns}")
+        logging.info(f"Initial dimensions: batch_size={batch_size}, height={height}, width={width}, channels={channels}")
+        logging.info(f"num_rows={num_rows}, num_columns={num_columns}")
 
         if match_image_size:
             target_shape = images[0].shape
@@ -468,7 +468,7 @@ class ImageConcatFromBatch:
                     target_width = target_shape[1]
                     target_height = int(target_width / original_aspect_ratio)
 
-                print(f"Resizing image from ({original_height}, {original_width}) to ({target_height}, {target_width})")
+                logging.info(f"Resizing image from ({original_height}, {original_width}) to ({target_height}, {target_width})")
 
                 # Resize the image to match the target size while preserving aspect ratio
                 resized_image = common_upscale(image.movedim(-1, 0), target_width, target_height, "lanczos", "disabled")
@@ -484,7 +484,7 @@ class ImageConcatFromBatch:
         grid_height = num_rows * height
         grid_width = num_columns * width
 
-        print(f"Grid dimensions before scaling: grid_height={grid_height}, grid_width={grid_width}")
+        logging.info(f"Grid dimensions before scaling: grid_height={grid_height}, grid_width={grid_width}")
 
         # Original scale factor calculation remains unchanged
         scale_factor = min(max_resolution / grid_height, max_resolution / grid_width, 1.0)
@@ -505,8 +505,8 @@ class ImageConcatFromBatch:
         # Recalculate grid dimensions with adjusted height and width
         grid_height = num_rows * height
         grid_width = num_columns * width
-        print(f"Grid dimensions after scaling: grid_height={grid_height}, grid_width={grid_width}")
-        print(f"Final image dimensions: height={height}, width={width}")
+        logging.info(f"Grid dimensions after scaling: grid_height={grid_height}, grid_width={grid_width}")
+        logging.info(f"Final image dimensions: height={height}, width={width}")
 
         grid = torch.zeros((grid_height, grid_width, channels), dtype=images.dtype)
 
@@ -666,7 +666,7 @@ Can be used for realtime diffusion with autoqueue.
                 time.sleep(delay)
 
         elapsed_time = time.time() - start_time
-        print(f"screengrab took {elapsed_time} seconds.")
+        logging.info(f"screengrab took {elapsed_time} seconds.")
         
         return (torch.cat(captures, dim=0),)
     
@@ -957,9 +957,8 @@ and passes the latent through unchanged.
             "text": [f"{B}x{C}x{T}x{H}x{W}"]}, 
             "result": (latent, B, C, T, H, W) 
         }
-    
+
 class ImageBatchRepeatInterleaving:
-    
     RETURN_TYPES = ("IMAGE", "MASK",)
     FUNCTION = "repeat"
     CATEGORY = "KJNodes/image"
@@ -980,21 +979,20 @@ with repeats 2 becomes batch of 10 images: 0, 0, 1, 1, 2, 2, 3, 3, 4, 4
                 "mask": ("MASK",),
             }
         }
-    
+
     def repeat(self, images, repeats, mask=None):
         original_count = images.shape[0]
         total_count = original_count * repeats
-       
+
         repeated_images = torch.repeat_interleave(images, repeats=repeats, dim=0)
         if mask is not None:
             mask = torch.repeat_interleave(mask, repeats=repeats, dim=0)
         else:
-            mask = torch.zeros((total_count, images.shape[1], images.shape[2]), 
+            mask = torch.zeros((total_count, images.shape[1], images.shape[2]),
                               device=images.device, dtype=images.dtype)
             for i in range(original_count):
                 mask[i * repeats] = 1.0
 
-        print("mask shape", mask.shape)
         return (repeated_images, mask)
 
 class ImageUpscaleWithModelBatched:
@@ -1183,7 +1181,7 @@ class ImagePadForOutpaintMasked:
     def expand_image(self, image, left, top, right, bottom, feathering, mask=None):
         if mask is not None:
             if torch.allclose(mask, torch.zeros_like(mask)):
-                    print("Warning: The incoming mask is fully black. Handling it as None.")
+                    logging.warning("The incoming mask is fully black. Handling it as None.")
                     mask = None
         B, H, W, C = image.size()
 
@@ -1323,7 +1321,7 @@ class ImagePrepForICLora:
 
         if reference_mask is not None:
             if torch.allclose(reference_mask, torch.zeros_like(reference_mask)):
-                    print("Warning: The incoming mask is fully black. Handling it as None.")
+                    logging.warning("The incoming mask is fully black. Handling it as None.")
                     reference_mask = None
         image = reference_image
         if latent_image is not None:
@@ -1338,7 +1336,6 @@ class ImagePrepForICLora:
                 size=(H, W),
                 mode='nearest'
             ).squeeze(1)
-            print(resized_mask.shape)
             image = image * resized_mask.unsqueeze(-1)
 
         # Calculate new width maintaining aspect ratio
@@ -2632,7 +2629,7 @@ class PreviewAnimation:
                 mask_img = Image.fromarray(np.clip(mask_np, 0, 255).astype(np.uint8))
                 pil_images.append(mask_img)
         else:
-            print("PreviewAnimation: No images or masks provided")
+            logging.warning("PreviewAnimation: No images or masks provided")
             return { "ui": { "images": results, "animated": (None,), "text": "empty" }}
 
         num_frames = len(pil_images)
@@ -2860,7 +2857,7 @@ highest dimension.
                     except:
                         pass
                 else:
-                    print(f"[ImageResizeKJv2] estimated output ~{est_mb:.2f} MB; batching {per_batch}/{B}")
+                    logging.info(f"[ImageResizeKJv2] estimated output ~{est_mb:.2f} MB; batching {per_batch}/{B}")
             except:
                 pass
 
@@ -2959,7 +2956,7 @@ highest dimension.
                         pass
                 else:
                     try:
-                        print(f"[ImageResizeKJv2] batch {current_batch}/{total_batches} · images {end_idx}/{B}")
+                        logging.info(f"[ImageResizeKJv2] batch {current_batch}/{total_batches} · images {end_idx}/{B}")
                     except:
                         pass
             out_image = torch.cat(chunks, dim=0)
@@ -3374,7 +3371,6 @@ class ImageGridtoBatch:
 
     def decompose(self, image, columns, rows):
         B, H, W, C = image.shape
-        print("input size: ", image.shape)
 
         # Calculate cell width, rounding down
         cell_width = W // columns
@@ -3834,7 +3830,6 @@ class ImageCropByMaskBatch:
         mask_count = BM
         if HM != H or WM != W:
             masks = F.interpolate(masks.unsqueeze(1), size=(H, W), mode='nearest-exact').squeeze(1)
-            print(masks.shape)
         output_images = []
         output_masks = []
 
@@ -4159,7 +4154,7 @@ class LoadVideosFromFolder:
                 if len(file_parts) > 1 and (file_parts[-1].lower() in ['webm', 'mp4', 'mkv', 'gif', 'mov']):
                     videos_list.append(os.path.join(kwargs['video'], f))
                     filenames.append(f)
-        print(videos_list)
+
         kwargs.pop('video')
         loaded_videos = []
         for idx, video in enumerate(videos_list):
@@ -4229,7 +4224,6 @@ class LoadVideosFromFolder:
                 row_tensor = torch.cat(padded_row_videos, dim=2)  # Concatenate horizontally
                 row_tensors.append(row_tensor)
             out_tensor = torch.cat(row_tensors, dim=1)  # Concatenate rows vertically
-        print(out_tensor.shape)
         return out_tensor,
 
     @classmethod

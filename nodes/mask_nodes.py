@@ -7,6 +7,7 @@ import numpy as np
 from contextlib import nullcontext
 import os
 from tqdm import tqdm
+import logging
 
 from comfy import model_management
 from comfy.utils import ProgressBar
@@ -101,7 +102,7 @@ Segments an image or batch of images using CLIPSeg.
         mask_tensor = torch.sigmoid(outputs.logits)
         mask_tensor = (mask_tensor - mask_tensor.min()) / (mask_tensor.max() - mask_tensor.min())
         mask_tensor = torch.where(mask_tensor > (threshold), mask_tensor, torch.tensor(0, dtype=torch.float))
-        print(mask_tensor.shape)
+
         if len(mask_tensor.shape) == 2:
             mask_tensor = mask_tensor.unsqueeze(0)
         mask_tensor = F.interpolate(mask_tensor.unsqueeze(1), size=(H, W), mode='nearest')
@@ -383,7 +384,7 @@ class CreateFluidMask:
         INFLOW_VELOCITY = inflow_velocity
         INFLOW_COUNT = inflow_count
 
-        print('Generating fluid solver, this may take some time.')
+        logging.info('Generating fluid solver, this may take some time.')
         fluid = Fluid(RESOLUTION, 'dye')
 
         center = np.floor_divide(RESOLUTION, 2)
@@ -403,7 +404,7 @@ class CreateFluidMask:
 
         
         for f in range(DURATION):
-            print(f'Computing frame {f + 1} of {DURATION}.')
+            logging.info(f'Computing frame {f + 1} of {DURATION}.')
             if f <= INFLOW_DURATION:
                 fluid.velocity += inflow_velocity
                 fluid.dye += inflow_dye
@@ -1403,7 +1404,7 @@ class SeparateMasks:
                 width = x_max - x_min + 1
                 height = y_max - y_min + 1
                 centroid_x = (x_min + x_max) / 2  # Calculate x centroid
-                print(f"Component {component}: width={width}, height={height}, x_pos={centroid_x}")
+                logging.info(f"Component {component}: width={width}, height={height}, x_pos={centroid_x}")
                 
                 if width >= size_threshold_width and height >= size_threshold_height:
                     if mode == "convex_polygons":
@@ -1506,7 +1507,7 @@ class ConsolidateMasksKJ:
             merged.append(mask_idx)
             final_masks.append(combined_mask)
 
-        print(f"Consolidated {B} masks into {len(final_masks)}")
+        logging.info(f"Consolidated {B} masks into {len(final_masks)}")
         return (torch.stack(final_masks, dim=0),)
 
 

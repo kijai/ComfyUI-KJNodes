@@ -66,9 +66,9 @@ def extract_lora(diff, key, rank, algorithm, lora_type, lowrank_iters=7, adaptiv
                 s_fro = torch.sqrt(torch.sum(S_squared))
                 s_red_fro = torch.sqrt(torch.sum(S_squared[:lora_rank]))
                 fro_percent = float(s_red_fro / s_fro)
-                print(f"{key} Extracted LoRA rank: {lora_rank}, Frobenius retained: {fro_percent:.1%}")
+                logging.info(f"{key} Extracted LoRA rank: {lora_rank}, Frobenius retained: {fro_percent:.1%}")
             else:
-                print(f"{key} Extracted LoRA rank: {lora_rank}")
+                logging.info(f"{key} Extracted LoRA rank: {lora_rank}")
         else:
             lora_rank = rank
 
@@ -256,7 +256,7 @@ class LoraReduceRank:
         for k, v in lora_sd.items():
             new_lora_sd[k.replace(".default", "")] = v
         del lora_sd
-        print("Resizing Lora...")
+        logging.info("Resizing Lora...")
         output_sd, old_dim, new_alpha, rank_list = resize_lora_model(new_lora_sd, new_rank, save_dtype, device, dynamic_method, dynamic_param, verbose)
 
         # update metadata
@@ -288,7 +288,7 @@ class LoraReduceRank:
         rank_str = new_rank if dynamic_method == "disabled" else f"dynamic_{average_rank}"
         output_checkpoint = f"{filename.replace('.safetensors', '')}_resized_from_{old_dim}_to_{rank_str}{output_dtype_str}_{counter:05}_.safetensors"
         output_checkpoint = os.path.join(full_output_folder, output_checkpoint)
-        print(f"Saving resized LoRA to {output_checkpoint}")
+        logging.info(f"Saving resized LoRA to {output_checkpoint}")
 
         comfy.utils.save_torch_file(output_sd, output_checkpoint, metadata=metadata)
         return {}
@@ -471,7 +471,7 @@ def resize_lora_model(lora_sd, new_rank, save_dtype, device, dynamic_method, dyn
     rank_list = []
 
     if dynamic_method:
-        print(f"Dynamically determining new alphas and dims based off {dynamic_method}: {dynamic_param}, max rank is {new_rank}")
+        logging.info(f"Dynamically determining new alphas and dims based off {dynamic_method}: {dynamic_param}, max rank is {new_rank}")
 
     lora_down_weight = None
     lora_up_weight = None
@@ -579,5 +579,5 @@ def resize_lora_model(lora_sd, new_rank, save_dtype, device, dynamic_method, dyn
         pbar.update(1)
 
     if verbose:
-        print(f"Average Frobenius norm retention: {np.mean(fro_list):.2%} | std: {np.std(fro_list):0.3f}")
+        logging.info(f"Average Frobenius norm retention: {np.mean(fro_list):.2%} | std: {np.std(fro_list):0.3f}")
     return o_lora_sd, max_old_rank, new_alpha, rank_list

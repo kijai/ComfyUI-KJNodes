@@ -850,7 +850,7 @@ class LTX2SamplingPreviewOverride(io.ComfyNode):
             node_id="LTX2SamplingPreviewOverride",
             display_name="LTX2 Sampling Preview Override",
             description="Overrides the LTX2 preview sampling preview function, temporary measure until previews are in comfy core",
-            category="KJNodes/experimental",
+            category="KJNodes/ltxv",
             is_experimental=True,
             inputs=[
                 io.Model.Input("model", tooltip="The model to add preview override to."),
@@ -963,7 +963,7 @@ class LTX2AudioLatentNormalizingSampling(io.ComfyNode):
             node_id="LTX2AudioLatentNormalizingSampling",
             display_name="LTX2 Audio Latent Normalizing Sampling",
             description="Improves LTX2 generated audio quality by normalizing audio latents at specified sampling steps.",
-            category="KJNodes/experimental",
+            category="KJNodes/ltxv",
             is_experimental=True,
             inputs=[
                 io.Model.Input("model", tooltip="The model to add preview override to."),

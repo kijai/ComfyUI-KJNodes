@@ -40,7 +40,7 @@ class Intrinsic_lora_sampling:
 
     RETURN_TYPES = ("IMAGE", "LATENT",)
     FUNCTION = "onestepsample"
-    CATEGORY = "KJNodes"
+    CATEGORY = "KJNodes/misc"
     DESCRIPTION = """
 Sampler to use the intrinsic loras:  
 https://github.com/duxiaodan/intrinsic-lora  
