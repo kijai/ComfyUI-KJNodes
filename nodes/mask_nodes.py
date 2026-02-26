@@ -1007,7 +1007,7 @@ class GrowMaskWithBlur:
         current_expand = expand
         for m in tqdm(growmask, desc="Expanding/Contracting Mask"):
             output = m.unsqueeze(0).unsqueeze(0).to(main_device)  # Add batch and channel dims for kornia
-            if abs(round(current_expand)) > 0:
+            if abs(round(current_expand)) > 0 and output.max() > 0:
                 # Create kernel - kornia expects kernel on same device as input
                 if tapered_corners:
                     kernel = torch.tensor([[0, 1, 0],
