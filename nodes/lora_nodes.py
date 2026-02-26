@@ -1,6 +1,7 @@
 import torch
 import comfy.model_management
 import comfy.utils
+import comfy.lora
 import folder_paths
 import os
 import logging
@@ -10,6 +11,50 @@ import numpy as np
 device = comfy.model_management.get_torch_device()
 
 CLAMP_QUANTILE = 0.99
+
+
+def _resolve_weight_from_patches(patches, key):
+    base_weight, convert_func = patches[0]
+    weight_tensor = comfy.model_management.cast_to_device(
+        base_weight, torch.device("cpu"), torch.float32, copy=True
+    )
+    try:
+        weight_tensor = convert_func(weight_tensor, inplace=True)
+    except TypeError:
+        weight_tensor = convert_func(weight_tensor)
+
+    if len(patches) > 1:
+        weight_tensor = comfy.lora.calculate_weight(
+            patches[1:],
+            weight_tensor,
+            key,
+            intermediate_dtype=torch.float32,
+            original_weights={key: patches},
+        )
+
+    return weight_tensor
+
+
+def _build_scaled_fp8_diff(finetuned_model, original_model, prefix, bias_diff):
+    finetuned_patches = finetuned_model.get_key_patches(prefix)
+    original_patches = original_model.get_key_patches(prefix)
+
+    common_keys = set(finetuned_patches.keys()).intersection(original_patches.keys())
+    diff_sd = {}
+
+    for key in common_keys:
+        is_weight = key.endswith(".weight")
+        is_bias = key.endswith(".bias")
+
+        if not is_weight and not (bias_diff and is_bias):
+            continue
+
+        ft_tensor = _resolve_weight_from_patches(finetuned_patches[key], key)
+        orig_tensor = _resolve_weight_from_patches(original_patches[key], key)
+
+        diff_sd[key] = ft_tensor.sub(orig_tensor)
+
+    return diff_sd
 
 def extract_lora(diff, key, rank, algorithm, lora_type, lowrank_iters=7, adaptive_param=1.0, clamp_quantile=True):
     """
@@ -99,15 +144,18 @@ def extract_lora(diff, key, rank, algorithm, lora_type, lowrank_iters=7, adaptiv
     return (U, Vh)
 
 
-def calc_lora_model(model_diff, rank, prefix_model, prefix_lora, output_sd, lora_type, algorithm, lowrank_iters, out_dtype, bias_diff=False, adaptive_param=1.0, clamp_quantile=True):
-    comfy.model_management.load_models_gpu([model_diff], force_patch_weights=True)
-    model_diff.model.diffusion_model.cpu()
-    sd = model_diff.model_state_dict(filter_prefix=prefix_model)
-    del model_diff
-    comfy.model_management.soft_empty_cache()
-    for k, v in sd.items():
-        if isinstance(v, torch.Tensor):
-            sd[k] = v.cpu()
+def calc_lora_model(model_diff, rank, prefix_model, prefix_lora, output_sd, lora_type, algorithm, lowrank_iters, out_dtype, bias_diff=False, adaptive_param=1.0, clamp_quantile=True, sd_override=None):
+    if sd_override is None:
+        comfy.model_management.load_models_gpu([model_diff], force_patch_weights=True)
+        model_diff.model.diffusion_model.cpu()
+        sd = model_diff.model_state_dict(filter_prefix=prefix_model)
+        del model_diff
+        comfy.model_management.soft_empty_cache()
+        for k, v in sd.items():
+            if isinstance(v, torch.Tensor):
+                sd[k] = v.cpu()
+    else:
+        sd = sd_override
 
     # Get total number of keys to process for progress bar
     total_keys = len([k for k in sd if k.endswith(".weight") or (bias_diff and k.endswith(".bias"))])
@@ -183,17 +231,39 @@ class LoraExtractKJ:
             raise ValueError("svd_lowrank algorithm is only supported for standard LoRA extraction.")
 
         dtype = {"fp8_e4m3fn": torch.float8_e4m3fn, "bf16": torch.bfloat16, "fp16": torch.float16, "fp16_fast": torch.float16, "fp32": torch.float32}[output_dtype]
-        m = finetuned_model.clone()
-        kp = original_model.get_key_patches("diffusion_model.")
-        for k in kp:
-            m.add_patches({k: kp[k]}, - 1.0, 1.0)
-        model_diff = m
+
+        model_diff = None
+        sd_override = None
+
+        scaled_fp8_ft = getattr(getattr(finetuned_model.model, "model_config", None), "scaled_fp8", None)
+        scaled_fp8_orig = getattr(getattr(original_model.model, "model_config", None), "scaled_fp8", None)
+        scaled_fp8_present = scaled_fp8_ft is not None or scaled_fp8_orig is not None
+
+        if scaled_fp8_present:
+            comfy.model_management.load_models_gpu([finetuned_model, original_model], force_patch_weights=True)
+            logging.info(
+                "LoraExtractKJ: detected scaled fp8 weights (finetuned=%s, original=%s); using high-precision diff path.",
+                scaled_fp8_ft is not None,
+                scaled_fp8_orig is not None,
+            )
+            sd_override = _build_scaled_fp8_diff(
+                finetuned_model, original_model, "diffusion_model.", bias_diff
+            )
+            comfy.model_management.soft_empty_cache()
+        else:
+            m = finetuned_model.clone()
+            kp = original_model.get_key_patches("diffusion_model.")
+            for k in kp:
+                m.add_patches({k: kp[k]}, - 1.0, 1.0)
+            model_diff = m
 
         full_output_folder, filename, counter, subfolder, filename_prefix = folder_paths.get_save_image_path(filename_prefix, self.output_dir)
 
         output_sd = {}
         if model_diff is not None:
             output_sd = calc_lora_model(model_diff, rank, "diffusion_model.", "diffusion_model.", output_sd, lora_type, algorithm, lowrank_iters, dtype, bias_diff=bias_diff, adaptive_param=adaptive_param, clamp_quantile=clamp_quantile)
+        elif sd_override is not None:
+            output_sd = calc_lora_model(None, rank, "diffusion_model.", "diffusion_model.", output_sd, lora_type, algorithm, lowrank_iters, dtype, bias_diff=bias_diff, adaptive_param=adaptive_param, clamp_quantile=clamp_quantile, sd_override=sd_override)
         if "adaptive" in lora_type:
             rank_str = f"{lora_type}_{adaptive_param:.2f}"
         else:
