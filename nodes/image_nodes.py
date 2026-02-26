@@ -2398,7 +2398,6 @@ class ImageBatchMulti:
             "required": {
                 "inputcount": ("INT", {"default": 2, "min": 2, "max": 1000, "step": 1}),
                 "image_1": ("IMAGE", ),
-                
             },
             "optional": {
                 "image_2": ("IMAGE", ),
@@ -2416,14 +2415,39 @@ with the **inputcount** and clicking update.
 """
 
     def combine(self, inputcount, **kwargs):
-        from nodes import ImageBatch
-        image_batch_node = ImageBatch()
-        image = kwargs["image_1"].cpu()
-        first_image_shape = image.shape
+        first = kwargs["image_1"]
+        h, w = first.shape[1], first.shape[2]
+
+        # determine output shape
+        max_ch = first.shape[-1]
+        total_frames = first.shape[0]
         for c in range(1, inputcount):
-            new_image = kwargs.get(f"image_{c + 1}", torch.zeros(first_image_shape)).cpu()
-            image, = image_batch_node.batch(image, new_image)
-        return (image,)
+            img = kwargs.get(f"image_{c + 1}")
+            if img is not None:
+                max_ch = max(max_ch, img.shape[-1])
+                total_frames += img.shape[0]
+            else:
+                total_frames += first.shape[0]
+
+        # pre-allocate output
+        out = torch.empty((total_frames, h, w, max_ch), dtype=first.dtype)
+        offset = 0
+
+        for c in range(inputcount):
+            img = kwargs.get(f"image_{c + 1}", torch.zeros((first.shape[0], h, w, max_ch), dtype=first.dtype))
+
+            if img.shape[1:3] != (h, w):
+                img = common_upscale(img.movedim(-1, 1), w, h, "bilinear", "center").movedim(1, -1)
+
+            if img.shape[-1] < max_ch:
+                img = torch.nn.functional.pad(img, (0, max_ch - img.shape[-1]), mode='constant', value=1.0)
+
+            n = img.shape[0]
+            out[offset:offset + n].copy_(img, non_blocking=True)
+            offset += n
+            del img
+
+        return (out.cpu(),)
 
 
 class ImageTensorList:
