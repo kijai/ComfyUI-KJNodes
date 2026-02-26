@@ -286,13 +286,6 @@ class DiffusionModelLoaderKJ():
         if extra_state_dict is not None:
             extra_sd = comfy.utils.load_torch_file(extra_state_dict)
             sd.update(extra_sd)
-            # If the model is a checkpoint, strip additional non-diffusion model entries before adding extra state dict
-            from comfy import model_detection
-            diffusion_model_prefix = model_detection.unet_prefix_from_state_dict(sd)
-            if diffusion_model_prefix == "model.diffusion_model.":
-                temp_sd = comfy.utils.state_dict_prefix_replace(sd, {diffusion_model_prefix: ""}, filter_keys=True)
-                if len(temp_sd) > 0:
-                    sd = temp_sd
             del extra_sd
 
         model = comfy.sd.load_diffusion_model_state_dict(sd, model_options=model_options, metadata=metadata)
