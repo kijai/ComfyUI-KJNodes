@@ -1946,7 +1946,7 @@ Then on another copy of the node provide the newly generated frames and choose h
     }
 
     def imagesfrombatch(self, source_images, overlap, overlap_side, overlap_mode, new_images=None):
-        if overlap >= len(source_images):
+        if overlap > len(source_images):
             return source_images, source_images, source_images
 
         if new_images is not None:
