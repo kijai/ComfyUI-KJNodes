@@ -2450,7 +2450,7 @@ class VAELoaderKJ:
                 vae_path = folder_paths.get_full_path_or_raise("vae", vae_name)
             sd, metadata = load_torch_file(vae_path, return_metadata=True)
 
-        if "vocoder.conv_post.weight" in sd:
+        if "vocoder.conv_post.weight" in sd or "vocoder.vocoder.conv_post.weight" in sd:
             from comfy.ldm.lightricks.vae.audio_vae import AudioVAE
             vae = AudioVAE(sd, metadata)
         else:
