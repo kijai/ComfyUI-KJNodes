@@ -148,8 +148,8 @@ class SplineEditor:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "points_store": ("STRING", {"multiline": False}),
-                "coordinates": ("STRING", {"multiline": False}),
+                "points_store": ("STRING", {"multiline": False, "advanced": True}),
+                "coordinates": ("STRING", {"multiline": False, "advanced": True}),
                 "mask_width": ("INT", {"default": 512, "min": 8, "max": 4096, "step": 8}),
                 "mask_height": ("INT", {"default": 512, "min": 8, "max": 4096, "step": 8}),
                 "points_to_sample": ("INT", {"default": 16, "min": 2, "max": 1000, "step": 1}),
@@ -1407,13 +1407,13 @@ class PointsEditor:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "points_store": ("STRING", {"multiline": False}),
-                "coordinates": ("STRING", {"multiline": False}),
-                "neg_coordinates": ("STRING", {"multiline": False}),
-                "bbox_store": ("STRING", {"multiline": False}),
-                "bboxes": ("STRING", {"multiline": False}),
+                "points_store": ("STRING", {"multiline": False, "advanced": True}),
+                "coordinates": ("STRING", {"multiline": False, "socketless": True, "advanced": True}),
+                "neg_coordinates": ("STRING", {"multiline": False, "socketless": True, "advanced": True}),
+                "bbox_store": ("STRING", {"multiline": False, "advanced": True}),
+                "bboxes": ("STRING", {"multiline": False, "socketless": True, "advanced": True}),
                 "bbox_format": (
-                [   
+                [
                     'xyxy',
                     'xywh',
                 ],

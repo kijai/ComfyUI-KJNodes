@@ -116,7 +116,11 @@ app.registerExtension({
             this.splineEditor = this.addDOMWidget(nodeData.name, "SplineEditorWidget", element, {
             serialize: false,
             hideOnZoom: false,
+            getMinHeight: () => this.splineEditorHeight || 550,
+            getMaxHeight: () => this.splineEditorHeight || 550,
+            getHeight: () => this.splineEditorHeight || 550,
             });
+            this.splineEditorHeight = 550;
 
             // context menu
             this.contextMenu = document.createElement("div");
@@ -220,6 +224,15 @@ app.registerExtension({
 
 
 class SplineEditor{
+  setNodeWidth(width) {
+    this.node.setSize([width, this.node.size[1]]);
+    // In Vue nodes mode, also update the CSS variable directly on the node element
+    const nodeEl = document.querySelector(`[data-node-id="${this.node.id}"]`);
+    if (nodeEl) {
+      nodeEl.style.setProperty('--node-width', `${width}px`);
+    }
+  }
+
   constructor(context, reset = false) {
   this.node = context;
   this.reset=reset;
@@ -322,7 +335,7 @@ class SplineEditor{
   this.widthWidget.callback = () => {
     this.width = this.widthWidget.value;
     if (this.width > 256) {
-        context.setSize([this.width + 45, context.size[1]]);
+        this.setNodeWidth(this.width + 45);
     }
     this.vis.width(this.width);
     this.updatePath();
@@ -330,7 +343,12 @@ class SplineEditor{
 this.heightWidget.callback = () => {
     this.height = this.heightWidget.value
     this.vis.height(this.height)
+    context.splineEditorHeight = this.height + 30;
     context.setSize([context.size[0], this.height + 450]);
+    if (context.graph) {
+      context.arrange?.();
+      context.graph.setDirtyCanvas(true, true);
+    }
     this.updatePath();
   }
   this.pointsStoreWidget.callback = () => {
@@ -658,8 +676,9 @@ this.lastMousePosition = { x: this.width/2, y: this.height/2 };
       this.pathElements = svgElement.getElementsByTagName('path'); // Get all path elements
 
       if (this.width > 256) {
-        this.node.setSize([this.width + 45, this.node.size[1]]);
+        this.setNodeWidth(this.width + 45);
       }
+      this.node.splineEditorHeight = this.height + 30;
       this.node.setSize([this.node.size[0], this.height + 450]);
       this.updatePath();
       this.refreshBackgroundImage();
@@ -740,18 +759,25 @@ this.lastMousePosition = { x: this.width/2, y: this.height/2 };
       this.drawRuler = false;
 
       if (img.width != this.vis.width() || img.height != this.vis.height()) {
-        if (img.width > 256) {
-          this.node.setSize([img.width + 45, this.node.size[1]]);
-        }
-        this.node.setSize([this.node.size[0], img.height + 520]);
         this.vis.width(img.width);
         this.vis.height(img.height);
         this.height = img.height;
         this.width = img.width;
-        
+
+        if (img.width > 256) {
+          this.setNodeWidth(img.width + 45);
+        }
+        this.node.splineEditorHeight = img.height + 30;
+        this.node.setSize([this.node.size[0], this.height + 520]);
+        if (this.node.graph) {
+          this.node.arrange?.();
+          this.node.graph.setDirtyCanvas(true, true);
+        }
+
         this.updatePath();
       }
-      this.backgroundImage.url(file ? URL.createObjectURL(file) : `data:${this.node.properties.imgData.type};base64,${base64String}`).visible(true).root.render();
+      const mimeType = this.node.properties.imgData?.type || 'image/png';
+      this.backgroundImage.url(file ? URL.createObjectURL(file) : `data:${mimeType};base64,${base64String}`).visible(true).root.render();
       };
 
     processImage = (img, file) => {
@@ -809,12 +835,19 @@ this.lastMousePosition = { x: this.width/2, y: this.height/2 };
     };
 
     refreshBackgroundImage = () => {
+      console.log("refreshBackgroundImage called, imgData:", !!this.node.properties.imgData, "base64:", !!this.node.properties.imgData?.base64, "type:", this.node.properties.imgData?.type);
       if (this.node.properties.imgData && this.node.properties.imgData.base64) {
         const base64String = this.node.properties.imgData.base64;
-        const imageUrl = `data:${this.node.properties.imgData.type};base64,${base64String}`;
+        const mimeType = this.node.properties.imgData.type || 'image/png';
+        const imageUrl = `data:${mimeType};base64,${base64String}`;
+        console.log("Loading bg image, url length:", imageUrl.length, "mime:", mimeType);
         const img = new Image();
+        img.onerror = (e) => console.error("Background image failed to load:", e);
         img.src = imageUrl;
-        img.onload = () => this.handleImageLoad(img, null, base64String);
+        img.onload = () => {
+          console.log("Background image loaded:", img.width, "x", img.height);
+          this.handleImageLoad(img, null, base64String);
+        };
       }
     };
 

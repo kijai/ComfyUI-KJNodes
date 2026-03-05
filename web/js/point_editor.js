@@ -118,7 +118,11 @@ app.registerExtension({
         this.pointsEditor = this.addDOMWidget(nodeData.name, "PointsEditorWidget", element, {
           serialize: false,
           hideOnZoom: false,
+          getMinHeight: () => this.pointsEditorHeight || 550,
+          getMaxHeight: () => this.pointsEditorHeight || 550,
+          getHeight: () => this.pointsEditorHeight || 550,
         });
+        this.pointsEditorHeight = 550;
 
         // context menu
         this.contextMenu = document.createElement("div");
@@ -214,6 +218,14 @@ app.registerExtension({
 })//register
 
 class PointsEditor {
+  setNodeWidth(width) {
+    this.node.setSize([width, this.node.size[1]]);
+    const nodeEl = document.querySelector(`[data-node-id="${this.node.id}"]`);
+    if (nodeEl) {
+      nodeEl.style.setProperty('--node-width', `${width}px`);
+    }
+  }
+
   constructor(context, reset = false) {
     this.node = context;
     this.reset = reset;
@@ -267,7 +279,7 @@ class PointsEditor {
     this.widthWidget.callback = () => {
       this.width = this.widthWidget.value;
       if (this.width > 256) {
-        context.setSize([this.width + 45, context.size[1]]);
+        this.setNodeWidth(this.width + 45);
       }
       this.vis.width(this.width);
       this.updateData();
@@ -275,7 +287,12 @@ class PointsEditor {
     this.heightWidget.callback = () => {
       this.height = this.heightWidget.value
       this.vis.height(this.height)
+      context.pointsEditorHeight = this.height + 30;
       context.setSize([context.size[0], this.height + 300]);
+      if (context.graph) {
+        context.arrange?.();
+        context.graph.setDirtyCanvas(true, true);
+      }
       this.updateData();
     }
     this.pointsStoreWidget.callback = () => {
@@ -552,8 +569,9 @@ class PointsEditor {
     this.node.pointsEditor.element.appendChild(svgElement);
 
     if (this.width > 256) {
-      this.node.setSize([this.width + 45, this.node.size[1]]);
+      this.setNodeWidth(this.width + 45);
     }
+    this.node.pointsEditorHeight = this.height + 30;
     this.node.setSize([this.node.size[0], this.height + 300]);
     this.updateData();
     this.refreshBackgroundImage();
@@ -583,22 +601,29 @@ class PointsEditor {
     };
 
   handleImageLoad = (img, file, base64String) => {
-    console.log(img.width, img.height); // Access width and height here
     this.widthWidget.value = img.width;
     this.heightWidget.value = img.height;
 
     if (img.width != this.vis.width() || img.height != this.vis.height()) {
-      if (img.width > 256) {
-        this.node.setSize([img.width + 45, this.node.size[1]]);
-      }
-      this.node.setSize([this.node.size[0], img.height + 300]);
       this.vis.width(img.width);
       this.vis.height(img.height);
       this.height = img.height;
       this.width = img.width;
+
+      if (img.width > 256) {
+        this.setNodeWidth(img.width + 45);
+      }
+      this.node.pointsEditorHeight = img.height + 30;
+      this.node.setSize([this.node.size[0], this.height + 300]);
+      if (this.node.graph) {
+        this.node.arrange?.();
+        this.node.graph.setDirtyCanvas(true, true);
+      }
+
       this.updateData();
     }
-    this.backgroundImage.url(file ? URL.createObjectURL(file) : `data:${this.node.properties.imgData.type};base64,${base64String}`).visible(true).root.render();
+    const mimeType = this.node.properties.imgData?.type || 'image/png';
+    this.backgroundImage.url(file ? URL.createObjectURL(file) : `data:${mimeType};base64,${base64String}`).visible(true).root.render();
     };
 
   processImage = (img, file) => {
@@ -658,7 +683,8 @@ class PointsEditor {
   refreshBackgroundImage = () => {
     if (this.node.properties.imgData && this.node.properties.imgData.base64) {
       const base64String = this.node.properties.imgData.base64;
-      const imageUrl = `data:${this.node.properties.imgData.type};base64,${base64String}`;
+      const mimeType = this.node.properties.imgData.type || 'image/png';
+      const imageUrl = `data:${mimeType};base64,${base64String}`;
       const img = new Image();
       img.src = imageUrl;
       img.onload = () => this.handleImageLoad(img, null, base64String);
