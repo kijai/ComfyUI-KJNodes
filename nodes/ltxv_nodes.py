@@ -330,17 +330,17 @@ class LTXVAudioVideoMask(io.ComfyNode):
 
         return io.NodeOutput(video_latent, audio_latent)
 
-def _compute_attention(self, query, context, transformer_options={}):
+def _compute_attention(self, query, context, attention_precision=None, transformer_options={}):
     """Compute attention and return the result. Cleans up intermediate tensors."""
     k = self.k_norm(self.to_k(context)).to(query.dtype)
     v = self.to_v(context).to(query.dtype)
-    x = comfy.ldm.modules.attention.optimized_attention(query, k, v, heads=self.heads, transformer_options=transformer_options).flatten(2)
+    x = comfy.ldm.modules.attention.optimized_attention(query, k, v, heads=self.heads, attn_precision=attention_precision, transformer_options=transformer_options).flatten(2)
     del k, v
     return x
 
-def nag_attention(self, query, context_positive, nag_context, transformer_options={}):
-    x_positive = _compute_attention(self, query, context_positive, transformer_options)
-    x_negative = _compute_attention(self, query, nag_context, transformer_options)
+def nag_attention(self, query, context_positive, nag_context, attention_precision=None, transformer_options={}):
+    x_positive = _compute_attention(self, query, context_positive, attention_precision, transformer_options)
+    x_negative = _compute_attention(self, query, nag_context, attention_precision, transformer_options)
     return x_positive, x_negative
 
 def normalized_attention_guidance(self, x_positive, x_negative):
@@ -388,7 +388,7 @@ def ltxv_crossattn_forward_nag(self, x, context, mask=None, transformer_options=
     q_pos = self.q_norm(self.to_q(x_pos))
     del x_pos
 
-    x_positive, x_negative = nag_attention(self, q_pos, context_pos, self.nag_context, transformer_options=transformer_options)
+    x_positive, x_negative = nag_attention(self, q_pos, context_pos, self.nag_context, attention_precision=self.attn_precision, transformer_options=transformer_options)
     del context_pos, q_pos
 
     x_pos_out = normalized_attention_guidance(self, x_positive, x_negative)
@@ -400,12 +400,20 @@ def ltxv_crossattn_forward_nag(self, x, context, mask=None, transformer_options=
         k_neg = self.k_norm(self.to_k(context_neg))
         v_neg = self.to_v(context_neg)
 
-        x_neg_out = comfy.ldm.modules.attention.optimized_attention(q_neg, k_neg, v_neg, heads=self.heads, transformer_options=transformer_options)
-        x = torch.cat([x_pos_out, x_neg_out], dim=0)
+        x_neg_out = comfy.ldm.modules.attention.optimized_attention(q_neg, k_neg, v_neg, heads=self.heads, attn_precision=self.attn_precision, transformer_options=transformer_options)
+        out = torch.cat([x_pos_out, x_neg_out], dim=0)
     else:
-        x = x_pos_out
+        out = x_pos_out
 
-    return self.to_out(x)
+    if self.to_gate_logits is not None:
+        gate_logits = self.to_gate_logits(x)  # (B, T, H)
+        b, t, _ = out.shape
+        out = out.view(b, t, self.heads, self.dim_head)
+        gates = 2.0 * torch.sigmoid(gate_logits)  # zero-init -> identity
+        out = out * gates.unsqueeze(-1)
+        out = out.view(b, t, self.heads * self.dim_head)
+
+    return self.to_out(out)
 
 
 class LTXVCrossAttentionPatch:
@@ -472,26 +480,28 @@ class LTX2_NAG(io.ComfyNode):
         context_video = context_audio = None
 
         if nag_cond_video is not None:
-            diffusion_model.caption_projection.to(device)
             context_video = nag_cond_video[0][0].to(device, dtype)
             if hasattr(diffusion_model, "preprocess_text_embeds"):
                 context_video = diffusion_model.preprocess_text_embeds(context_video.to(device=device, dtype=dtype))
             v_context, _ = torch.split(context_video, int(context_video.shape[-1] / 2), len(context_video.shape) - 1)
-            context_video = diffusion_model.caption_projection(v_context)
-            diffusion_model.caption_projection.to(offload_device)
+            if diffusion_model.caption_proj_before_connector and diffusion_model.caption_projection_first_linear:
+                diffusion_model.caption_projection.to(device)
+                context_video = diffusion_model.caption_projection(v_context)
+                diffusion_model.caption_projection.to(offload_device)
             context_video = context_video.view(1, -1, img_dim)
             for idx, block in enumerate(diffusion_model.transformer_blocks):
                 patched_attn2 = LTXVCrossAttentionPatch(context_video, nag_scale, nag_alpha, nag_tau, inplace=inplace).__get__(block.attn2, block.__class__)
                 model_clone.add_object_patch(f"diffusion_model.transformer_blocks.{idx}.attn2.forward", patched_attn2)
 
         if nag_cond_audio is not None and diffusion_model.audio_caption_projection is not None:
-            diffusion_model.audio_caption_projection.to(device)
             context_audio = nag_cond_audio[0][0].to(device, dtype)
             if hasattr(diffusion_model, "preprocess_text_embeds"):
                 context_audio = diffusion_model.preprocess_text_embeds(context_audio.to(device=device, dtype=dtype))
             _, a_context = torch.split(context_audio, int(context_audio.shape[-1] / 2), len(context_audio.shape) - 1)
-            context_audio = diffusion_model.audio_caption_projection(a_context)
-            diffusion_model.audio_caption_projection.to(offload_device)
+            if diffusion_model.caption_proj_before_connector and diffusion_model.caption_projection_first_linear:
+                diffusion_model.audio_caption_projection.to(device)
+                context_audio = diffusion_model.audio_caption_projection(a_context)
+                diffusion_model.audio_caption_projection.to(offload_device)
             context_audio = context_audio.view(1, -1, audio_dim)
             for idx, block in enumerate(diffusion_model.transformer_blocks):
                 patched_audio_attn2 = LTXVCrossAttentionPatch(context_audio, nag_scale, nag_alpha, nag_tau, inplace=inplace).__get__(block.audio_attn2, block.__class__)
