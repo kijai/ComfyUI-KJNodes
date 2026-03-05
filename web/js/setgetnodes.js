@@ -396,6 +396,16 @@ app.registerExtension({
 				}
 				this.properties.showOutputText = GetNode.defaultVisibility;
 				const node = this;
+				const comboOptions = {};
+				Object.defineProperty(comboOptions, 'values', {
+					get: () => {
+						if (!node.graph) return [];
+						const setterNodes = node.graph._nodes.filter((otherNode) => otherNode.type == 'SetNode');
+						return setterNodes.map((otherNode) => otherNode.widgets[0].value).sort();
+					},
+					enumerable: true,
+					configurable: true
+				});
 				this.addWidget(
 					"combo",
 					"Constant",
@@ -403,13 +413,11 @@ app.registerExtension({
 					(e) => {
 						this.onRename();
 					},
-					{
-						values: () => {
-                            const setterNodes = node.graph._nodes.filter((otherNode) => otherNode.type == 'SetNode');
-                            return setterNodes.map((otherNode) => otherNode.widgets[0].value).sort();
-                        }
-					}
+					comboOptions
 				)
+
+				// Keep for compatibility - called by SetNode.update() and SetNode.onRemoved()
+				this.setComboValues = function() {}
 
 				this.addOutput("*", '*');			
 				this.onConnectionsChange = function(
