@@ -228,14 +228,34 @@ app.registerExtension({
 							this.inputs = [];
 						}
 						const target_number_of_inputs = this.widgets.find(w => w.name === "inputcount")["value"];
-						if (target_number_of_inputs === this.inputs.length) return; // already set, do nothing
-			
-						if (target_number_of_inputs < this.inputs.length) {
-							for (let i = this.inputs.length; i >= this.inputs_offset + target_number_of_inputs; i--)
-								this.removeInput(i);
-						} else {
-							for (let i = this.inputs.length + 1 - this.inputs_offset; i <= target_number_of_inputs; ++i)
-								this.addInput(`string_${i}`, this._type);
+						const desired_names = new Set(
+							Array.from({ length: target_number_of_inputs }, (_, i) => `string_${i + 1}`)
+						);
+						const current_string_names = new Set(
+							this.inputs
+								.filter(input => /^string_\d+$/.test(input?.name))
+								.map(input => input.name)
+						);
+
+						const already_synced =
+							current_string_names.size === desired_names.size &&
+							[...desired_names].every(name => current_string_names.has(name));
+						if (already_synced) return;
+
+						// Remove stray dynamic inputs first so count updates don't drift when non-string inputs exist.
+						for (const name of current_string_names) {
+							if (!desired_names.has(name)) {
+								const slot_index = this.inputs.findIndex(input => input?.name === name);
+								if (slot_index !== -1) {
+									this.removeInput(slot_index);
+								}
+							}
+						}
+						for (let i = 1; i <= target_number_of_inputs; i++) {
+							const name = `string_${i}`;
+							if (!this.inputs.some(input => input?.name === name)) {
+								this.addInput(name, this._type);
+							}
 						}
 					});
 				}
