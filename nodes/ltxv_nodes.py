@@ -466,6 +466,7 @@ class LTX2_NAG(io.ComfyNode):
             return io.NodeOutput(model)
 
         device = mm.get_torch_device()
+        offload_device = mm.unet_offload_device()
         dtype = model.model.manual_cast_dtype
         if dtype is None:
             dtype = model.model.diffusion_model.dtype
@@ -480,9 +481,17 @@ class LTX2_NAG(io.ComfyNode):
 
         if nag_cond_video is not None:
             context_video = nag_cond_video[0][0].to(device, dtype)
-            context_video = diffusion_model.preprocess_text_embeds(context_video.to(device=device, dtype=dtype), unprocessed=True)
-            vid_dim = getattr(diffusion_model, "cross_attention_dim", context_video.shape[-1] // 2)
-            context_video = context_video[:, :, :vid_dim]
+            vid_split = getattr(diffusion_model, "cross_attention_dim", None)
+            if vid_split is not None and context_video.shape[-1] == vid_split + diffusion_model.audio_cross_attention_dim:
+                context_video = context_video[:, :, :vid_split]
+            if diffusion_model.caption_proj_before_connector and diffusion_model.caption_projection_first_linear:
+                diffusion_model.caption_projection.to(device)
+                context_video = diffusion_model.caption_projection(context_video)
+                diffusion_model.caption_projection.to(offload_device)
+            if hasattr(diffusion_model, "video_embeddings_connector"):
+                diffusion_model.video_embeddings_connector.to(device)
+                context_video = diffusion_model.video_embeddings_connector(context_video)[0]
+                diffusion_model.video_embeddings_connector.to(offload_device)
             context_video = context_video.view(1, -1, img_dim)
             for idx, block in enumerate(diffusion_model.transformer_blocks):
                 patched_attn2 = LTXVCrossAttentionPatch(context_video, nag_scale, nag_alpha, nag_tau, inplace=inplace).__get__(block.attn2, block.__class__)
@@ -490,9 +499,17 @@ class LTX2_NAG(io.ComfyNode):
 
         if nag_cond_audio is not None and diffusion_model.audio_caption_projection is not None:
             context_audio = nag_cond_audio[0][0].to(device, dtype)
-            context_audio = diffusion_model.preprocess_text_embeds(context_audio.to(device=device, dtype=dtype), unprocessed=True)
-            vid_dim = getattr(diffusion_model, "cross_attention_dim", context_audio.shape[-1] // 2)
-            context_audio = context_audio[:, :, vid_dim:]
+            vid_split = getattr(diffusion_model, "cross_attention_dim", None)
+            if vid_split is not None and context_audio.shape[-1] == vid_split + diffusion_model.audio_cross_attention_dim:
+                context_audio = context_audio[:, :, vid_split:]
+            if diffusion_model.caption_proj_before_connector and diffusion_model.caption_projection_first_linear:
+                diffusion_model.audio_caption_projection.to(device)
+                context_audio = diffusion_model.audio_caption_projection(context_audio)
+                diffusion_model.audio_caption_projection.to(offload_device)
+            if hasattr(diffusion_model, "audio_embeddings_connector"):
+                diffusion_model.audio_embeddings_connector.to(device)
+                context_audio = diffusion_model.audio_embeddings_connector(context_audio)[0]
+                diffusion_model.audio_embeddings_connector.to(offload_device)
             context_audio = context_audio.view(1, -1, audio_dim)
             for idx, block in enumerate(diffusion_model.transformer_blocks):
                 patched_audio_attn2 = LTXVCrossAttentionPatch(context_audio, nag_scale, nag_alpha, nag_tau, inplace=inplace).__get__(block.audio_attn2, block.__class__)
