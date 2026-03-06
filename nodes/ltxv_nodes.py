@@ -615,20 +615,24 @@ class WrappedPreviewer():
         self.c_index = (self.c_index + num_previews) % num_images
         return None
     def process_previews(self, image_tensor, ind, leng):
-        max_size = 256
+        max_size = 512
+        min_size = 256
         image_tensor = self.decode_latent_to_preview(image_tensor)
+
+        if image_tensor.size(1) < min_size or image_tensor.size(2) < min_size:
+            image_tensor = F.interpolate(image_tensor.movedim(-1,0), scale_factor=4, mode='nearest').movedim(0,-1)
+
         if image_tensor.size(1) > max_size or image_tensor.size(2) > max_size:
             image_tensor = image_tensor.movedim(-1,0)
             if image_tensor.size(2) < image_tensor.size(3):
                 height = (max_size * image_tensor.size(2)) // image_tensor.size(3)
-                image_tensor = F.interpolate(image_tensor, (height,max_size), mode='bilinear')
+                image_tensor = F.interpolate(image_tensor, (height,max_size), mode='nearest')
             else:
                 width = (max_size * image_tensor.size(3)) // image_tensor.size(2)
-                image_tensor = F.interpolate(image_tensor, (max_size, width), mode='bilinear')
+                image_tensor = F.interpolate(image_tensor, (max_size, width), mode='nearest')
             image_tensor = image_tensor.movedim(0,-1)
-        previews_ubyte = (image_tensor.clamp(0, 1)
-                         .mul(0xFF)  # to 0..255
-                         ).to(device="cpu", dtype=torch.uint8)
+
+        previews_ubyte = (image_tensor.clamp(0, 1).mul(0xFF)).to(device="cpu", dtype=torch.uint8)
 
         # Send VHS preview
         for preview in previews_ubyte:
