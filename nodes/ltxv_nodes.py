@@ -657,7 +657,7 @@ class WrappedPreviewer():
                 self.latent_rgb_factors_bias = self.latent_rgb_factors_bias.to(dtype=x0.dtype, device=x0.device)
             latent_image = F.linear(x0.movedim(1, -1), self.latent_rgb_factors,
                                     bias=self.latent_rgb_factors_bias)
-            latent_image = (latent_image + 1.0) / 2.0
+            latent_image = (latent_image - latent_image.min()) / (latent_image.max() - latent_image.min())
             return latent_image
 
 
