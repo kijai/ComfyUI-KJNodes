@@ -1468,7 +1468,18 @@ def ltx2_sageattn_forward(self, x, context=None, mask=None, pe=None, k_pe=None, 
         del v_fp8, v_scale
 
     del q_int8, q_scale, k_int8, k_scale
-    return self.to_out(o.view(batch_size, seq_len, -1))
+
+    o = o.view(batch_size, seq_len, -1)
+
+    if self.to_gate_logits is not None:
+        gate_logits = self.to_gate_logits(x)  # (B, T, H)
+        b, t, _ = o.shape
+        o = o.view(b, t, self.heads, self.dim_head)
+        gates = 2.0 * torch.sigmoid(gate_logits)  # zero-init -> identity
+        o = o * gates.unsqueeze(-1)
+        o = o.view(b, t, self.heads * self.dim_head)
+
+    return self.to_out(o)
 
 
 import folder_paths
