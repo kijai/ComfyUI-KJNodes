@@ -180,6 +180,7 @@ class LTXVAudioVideoMask(io.ComfyNode):
                     default="truncate",
                     tooltip="'truncate': cut latent to end_time length. 'pad': extend latent to end_time. 'partial': mask range within existing latent.",
                 ),
+                io.Combo.Input("existing_mask_mode", options=["add", "subtract", "overwrite"], optional=True, default="add", tooltip="How to combine with existing noise masks if present. 'add' will take the max of existing and new mask, 'overwrite' will replace with new mask."),
             ],
             outputs=[
                 io.Latent.Output(display_name="video_latent"),
@@ -188,7 +189,7 @@ class LTXVAudioVideoMask(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, video_fps, video_start_time, video_end_time, audio_start_time, audio_end_time, max_length="truncate", video_latent=None, audio_latent=None) -> io.NodeOutput:
+    def execute(cls, video_fps, video_start_time, video_end_time, audio_start_time, audio_end_time, max_length="truncate", existing_mask_mode="add", video_latent=None, audio_latent=None,) -> io.NodeOutput:
 
         time_scale_factor = 8
         mel_hop_length = 160
@@ -240,7 +241,7 @@ class LTXVAudioVideoMask(io.ComfyNode):
             video_latent_frame_index_end = min(video_latent_frame_index_end, video_latent_frame_count)
 
             # Get existing noise mask if present, otherwise create new one
-            if "noise_mask" in video_latent:
+            if "noise_mask" in video_latent and existing_mask_mode != "overwrite":
                 video_mask = video_latent["noise_mask"].clone()
                 # Adjust mask size based on mode
                 if max_length == "pad" and video_samples.shape[2] > video_latent["samples"].shape[2]:
@@ -261,10 +262,10 @@ class LTXVAudioVideoMask(io.ComfyNode):
             else:
                 video_mask = torch.zeros_like(video_samples)[:, :1]
 
-            video_mask[:, :, video_latent_frame_index_start:video_latent_frame_index_end] = 1.0
+            video_mask[:, :, video_latent_frame_index_start:video_latent_frame_index_end] = 1.0 if existing_mask_mode != "subtract" else 0.0
             # ensure all padded frames are also masked
             if max_length == "pad" and video_samples.shape[2] > video_latent["samples"].shape[2]:
-                video_mask[:, :, video_latent["samples"].shape[2]:] = 1.0
+                video_mask[:, :, video_latent["samples"].shape[2]:] = 1.0 if existing_mask_mode != "subtract" else 0.0
             video_latent = video_latent.copy()
             video_latent["samples"] = video_samples
             video_latent["noise_mask"] = video_mask
