@@ -180,7 +180,7 @@ class LTXVAudioVideoMask(io.ComfyNode):
                     default="truncate",
                     tooltip="'truncate': cut latent to end_time length. 'pad': extend latent to end_time. 'partial': mask range within existing latent.",
                 ),
-                io.Combo.Input("existing_mask_mode", options=["add", "subtract", "overwrite"], optional=True, default="add", tooltip="How to combine with existing noise masks if present. 'add' will take the max of existing and new mask, 'overwrite' will replace with new mask."),
+                io.Combo.Input("existing_mask_mode", options=["add", "subtract", "overwrite"], optional=True, default="add", tooltip="How to combine with existing noise masks if present. 'add' will take the max of existing and new mask, 'overwrite' will replace with new mask. 'subtract' will set the masked region to 0 instead of 1, effectively unmasking it."),
             ],
             outputs=[
                 io.Latent.Output(display_name="video_latent"),
