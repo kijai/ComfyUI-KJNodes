@@ -3119,6 +3119,7 @@ class WanImageToVideoSVIPro(io.ComfyNode):
                 io.Latent.Input("anchor_samples"),
                 io.Latent.Input("prev_samples", optional=True),
                 io.Int.Input("motion_latent_count", default=1, min=0, max=128, step=1),
+                io.Int.Input("anchor_frame_count", default=1, min=1, max=128, step=1, tooltip="Number of anchor frames to use from anchor_samples as reference conditioning. Remaining frames (if any) are used as starting frames when prev_samples is not connected. Default=1 (recommended). Values >1 are experimental and may cause blending artifacts between reference frames."),
             ],
             outputs=[
                 io.Conditioning.Output(display_name="positive"),
@@ -3128,7 +3129,7 @@ class WanImageToVideoSVIPro(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, positive, negative, length, motion_latent_count, anchor_samples, prev_samples=None) -> io.NodeOutput:
+    def execute(cls, positive, negative, length, motion_latent_count, anchor_samples, prev_samples=None, anchor_frame_count=1) -> io.NodeOutput:
         anchor_latent = anchor_samples["samples"].clone()
 
         B, C, T, H, W = anchor_latent.shape
@@ -3146,12 +3147,26 @@ class WanImageToVideoSVIPro(io.ComfyNode):
             padding_size = total_latents - anchor_latent.shape[2] - motion_latent.shape[2]
             image_cond_latent = torch.cat([anchor_latent, motion_latent], dim=2)
 
-        padding = torch.zeros(1, C, padding_size, H, W, dtype=dtype, device=device)
-        padding = comfy.latent_formats.Wan21().process_out(padding)
-        image_cond_latent = torch.cat([image_cond_latent, padding], dim=2)
+        # Handle case where anchor has more frames than target
+        if padding_size < 0:
+            print(f"[WanImageToVideoSVIPro] Anchor has {image_cond_latent.shape[2]} frames but target is {total_latents} frames.")
+            print(f"[WanImageToVideoSVIPro] Using all {image_cond_latent.shape[2]} anchor frames as reference conditioning.")
+            # Keep all anchor frames, don't truncate
+            padding_size = 0
 
-        mask = torch.ones((1, 1, empty_latent.shape[2], H, W), device=device, dtype=dtype)
-        mask[:, :, :1] = 0.0
+        if padding_size > 0:
+            padding = torch.zeros(B, C, padding_size, H, W, dtype=dtype, device=device)
+            padding = comfy.latent_formats.Wan21().process_out(padding)
+            image_cond_latent = torch.cat([image_cond_latent, padding], dim=2)
+
+        # Determine how many frames to mark as anchor in the mask
+        frames_to_mark = min(anchor_frame_count, image_cond_latent.shape[2])
+
+        print(f"[WanImageToVideoSVIPro] Marking {frames_to_mark} frame(s) as anchor out of {image_cond_latent.shape[2]} total conditioning frames")
+
+        # Create mask that matches the conditioning latent dimensions
+        mask = torch.ones((B, 1, image_cond_latent.shape[2], H, W), device=device, dtype=dtype)
+        mask[:, :, :frames_to_mark] = 0.0
 
         positive = node_helpers.conditioning_set_values(positive, {"concat_latent_image": image_cond_latent, "concat_mask": mask})
         negative = node_helpers.conditioning_set_values(negative, {"concat_latent_image": image_cond_latent, "concat_mask": mask})
@@ -3159,6 +3174,52 @@ class WanImageToVideoSVIPro(io.ComfyNode):
         out_latent = {}
         out_latent["samples"] = empty_latent
         return io.NodeOutput(positive, negative, out_latent)
+
+class BatchLatentToWanVideoLatent:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "latents": ("LATENT",),
+            }
+        }
+
+    RETURN_TYPES = ("LATENT",)
+    FUNCTION = "convert"
+    CATEGORY = "KJNodes/latents"
+    DESCRIPTION = """
+Converts batched standard VAE latents to Wan video latent format.
+
+Transforms: [B, C, H, W] → [1, C, B, H, W]
+
+This allows using multiple images as multi-frame anchors for WanImageToVideoSVIPro.
+Simply batch your images (e.g., [reference, start, start, start, start]), encode with
+standard VAE, then convert with this node.
+
+Use case: Create reference-influenced video generation similar to IP-Adapter.
+Example: 1 reference image + 4 repeated start images = 5-frame anchor for SVI Pro.
+"""
+
+    def convert(self, latents):
+        samples = latents["samples"]
+
+        # Check if already in video format
+        if samples.dim() == 5:
+            print("[BatchLatentToWanVideoLatent] Warning: Input is already in video latent format [B, C, T, H, W]")
+            return (latents,)
+
+        if samples.dim() != 4:
+            raise ValueError(f"Expected 4D tensor [B, C, H, W], got {samples.dim()}D tensor with shape {samples.shape}")
+
+        B, C, H, W = samples.shape
+
+        print(f"[BatchLatentToWanVideoLatent] Converting {B} image latents to video format")
+        print(f"[BatchLatentToWanVideoLatent] Output shape: [1, {C}, {B}, {H}, {W}]")
+
+        # Convert batch dimension to temporal dimension: [B, C, H, W] → [1, C, B, H, W]
+        video_latent = samples.unsqueeze(0).permute(0, 2, 1, 3, 4)
+
+        return ({"samples": video_latent},)
 
 class DeprecatedCompileNodeKJ:
     @classmethod
