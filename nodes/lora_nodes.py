@@ -6,6 +6,7 @@ import os
 import logging
 from tqdm import tqdm
 import numpy as np
+from comfy_api.latest import io
 
 device = comfy.model_management.get_torch_device()
 
@@ -100,27 +101,31 @@ def extract_lora(diff, key, rank, algorithm, lora_type, lowrank_iters=7, adaptiv
 
 
 def calc_lora_model(model_diff, rank, prefix_model, prefix_lora, output_sd, lora_type, algorithm, lowrank_iters, out_dtype, bias_diff=False, adaptive_param=1.0, clamp_quantile=True):
-    comfy.model_management.load_models_gpu([model_diff], force_patch_weights=True)
-    model_diff.model.diffusion_model.cpu()
-    sd = model_diff.model_state_dict(filter_prefix=prefix_model)
-    del model_diff
-    comfy.model_management.soft_empty_cache()
-    for k, v in sd.items():
-        if isinstance(v, torch.Tensor):
-            sd[k] = v.cpu()
+    # Get key names from module structure without materializing weights
+    sd_keys = []
+    for name, _ in model_diff.model.named_parameters():
+        if prefix_model is None or name.startswith(prefix_model):
+            sd_keys.append(name)
+    for name, _ in model_diff.model.named_buffers():
+        if prefix_model is None or name.startswith(prefix_model):
+            sd_keys.append(name)
 
-    # Get total number of keys to process for progress bar
-    total_keys = len([k for k in sd if k.endswith(".weight") or (bias_diff and k.endswith(".bias"))])
-    
-    # Create progress bar
+    total_keys = len([k for k in sd_keys if k.endswith(".weight") or (bias_diff and k.endswith(".bias"))])
     progress_bar = tqdm(total=total_keys, desc=f"Extracting LoRA ({prefix_lora.strip('.')})")
     comfy_pbar = comfy.utils.ProgressBar(total_keys)
 
-    for k in sd:
+    # Process one weight at a time to minimize memory usage
+    for k in sd_keys:
         if k.endswith(".weight"):
-            weight_diff = sd[k]
+            # Patch and retrieve single weight
+            weight_diff = model_diff.patch_weight_to_device(k, return_weight=True)
+            if weight_diff is None:
+                progress_bar.update(1)
+                comfy_pbar.update(1)
+                continue
             if weight_diff.ndim == 5:
-                logging.info(f"Skipping 5D tensor for key {k}") #skip patch embed
+                logging.info(f"Skipping 5D tensor for key {k}")
+                del weight_diff
                 progress_bar.update(1)
                 comfy_pbar.update(1)
                 continue
@@ -128,6 +133,7 @@ def calc_lora_model(model_diff, rank, prefix_model, prefix_lora, output_sd, lora
                 if weight_diff.ndim < 2:
                     if bias_diff:
                         output_sd["{}{}.diff".format(prefix_lora, k[len(prefix_model):-7])] = weight_diff.contiguous().to(out_dtype).cpu()
+                    del weight_diff
                     progress_bar.update(1)
                     comfy_pbar.update(1)
                     continue
@@ -139,61 +145,73 @@ def calc_lora_model(model_diff, rank, prefix_model, prefix_lora, output_sd, lora
                     logging.warning(f"Could not generate lora weights for key {k}, error {e}")
             else:
                 output_sd["{}{}.diff".format(prefix_lora, k[len(prefix_model):-7])] = weight_diff.contiguous().to(out_dtype).cpu()
-            
+            del weight_diff
             progress_bar.update(1)
             comfy_pbar.update(1)
 
         elif bias_diff and k.endswith(".bias"):
-            output_sd["{}{}.diff_b".format(prefix_lora, k[len(prefix_model):-5])] = sd[k].contiguous().to(out_dtype).cpu()
+            weight = model_diff.patch_weight_to_device(k, return_weight=True)
+            if weight is not None:
+                output_sd["{}{}.diff_b".format(prefix_lora, k[len(prefix_model):-5])] = weight.contiguous().to(out_dtype).cpu()
+                del weight
             progress_bar.update(1)
             comfy_pbar.update(1)
+
     progress_bar.close()
+    del model_diff
+    comfy.model_management.soft_empty_cache()
     return output_sd
 
-class LoraExtractKJ:
-    def __init__(self):
-        self.output_dir = folder_paths.get_output_directory()
+
+class LoraExtractKJ(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="LoraExtractKJ",
+            category="KJNodes/lora",
+            is_output_node=True,
+            inputs=[
+                io.MultiType.Input("finetuned", [io.Model, io.Clip], tooltip="The finetuned model or clip to extract LoRA from."),
+                io.MultiType.Input("original", [io.Model, io.Clip], tooltip="The original base model or clip to diff against."),
+                io.String.Input("filename_prefix", default="loras/ComfyUI_extracted_lora"),
+                io.Int.Input("rank", default=64, min=1, max=4096, step=1, tooltip="The rank to use for standard LoRA, or maximum rank limit for adaptive methods."),
+                io.Combo.Input("lora_type", options=["standard", "full", "adaptive_ratio", "adaptive_quantile", "adaptive_energy", "adaptive_fro"]),
+                io.Combo.Input("algorithm", options=["svd_linalg", "svd_lowrank"], default="svd_lowrank", tooltip="SVD algorithm to use, svd_lowrank is faster but less accurate."),
+                io.Int.Input("lowrank_iters", default=7, min=1, max=100, step=1, tooltip="The number of subspace iterations for lowrank SVD algorithm."),
+                io.Combo.Input("output_dtype", options=["fp16", "bf16", "fp32"], default="fp16"),
+                io.Boolean.Input("bias_diff", default=True),
+                io.Float.Input("adaptive_param", default=0.15, min=0.0, max=1.0, step=0.01, tooltip="For ratio mode, this is the ratio of the maximum singular value. For quantile mode, this is the quantile of the singular values. For fro mode, this is the Frobenius norm retention ratio."),
+                io.Boolean.Input("clamp_quantile", default=False),
+            ],
+        )
+
 
     @classmethod
-    def INPUT_TYPES(s):
-        return {"required": 
-                {
-                    "finetuned_model": ("MODEL",),
-                    "original_model": ("MODEL",),
-                    "filename_prefix": ("STRING", {"default": "loras/ComfyUI_extracted_lora"}),
-                    "rank": ("INT", {"default": 64, "min": 1, "max": 4096, "step": 1, "tooltip": "The rank to use for standard LoRA, or maximum rank limit for adaptive methods."}),
-                    "lora_type": (["standard", "full", "adaptive_ratio", "adaptive_quantile", "adaptive_energy", "adaptive_fro"],),
-                    "algorithm": (["svd_linalg", "svd_lowrank"], {"default": "svd_lowrank", "tooltip": "SVD algorithm to use, svd_lowrank is faster but less accurate."}),
-                    "lowrank_iters": ("INT", {"default": 7, "min": 1, "max": 100, "step": 1, "tooltip": "The number of subspace iterations for lowrank SVD algorithm."}),
-                    "output_dtype": (["fp16", "bf16", "fp32"], {"default": "fp16"}),
-                    "bias_diff": ("BOOLEAN", {"default": True}),
-                    "adaptive_param": ("FLOAT", {"default": 0.15, "min": 0.0, "max": 1.0, "step": 0.01, "tooltip": "For ratio mode, this is the ratio of the maximum singular value. For quantile mode, this is the quantile of the singular values. For fro mode, this is the Frobenius norm retention ratio."}),
-                    "clamp_quantile": ("BOOLEAN", {"default": False}),
-                },
-
-    }
-    RETURN_TYPES = ()
-    FUNCTION = "save"
-    OUTPUT_NODE = True
-
-    CATEGORY = "KJNodes/lora"
-
-    def save(self, finetuned_model, original_model, filename_prefix, rank, lora_type, algorithm, lowrank_iters, output_dtype, bias_diff, adaptive_param, clamp_quantile):
+    def execute(cls, finetuned, original, filename_prefix, rank, lora_type, algorithm, lowrank_iters, output_dtype, bias_diff, adaptive_param, clamp_quantile) -> io.NodeOutput:
         if algorithm == "svd_lowrank" and lora_type != "standard":
             raise ValueError("svd_lowrank algorithm is only supported for standard LoRA extraction.")
 
-        dtype = {"fp8_e4m3fn": torch.float8_e4m3fn, "bf16": torch.bfloat16, "fp16": torch.float16, "fp16_fast": torch.float16, "fp32": torch.float32}[output_dtype]
-        m = finetuned_model.clone()
-        kp = original_model.get_key_patches("diffusion_model.")
-        for k in kp:
-            m.add_patches({k: kp[k]}, - 1.0, 1.0)
-        model_diff = m
+        dtype = {"bf16": torch.bfloat16, "fp16": torch.float16, "fp32": torch.float32}[output_dtype]
 
-        full_output_folder, filename, counter, subfolder, filename_prefix = folder_paths.get_save_image_path(filename_prefix, self.output_dir)
+        output_dir = folder_paths.get_output_directory()
+        full_output_folder, filename, counter, subfolder, filename_prefix = folder_paths.get_save_image_path(filename_prefix, output_dir)
 
         output_sd = {}
-        if model_diff is not None:
-            output_sd = calc_lora_model(model_diff, rank, "diffusion_model.", "diffusion_model.", output_sd, lora_type, algorithm, lowrank_iters, dtype, bias_diff=bias_diff, adaptive_param=adaptive_param, clamp_quantile=clamp_quantile)
+
+        is_clip = hasattr(finetuned, "patcher")
+
+        if is_clip:
+            clip_diff = finetuned.clone()
+            kp = original.get_key_patches()
+            kp = {k: v for k, v in kp.items() if not k.endswith(".position_ids") and not k.endswith(".logit_scale")}
+            clip_diff.add_patches(kp, -1.0, 1.0)
+            output_sd = calc_lora_model(clip_diff.patcher, rank, "", "text_encoders.", output_sd, lora_type, algorithm, lowrank_iters, dtype, bias_diff=bias_diff, adaptive_param=adaptive_param, clamp_quantile=clamp_quantile)
+        else:
+            m = finetuned.clone()
+            kp = original.get_key_patches("diffusion_model.")
+            m.add_patches(kp, -1.0, 1.0)
+            output_sd = calc_lora_model(m, rank, "diffusion_model.", "diffusion_model.", output_sd, lora_type, algorithm, lowrank_iters, dtype, bias_diff=bias_diff, adaptive_param=adaptive_param, clamp_quantile=clamp_quantile)
+
         if "adaptive" in lora_type:
             rank_str = f"{lora_type}_{adaptive_param:.2f}"
         else:
@@ -202,43 +220,30 @@ class LoraExtractKJ:
         output_checkpoint = os.path.join(full_output_folder, output_checkpoint)
 
         comfy.utils.save_torch_file(output_sd, output_checkpoint, metadata=None)
-        return {}
+        return io.NodeOutput()
 
-NODE_CLASS_MAPPINGS = {
-    "LoraExtractKJ": LoraExtractKJ
-}
-
-NODE_DISPLAY_NAME_MAPPINGS = {
-    "LoraExtractKJ": "LoraExtractKJ"
-}
-
-class LoraReduceRank:
-    def __init__(self):
-        self.output_dir = folder_paths.get_output_directory()
+class LoraReduceRank(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="LoraReduceRankKJ",
+            display_name="LoraReduceRank",
+            category="KJNodes/lora",
+            description="Resize a LoRA model by reducing its rank. Based on kohya's sd-scripts: https://github.com/kohya-ss/sd-scripts/blob/main/networks/resize_lora.py",
+            is_output_node=True,
+            is_experimental=True,
+            inputs=[
+                io.Combo.Input("lora_name", options=folder_paths.get_filename_list("loras"), tooltip="The name of the LoRA."),
+                io.Int.Input("new_rank", default=8, min=1, max=4096, step=1, tooltip="The new rank to resize the LoRA. Acts as max rank when using dynamic_method."),
+                io.Combo.Input("dynamic_method", options=["disabled", "sv_ratio", "sv_cumulative", "sv_fro", "sv_knee"], default="disabled", tooltip="Method to use for dynamically determining new alphas and dims. sv_knee finds the elbow point in the singular value curve."),
+                io.Float.Input("dynamic_param", default=0.2, min=0.0, max=2.0, step=0.01, tooltip="Parameter for dynamic methods. For sv_knee: sensitivity (1.0=standard knee, <1.0=more aggressive/lower rank, >1.0=more conservative)."),
+                io.Combo.Input("output_dtype", options=["match_original", "fp16", "bf16", "fp32"], default="match_original", tooltip="Data type to save the LoRA as."),
+                io.Boolean.Input("verbose", default=True),
+            ],
+        )
 
     @classmethod
-    def INPUT_TYPES(s):
-        return {"required": 
-                {
-                    "lora_name": (folder_paths.get_filename_list("loras"), {"tooltip": "The name of the LoRA."}),
-                    "new_rank": ("INT", {"default": 8, "min": 1, "max": 4096, "step": 1, "tooltip": "The new rank to resize the LoRA. Acts as max rank when using dynamic_method."}),
-                    "dynamic_method": (["disabled", "sv_ratio", "sv_cumulative", "sv_fro"], {"default": "disabled", "tooltip": "Method to use for dynamically determining new alphas and dims"}),
-                    "dynamic_param": ("FLOAT", {"default": 0.2, "min": 0.0, "max": 1.0, "step": 0.01, "tooltip": "Method to use for dynamically determining new alphas and dims"}),
-                    "output_dtype": (["match_original", "fp16", "bf16", "fp32"], {"default": "match_original", "tooltip": "Data type to save the LoRA as."}),
-                    "verbose": ("BOOLEAN", {"default": True}),
-                },
-
-    }
-    RETURN_TYPES = ()
-    FUNCTION = "save"
-    OUTPUT_NODE = True
-    EXPERIMENTAL = True
-    DESCRIPTION = "Resize a LoRA model by reducing it's rank. Based on kohya's sd-scripts: https://github.com/kohya-ss/sd-scripts/blob/main/networks/resize_lora.py"
-
-    CATEGORY = "KJNodes/lora"
-
-    def save(self, lora_name, new_rank, output_dtype, dynamic_method, dynamic_param, verbose):
-
+    def execute(cls, lora_name, new_rank, dynamic_method, dynamic_param, output_dtype, verbose) -> io.NodeOutput:
         lora_path = folder_paths.get_full_path("loras", lora_name)
         lora_sd, metadata = comfy.utils.load_torch_file(lora_path, return_metadata=True)
 
@@ -259,7 +264,6 @@ class LoraReduceRank:
         logging.info("Resizing Lora...")
         output_sd, old_dim, new_alpha, rank_list = resize_lora_model(new_lora_sd, new_rank, save_dtype, device, dynamic_method, dynamic_param, verbose)
 
-        # update metadata
         if metadata is None:
             metadata = {}
 
@@ -274,15 +278,15 @@ class LoraReduceRank:
             metadata["ss_network_dim"] = "Dynamic"
             metadata["ss_network_alpha"] = "Dynamic"
 
-        # cast to save_dtype before calculating hashes
         for key in list(output_sd.keys()):
             value = output_sd[key]
             if type(value) == torch.Tensor and value.dtype.is_floating_point and value.dtype != save_dtype:
                 output_sd[key] = value.to(save_dtype)
 
+        output_dir = folder_paths.get_output_directory()
         output_filename_prefix = "loras/" + lora_name
 
-        full_output_folder, filename, counter, subfolder, filename_prefix = folder_paths.get_save_image_path(output_filename_prefix, self.output_dir)
+        full_output_folder, filename, counter, subfolder, filename_prefix = folder_paths.get_save_image_path(output_filename_prefix, output_dir)
         output_dtype_str = f"_{output_dtype}" if output_dtype != "match_original" else ""
         average_rank = str(int(np.mean(rank_list)))
         rank_str = new_rank if dynamic_method == "disabled" else f"dynamic_{average_rank}"
@@ -291,15 +295,7 @@ class LoraReduceRank:
         logging.info(f"Saving resized LoRA to {output_checkpoint}")
 
         comfy.utils.save_torch_file(output_sd, output_checkpoint, metadata=metadata)
-        return {}
-
-NODE_CLASS_MAPPINGS = {
-    "LoraExtractKJ": LoraExtractKJ
-}
-
-NODE_DISPLAY_NAME_MAPPINGS = {
-    "LoraExtractKJ": "LoraExtractKJ"
-}
+        return io.NodeOutput()
 
 # Convert LoRA to different rank approximation (should only be used to go to lower rank)
 # This code is based off the extract_lora_from_models.py file which is based on https://github.com/cloneofsimo/lora/blob/develop/lora_diffusion/cli_svd.py
@@ -345,45 +341,98 @@ def index_sv_ratio(S, target):
     return index
 
 
+def index_sv_knee(S, sensitivity=1.0):
+    """Find the knee/elbow point in the singular value curve.
+    Uses the Kneedle method: normalizes the curve to [0,1] on both axes,
+    then finds the point with maximum distance from a reference line.
+
+    sensitivity controls the aggressiveness:
+      1.0 = standard knee point
+      < 1.0 = more aggressive (lower rank), e.g. 0.5 roughly halves the knee rank
+      > 1.0 = more conservative (higher rank)
+    The reference line tilts based on sensitivity: at lower values,
+    the line favors keeping fewer singular values."""
+    n = len(S)
+    if n <= 2:
+        return 1
+
+    S_np = S.cpu().float().numpy()
+
+    # Normalize x and y to [0, 1]
+    x = np.linspace(0, 1, n)
+    y = (S_np - S_np[-1]) / (S_np[0] - S_np[-1] + 1e-10)
+
+    # Reference line from (0, 1) to (1, 1-sensitivity)
+    # At sensitivity=1.0: line goes (0,1)->(1,0), standard kneedle
+    # At sensitivity=0.5: line goes (0,1)->(1,0.5), steeper = more aggressive
+    y_line = 1.0 - sensitivity * x
+
+    # Signed distance: positive means curve is above the line (keep)
+    distances = y - y_line
+
+    # Find the point of maximum positive distance
+    index = int(np.argmax(distances))
+    index = max(1, min(index, n - 1))
+    return index
+
+
 # Modified from Kohaku-blueleaf's extract/merge functions
+def _svd_extract(weight_2d, lora_rank, dynamic_method, dynamic_param, device, scale=1):
+    """Shared SVD extraction for both linear and conv weights.
+    Dynamic mode: single full SVD (need all singular values for rank selection).
+    Disabled mode: svd_lowrank only (rank is known, much faster for large matrices)."""
+    weight_2d = weight_2d.to(device)
+    if weight_2d.dtype != torch.float32:
+        weight_2d = weight_2d.float()
+
+    if dynamic_method and dynamic_method != "disabled":
+        # Full SVD: we need all singular values for dynamic rank selection,
+        # and we reuse U/Vh directly — one SVD, no wasted work
+        U, S, Vh = torch.linalg.svd(weight_2d, full_matrices=False)
+        param_dict = rank_resize(S, lora_rank, dynamic_method, dynamic_param, scale)
+        lora_rank = param_dict["new_rank"]
+        U = U[:, :lora_rank]
+        S = S[:lora_rank]
+        Vh = Vh[:lora_rank, :]
+    else:
+        # Randomized lowrank SVD: only compute top-k, much faster when rank << min(m,n)
+        U, S, V = torch.svd_lowrank(weight_2d, q=lora_rank, niter=7)
+        Vh = V.t()
+        param_dict = {"new_rank": lora_rank, "new_alpha": float(scale * lora_rank)}
+        del V
+
+    sqrt_S = torch.diag(torch.sqrt(S))
+    U = U @ sqrt_S
+    Vh = sqrt_S @ Vh
+
+    return U, Vh, param_dict
+
+
 def extract_conv(weight, lora_rank, dynamic_method, dynamic_param, device, scale=1):
     out_size, in_size, kernel_size, _ = weight.size()
-    if weight.dtype != torch.float32:
-        weight = weight.to(torch.float32)
-    U, S, Vh = torch.linalg.svd(weight.reshape(out_size, -1).to(device))
 
-    param_dict = rank_resize(S, lora_rank, dynamic_method, dynamic_param, scale)
+    U, Vh, param_dict = _svd_extract(
+        weight.reshape(out_size, -1), lora_rank, dynamic_method, dynamic_param, device, scale
+    )
     lora_rank = param_dict["new_rank"]
-
-    U = U[:, :lora_rank]
-    S = S[:lora_rank]
-    U = U @ torch.diag(S)
-    Vh = Vh[:lora_rank, :]
 
     param_dict["lora_down"] = Vh.reshape(lora_rank, in_size, kernel_size, kernel_size).cpu()
     param_dict["lora_up"] = U.reshape(out_size, lora_rank, 1, 1).cpu()
-    del U, S, Vh, weight
+    del U, Vh, weight
     return param_dict
 
 
 def extract_linear(weight, lora_rank, dynamic_method, dynamic_param, device, scale=1):
     out_size, in_size = weight.size()
 
-    if weight.dtype != torch.float32:
-        weight = weight.to(torch.float32)
-    U, S, Vh = torch.linalg.svd(weight.to(device))
-
-    param_dict = rank_resize(S, lora_rank, dynamic_method, dynamic_param, scale)
+    U, Vh, param_dict = _svd_extract(
+        weight, lora_rank, dynamic_method, dynamic_param, device, scale
+    )
     lora_rank = param_dict["new_rank"]
-
-    U = U[:, :lora_rank]
-    S = S[:lora_rank]
-    U = U @ torch.diag(S)
-    Vh = Vh[:lora_rank, :]
 
     param_dict["lora_down"] = Vh.reshape(lora_rank, in_size).cpu()
     param_dict["lora_up"] = U.reshape(out_size, lora_rank).cpu()
-    del U, S, Vh, weight
+    del U, Vh, weight
     return param_dict
 
 
@@ -433,6 +482,11 @@ def rank_resize(S, rank, dynamic_method, dynamic_param, scale=1):
     elif dynamic_method == "sv_fro":
         # Calculate new dim and alpha based off sqrt sum of squares
         new_rank = index_sv_fro(S, dynamic_param) + 1
+        new_alpha = float(scale * new_rank)
+
+    elif dynamic_method == "sv_knee":
+        # Knee/elbow detection in singular value curve
+        new_rank = index_sv_knee(S, dynamic_param) + 1
         new_alpha = float(scale * new_rank)
     else:
         new_rank = rank
@@ -549,7 +603,7 @@ def resize_lora_model(lora_sd, new_rank, save_dtype, device, dynamic_method, dyn
                 full_weight_matrix = merge_linear(lora_down_weight, lora_up_weight, device)
                 param_dict = extract_linear(full_weight_matrix, new_rank, dynamic_method, dynamic_param, device, scale)
 
-            if verbose:
+            if verbose and "fro_retained" in param_dict:
                 max_ratio = param_dict["max_ratio"]
                 sum_retained = param_dict["sum_retained"]
                 fro_retained = param_dict["fro_retained"]
@@ -558,7 +612,7 @@ def resize_lora_model(lora_sd, new_rank, save_dtype, device, dynamic_method, dyn
                 log_str = f"{block_down_name:75} | sum(S) retained: {sum_retained:.1%}, fro retained: {fro_retained:.1%}, max(S) ratio: {max_ratio:0.1f}, new dim: {param_dict['new_rank']}"
                 tqdm.write(log_str)
                 verbose_str += log_str
-            
+
             if verbose and dynamic_method:
                 verbose_str += f", dynamic | dim: {param_dict['new_rank']}, alpha: {param_dict['new_alpha']}\n"
             else:
