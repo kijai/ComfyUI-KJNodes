@@ -4269,6 +4269,7 @@ class EncodeVideoComponents(io.ComfyNode):
                 io.Vae.Input("vae", tooltip="The VAE model to use for encoding."),
                 io.Int.Input("width", default=768, min=16, max=16384, step=2, tooltip="Target width for the frames before encoding."),
                 io.Int.Input("height", default=512, min=16, max=16384, step=2, tooltip="Target height for the frames before encoding."),
+                io.Int.Input("max_frames", default=0, min=0, max=999999, step=1, tooltip="Maximum number of frames. 0 = no limit."),
                 io.Combo.Input("upscale_method", options=["nearest-exact", "bilinear", "area", "bicubic", "lanczos"], default="lanczos", tooltip="Interpolation method for resizing."),
                 io.DynamicCombo.Input(
                     "keep_proportion",
@@ -4281,6 +4282,7 @@ class EncodeVideoComponents(io.ComfyNode):
                 io.Latent.Output(display_name="latent"),
                 io.Audio.Output(display_name="audio"),
                 io.Float.Output(display_name="fps"),
+                io.Int.Output(display_name="frame_count", tooltip="Number pixel space frames after any possible cropping"),
             ],
         )
 
@@ -4361,7 +4363,7 @@ class EncodeVideoComponents(io.ComfyNode):
         return width, height, crop_region, (pad_left, pad_right, pad_top, pad_bottom)
 
     @classmethod
-    def execute(cls, video, vae, width, height, upscale_method, keep_proportion) -> io.NodeOutput:
+    def execute(cls, video, vae, width, height, max_frames, upscale_method, keep_proportion) -> io.NodeOutput:
         import av
         import itertools
 
@@ -4375,11 +4377,13 @@ class EncodeVideoComponents(io.ComfyNode):
         start_time = getattr(video, '_VideoFromFile__start_time', 0)
         duration = getattr(video, '_VideoFromFile__duration', 0)
 
-        # Get frame count for progress bar
+        # Get frame count for progress bar, capped by max_frames
         try:
             total_frames = video.get_frame_count()
         except (ValueError, AttributeError):
             total_frames = 0
+        if max_frames > 0 and total_frames > 0:
+            total_frames = min(total_frames, max_frames)
         pbar = ProgressBar(total_frames) if total_frames > 0 else None
 
         # Use GPU for resize methods that support it (lanczos uses PIL, CPU-only)
@@ -4399,6 +4403,8 @@ class EncodeVideoComponents(io.ComfyNode):
                 if frame.pts < start_pts:
                     continue
                 if duration and frame.pts >= end_pts:
+                    break
+                if max_frames > 0 and len(frames) >= max_frames:
                     break
 
                 if res_w is None:
@@ -4491,4 +4497,4 @@ class EncodeVideoComponents(io.ComfyNode):
                         "sample_rate": int(audio_stream.sample_rate) if audio_stream.sample_rate else 1,
                     }
 
-        return io.NodeOutput({"samples": t}, audio, float(frame_rate))
+        return io.NodeOutput({"samples": t}, audio, float(frame_rate), s.shape[0])
