@@ -331,17 +331,17 @@ class LTXVAudioVideoMask(io.ComfyNode):
 
         return io.NodeOutput(video_latent, audio_latent)
 
-def _compute_attention(self, query, context, attention_precision=None, transformer_options={}):
+def _compute_attention(self, query, context, attn_precision=None, transformer_options={}):
     """Compute attention and return the result. Cleans up intermediate tensors."""
     k = self.k_norm(self.to_k(context)).to(query.dtype)
     v = self.to_v(context).to(query.dtype)
-    x = comfy.ldm.modules.attention.optimized_attention(query, k, v, heads=self.heads, attn_precision=attention_precision, transformer_options=transformer_options).flatten(2)
+    x = comfy.ldm.modules.attention.optimized_attention(query, k, v, heads=self.heads, attn_precision=attn_precision, transformer_options=transformer_options).flatten(2)
     del k, v
     return x
 
-def nag_attention(self, query, context_positive, nag_context, attention_precision=None, transformer_options={}):
-    x_positive = _compute_attention(self, query, context_positive, attention_precision, transformer_options)
-    x_negative = _compute_attention(self, query, nag_context, attention_precision, transformer_options)
+def nag_attention(self, query, context_positive, nag_context, attn_precision=None, transformer_options={}):
+    x_positive = _compute_attention(self, query, context_positive, attn_precision, transformer_options)
+    x_negative = _compute_attention(self, query, nag_context, attn_precision, transformer_options)
     return x_positive, x_negative
 
 def normalized_attention_guidance(self, x_positive, x_negative):
@@ -389,7 +389,7 @@ def ltxv_crossattn_forward_nag(self, x, context, mask=None, transformer_options=
     q_pos = self.q_norm(self.to_q(x_pos))
     del x_pos
 
-    x_positive, x_negative = nag_attention(self, q_pos, context_pos, self.nag_context, attention_precision=self.attn_precision, transformer_options=transformer_options)
+    x_positive, x_negative = nag_attention(self, q_pos, context_pos, self.nag_context, attn_precision=self.attn_precision, transformer_options=transformer_options)
     del context_pos, q_pos
 
     x_pos_out = normalized_attention_guidance(self, x_positive, x_negative)
