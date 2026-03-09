@@ -4267,8 +4267,8 @@ class EncodeVideoComponents(io.ComfyNode):
             inputs=[
                 io.Video.Input("video", tooltip="The video to extract and encode."),
                 io.Vae.Input("vae", tooltip="The VAE model to use for encoding."),
-                io.Int.Input("width", default=768, min=16, max=16384, step=2, tooltip="Target width for the frames before encoding."),
-                io.Int.Input("height", default=512, min=16, max=16384, step=2, tooltip="Target height for the frames before encoding."),
+                io.Int.Input("width", default=768, min=0, max=16384, step=2, tooltip="Target width for the frames before encoding. 0 = original width."),
+                io.Int.Input("height", default=512, min=0, max=16384, step=2, tooltip="Target height for the frames before encoding. 0 = original height."),
                 io.Int.Input("max_frames", default=0, min=0, max=999999, step=1, tooltip="Maximum number of frames. 0 = no limit."),
                 io.Combo.Input("upscale_method", options=["nearest-exact", "bilinear", "area", "bicubic", "lanczos"], default="lanczos", tooltip="Interpolation method for resizing."),
                 io.DynamicCombo.Input(
@@ -4289,6 +4289,10 @@ class EncodeVideoComponents(io.ComfyNode):
     @staticmethod
     def _compute_resize_params(mode, position, width, height, src_w, src_h):
         """Compute target resize dimensions, crop region, and padding from keep_proportion mode."""
+        if width == 0:
+            width = src_w
+        if height == 0:
+            height = src_h
         pillarbox_blur = mode == "pillarbox_blur"
         pad_left = pad_right = pad_top = pad_bottom = 0
         crop_region = None  # (x, y, crop_w, crop_h) or None
@@ -4386,7 +4390,7 @@ class EncodeVideoComponents(io.ComfyNode):
             total_frames = min(total_frames, max_frames)
         pbar = ProgressBar(total_frames) if total_frames > 0 else None
 
-        # Use GPU for resize methods that support it (lanczos uses PIL, CPU-only)
+        # Lanczos requires PIL (CPU-only), all other methods use torch on GPU
         use_gpu = upscale_method != "lanczos"
         device = model_management.get_torch_device() if use_gpu else torch.device("cpu")
 
@@ -4421,7 +4425,7 @@ class EncodeVideoComponents(io.ComfyNode):
                     cx, cy, cw, ch = crop_region
                     img = img[cy:cy+ch, cx:cx+cw, :]
 
-                # Resize on GPU when possible, then cast to VAE dtype and move to CPU
+                # Resize (GPU for torch-native methods, CPU/PIL for lanczos)
                 img = common_upscale(
                     img.unsqueeze(0).movedim(-1, 1), res_w, res_h, upscale_method, crop="disabled"
                 ).movedim(1, -1).squeeze(0).to(dtype=target_dtype, device="cpu")
