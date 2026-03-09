@@ -4231,3 +4231,264 @@ class LoadVideosFromFolder:
         if s.vhs_nodes is not None:
             return s.vhs_nodes.utils.hash_path(video)
         return None
+
+
+class EncodeVideoComponents(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        position_options = ["center", "top", "bottom", "left", "right"]
+        options = [
+            io.DynamicCombo.Option(key="stretch", inputs=[]),
+            io.DynamicCombo.Option(key="resize", inputs=[]),
+            io.DynamicCombo.Option(key="total_pixels", inputs=[]),
+            io.DynamicCombo.Option(key="crop", inputs=[
+                io.Combo.Input("crop_position", options=position_options, tooltip="Position to crop from."),
+            ]),
+            io.DynamicCombo.Option(key="pad", inputs=[
+                io.String.Input("pad_color", default="0, 0, 0", tooltip="Color to use for padding."),
+                io.Combo.Input("pad_position", options=position_options, tooltip="Position to align the image within the padded area."),
+            ]),
+            io.DynamicCombo.Option(key="pad_edge", inputs=[
+                io.Combo.Input("pad_position", options=position_options, tooltip="Position to align the image within the padded area."),
+            ]),
+            io.DynamicCombo.Option(key="pad_edge_pixel", inputs=[
+                io.Combo.Input("pad_position", options=position_options, tooltip="Position to align the image within the padded area."),
+            ]),
+            io.DynamicCombo.Option(key="pillarbox_blur", inputs=[
+                io.Combo.Input("pad_position", options=position_options, tooltip="Position to align the image within the padded area."),
+            ]),
+        ]
+        return io.Schema(
+            node_id="EncodeVideoComponents",
+            search_aliases=["video to latent", "encode video", "vae encode video"],
+            display_name="Encode Video Components",
+            category="KJNodes/image",
+            description="Extracts video frames, resizes them, and encodes with a VAE directly, avoiding storing the full image tensor.",
+            inputs=[
+                io.Video.Input("video", tooltip="The video to extract and encode."),
+                io.Vae.Input("vae", tooltip="The VAE model to use for encoding."),
+                io.Int.Input("width", default=768, min=16, max=16384, step=2, tooltip="Target width for the frames before encoding."),
+                io.Int.Input("height", default=512, min=16, max=16384, step=2, tooltip="Target height for the frames before encoding."),
+                io.Combo.Input("upscale_method", options=["nearest-exact", "bilinear", "area", "bicubic", "lanczos"], default="lanczos", tooltip="Interpolation method for resizing."),
+                io.DynamicCombo.Input(
+                    "keep_proportion",
+                    options=options,
+                    display_name="Keep Proportion",
+                    tooltip="How to handle aspect ratio mismatch when resizing.",
+                ),
+            ],
+            outputs=[
+                io.Latent.Output(display_name="latent"),
+                io.Audio.Output(display_name="audio"),
+                io.Float.Output(display_name="fps"),
+            ],
+        )
+
+    @staticmethod
+    def _compute_resize_params(mode, position, width, height, src_w, src_h):
+        """Compute target resize dimensions, crop region, and padding from keep_proportion mode."""
+        pillarbox_blur = mode == "pillarbox_blur"
+        pad_left = pad_right = pad_top = pad_bottom = 0
+        crop_region = None  # (x, y, crop_w, crop_h) or None
+
+        if mode in ["resize", "total_pixels"] or mode.startswith("pad") or pillarbox_blur:
+            if mode == "total_pixels":
+                total_pixels = width * height
+                aspect_ratio = src_w / src_h
+                new_height = int(math.sqrt(total_pixels / aspect_ratio))
+                new_width = int(math.sqrt(total_pixels * aspect_ratio))
+            else:
+                ratio = min(width / src_w, height / src_h)
+                new_width = round(src_w * ratio)
+                new_height = round(src_h * ratio)
+
+            if mode.startswith("pad") or pillarbox_blur:
+                if position == "center":
+                    pad_left = (width - new_width) // 2
+                    pad_right = width - new_width - pad_left
+                    pad_top = (height - new_height) // 2
+                    pad_bottom = height - new_height - pad_top
+                elif position == "top":
+                    pad_left = (width - new_width) // 2
+                    pad_right = width - new_width - pad_left
+                    pad_top = 0
+                    pad_bottom = height - new_height
+                elif position == "bottom":
+                    pad_left = (width - new_width) // 2
+                    pad_right = width - new_width - pad_left
+                    pad_top = height - new_height
+                    pad_bottom = 0
+                elif position == "left":
+                    pad_left = 0
+                    pad_right = width - new_width
+                    pad_top = (height - new_height) // 2
+                    pad_bottom = height - new_height - pad_top
+                elif position == "right":
+                    pad_left = width - new_width
+                    pad_right = 0
+                    pad_top = (height - new_height) // 2
+                    pad_bottom = height - new_height - pad_top
+
+            width = new_width
+            height = new_height
+
+        if mode == "crop":
+            old_aspect = src_w / src_h
+            new_aspect = width / height
+            if old_aspect > new_aspect:
+                crop_w = round(src_h * new_aspect)
+                crop_h = src_h
+            else:
+                crop_w = src_w
+                crop_h = round(src_w / new_aspect)
+            if position == "center":
+                x = (src_w - crop_w) // 2
+                y = (src_h - crop_h) // 2
+            elif position == "top":
+                x = (src_w - crop_w) // 2
+                y = 0
+            elif position == "bottom":
+                x = (src_w - crop_w) // 2
+                y = src_h - crop_h
+            elif position == "left":
+                x = 0
+                y = (src_h - crop_h) // 2
+            elif position == "right":
+                x = src_w - crop_w
+                y = (src_h - crop_h) // 2
+            crop_region = (x, y, crop_w, crop_h)
+
+        return width, height, crop_region, (pad_left, pad_right, pad_top, pad_bottom)
+
+    @classmethod
+    def execute(cls, video, vae, width, height, upscale_method, keep_proportion) -> io.NodeOutput:
+        import av
+        import itertools
+
+        mode = keep_proportion["keep_proportion"]
+        position = keep_proportion.get("crop_position") or keep_proportion.get("pad_position", "center")
+        pad_color = keep_proportion.get("pad_color", "0, 0, 0")
+        target_dtype = vae.vae_dtype
+
+        # Access VideoFromFile internals for efficient per-frame decode
+        source = video.get_stream_source()
+        start_time = getattr(video, '_VideoFromFile__start_time', 0)
+        duration = getattr(video, '_VideoFromFile__duration', 0)
+
+        # Get frame count for progress bar
+        try:
+            total_frames = video.get_frame_count()
+        except (ValueError, AttributeError):
+            total_frames = 0
+        pbar = ProgressBar(total_frames) if total_frames > 0 else None
+
+        # Use GPU for resize methods that support it (lanczos uses PIL, CPU-only)
+        use_gpu = upscale_method != "lanczos"
+        device = model_management.get_torch_device() if use_gpu else torch.device("cpu")
+
+        # --- Decode video frames with per-frame resize + dtype cast ---
+        with av.open(source, mode='r') as container:
+            video_stream = container.streams.video[0]
+            start_pts = int(start_time / video_stream.time_base)
+            end_pts = int((start_time + duration) / video_stream.time_base) if duration else 0
+            container.seek(start_pts, stream=video_stream)
+
+            res_w, res_h, crop_region, padding = None, None, None, (0, 0, 0, 0)
+            frames = []
+            for frame in container.decode(video_stream):
+                if frame.pts < start_pts:
+                    continue
+                if duration and frame.pts >= end_pts:
+                    break
+
+                if res_w is None:
+                    src_h, src_w = frame.height, frame.width
+                    res_w, res_h, crop_region, padding = cls._compute_resize_params(
+                        mode, position, width, height, src_w, src_h
+                    )
+
+                # Decode to tensor and normalize
+                img = torch.from_numpy(frame.to_ndarray(format='rgb24')).to(device=device, dtype=torch.float32) / 255.0
+
+                # Crop if needed (before resize)
+                if crop_region is not None:
+                    cx, cy, cw, ch = crop_region
+                    img = img[cy:cy+ch, cx:cx+cw, :]
+
+                # Resize on GPU when possible, then cast to VAE dtype and move to CPU
+                img = common_upscale(
+                    img.unsqueeze(0).movedim(-1, 1), res_w, res_h, upscale_method, crop="disabled"
+                ).movedim(1, -1).squeeze(0).to(dtype=target_dtype, device="cpu")
+
+                frames.append(img)
+                if pbar is not None:
+                    pbar.update(1)
+
+            frame_rate = video_stream.average_rate if video_stream.average_rate else 1
+
+        s = torch.stack(frames) if frames else torch.zeros(0, height, width, 3, dtype=target_dtype)
+
+        # Pad logic (applied on the full stack since padding modes like pillarbox_blur need all frames)
+        pillarbox_blur = mode == "pillarbox_blur"
+        pad_left, pad_right, pad_top, pad_bottom = padding
+        if (mode.startswith("pad") or pillarbox_blur) and (pad_left > 0 or pad_right > 0 or pad_top > 0 or pad_bottom > 0):
+            pad_mode = (
+                "pillarbox_blur" if pillarbox_blur else
+                "edge" if mode == "pad_edge" else
+                "edge_pixel" if mode == "pad_edge_pixel" else
+                "color"
+            )
+            s, _ = ImagePadKJ.pad(None, s, pad_left, pad_right, pad_top, pad_bottom, 0, pad_color, pad_mode)
+
+        # Trim frames to a count valid for the VAE's temporal compression
+        try:
+            temporal_compress = vae.downscale_ratio[0]
+            temporal_decompress = vae.upscale_ratio[0]
+            valid_frames = temporal_decompress(temporal_compress(s.shape[0]))
+            if valid_frames < s.shape[0]:
+                logging.warning(f"[EncodeVideoComponents] Trimming {s.shape[0] - valid_frames} frames ({s.shape[0]} -> {valid_frames}) to match VAE temporal compression ratio")
+                s = s[:valid_frames]
+        except (TypeError, IndexError):
+            pass
+
+        t = vae.encode(s)
+
+
+        # --- Extract audio in a separate pass ---
+        audio = None
+        if isinstance(source, BytesIO):
+            source.seek(0)
+        with av.open(source, mode='r') as container:
+            video_stream = container.streams.video[0]
+            start_pts = int(start_time / video_stream.time_base)
+            container.seek(start_pts, stream=video_stream)
+            if len(container.streams.audio):
+                audio_stream = container.streams.audio[-1]
+                audio_frames = []
+                resample = av.audio.resampler.AudioResampler(format='fltp').resample
+                aframes = itertools.chain.from_iterable(
+                    map(resample, container.decode(audio_stream))
+                )
+                has_first_frame = False
+                for aframe in aframes:
+                    offset_seconds = start_time - aframe.pts * audio_stream.time_base
+                    to_skip = int(offset_seconds * audio_stream.sample_rate)
+                    if to_skip < aframe.samples:
+                        has_first_frame = True
+                        break
+                if has_first_frame:
+                    audio_frames.append(aframe.to_ndarray()[..., to_skip:])
+                    for aframe in aframes:
+                        if aframe.time > start_time + duration:
+                            break
+                        audio_frames.append(aframe.to_ndarray())
+                if audio_frames:
+                    audio_data = np.concatenate(audio_frames, axis=1)
+                    if duration:
+                        audio_data = audio_data[..., :int(duration * audio_stream.sample_rate)]
+                    audio = {
+                        "waveform": torch.from_numpy(audio_data).unsqueeze(0),
+                        "sample_rate": int(audio_stream.sample_rate) if audio_stream.sample_rate else 1,
+                    }
+
+        return io.NodeOutput({"samples": t}, audio, float(frame_rate))
