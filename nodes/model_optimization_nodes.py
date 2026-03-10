@@ -1612,8 +1612,13 @@ class GGUFLoaderKJ(io.ComfyNode):
 
     @classmethod
     def _get_gguf_module(cls):
-        gguf_path = os.path.join(folder_paths.folder_names_and_paths["custom_nodes"][0][0], "ComfyUI-GGUF")
         """Import GGUF module with version validation"""
+        for key, mod in sys.modules.items():
+            if key.endswith("ComfyUI-GGUF") or key.endswith("comfyui-gguf"):
+                if hasattr(mod, "ops") and hasattr(mod, "nodes"):
+                    return mod
+
+        gguf_path = os.path.join(folder_paths.folder_names_and_paths["custom_nodes"][0][0], "ComfyUI-GGUF")
         for module_name in ["ComfyUI-GGUF", "custom_nodes.ComfyUI-GGUF", "comfyui-gguf", "custom_nodes.comfyui-gguf", gguf_path, gguf_path.lower()]:
             try:
                 module = importlib.import_module(module_name)
