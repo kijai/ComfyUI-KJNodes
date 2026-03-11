@@ -8,6 +8,8 @@ import numpy as np
 import torch
 import logging
 import comfy.model_management as mm
+import comfy.ldm.modules.attention as _comfy_attn
+from comfy.ldm.lightricks.model import apply_rotary_emb as _apply_rope
 device = mm.get_torch_device()
 import latent_preview
 
@@ -1129,6 +1131,262 @@ class LTXVImgToVideoInplaceKJ(io.ComfyNode):
 
         return io.NodeOutput({"samples": samples, "noise_mask": conditioning_latent_frames_mask})
 
+try:
+    import triton
+    import triton.language as tl
+    HAS_TRITON = True
+except ImportError:
+    HAS_TRITON = False
+
+if HAS_TRITON:
+    @triton.jit
+    def _rms_norm_scale_shift_kernel(
+        X_ptr, Out_ptr, Scale_ptr, Shift_ptr,
+        N, scale_n_rows,   # scale_n_rows: actual rows in scale/shift (handles broadcast)
+        eps: tl.constexpr,
+        BLOCK_N: tl.constexpr,
+        IS_BF16: tl.constexpr,
+        HAS_BROADCAST: tl.constexpr,  # True when scale_n_rows < n_rows
+    ):
+        row = tl.program_id(0)
+        cols = tl.arange(0, BLOCK_N)
+        mask = cols < N
+        off = row * N + cols
+
+        x = tl.load(X_ptr + off, mask=mask, other=0.0).to(tl.float32)
+
+        mean_sq = tl.sum(x * x, axis=0) / N
+        rrms = tl.math.rsqrt(mean_sq + eps)
+        x_norm = x * rrms
+
+        # Fast path: no broadcast, scale row == x row
+        if HAS_BROADCAST:
+            scale_row = row % scale_n_rows
+            scale_off = scale_row * N + cols
+        else:
+            scale_off = off
+        scale = tl.load(Scale_ptr + scale_off, mask=mask, other=0.0).to(tl.float32)
+        shift = tl.load(Shift_ptr + scale_off, mask=mask, other=0.0).to(tl.float32)
+        out = x_norm * (1.0 + scale) + shift
+
+        if IS_BF16:
+            tl.store(Out_ptr + off, out.to(tl.bfloat16), mask=mask)
+        else:
+            tl.store(Out_ptr + off, out.to(tl.float16), mask=mask)
+
+    @triton.jit
+    def _rope_qk_split_kernel(
+        Q_ptr, K_ptr, Cos_ptr, Sin_ptr,
+        H, T, D,          # D = dim_head (full, even)
+        TH,               # T * H, precomputed to avoid runtime multiply in index decomp
+        # q/k layout: [B, T, H*D] contiguous → q[b,t,h*D + d]
+        # cos/sin layout: [B, H, T, D//2] contiguous
+        IS_BF16: tl.constexpr,
+        BLOCK_HD: tl.constexpr,   # >= D//2
+    ):
+        # grid: (B*H*T,)
+        bht   = tl.program_id(0)
+        t     = bht % T
+        h     = (bht // T) % H
+        b     = bht // TH
+
+        D_half = D // 2
+        cols   = tl.arange(0, BLOCK_HD)
+        mask   = cols < D_half
+
+        # offset into q/k tensor: [B, T, H*D]
+        qk_base  = (b * T + t) * (H * D) + h * D
+        # offset into cos/sin: [B, H, T, D//2]
+        cs_base  = (b * H * T + h * T + t) * D_half
+
+        # load both halves of q and k
+        q_x = tl.load(Q_ptr + qk_base          + cols, mask=mask, other=0.0).to(tl.float32)
+        q_y = tl.load(Q_ptr + qk_base + D_half  + cols, mask=mask, other=0.0).to(tl.float32)
+        k_x = tl.load(K_ptr + qk_base          + cols, mask=mask, other=0.0).to(tl.float32)
+        k_y = tl.load(K_ptr + qk_base + D_half  + cols, mask=mask, other=0.0).to(tl.float32)
+        cos = tl.load(Cos_ptr + cs_base         + cols, mask=mask, other=1.0).to(tl.float32)
+        sin = tl.load(Sin_ptr + cs_base         + cols, mask=mask, other=0.0).to(tl.float32)
+
+        # split RoPE: out_x = x*cos - y*sin,  out_y = y*cos + x*sin
+        q_ox = q_x * cos - q_y * sin
+        q_oy = q_y * cos + q_x * sin
+        k_ox = k_x * cos - k_y * sin
+        k_oy = k_y * cos + k_x * sin
+
+        if IS_BF16:
+            tl.store(Q_ptr + qk_base          + cols, q_ox.to(tl.bfloat16), mask=mask)
+            tl.store(Q_ptr + qk_base + D_half  + cols, q_oy.to(tl.bfloat16), mask=mask)
+            tl.store(K_ptr + qk_base          + cols, k_ox.to(tl.bfloat16), mask=mask)
+            tl.store(K_ptr + qk_base + D_half  + cols, k_oy.to(tl.bfloat16), mask=mask)
+        else:
+            tl.store(Q_ptr + qk_base          + cols, q_ox.to(tl.float16), mask=mask)
+            tl.store(Q_ptr + qk_base + D_half  + cols, q_oy.to(tl.float16), mask=mask)
+            tl.store(K_ptr + qk_base          + cols, k_ox.to(tl.float16), mask=mask)
+            tl.store(K_ptr + qk_base + D_half  + cols, k_oy.to(tl.float16), mask=mask)
+
+    @triton.jit
+    def _rms_norm_dual_scale_shift_kernel(
+        X_ptr, Out1_ptr, Out2_ptr,
+        Scale1_ptr, Shift1_ptr, Scale2_ptr, Shift2_ptr,
+        N, scale_n_rows,
+        eps: tl.constexpr,
+        BLOCK_N: tl.constexpr,
+        IS_BF16: tl.constexpr,
+        HAS_BROADCAST: tl.constexpr,
+    ):
+        """Compute rms_norm(x) once, write two differently-scaled outputs."""
+        row = tl.program_id(0)
+        cols = tl.arange(0, BLOCK_N)
+        mask = cols < N
+        off = row * N + cols
+
+        x = tl.load(X_ptr + off, mask=mask, other=0.0).to(tl.float32)
+        mean_sq = tl.sum(x * x, axis=0) / N
+        x_norm = x * tl.math.rsqrt(mean_sq + eps)
+
+        if HAS_BROADCAST:
+            scale_row = row % scale_n_rows
+            s_off = scale_row * N + cols
+        else:
+            s_off = off
+
+        scale1 = tl.load(Scale1_ptr + s_off, mask=mask, other=0.0).to(tl.float32)
+        shift1 = tl.load(Shift1_ptr + s_off, mask=mask, other=0.0).to(tl.float32)
+        scale2 = tl.load(Scale2_ptr + s_off, mask=mask, other=0.0).to(tl.float32)
+        shift2 = tl.load(Shift2_ptr + s_off, mask=mask, other=0.0).to(tl.float32)
+
+        out1 = x_norm * (1.0 + scale1) + shift1
+        out2 = x_norm * (1.0 + scale2) + shift2
+
+        if IS_BF16:
+            tl.store(Out1_ptr + off, out1.to(tl.bfloat16), mask=mask)
+            tl.store(Out2_ptr + off, out2.to(tl.bfloat16), mask=mask)
+        else:
+            tl.store(Out1_ptr + off, out1.to(tl.float16), mask=mask)
+            tl.store(Out2_ptr + off, out2.to(tl.float16), mask=mask)
+
+
+def fused_norm_scale_shift(x, scale, shift, eps=1e-6, use_triton=True):
+    if use_triton and HAS_TRITON and x.is_cuda:
+        orig_shape = x.shape
+        hidden = x.shape[-1]
+        x_2d = x.contiguous().reshape(-1, hidden)
+        n_rows = x_2d.shape[0]
+        # Flatten scale/shift without expanding — kernel handles broadcast via modulo
+        scale_2d = scale.contiguous().reshape(-1, hidden)
+        shift_2d = shift.contiguous().reshape(-1, hidden)
+        scale_n_rows = scale_2d.shape[0]
+        out = torch.empty_like(x_2d)
+        BLOCK_N = triton.next_power_of_2(hidden)
+        num_warps = min(max(BLOCK_N // 256, 1), 16)
+        _rms_norm_scale_shift_kernel[(n_rows,)](
+            x_2d, out, scale_2d, shift_2d,
+            hidden, scale_n_rows,
+            eps=eps, BLOCK_N=BLOCK_N,
+            IS_BF16=(x.dtype == torch.bfloat16),
+            HAS_BROADCAST=(scale_n_rows < n_rows),
+            num_warps=num_warps,
+        )
+        return out.view(orig_shape)
+    else:
+        return comfy.ldm.common_dit.rms_norm(x, eps=eps) * (1 + scale) + shift
+
+
+def fused_rope_qk(q, k, freqs_cis, use_triton=True):
+    """Apply split RoPE to q and k in one fused kernel pass.
+    q, k: [B, T, H*D] contiguous
+    freqs_cis: (cos, sin, split_pe) where cos/sin: [B, H, T, D//2]
+    Falls back to original apply_rotary_emb if preconditions not met.
+    """
+
+    if not (use_triton and HAS_TRITON and q.is_cuda):
+        return _apply_rope(q, freqs_cis), _apply_rope(k, freqs_cis)
+
+    cos, sin = freqs_cis[0], freqs_cis[1]
+    split_pe = freqs_cis[2] if len(freqs_cis) > 2 else False
+
+    if not split_pe or cos.ndim != 4 or q.ndim != 3:
+        return _apply_rope(q, freqs_cis), _apply_rope(k, freqs_cis)
+
+    B_cos, H, T_cos, D_half = cos.shape
+    D = D_half * 2
+    if q.shape != (B_cos, T_cos, H * D) or k.shape != (B_cos, T_cos, H * D):
+        return _apply_rope(q, freqs_cis), _apply_rope(k, freqs_cis)
+
+    q = q.contiguous()
+    k = k.contiguous()
+    cos_c = cos.contiguous()
+    sin_c = sin.contiguous()
+
+    BLOCK_HD = triton.next_power_of_2(D_half)
+    num_warps = min(max(BLOCK_HD // 32, 1), 8)
+    _rope_qk_split_kernel[(B_cos * H * T_cos,)](
+        q, k, cos_c, sin_c,
+        H, T_cos, D,
+        T_cos * H,
+        IS_BF16=(q.dtype == torch.bfloat16),
+        BLOCK_HD=BLOCK_HD,
+        num_warps=num_warps,
+    )
+    return q, k
+
+
+def fused_norm_dual_scale_shift(x, scale1, shift1, scale2, shift2, eps=1e-6, use_triton=True):
+    """RMS-norm x once, return two scaled outputs: (x_norm*(1+s1)+b1, x_norm*(1+s2)+b2)."""
+    if use_triton and HAS_TRITON and x.is_cuda:
+        orig_shape = x.shape
+        hidden = x.shape[-1]
+        x_2d     = x.contiguous().reshape(-1, hidden)
+        n_rows   = x_2d.shape[0]
+        scale1_2d = scale1.contiguous().reshape(-1, hidden)
+        shift1_2d = shift1.contiguous().reshape(-1, hidden)
+        scale2_2d = scale2.contiguous().reshape(-1, hidden)
+        shift2_2d = shift2.contiguous().reshape(-1, hidden)
+        scale_n_rows = scale1_2d.shape[0]
+        out1 = torch.empty_like(x_2d)
+        out2 = torch.empty_like(x_2d)
+        BLOCK_N   = triton.next_power_of_2(hidden)
+        num_warps = min(max(BLOCK_N // 256, 1), 16)
+        _rms_norm_dual_scale_shift_kernel[(n_rows,)](
+            x_2d, out1, out2,
+            scale1_2d, shift1_2d, scale2_2d, shift2_2d,
+            hidden, scale_n_rows,
+            eps=eps, BLOCK_N=BLOCK_N,
+            IS_BF16=(x.dtype == torch.bfloat16),
+            HAS_BROADCAST=(scale_n_rows < n_rows),
+            num_warps=num_warps,
+        )
+        return out1.view(orig_shape), out2.view(orig_shape)
+    else:
+        x_norm = comfy.ldm.common_dit.rms_norm(x, eps=eps)
+        return x_norm * (1 + scale1) + shift1, x_norm * (1 + scale2) + shift2
+
+
+def _apply_text_cross_attention_patched(
+    self, x, context, attn, scale_shift_table, prompt_scale_shift_table,
+    timestep, prompt_timestep, attention_mask, transformer_options,
+):
+    """Drop-in replacement for _apply_text_cross_attention with fused norm+scale+shift.
+    Patched onto the block instance so self._apply_text_cross_attention resolves here."""
+    if self.cross_attention_adaln:
+        shift_q, scale_q, gate = self.get_ada_values(scale_shift_table, x.shape[0], timestep, slice(6, 9))
+        batch_size = x.shape[0]
+        shift_kv, scale_kv = (
+            prompt_scale_shift_table[None, None].to(device=x.device, dtype=x.dtype)
+            + prompt_timestep.reshape(batch_size, prompt_timestep.shape[1], 2, -1)
+        ).unbind(dim=2)
+        attn_input = fused_norm_scale_shift(x, scale_q, shift_q,
+                                            use_triton=getattr(self, 'use_triton_kernels', True))
+        del shift_q, scale_q
+        encoder_hidden_states = context * (1 + scale_kv) + shift_kv
+        del scale_kv, shift_kv
+        return attn(attn_input, context=encoder_hidden_states,
+                    mask=attention_mask, transformer_options=transformer_options) * gate
+    return attn(
+        comfy.ldm.common_dit.rms_norm(x), context=context,
+        mask=attention_mask, transformer_options=transformer_options,
+    )
+
 
 def ltx2_forward(
         self, x: Tuple[torch.Tensor, torch.Tensor], v_context=None, a_context=None, attention_mask=None, v_timestep=None, a_timestep=None,
@@ -1138,6 +1396,7 @@ def ltx2_forward(
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         run_vx = transformer_options.get("run_vx", True)
         run_ax = transformer_options.get("run_ax", True)
+        use_triton = getattr(self, 'use_triton_kernels', True)
         video_scale = getattr(self, 'video_scale', 1.0)
         audio_scale = getattr(self, 'audio_scale', 1.0)
         audio_to_video_scale = getattr(self, 'audio_to_video_scale', 1.0)
@@ -1148,14 +1407,41 @@ def ltx2_forward(
         run_a2v = run_vx and transformer_options.get("a2v_cross_attn", True) and ax.numel() > 0 and audio_to_video_scale != 0.0
         run_v2a = run_ax and transformer_options.get("v2a_cross_attn", True) and video_to_audio_scale != 0.0
 
-        # video
         if run_vx:
             # video self-attention
             vshift_msa, vscale_msa = (self.get_ada_values(self.scale_shift_table, vx.shape[0], v_timestep, slice(0, 2)))
-            norm_vx = comfy.ldm.common_dit.rms_norm(vx) * (1 + vscale_msa) + vshift_msa
+            norm_vx = fused_norm_scale_shift(vx, vscale_msa, vshift_msa, use_triton=use_triton)
             del vshift_msa, vscale_msa
-            attn1_out = self.attn1(norm_vx, pe=v_pe, mask=self_attention_mask, transformer_options=transformer_options)
-            del norm_vx
+            # inline attn1 only when triton is active (needed to intercept q/k for fused RoPE)
+            if use_triton:
+                _a1 = self.attn1
+                q = _a1.to_q(norm_vx)
+                k = _a1.to_k(norm_vx)
+                v = _a1.to_v(norm_vx)
+
+                q = _a1.q_norm(q)
+                k = _a1.k_norm(k)
+
+                if v_pe is not None:
+                    q, k = fused_rope_qk(q, k, v_pe, use_triton=True)
+
+                if self_attention_mask is None:
+                    _sa_out = _comfy_attn.optimized_attention(q, k, v, _a1.heads, attn_precision=_a1.attn_precision, transformer_options=transformer_options)
+                else:
+                    _sa_out = _comfy_attn.optimized_attention_masked(q, k, v, _a1.heads, self_attention_mask, attn_precision=_a1.attn_precision, transformer_options=transformer_options)
+                del q, k, v
+                if _a1.to_gate_logits is not None:
+                    _gate = _a1.to_gate_logits(norm_vx)
+                    _b, _t, _ = _sa_out.shape
+                    _sa_out = _sa_out.view(_b, _t, _a1.heads, _a1.dim_head)
+                    _sa_out = (_sa_out * (2.0 * torch.sigmoid(_gate)).unsqueeze(-1)).view(_b, _t, _a1.heads * _a1.dim_head)
+                    del _gate
+
+                attn1_out = _a1.to_out(_sa_out)
+                del _sa_out, norm_vx
+            else:
+                attn1_out = self.attn1(norm_vx, pe=v_pe, transformer_options=transformer_options)
+                del norm_vx
             # video cross-attention
             vgate_msa = self.get_ada_values(self.scale_shift_table, vx.shape[0], v_timestep, slice(2, 3))[0]
             vx.addcmul_(attn1_out, vgate_msa, value=video_scale)
@@ -1166,12 +1452,11 @@ def ltx2_forward(
                 v_timestep, v_prompt_timestep, attention_mask, transformer_options,),
                 alpha=video_scale
             )
-
         # audio
         if run_ax:
             # audio self-attention
             ashift_msa, ascale_msa = (self.get_ada_values(self.audio_scale_shift_table, ax.shape[0], a_timestep, slice(0, 2)))
-            norm_ax = comfy.ldm.common_dit.rms_norm(ax) * (1 + ascale_msa) + ashift_msa
+            norm_ax = fused_norm_scale_shift(ax, ascale_msa, ashift_msa, use_triton=use_triton)
             del ashift_msa, ascale_msa
             attn1_out = self.audio_attn1(norm_ax, pe=a_pe, transformer_options=transformer_options)
             del norm_ax
@@ -1188,52 +1473,47 @@ def ltx2_forward(
 
         # video - audio cross attention.
         if run_a2v or run_v2a:
-            vx_norm3 = comfy.ldm.common_dit.rms_norm(vx)
-            ax_norm3 = comfy.ldm.common_dit.rms_norm(ax)
+            if run_a2v and run_v2a:
+                # Fetch all 4 scale/shift values per table at once (avoids two get_ada_values calls each)
+                # and compute rms_norm once per tensor via dual kernel.
+                v_ca_vals = self.get_ada_values(self.scale_shift_table_a2v_ca_video[:4, :], vx.shape[0], v_cross_scale_shift_timestep)
+                a_ca_vals = self.get_ada_values(self.scale_shift_table_a2v_ca_audio[:4, :], ax.shape[0], a_cross_scale_shift_timestep)
+                vx_a2v, vx_v2a = fused_norm_dual_scale_shift(vx, v_ca_vals[0], v_ca_vals[1], v_ca_vals[2], v_ca_vals[3], use_triton=use_triton)
+                ax_a2v, ax_v2a = fused_norm_dual_scale_shift(ax, a_ca_vals[0], a_ca_vals[1], a_ca_vals[2], a_ca_vals[3], use_triton=use_triton)
+                del v_ca_vals, a_ca_vals
+            elif run_a2v:
+                sv, bv = self.get_ada_values(self.scale_shift_table_a2v_ca_video[:4, :], vx.shape[0], v_cross_scale_shift_timestep)[:2]
+                sa, ba = self.get_ada_values(self.scale_shift_table_a2v_ca_audio[:4, :], ax.shape[0], a_cross_scale_shift_timestep)[:2]
+                vx_a2v = fused_norm_scale_shift(vx, sv, bv, use_triton=use_triton)
+                ax_a2v = fused_norm_scale_shift(ax, sa, ba, use_triton=use_triton)
+                del sv, bv, sa, ba
+            else:  # only v2a
+                sv, bv = self.get_ada_values(self.scale_shift_table_a2v_ca_video[:4, :], vx.shape[0], v_cross_scale_shift_timestep)[2:4]
+                sa, ba = self.get_ada_values(self.scale_shift_table_a2v_ca_audio[:4, :], ax.shape[0], a_cross_scale_shift_timestep)[2:4]
+                vx_v2a = fused_norm_scale_shift(vx, sv, bv, use_triton=use_triton)
+                ax_v2a = fused_norm_scale_shift(ax, sa, ba, use_triton=use_triton)
+                del sv, bv, sa, ba
 
             # audio to video cross attention
             if run_a2v:
-                scale_ca_audio_hidden_states_a2v, shift_ca_audio_hidden_states_a2v = self.get_ada_values(
-                    self.scale_shift_table_a2v_ca_audio[:4, :], ax.shape[0], a_cross_scale_shift_timestep)[:2]
-                scale_ca_video_hidden_states_a2v_v, shift_ca_video_hidden_states_a2v_v = self.get_ada_values(
-                    self.scale_shift_table_a2v_ca_video[:4, :], vx.shape[0], v_cross_scale_shift_timestep)[:2]
-
-                vx_scaled = vx_norm3 * (1 + scale_ca_video_hidden_states_a2v_v) + shift_ca_video_hidden_states_a2v_v
-                ax_scaled = ax_norm3 * (1 + scale_ca_audio_hidden_states_a2v) + shift_ca_audio_hidden_states_a2v
-                del scale_ca_video_hidden_states_a2v_v, shift_ca_video_hidden_states_a2v_v, scale_ca_audio_hidden_states_a2v, shift_ca_audio_hidden_states_a2v
-
-                a2v_out = self.audio_to_video_attn(vx_scaled, context=ax_scaled, pe=v_cross_pe, k_pe=a_cross_pe, transformer_options=transformer_options)
-                del vx_scaled, ax_scaled
-
+                a2v_out = self.audio_to_video_attn(vx_a2v, context=ax_a2v, pe=v_cross_pe, k_pe=a_cross_pe, transformer_options=transformer_options)
+                del vx_a2v, ax_a2v
                 gate_out_a2v = self.get_ada_values(self.scale_shift_table_a2v_ca_video[4:, :], vx.shape[0], v_cross_gate_timestep)[0]
                 vx.addcmul_(a2v_out, gate_out_a2v, value=audio_to_video_scale)
                 del gate_out_a2v, a2v_out
 
             # video to audio cross attention
             if run_v2a:
-                scale_ca_audio_hidden_states_v2a, shift_ca_audio_hidden_states_v2a = self.get_ada_values(
-                    self.scale_shift_table_a2v_ca_audio[:4, :], ax.shape[0], a_cross_scale_shift_timestep)[2:4]
-                scale_ca_video_hidden_states_v2a, shift_ca_video_hidden_states_v2a = self.get_ada_values(
-                    self.scale_shift_table_a2v_ca_video[:4, :], vx.shape[0], v_cross_scale_shift_timestep)[2:4]
-
-                ax_scaled = ax_norm3 * (1 + scale_ca_audio_hidden_states_v2a) + shift_ca_audio_hidden_states_v2a
-                vx_scaled = vx_norm3 * (1 + scale_ca_video_hidden_states_v2a) + shift_ca_video_hidden_states_v2a
-                del scale_ca_video_hidden_states_v2a, shift_ca_video_hidden_states_v2a, scale_ca_audio_hidden_states_v2a, shift_ca_audio_hidden_states_v2a
-                del vx_norm3, ax_norm3
-
-                v2a_out = self.video_to_audio_attn(ax_scaled, context=vx_scaled, pe=a_cross_pe, k_pe=v_cross_pe, transformer_options=transformer_options)
-                del ax_scaled, vx_scaled
-
+                v2a_out = self.video_to_audio_attn(ax_v2a, context=vx_v2a, pe=a_cross_pe, k_pe=v_cross_pe, transformer_options=transformer_options)
+                del ax_v2a, vx_v2a
                 gate_out_v2a = self.get_ada_values(self.scale_shift_table_a2v_ca_audio[4:, :], ax.shape[0], a_cross_gate_timestep)[0]
                 ax.addcmul_(v2a_out, gate_out_v2a, value=video_to_audio_scale)
                 del gate_out_v2a, v2a_out
-            else:
-                del vx_norm3, ax_norm3
 
         # video feedforward
         if run_vx:
             vshift_mlp, vscale_mlp = self.get_ada_values(self.scale_shift_table, vx.shape[0], v_timestep, slice(3, 5))
-            vx_scaled = comfy.ldm.common_dit.rms_norm(vx) * (1 + vscale_mlp) + vshift_mlp
+            vx_scaled = fused_norm_scale_shift(vx, vscale_mlp, vshift_mlp, use_triton=use_triton)
             del vshift_mlp, vscale_mlp
 
             ff_out = self.ff(vx_scaled)
@@ -1246,7 +1526,7 @@ def ltx2_forward(
         # audio feedforward
         if run_ax:
             ashift_mlp, ascale_mlp = self.get_ada_values(self.audio_scale_shift_table, ax.shape[0], a_timestep, slice(3, 5))
-            ax_scaled = comfy.ldm.common_dit.rms_norm(ax) * (1 + ascale_mlp) + ashift_mlp
+            ax_scaled = fused_norm_scale_shift(ax, ascale_mlp, ashift_mlp, use_triton=use_triton)
             del ashift_mlp, ascale_mlp
 
             ff_out = self.audio_ff(ax_scaled)
@@ -1259,17 +1539,21 @@ def ltx2_forward(
         return vx, ax
 
 class LTX2ForwardPatch:
-    def __init__(self, video, audio, audio_to_video, video_to_audio):
+    def __init__(self, video, audio, audio_to_video, video_to_audio, use_triton=True):
         self.video_scale = video
         self.audio_scale = audio
         self.video_to_audio_scale = video_to_audio
         self.audio_to_video_scale = audio_to_video
+        self.use_triton_kernels = use_triton
     def __get__(self, obj, objtype=None):
         def wrapped_forward(self_module, *args, **kwargs):
             self_module.video_scale = self.video_scale
             self_module.audio_scale = self.audio_scale
             self_module.video_to_audio_scale = self.video_to_audio_scale
             self_module.audio_to_video_scale = self.audio_to_video_scale
+            self_module.use_triton_kernels = self.use_triton_kernels
+            self_module._apply_text_cross_attention = types.MethodType(
+                _apply_text_cross_attention_patched, self_module)
             return ltx2_forward(self_module, *args, **kwargs)
         return types.MethodType(wrapped_forward, obj)
 
@@ -1290,6 +1574,7 @@ class LTX2AttentionTunerPatch(io.ComfyNode):
                 io.Float.Input("audio_scale", default=1.0, min=0.0, max=100, step=0.01, tooltip="Scaling factor for audio attention."),
                 io.Float.Input("audio_to_video_scale", default=1.0, min=0.0, max=100, step=0.01, tooltip="Scaling factor for video attention."),
                 io.Float.Input("video_to_audio_scale", default=1.0, min=0.0, max=100, step=0.01, tooltip="Scaling factor for audio attention."),
+                io.Boolean.Input("triton_kernels", default=True, tooltip="Use Triton fused kernels for norm+scale+shift and rope application operations, can be very slightly faster."),
             ],
             outputs=[
                 io.Model.Output(display_name="model"),
@@ -1297,7 +1582,7 @@ class LTX2AttentionTunerPatch(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, model, blocks, video_scale, audio_scale, audio_to_video_scale, video_to_audio_scale) -> io.NodeOutput:
+    def execute(cls, model, blocks, video_scale, audio_scale, audio_to_video_scale, video_to_audio_scale, triton_kernels) -> io.NodeOutput:
         model_clone = model.clone()
         diffusion_model = model_clone.get_model_object("diffusion_model")
 
@@ -1307,15 +1592,15 @@ class LTX2AttentionTunerPatch(io.ComfyNode):
         else:
             selected_blocks = set(int(idx) for idx in blocks.strip().split(","))
 
-        logging.info(f"Applying LTX2 Attention Tuner Patch with custom scales to blocks: {sorted(selected_blocks)}")
+        logging.info(f"Applying LTX2 Attention Tuner Patch with custom scales to blocks: {sorted(selected_blocks)}, triton_kernels={triton_kernels}")
 
         # Apply patch to all blocks, but use 1.0 scales for non-selected blocks
         for idx in range(len(diffusion_model.transformer_blocks)):
             block = diffusion_model.transformer_blocks[idx]
             if idx in selected_blocks:
-                patched_forward = LTX2ForwardPatch(video_scale, audio_scale, audio_to_video_scale, video_to_audio_scale).__get__(block, block.__class__)
+                patched_forward = LTX2ForwardPatch(video_scale, audio_scale, audio_to_video_scale, video_to_audio_scale, use_triton=triton_kernels).__get__(block, block.__class__)
             else:
-                patched_forward = LTX2ForwardPatch(1.0, 1.0, 1.0, 1.0).__get__(block, block.__class__)
+                patched_forward = LTX2ForwardPatch(1.0, 1.0, 1.0, 1.0, use_triton=triton_kernels).__get__(block, block.__class__)
             model_clone.add_object_patch(f"diffusion_model.transformer_blocks.{idx}.forward", patched_forward)
 
         return io.NodeOutput(model_clone)
@@ -1332,6 +1617,7 @@ class LTX2MemoryEfficientSageAttentionPatch(io.ComfyNode):
             is_experimental=True,
             inputs=[
                 io.Model.Input("model"),
+                io.Boolean.Input("triton_kernels", default=True, tooltip="Use Triton fused RoPE kernel on the self-attention Q/K. Requires Triton."),
             ],
             outputs=[
                 io.Model.Output(display_name="model"),
@@ -1339,16 +1625,16 @@ class LTX2MemoryEfficientSageAttentionPatch(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, model) -> io.NodeOutput:
+    def execute(cls, model, triton_kernels) -> io.NodeOutput:
         if _cuda_archs is None:
             raise RuntimeError("sageattention is not new enough version or could not determine CUDA architecture, cannot apply LTX2 Memory Efficient Sage Attention Patch.")
         model_clone = model.clone()
         diffusion_model = model_clone.get_model_object("diffusion_model")
 
-        logging.info("Applying LTX2 Memory Efficient Sage Attention Patch to all transformer blocks")
+        logging.info(f"Applying LTX2 Memory Efficient Sage Attention Patch to all transformer blocks, triton_kernels={triton_kernels}")
 
-        # Apply patch to all blocks, but use 1.0 scales for non-selected blocks
         for idx, block in enumerate(diffusion_model.transformer_blocks):
+            block.attn1.use_triton_kernels = triton_kernels
             model_clone.add_object_patch(f"diffusion_model.transformer_blocks.{idx}.attn1.forward", ltx2_sageattn_forward.__get__(block.attn1, block.attn1.__class__))
 
         return io.NodeOutput(model_clone)
@@ -1406,13 +1692,17 @@ def ltx2_sageattn_forward(self, x, context=None, mask=None, pe=None, k_pe=None, 
     # query
     q = self.to_q(x)
     q = self.q_norm(q)
-    if pe is not None:
-        q = apply_rotary_emb(q, pe)
     # key
     k = self.to_k(context)
     k = self.k_norm(k)
+    # apply RoPE — fuse q+k into one kernel when both share the same pe
     if pe is not None:
-        k = apply_rotary_emb(k, pe if k_pe is None else k_pe)
+        use_triton = getattr(self, 'use_triton_kernels', False)
+        if k_pe is None:
+            q, k = fused_rope_qk(q, k, pe, use_triton=use_triton)
+        else:
+            q = apply_rotary_emb(q, pe)
+            k = apply_rotary_emb(k, k_pe)
     # value
     v = self.to_v(context)
 
