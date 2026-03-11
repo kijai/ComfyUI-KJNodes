@@ -2726,7 +2726,7 @@ v2 of the node. This node is only kept to not completely break older workflows.
         return(image, image.shape[2], image.shape[1],)
 
 class ImageResizeKJv2:
-    upscale_methods = ["nearest-exact", "bilinear", "area", "bicubic", "lanczos"]
+    upscale_methods = ["nearest-exact", "bilinear", "area", "bicubic", "lanczos", "nvidia_rtx_vsr"]
     @classmethod
     def INPUT_TYPES(s):
         return {
@@ -2861,6 +2861,20 @@ highest dimension.
             except:
                 pass
 
+        # NVIDIA RTX Video Super Resolution setup
+        nvvfx_sr = None
+        nvvfx_ctx = None
+        if upscale_method == "nvidia_rtx_vsr":
+            try:
+                import nvvfx
+            except:
+                raise ImportError("NVIDIA RTX Video Super Resolution is not available. Please install the nvidia-vfx library and ensure you have a compatible NVIDIA GPU.")
+            nvvfx_ctx = nvvfx.VideoSuperRes(nvvfx.effects.QualityLevel.ULTRA)
+            nvvfx_sr = nvvfx_ctx.__enter__()
+            nvvfx_sr.output_width = max(8, round(width / 8) * 8)
+            nvvfx_sr.output_height = max(8, round(height / 8) * 8)
+            nvvfx_sr.load()
+
         def _process_subbatch(in_image, in_mask, pad_left, pad_right, pad_top, pad_bottom):
             # Avoid unnecessary clones; only move if needed
             out_image = in_image if in_image.device == device else in_image.to(device)
@@ -2897,12 +2911,23 @@ highest dimension.
                 if out_mask is not None:
                     out_mask = out_mask.narrow(-1, x, crop_w).narrow(-2, y, crop_h)
 
-            out_image = common_upscale(out_image.movedim(-1,1), width, height, upscale_method, crop="disabled").movedim(1,-1)
-            if out_mask is not None:
-                if upscale_method == "lanczos":
-                    out_mask = common_upscale(out_mask.unsqueeze(1).repeat(1, 3, 1, 1), width, height, upscale_method, crop="disabled").movedim(1,-1)[:, :, :, 0]
-                else:
-                    out_mask = common_upscale(out_mask.unsqueeze(1), width, height, upscale_method, crop="disabled").squeeze(1)
+            if upscale_method == "nvidia_rtx_vsr":
+                # Process each frame through RTX Video Super Resolution
+                frames_chw = out_image.movedim(-1, 1).cuda().contiguous()
+                upscaled_frames = []
+                for j in range(frames_chw.shape[0]):
+                    dlpack_out = nvvfx_sr.run(frames_chw[j]).image
+                    upscaled_frames.append(torch.from_dlpack(dlpack_out).clone())
+                out_image = torch.stack(upscaled_frames, dim=0).movedim(1, -1).cpu()
+                if out_mask is not None:
+                    out_mask = common_upscale(out_mask.unsqueeze(1), width, height, "bilinear", crop="disabled").squeeze(1)
+            else:
+                out_image = common_upscale(out_image.movedim(-1,1), width, height, upscale_method, crop="disabled").movedim(1,-1)
+                if out_mask is not None:
+                    if upscale_method == "lanczos":
+                        out_mask = common_upscale(out_mask.unsqueeze(1).repeat(1, 3, 1, 1), width, height, upscale_method, crop="disabled").movedim(1,-1)[:, :, :, 0]
+                    else:
+                        out_mask = common_upscale(out_mask.unsqueeze(1), width, height, upscale_method, crop="disabled").squeeze(1)
 
             # Pad logic
             if (keep_proportion.startswith("pad") or pillarbox_blur) and (pad_left > 0 or pad_right > 0 or pad_top > 0 or pad_bottom > 0):
@@ -2964,6 +2989,10 @@ highest dimension.
                 out_mask = torch.cat([m for m in mask_chunks if m is not None], dim=0)
             else:
                 out_mask = None
+
+        # Cleanup NVIDIA RTX VSR context
+        if nvvfx_ctx is not None:
+            nvvfx_ctx.__exit__(None, None, None)
 
         # Progress UI
         if unique_id and PromptServer is not None:
