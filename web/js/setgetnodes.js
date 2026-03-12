@@ -23,7 +23,7 @@ function setColorAndBgColor(type) {
 		"SIGMAS": { color: "#485248", bgcolor: "#272e27"},
 
     };
-	console.log("Setting color for type:", colorMap[type]);
+	//console.log("Setting color for type:", colorMap[type]);
     const colors = colorMap[type];
     if (colors) {
         this.color = colors.color;
@@ -46,6 +46,59 @@ function showAlert(message) {
     life: 5000,
   })
 }
+function convertSetGetToLinks(graph, setNode) {
+	if (!graph || !setNode) return;
+
+	// Find the source connected to the Set node's input
+	const setInput = setNode.inputs[0];
+	if (setInput.link == null) return;
+	const sourceLink = graph.links[setInput.link] ?? graph._links?.get(setInput.link);
+	if (!sourceLink) return;
+	const sourceNode = graph.getNodeById(sourceLink.origin_id);
+	if (!sourceNode) return;
+	const sourceSlot = sourceLink.origin_slot;
+
+	// Find all Get nodes for this Set
+	const name = setNode.widgets[0].value;
+	const getters = graph._nodes.filter(
+		n => n.type === 'GetNode' && n.widgets[0].value === name && name !== ''
+	);
+
+	// Collect all consumer connections from Get nodes
+	const connections = [];
+	for (const getter of getters) {
+		const output = getter.outputs[0];
+		if (output.links) {
+			for (const linkId of [...output.links]) {
+				const getLink = graph.links[linkId] ?? graph._links?.get(linkId);
+				if (getLink) {
+					connections.push({
+						targetId: getLink.target_id,
+						targetSlot: getLink.target_slot
+					});
+				}
+			}
+		}
+	}
+
+	// Remove all Get nodes (this also removes their links)
+	for (const getter of getters) {
+		graph.remove(getter);
+	}
+	// Remove the Set node
+	graph.remove(setNode);
+
+	// Create direct links from source to each consumer
+	for (const conn of connections) {
+		const targetNode = graph.getNodeById(conn.targetId);
+		if (targetNode) {
+			sourceNode.connect(sourceSlot, targetNode, conn.targetSlot);
+		}
+	}
+
+	app.canvas.setDirty(true, true);
+}
+
 app.registerExtension({
 	name: "SetNode",
 	registerCustomNodes() {
@@ -278,6 +331,12 @@ app.registerExtension({
 					
 					},
 				);
+				options.unshift({
+					content: "Convert to links",
+					callback: () => {
+						convertSetGetToLinks(this.graph, this);
+					},
+				});
 				// Dynamically add a submenu for all getters
 				this.currentGetters = this.findGetters(this.graph);
 				if (this.currentGetters) {
@@ -493,7 +552,7 @@ app.registerExtension({
 			
 			getInputLink(slot) {
 				const setter = this.findSetter(this.graph);
-			
+
 				if (setter) {
 					const slotInfo = setter.inputs[slot];
 					const link = this.graph.links[slotInfo.link];
@@ -511,6 +570,12 @@ app.registerExtension({
 				this.currentSetter = this.findSetter(this.graph)
 				if (!this.currentSetter) return
 				options.unshift(
+					{
+						content: "Convert to links",
+						callback: () => {
+							convertSetGetToLinks(this.graph, this.currentSetter);
+						},
+					},
 					{
 						content: "Go to setter",
 						callback: () => {
@@ -572,4 +637,96 @@ app.registerExtension({
 
 		GetNode.category = "KJNodes";
 	},
+});
+
+// Patch link context menu to add "Convert to Set/Get" option
+app.registerExtension({
+	name: "KJNodes.LinkToSetGet",
+	setup() {
+		const originalShowLinkMenu = LGraphCanvas.prototype.showLinkMenu;
+		LGraphCanvas.prototype.showLinkMenu = function(segment, e) {
+			const result = originalShowLinkMenu.call(this, segment, e);
+
+			const graph = this.graph;
+			if (!graph) return result;
+
+			// Get the full link object to access target info
+			const link = graph._links?.get(segment.id) ?? graph.links?.[segment.id];
+			if (!link || link.origin_id == null || link.target_id == null) return result;
+
+			// Find the existing context menu that was just created and add our option
+			const menus = document.querySelectorAll(".litecontextmenu");
+			const lastMenu = menus[menus.length - 1];
+			if (!lastMenu) return result;
+
+			const entries = lastMenu.querySelector(".litemenu-entry")?.parentElement;
+			if (!entries) return result;
+
+			// Create separator
+			const separator = document.createElement("div");
+			separator.className = "litemenu-entry separator";
+			entries.appendChild(separator);
+
+			// Create menu entry
+			const menuItem = document.createElement("div");
+			menuItem.className = "litemenu-entry submenu";
+			menuItem.textContent = "Convert to Set/Get";
+			entries.appendChild(menuItem);
+
+			const canvas = this;
+			menuItem.addEventListener("click", function() {
+				// Close menu
+				lastMenu.remove();
+
+				const originNode = graph.getNodeById(link.origin_id);
+				const targetNode = graph.getNodeById(link.target_id);
+				if (!originNode || !targetNode) return;
+
+				const outputSlot = originNode.outputs[link.origin_slot];
+				const linkType = outputSlot?.type || "*";
+				const linkName = outputSlot?.name || linkType;
+
+				// Create Set node near the source
+				const setNode = LiteGraph.createNode("SetNode");
+				if (!setNode) return;
+				setNode.pos = [
+					originNode.pos[0] + originNode.size[0] + 30,
+					originNode.pos[1]
+				];
+				graph.add(setNode);
+
+				// Create Get node near the target
+				const getNode = LiteGraph.createNode("GetNode");
+				if (!getNode) return;
+				graph.add(getNode);
+				getNode.pos = [
+					targetNode.pos[0] - getNode.size[0] - 30,
+					targetNode.pos[1]
+				];
+
+				// Remove the original link
+				graph.removeLink(link.id);
+
+				// Connect source -> Set node input
+				originNode.connect(link.origin_slot, setNode, 0);
+
+				// Set the name widget on the Set node
+				setNode.widgets[0].value = linkName;
+				setNode.title = (!disablePrefix ? "Set_" : "") + linkName;
+				setNode.validateName(graph);
+
+				// Update Get node to match
+				const finalName = setNode.widgets[0].value;
+				getNode.widgets[0].value = finalName;
+				getNode.onRename();
+
+				// Connect Get node output -> target node input
+				getNode.connect(0, targetNode, link.target_slot);
+
+				canvas.setDirty(true, true);
+			});
+
+			return result;
+		};
+	}
 });
