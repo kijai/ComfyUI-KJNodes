@@ -1366,6 +1366,12 @@ this.lastMousePosition = { x: this.width/2, y: this.height/2 };
         // Add the point to the array of points
         points.push({ x: point.x, y: point.y });
         }
+    // Snap the last sampled point to the last control point's position
+    // to avoid small offsets caused by spline overshoot and binary search tolerance
+    if (points.length > 0 && spline && spline.points && spline.points.length > 1) {
+      const lastControlPoint = spline.points[spline.points.length - 1];
+      points[points.length - 1].y = lastControlPoint.y;
+    }
     return points;
     }
   }
