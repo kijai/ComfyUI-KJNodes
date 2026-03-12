@@ -460,7 +460,7 @@ app.registerExtension({
 				};
 
 				this.validateLinks = function() {
-					if (this.outputs[0].type !== '*' && this.outputs[0].links) {
+					if (this.outputs[0].type !== '*' && this.outputs[0].links && node.graph?.links) {
 						this.outputs[0].links.filter(linkId => {
 							const link = node.graph.links[linkId];
 							return link && (!link.type.split(",").includes(this.outputs[0].type) && link.type !== '*');
