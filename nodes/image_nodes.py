@@ -909,8 +909,8 @@ class GetImageSizeAndCount:
             "image": ("IMAGE",),
         }}
 
-    RETURN_TYPES = ("IMAGE","INT", "INT", "INT",)
-    RETURN_NAMES = ("image", "width", "height", "count",)
+    RETURN_TYPES = ("IMAGE","INT", "INT", "INT", "INT",)
+    RETURN_NAMES = ("image", "width", "height", "count", "channels",)
     FUNCTION = "getsize"
     CATEGORY = "KJNodes/image"
     DESCRIPTION = """
@@ -923,9 +923,10 @@ and passes it through unchanged.
         width = image.shape[2]
         height = image.shape[1]
         count = image.shape[0]
+        channels = image.shape[3]
         return {"ui": {
-            "text": [f"{count}x{width}x{height}"]}, 
-            "result": (image, width, height, count) 
+            "text": [f"{count}x{width}x{height}x{channels}"]}, 
+            "result": (image, width, height, count, channels) 
         }
 
 class GetLatentSizeAndCount:
