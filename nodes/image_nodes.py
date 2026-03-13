@@ -27,9 +27,10 @@ from PIL.PngImagePlugin import PngInfo
 from nodes import MAX_RESOLUTION, SaveImage
 from comfy_extras.nodes_mask import composite
 from comfy.cli_args import args
-from comfy.utils import ProgressBar, common_upscale
+from comfy.utils import ProgressBar, common_upscale, tiled_scale_multidim
 from comfy import model_management
-from comfy_api.latest import io
+from comfy_api.latest import io, InputImpl, Types, ui
+from fractions import Fraction
 import node_helpers
 import folder_paths
 
@@ -4531,3 +4532,174 @@ class EncodeVideoComponents(io.ComfyNode):
                     }
 
         return io.NodeOutput({"samples": t}, audio, float(frame_rate), s.shape[0])
+
+
+class DecodeAndSaveVideo(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="DecodeAndSaveVideo",
+            search_aliases=["video to latent", "decode video"],
+            display_name="Decode and Save Video",
+            category="KJNodes/image",
+            description="Decodes video frames and audio from latent representations, combines them, and saves as a video file, without keeping intermediate images in memory.",
+            inputs=[
+                io.Latent.Input("video_latent", tooltip="The latent representation of the video frames."),
+                io.Latent.Input("audio_latent", optional=True, tooltip="The latent representation of the audio frames."),
+                io.Float.Input("fps", default=25.0, min=0.0, max=999.0, step=0.01, tooltip="Frame rate for the output video."),
+                io.String.Input("filename_prefix", default="video/ComfyUI", tooltip="The prefix for the file to save. This may include formatting information such as %date:yyyy-MM-dd% or %Empty Latent Image.width% to include values from nodes."),
+                io.Combo.Input("format", options=Types.VideoContainer.as_input(), default="auto", tooltip="The format to save the video as."),
+                io.Combo.Input("codec", options=Types.VideoCodec.as_input(), default="auto", tooltip="The codec to use for the video."),
+                io.Vae.Input("video_vae", tooltip="The VAE model to use for encoding."),
+                io.Vae.Input("audio_vae", optional=True, tooltip="The VAE model to use for decoding audio."),
+                io.DynamicCombo.Input("tiling", options=[
+                    io.DynamicCombo.Option(key="disabled", inputs=[]),
+                    io.DynamicCombo.Option(key="enabled", inputs=[
+                        io.Int.Input("tile_size", default=512, min=64, max=4096, step=32, tooltip="Size of the tiles to decode. Smaller tiles use less memory but take more time."),
+                        io.Int.Input("overlap", default=64, min=0, max=4096, step=32, tooltip="Amount of overlap between tiles. Higher overlap can improve quality at the edges of tiles but uses more memory and takes more time."),
+                        io.Int.Input("temporal_size", default=4096, min=8, max=4096, step=4, tooltip="Only used for video VAEs: Amount of frames to decode at a time. Higher value than number of frames = disabled"),
+                        io.Int.Input("temporal_overlap", default=16, min=4, max=4096, step=4, tooltip="Only used for video VAEs: Amount of frames to overlap. Higher overlap can improve quality at the edges of temporal tiles but uses more memory and takes more time."),
+                    ]),
+                ]),
+            ],
+            hidden=[io.Hidden.prompt, io.Hidden.extra_pnginfo],
+            is_output_node=True,
+        )
+
+    @classmethod
+    def execute(cls, video_latent, video_vae, filename_prefix, format, codec, tiling, audio_latent=None, audio_vae=None, fps=25.0) -> io.NodeOutput:
+        if tiling["tiling"] == "enabled":
+            tile_size = tiling["tile_size"]
+            overlap = tiling["overlap"]
+            temporal_size = tiling["temporal_size"]
+            temporal_overlap = tiling["temporal_overlap"]
+
+            if tile_size < overlap * 4:
+                overlap = tile_size // 4
+            if temporal_size < temporal_overlap * 2:
+                temporal_overlap = temporal_overlap // 2
+            temporal_compression = video_vae.temporal_compression_decode()
+            if temporal_compression is not None:
+                temporal_size = max(2, temporal_size // temporal_compression)
+                temporal_overlap = max(1, min(temporal_size // 2, temporal_overlap // temporal_compression))
+            else:
+                temporal_size = None
+                temporal_overlap = None
+
+            compression = video_vae.spacial_compression_decode()
+
+            images = cls.decode_tiled(video_vae, video_latent["samples"],
+                                      tile_t=max(2, temporal_size),
+                                      tile_x=tile_size // compression,
+                                      tile_y=tile_size // compression,
+                                      overlap=(temporal_overlap if temporal_overlap is not None else 1, max(1, overlap // compression), max(1, overlap // compression)),
+            ).movedim(1, -1)
+            if len(images.shape) == 5: #Combine batches
+                images = images.reshape(-1, images.shape[-3], images.shape[-2], images.shape[-1])
+        else:
+            images = cls.decode_video(video_vae, video_latent)
+
+        if audio_latent is not None:
+            if audio_vae is None:
+                raise ValueError("Audio VAE must be provided if audio latent is provided.")
+            audio = cls.decode_audio(audio_latent, audio_vae)
+        else:
+            audio = None
+
+        video = InputImpl.VideoFromComponents(Types.VideoComponents(images=images, audio=audio, frame_rate=Fraction(fps)))
+        file, subfolder = cls.save_video(video, filename_prefix, format, codec)
+
+        return io.NodeOutput(ui=ui.PreviewVideo([ui.SavedResult(file, subfolder, io.FolderType.output)]))
+
+    @classmethod
+    def decode_video(cls, vae, samples):
+        samples_in = samples["samples"]
+        if samples_in.is_nested:
+            samples_in = samples_in.unbind()[0]
+
+        vae.throw_exception_if_invalid()
+        pixel_samples = None
+        do_tile = False
+        if vae.latent_dim == 2 and samples_in.ndim == 5:
+            samples_in = samples_in[:, :, 0]
+        try:
+            memory_used = vae.memory_used_decode(samples_in.shape, vae.vae_dtype)
+            model_management.load_models_gpu([vae.patcher], memory_required=memory_used, force_full_load=True)
+            free_memory = vae.patcher.get_free_memory(vae.device)
+            batch_number = int(free_memory / memory_used)
+            batch_number = max(1, batch_number)
+
+            for x in range(0, samples_in.shape[0], batch_number):
+                samples = samples_in[x:x+batch_number].to(vae.vae_dtype).to(vae.device)
+                out = vae.process_output(vae.first_stage_model.decode(samples).to(vae.output_device).to(torch.float16))
+                if pixel_samples is None:
+                    pixel_samples = torch.empty((samples_in.shape[0],) + tuple(out.shape[1:]), device=vae.output_device, dtype=out.dtype)
+                pixel_samples[x:x+batch_number] = out
+        except Exception as e:
+            model_management.raise_non_oom(e)
+            logging.warning("Warning: Ran out of memory when regular VAE decoding, retrying with tiled VAE decoding.")
+            do_tile = True
+
+        if do_tile:
+            dims = samples_in.ndim - 2
+            if dims == 1 or cls.extra_1d_channel is not None:
+                pixel_samples = vae.decode_tiled_1d(samples_in)
+            elif dims == 2:
+                pixel_samples = vae.decode_tiled_2d(samples_in)
+            elif dims == 3:
+                tile = 256 // vae.spacial_compression_decode()
+                overlap = tile // 4
+                pixel_samples = vae.decode_tiled_3d(samples_in, tile_x=tile, tile_y=tile, overlap=(1, overlap, overlap))
+
+        pixel_samples = pixel_samples.to(vae.output_device).movedim(1,-1)
+
+        if len(pixel_samples.shape) == 5: #Combine batches
+            pixel_samples = pixel_samples.reshape(-1, pixel_samples.shape[-3], pixel_samples.shape[-2], pixel_samples.shape[-1])
+        return pixel_samples
+
+    @classmethod
+    def decode_tiled(cls, vae, samples, tile_t=999, tile_x=32, tile_y=32, overlap=(1, 8, 8)):
+        vae.throw_exception_if_invalid()
+        memory_used = vae.memory_used_decode(samples.shape, vae.vae_dtype)
+        model_management.load_models_gpu([vae.patcher], memory_required=memory_used, force_full_load=vae.disable_offload)
+        decode_fn = lambda a: vae.first_stage_model.decode(a.to(vae.vae_dtype).to(vae.device)).to(torch.float16)
+        return vae.process_output(tiled_scale_multidim(samples, decode_fn, tile=(tile_t, tile_x, tile_y), overlap=overlap,
+                                                       upscale_amount=vae.upscale_ratio, out_channels=vae.output_channels, index_formulas=vae.upscale_index_formula, output_device=vae.output_device))
+
+
+    @classmethod
+    def decode_audio(cls, samples, audio_vae):
+        audio_latent = samples["samples"]
+        if audio_latent.is_nested:
+            audio_latent = audio_latent.unbind()[-1]
+        audio = audio_vae.decode(audio_latent).to(audio_latent.device)
+        output_audio_sample_rate = audio_vae.output_sample_rate
+        return {"waveform": audio, "sample_rate": int(output_audio_sample_rate)}
+
+    @classmethod
+    def save_video(cls, video, filename_prefix, format, codec) -> io.NodeOutput:
+        width, height = video.get_dimensions()
+        full_output_folder, filename, counter, subfolder, filename_prefix = folder_paths.get_save_image_path(
+            filename_prefix,
+            folder_paths.get_output_directory(),
+            width,
+            height
+        )
+        saved_metadata = None
+        if not args.disable_metadata:
+            metadata = {}
+            if cls.hidden.extra_pnginfo is not None:
+                metadata.update(cls.hidden.extra_pnginfo)
+            if cls.hidden.prompt is not None:
+                metadata["prompt"] = cls.hidden.prompt
+            if len(metadata) > 0:
+                saved_metadata = metadata
+        file = f"{filename}_{counter:05}_.{Types.VideoContainer.get_extension(format)}"
+        video.save_to(
+            os.path.join(full_output_folder, file),
+            format=Types.VideoContainer(format),
+            codec=codec,
+            metadata=saved_metadata
+        )
+        return file, subfolder
+
