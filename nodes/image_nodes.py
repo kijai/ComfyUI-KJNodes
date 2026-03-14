@@ -4712,7 +4712,7 @@ class PreviewImageOrMask(io.ComfyNode):
             display_name="Preview Image Or Mask",
             category="image",
             essentials_category="Basics",
-            description="Previews the input images.",
+            description="Previews the input images or masks.",
             search_aliases=["output"],
             inputs=[
                 io.MultiType.Input("input", [io.Image, io.Mask], tooltip="The image or mask to preview."),
