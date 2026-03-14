@@ -4703,3 +4703,27 @@ class DecodeAndSaveVideo(io.ComfyNode):
         )
         return file, subfolder
 
+
+class PreviewImageOrMask(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="PreviewImageOrMask",
+            display_name="Preview Image Or Mask",
+            category="image",
+            essentials_category="Basics",
+            description="Previews the input images.",
+            search_aliases=["save", "save image", "export image", "output image", "write image", "download"],
+            inputs=[
+                io.MultiType.Input("input", [io.Image, io.Mask], tooltip="The image or mask to preview."),
+            ],
+            hidden=[io.Hidden.prompt, io.Hidden.extra_pnginfo],
+            is_output_node=True,
+        )
+
+    @classmethod
+    def execute(cls, input) -> io.NodeOutput:
+        if input.ndim == 3:
+            return io.NodeOutput(ui=ui.PreviewMask(input, cls=cls))
+        return io.NodeOutput(ui=ui.PreviewImage(input, cls=cls))
+
