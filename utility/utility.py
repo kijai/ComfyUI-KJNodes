@@ -53,7 +53,7 @@ def string_to_color(color_string: str) -> List[int]:
                 color_list = [int(v) for v in values]
         except ValueError:
             logging.warning(f"Invalid color format: {color_string}. Using default black.")
-    elif color_string.lstrip('#').isalnum() and not color_string.lstrip('#').replace('.', '', 1).isdigit():
+    elif color_string.startswith('#') or (color_string.lstrip('#').isalnum() and not color_string.lstrip('#').replace('.', '', 1).isdigit()):
         # Could be Hex format or color name
         color_string_stripped = color_string.lstrip('#')
         # Try hex first
