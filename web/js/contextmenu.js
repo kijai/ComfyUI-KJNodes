@@ -165,11 +165,5 @@ app.registerExtension({
 				defaultValue: true,
 				type: "boolean",
 			});
-			app.ui.settings.addSetting({
-				id: "KJNodes.browserStatus",
-				name: "KJNodes: 🟢 Stoplight browser status icon 🔴",
-				defaultValue: false,
-				type: "boolean",
-			});
 }
 });
