@@ -1100,7 +1100,7 @@ class SplitImageChannels:
             "image": ("IMAGE",),
             },
             }
-    
+
     RETURN_TYPES = ("IMAGE", "IMAGE", "IMAGE", "MASK")
     RETURN_NAMES = ("red", "green", "blue", "mask")
     FUNCTION = "split"
@@ -1109,20 +1109,22 @@ class SplitImageChannels:
 Splits image channels into images where the selected channel  
 is repeated for all channels, and the alpha as a mask. 
 """
-        
+
     def split(self, image):
         red = image[:, :, :, 0:1] # Red channel
         green = image[:, :, :, 1:2] # Green channel
         blue = image[:, :, :, 2:3] # Blue channel
-        alpha = image[:, :, :, 3:4] # Alpha channel
-        alpha = alpha.squeeze(-1)
+        if image.shape[3] == 4:
+            alpha = image[:, :, :, 4] # Alpha channel
+        else:
+            alpha = torch.zeros(image.shape[0], image.shape[1], image.shape[2], device=image.device)
 
         # Repeat the selected channel for all channels
         red = torch.cat([red, red, red], dim=3)
         green = torch.cat([green, green, green], dim=3)
         blue = torch.cat([blue, blue, blue], dim=3)
         return (red, green, blue, alpha)
-    
+
 class MergeImageChannels:
     @classmethod
     def INPUT_TYPES(s):
