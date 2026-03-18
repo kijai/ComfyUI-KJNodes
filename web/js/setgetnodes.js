@@ -1,88 +1,502 @@
 const { app } = window.comfyAPI.app;
 
-//based on diffus3's SetGet: https://github.com/diffus3/ComfyUI-extensions
+// originally based on diffus3's SetGet: https://github.com/diffus3/ComfyUI-extensions
 
-// Nodes that allow you to tunnel connections for cleaner graphs
-function setColorAndBgColor(type) {
-    const colorMap = {
-		"DEFAULT": LGraphCanvas.node_colors.gray,
-        "MODEL": LGraphCanvas.node_colors.blue,
-        "LATENT": LGraphCanvas.node_colors.purple,
-        "VAE": LGraphCanvas.node_colors.red,
-		"WANVAE": LGraphCanvas.node_colors.red,
-        "CONDITIONING": LGraphCanvas.node_colors.brown,
-        "IMAGE": LGraphCanvas.node_colors.pale_blue,
-        "CLIP": LGraphCanvas.node_colors.yellow,
-        "FLOAT": LGraphCanvas.node_colors.green,
-		"MASK": { color: "#1c5715", bgcolor: "#1f401b"},
-		"INT": { color: "#1b4669", bgcolor: "#29699c"},
-		"CONTROL_NET": { color: "#156653", bgcolor: "#1c453b"},
-		"NOISE": { color: "#2e2e2e", bgcolor: "#242121"},
-		"GUIDER": { color: "#3c7878", bgcolor: "#1c453b"},
-		"SAMPLER": { color: "#614a4a", bgcolor: "#3b2c2c"},
-		"SIGMAS": { color: "#485248", bgcolor: "#272e27"},
+// Nodes that allow you to hide connections for cleaner graphs
 
-    };
-	//console.log("Setting color for type:", colorMap[type]);
-    const colors = colorMap[type];
-    if (colors) {
-        this.color = colors.color;
-        this.bgcolor = colors.bgcolor;
-    }
-	else{
-		// Default color
-		this.color = LGraphCanvas.node_colors.gray;
-		this.bgcolor = LGraphCanvas.node_colors.gray;
+let _typeColorMap;
+function setColorAndBgColor(node, type) {
+	if (!_typeColorMap) {
+		_typeColorMap = {
+			"DEFAULT": LGraphCanvas.node_colors.gray,
+			"MODEL": LGraphCanvas.node_colors.blue,
+			"LATENT": LGraphCanvas.node_colors.purple,
+			"VAE": LGraphCanvas.node_colors.red,
+			"WANVAE": LGraphCanvas.node_colors.red,
+			"CONDITIONING": LGraphCanvas.node_colors.brown,
+			"IMAGE": LGraphCanvas.node_colors.pale_blue,
+			"CLIP": LGraphCanvas.node_colors.yellow,
+			"FLOAT": LGraphCanvas.node_colors.green,
+			"MASK": { color: "#1c5715", bgcolor: "#1f401b"},
+			"INT": { color: "#1b4669", bgcolor: "#29699c"},
+			"CONTROL_NET": { color: "#156653", bgcolor: "#1c453b"},
+			"NOISE": { color: "#2e2e2e", bgcolor: "#242121"},
+			"GUIDER": { color: "#3c7878", bgcolor: "#1c453b"},
+			"SAMPLER": { color: "#614a4a", bgcolor: "#3b2c2c"},
+			"SIGMAS": { color: "#485248", bgcolor: "#272e27"},
+		};
+	}
+	const colors = _typeColorMap[type] || LGraphCanvas.node_colors?.gray;
+	if (colors) {
+		node.color = colors.color;
+		node.bgcolor = colors.bgcolor;
 	}
 }
-let disablePrefix = app.ui.settings.getSettingValue("KJNodes.disablePrefix")
+function getDisablePrefix() {
+	return app.ui.settings.getSettingValue("KJNodes.disablePrefix") ?? false;
+}
+// Temporary map for paste rename coordination between Set and Get nodes.
+// Key: old name, Value: new name. Cleared via setTimeout(0) after each paste cycle.
+// This works because both onConfigure calls (Set + Get) fire synchronously within
+// the same paste operation, before the timeout clears the entry.
+const _pasteRenameMap = new Map();
+
+let _forceShowAllLinks = false;
+
+function getShowLinksMode() {
+	if (_forceShowAllLinks) return "always";
+	return app.ui.settings.getSettingValue("KJNodes.showSetGetLinks") ?? "never";
+}
 const LGraphNode = LiteGraph.LGraphNode
 
-function showAlert(message) {
-  app.extensionManager.toast.add({
-    severity: 'warn',
-    summary: "KJ Get/Set",
-    detail: `${message}. Most likely you're missing custom nodes`,
-    life: 5000,
-  })
+// Cross-graph traversal utilities with lexical scoping for subgraph support.
+// Set nodes propagate downward: a Set in a parent graph is visible to all descendant subgraphs.
+// Get nodes look upward: a Get searches its own graph first, then parent, then grandparent, etc.
+// Duplicate names are allowed across unrelated (sibling) subgraphs.
+
+function findRootGraph(graph) {
+	if (!graph) return null;
+	return graph.rootGraph || graph;
 }
+
+// Find which SubgraphNode in parentGraph wraps the given subgraph
+function findSubgraphNodeFor(parentGraph, innerNode) {
+	if (!parentGraph?._nodes || !innerNode?.graph) return null;
+	for (const n of parentGraph._nodes) {
+		if (n.subgraph && n.subgraph === innerNode.graph) return n;
+	}
+	return null;
+}
+
+// Walk from a subgraph up to root, returning [graph, parent, grandparent, ..., root]
+function getGraphAncestors(graph) {
+	if (!graph) return [];
+	const root = findRootGraph(graph);
+	if (!root || graph === root) return [root];
+
+	const chain = [graph];
+	const visited = new Set([graph]);
+	let current = graph;
+	// Walk up: find which SubgraphNode wraps current, then get its parent graph
+	while (current !== root) {
+		let found = false;
+		// Search root nodes
+		for (const n of root._nodes) {
+			if (n.subgraph === current) {
+				chain.push(root);
+				current = root;
+				found = true;
+				break;
+			}
+		}
+		if (found) break;
+		// Search sibling subgraphs (for nested subgraphs)
+		const subgraphs = root._subgraphs || root.subgraphs;
+		if (subgraphs) {
+			for (const sg of subgraphs.values()) {
+				if (sg === current || !sg._nodes) continue;
+				for (const n of sg._nodes) {
+					if (n.subgraph === current) {
+						if (visited.has(sg)) { found = false; break; }
+						visited.add(sg);
+						chain.push(sg);
+						current = sg;
+						found = true;
+						break;
+					}
+				}
+				if (found) break;
+			}
+		}
+		if (!found) {
+			// Can't find parent, add root as fallback
+			if (!chain.includes(root)) chain.push(root);
+			break;
+		}
+	}
+	return chain;
+}
+
+// Get all descendant subgraphs of a graph (children, grandchildren, etc.)
+function getGraphDescendants(graph, _visited) {
+	if (!graph?._nodes) return [];
+	const visited = _visited || new Set();
+	if (visited.has(graph)) return [];
+	visited.add(graph);
+	const descendants = [];
+	for (const n of graph._nodes) {
+		if (n.subgraph && !visited.has(n.subgraph)) {
+			descendants.push(n.subgraph);
+			descendants.push(...getGraphDescendants(n.subgraph, visited));
+		}
+	}
+	return descendants;
+}
+
+// Collect nodes of a type from specific graphs
+function collectNodesOfType(graphs, type) {
+	const results = [];
+	for (const g of graphs) {
+		if (!g?._nodes) continue;
+		for (const node of g._nodes) {
+			if (node.type === type) results.push({ node, graph: g });
+		}
+	}
+	return results;
+}
+
+// Find all nodes of type across ALL graphs (root + all subgraphs). Used for global operations.
+function findAllNodesOfType(graph, type) {
+	const root = findRootGraph(graph);
+	if (!root) return [];
+	const allGraphs = [root];
+	const subgraphs = root._subgraphs || root.subgraphs;
+	if (subgraphs) {
+		for (const sg of subgraphs.values()) allGraphs.push(sg);
+	}
+	return collectNodesOfType(allGraphs, type);
+}
+
+// Scoped setter lookup: search current graph, then ancestors (look up).
+function findSetterByName(graph, name) {
+	if (!name) return null;
+	for (const g of getGraphAncestors(graph)) {
+		if (!g?._nodes) continue;
+		for (const node of g._nodes) {
+			if (node.type === 'SetNode' && node.widgets[0].value === name) {
+				return { node, graph: g };
+			}
+		}
+	}
+	return null;
+}
+
+// Scoped getter lookup: search current graph + descendants (propagate down).
+function findGettersByName(graph, name) {
+	if (!name) return [];
+	const graphs = [graph, ...getGraphDescendants(graph)];
+	return collectNodesOfType(graphs, 'GetNode')
+		.filter(entry => entry.node.widgets[0].value === name);
+}
+
+// Get all visible SetNode names for a GetNode's combo dropdown.
+// Shows names from current graph + ancestors (what's in scope).
+// Also builds a source map for getOptionLabel. This module-level variable is safe
+// because the values getter and getOptionLabel run in the same synchronous render pass.
+let _setNameSourceMap = new Map();
+
+function getVisibleSetNames(graph) {
+	const sourceMap = new Map();
+	const ancestors = getGraphAncestors(graph);
+	const entries = collectNodesOfType(ancestors, 'SetNode');
+	for (const e of entries) {
+		const name = e.node.widgets[0].value;
+		if (!name) continue;
+		if (!sourceMap.has(name)) {
+			sourceMap.set(name, e.graph === graph ? "local" : "parent");
+		}
+	}
+	_setNameSourceMap = sourceMap;
+	return [...sourceMap.keys()].sort();
+}
+
+// Exposed globally for use in contextmenu.js
+window.kjNodes = window.kjNodes || {};
+window.kjNodes.convertOutputsToSetGet = convertOutputsToSetGet;
+window.kjNodes.snapshotSelectedNodes = snapshotSelectedNodes;
+function convertOutputsToSetGet(graph, node) {
+	if (!graph || !node) return;
+	for (let slotIdx = 0; slotIdx < node.outputs.length; slotIdx++) {
+		const output = node.outputs[slotIdx];
+		if (!output.links || output.links.length === 0) continue;
+
+		const linkType = output.type || "*";
+		const linkName = output.name || linkType;
+
+		// Collect targets and link IDs to remove, skipping existing Set/Get nodes
+		const targets = [];
+		const linksToRemove = [];
+		for (const linkId of [...output.links]) {
+			const link = getLink(graph, linkId);
+			if (link) {
+				const targetNode = graph.getNodeById(link.target_id);
+				if (targetNode && targetNode.type !== 'SetNode' && targetNode.type !== 'GetNode') {
+					targets.push({ targetId: link.target_id, targetSlot: link.target_slot });
+					linksToRemove.push(linkId);
+				}
+			}
+		}
+		if (targets.length === 0) continue;
+
+		// Create Set node
+		const setNode = LiteGraph.createNode("SetNode");
+		if (!setNode) continue;
+		setNode.pos = [
+			node.pos[0] + node.size[0] + 30,
+			node.pos[1] + slotIdx * 60
+		];
+		graph.add(setNode);
+		setNode.flags.collapsed = true;
+
+		for (const linkId of linksToRemove) graph.removeLink(linkId);
+
+		// Connect source → Set node input
+		node.connect(slotIdx, setNode, 0);
+
+		// Set the name widget
+		setNode.widgets[0].value = linkName;
+		setNode.title = (!getDisablePrefix() ? "Set_" : "") + linkName;
+		setNode.validateName(graph);
+		const finalName = setNode.widgets[0].value;
+		setNode.properties.previousName = finalName;
+
+		// Create a Get node for each target
+		for (const target of targets) {
+			const targetNode = graph.getNodeById(target.targetId);
+			if (!targetNode) continue;
+
+			const getNode = LiteGraph.createNode("GetNode");
+			if (!getNode) continue;
+			getNode.pos = [
+				targetNode.pos[0] - getNode.size[0] - 30,
+				targetNode.pos[1]
+			];
+			graph.add(getNode);
+			getNode.flags.collapsed = true;
+
+			getNode.widgets[0].value = finalName;
+			getNode.onRename();
+
+			getNode.connect(0, targetNode, target.targetSlot);
+		}
+	}
+	app.canvas.setDirty(true, true);
+}
+
+// Snapshot selection immediately (before right-click changes it)
+function snapshotSelectedNodes(node, typeFilter) {
+	const selected = Object.values(app.canvas.selected_nodes || {});
+	// Always include the right-clicked node, even if selection state is inconsistent
+	const nodeSet = new Set(selected);
+	nodeSet.add(node);
+	let nodes = [...nodeSet];
+	if (typeFilter) nodes = nodes.filter(n => n.type === typeFilter);
+	return nodes;
+}
+
+// Tracks nodes flagged with has_errors so they can be cleared on the next alert.
+// Always cleared before repopulating, so it only holds nodes from the most recent alert.
+const _errorNodes = new Set();
+function showAlert(message, nodes) {
+	const nodeList = nodes ? (Array.isArray(nodes) ? nodes : [nodes]) : [];
+	const nodeInfo = nodeList.map(n =>
+		`${n.title || n.type} [${Math.round(n.pos[0])}, ${Math.round(n.pos[1])}]`
+	).join(', ');
+	if (nodeList.length) {
+		// Clear previous error flags
+		for (const n of _errorNodes) n.has_errors = false;
+		_errorNodes.clear();
+		setTimeout(() => {
+			for (const n of nodeList) {
+				n.has_errors = true;
+				_errorNodes.add(n);
+			}
+			app.canvas?.setDirty(true, true);
+		}, 100);
+	}
+	app.extensionManager.toast.add({
+		severity: 'warn',
+		summary: "KJ Set/Get",
+		detail: nodeInfo ? `${message} — ${nodeInfo}` : message,
+		life: 5000,
+	});
+}
+function convertAllSetGetToLinks(graph) {
+	if (!graph) return;
+	const rootGraph = findRootGraph(graph);
+
+	// First pass: handle cross-graph pairs (must run before same-graph
+	// because converting cross-graph creates real links that replace
+	// the Set/Get, and same-graph pass would miss the removed nodes)
+	const allSetEntries = findAllNodesOfType(rootGraph, 'SetNode');
+	for (const { node: setNode, graph: setGraph } of [...allSetEntries]) {
+		const name = setNode.widgets[0].value;
+		if (!name) continue;
+		const allGetEntries = findGettersByName(rootGraph, name);
+		const crossGraphGetters = allGetEntries.filter(e => e.graph !== setGraph);
+		if (crossGraphGetters.length > 0) {
+			convertCrossGraphSetGet(setNode, setGraph, crossGraphGetters);
+		}
+	}
+
+	// Second pass: handle remaining same-graph pairs
+	for (const { node: setNode, graph: g } of [...findAllNodesOfType(rootGraph, 'SetNode')]) {
+		convertSetGetToLinks(g, setNode);
+	}
+}
+
+// Compat shim: older frontends may lack graph.getLink(), and _links may be a Map or
+// plain object depending on the litegraph version. The == null check catches both null
+// and undefined intentionally.
+function getLink(graph, linkId) {
+	if (linkId == null) return null;
+	if (graph.getLink) return graph.getLink(linkId);
+	return graph._links instanceof Map ? graph._links.get(linkId) : graph._links?.[linkId] ?? null;
+}
+
+// Collect {targetId, targetSlot} from an output slot's links
+function collectOutputConnections(graph, output) {
+	const connections = [];
+	if (output?.links) {
+		for (const linkId of [...output.links]) {
+			const link = getLink(graph, linkId);
+			if (link) connections.push({ targetId: link.target_id, targetSlot: link.target_slot });
+		}
+	}
+	return connections;
+}
+
+function convertCrossGraphSetGet(setNode, setGraph, crossGraphGetters) {
+	// Find what's connected to the SetNode's input
+	const setInput = setNode.inputs[0];
+	if (setInput.link == null) return;
+	const sourceLink = getLink(setGraph, setInput.link);
+	if (!sourceLink) return;
+	const sourceNode = setGraph.getNodeById(sourceLink.origin_id);
+	if (!sourceNode) return;
+	const sourceSlot = sourceLink.origin_slot;
+	const linkType = setNode.inputs[0].type || '*';
+
+	for (const { node: getter, graph: getterGraph } of crossGraphGetters) {
+		// Collect getter's downstream connections before removing it
+		const connections = collectOutputConnections(getterGraph, getter.outputs[0]);
+		if (connections.length === 0) {
+			getterGraph.remove(getter);
+			continue;
+		}
+
+		// Determine direction and create SubgraphInput or SubgraphOutput
+		const rootGraph = findRootGraph(setGraph);
+		const sgNodeForGetter = findSubgraphNodeFor(rootGraph, getter);
+		const sgNodeForSetter = findSubgraphNodeFor(rootGraph, setNode);
+
+		if (sgNodeForGetter && setGraph === rootGraph) {
+			// Set in root, Get in subgraph → create SubgraphInput
+			const subgraph = sgNodeForGetter.subgraph;
+			const inputName = setNode.widgets[0].value || linkType;
+			const newInput = subgraph.addInput(inputName, linkType);
+			const inputIndex = subgraph.inputs.indexOf(newInput);
+
+			// Connect source → SubgraphNode's new input in root graph
+			sourceNode.connect(sourceSlot, sgNodeForGetter, inputIndex);
+
+			// Inside subgraph: connect SubgraphInput slot → getter's targets
+			for (const conn of connections) {
+				if (conn.targetId === subgraph.outputNode?.id) {
+					// GetNode fed a SubgraphOutput — bypass it and connect source directly in parent graph.
+					const sgNodeOutput = sgNodeForGetter.outputs[conn.targetSlot];
+					if (sgNodeOutput?.links) {
+						for (const parentLinkId of [...sgNodeOutput.links]) {
+							const parentLink = getLink(rootGraph, parentLinkId);
+							if (parentLink) {
+								const parentTarget = rootGraph.getNodeById(parentLink.target_id);
+								if (parentTarget) {
+									sourceNode.connect(sourceSlot, parentTarget, parentLink.target_slot);
+								}
+							}
+						}
+					}
+					// Remove the now-unnecessary SubgraphOutput
+					const sgOutput = subgraph.outputs[conn.targetSlot];
+					if (sgOutput) {
+						subgraph.removeOutput(sgOutput);
+					}
+				} else {
+					const targetNode = getterGraph.getNodeById(conn.targetId);
+					if (targetNode) {
+						newInput.connect(targetNode.inputs[conn.targetSlot], targetNode);
+					}
+				}
+			}
+
+			// If no connections used the SubgraphInput, remove it
+			if (newInput.linkIds.length === 0) {
+				subgraph.removeInput(newInput);
+			}
+
+			getterGraph.remove(getter);
+
+		} else if (sgNodeForSetter && getterGraph === rootGraph) {
+			// Set in subgraph, Get in root → create SubgraphOutput
+			const subgraph = sgNodeForSetter.subgraph;
+			const outputName = setNode.widgets[0].value || linkType;
+			const newOutput = subgraph.addOutput(outputName, linkType);
+			const outputIndex = subgraph.outputs.indexOf(newOutput);
+
+			// Inside subgraph: connect source output → SubgraphOutput slot
+			newOutput.connect(sourceNode.outputs[sourceSlot], sourceNode);
+
+			// In root graph: connect SubgraphNode's new output → getter's targets
+			for (const conn of connections) {
+				const targetNode = getterGraph.getNodeById(conn.targetId);
+				if (targetNode) {
+					sgNodeForSetter.connect(outputIndex, targetNode, conn.targetSlot);
+				}
+			}
+
+			getterGraph.remove(getter);
+
+		} else {
+			// Both in different subgraphs (sibling) — would need both input and output
+			// Skip for now, too complex
+			console.warn(`KJNodes: Cannot convert cross-graph Set/Get "${setNode.widgets[0].value}" between sibling subgraphs`);
+		}
+	}
+
+	// Remove SetNode if all its getters have been handled (check if any same-graph getters remain)
+	const remainingGetters = setGraph._nodes.filter(
+		n => n.type === 'GetNode' && n.widgets[0].value === setNode.widgets[0].value
+	);
+	if (remainingGetters.length === 0) {
+		setGraph.remove(setNode);
+	}
+}
+
 function convertSetGetToLinks(graph, setNode) {
 	if (!graph || !setNode) return;
+
+	const name = setNode.widgets[0].value;
+	let sameGraphGetters = [];
+	if (name) {
+		const allGetters = findGettersByName(graph, name);
+		const crossGetters = [];
+		for (const entry of allGetters) {
+			if (entry.graph === graph) sameGraphGetters.push(entry.node);
+			else crossGetters.push(entry);
+		}
+		if (crossGetters.length > 0) {
+			convertCrossGraphSetGet(setNode, graph, crossGetters);
+		}
+	}
 
 	// Find the source connected to the Set node's input
 	const setInput = setNode.inputs[0];
 	if (setInput.link == null) return;
-	const sourceLink = graph.links[setInput.link] ?? graph._links?.get(setInput.link);
+	const sourceLink = getLink(graph, setInput.link);
 	if (!sourceLink) return;
 	const sourceNode = graph.getNodeById(sourceLink.origin_id);
 	if (!sourceNode) return;
 	const sourceSlot = sourceLink.origin_slot;
 
-	// Find all Get nodes for this Set
-	const name = setNode.widgets[0].value;
-	const getters = graph._nodes.filter(
-		n => n.type === 'GetNode' && n.widgets[0].value === name && name !== ''
-	);
-
-	// Collect all consumer connections from Get nodes
+	// Collect all consumer connections from Get nodes and SetNode's own output passthrough
 	const connections = [];
-	for (const getter of getters) {
-		const output = getter.outputs[0];
-		if (output.links) {
-			for (const linkId of [...output.links]) {
-				const getLink = graph.links[linkId] ?? graph._links?.get(linkId);
-				if (getLink) {
-					connections.push({
-						targetId: getLink.target_id,
-						targetSlot: getLink.target_slot
-					});
-				}
-			}
-		}
+	for (const getter of sameGraphGetters) {
+		connections.push(...collectOutputConnections(graph, getter.outputs[0]));
 	}
+	connections.push(...collectOutputConnections(graph, setNode.outputs[0]));
 
 	// Remove all Get nodes (this also removes their links)
-	for (const getter of getters) {
+	for (const getter of sameGraphGetters) {
 		graph.remove(getter);
 	}
 	// Remove the Set node
@@ -96,20 +510,20 @@ function convertSetGetToLinks(graph, setNode) {
 		}
 	}
 
-	app.canvas.setDirty(true, true);
+	app.canvas?.setDirty(true, true);
 }
 
+// region SetNode
 app.registerExtension({
-	name: "SetNode",
+	name: "KJNodes.SetNode",
 	registerCustomNodes() {
 		class SetNode extends LGraphNode {
-			defaultVisibility = true;
+			static title = "Set";
+			static category = "KJNodes";
 			serialize_widgets = true;
 			drawConnection = false;
-			currentGetters = null;
 			slotColor = "#FFF";
 			canvas = app.canvas;
-			menuEntry = "Show connections";
 
 			constructor(title) {
 				super(title)
@@ -118,215 +532,243 @@ app.registerExtension({
 						"previousName": ""
 					};
 				}
-				this.properties.showOutputText = SetNode.defaultVisibility;
-
-				const node = this;
+				this.properties["Node name for S&R"] = "SetNode";
+				this.properties["aux_id"] = "SetNode";
+				this.isVirtualNode = true; // This node is purely frontend and does not impact the resulting prompt so should not be serialized
 
 				this.addWidget(
-					"text", 
-					"Constant", 
-					'', 
-					(s, t, u, v, x) => {
-						node.validateName(node.graph);
-						if(this.widgets[0].value !== ''){
-							this.title = (!disablePrefix ? "Set_" : "") + this.widgets[0].value;
+					"text",
+					"Constant",
+					'',
+					() => {
+						if (!this.graph) return;
+						this.validateName(this.graph);
+						if (this.widgets[0].value !== '') {
+							this.title = (!getDisablePrefix() ? "Set_" : "") + this.widgets[0].value;
 						}
 						this.update();
 						this.properties.previousName = this.widgets[0].value;
-					}, 
+					},
 					{}
 				)
-				
+
 				this.addInput("*", "*");
 				this.addOutput("*", '*');
+			}
 
-				this.onConnectionsChange = function(
-					slotType,	//1 = input, 2 = output
-					slot,
-					isChangeConnect,
-                    link_info,
-                    output
-				) {
-					//On Disconnect
-					if (slotType == 1 && !isChangeConnect) {
-						if(this.inputs[slot].name === ''){
-							this.inputs[slot].type = '*';
-							this.inputs[slot].name = '*';
-							this.title = "Set"
-						}
+			onConnectionsChange(
+				slotType,
+				slot,
+				isChangeConnect,
+				link_info
+			) {
+				//On Disconnect
+				if (slotType === LiteGraph.INPUT && !isChangeConnect) {
+					const outputConnected = this.outputs[0]?.links?.length > 0;
+					if (outputConnected) {
+						this.inputs[slot].type = this.outputs[0].type;
+						this.inputs[slot].name = this.outputs[0].name;
+					} else {
+						this.inputs[slot].type = '*';
+						this.inputs[slot].name = '*';
+						this.outputs[0].type = '*';
+						this.outputs[0].name = '*';
+						this.title = "Set";
+						this.color = null;
+						this.bgcolor = null;
 					}
-					if (slotType == 2 && !isChangeConnect) {
-						if (this.outputs && this.outputs[slot]) {
-							this.outputs[slot].type = '*';
-							this.outputs[slot].name = '*';
-						}
-					}
-					//On Connect
-					if (link_info && node.graph && slotType == 1 && isChangeConnect) {
-						const resolve = link_info.resolve(node.graph)
-						const type = (resolve?.subgraphInput ?? resolve?.output)?.type
-						if (type) {
-							if (this.title === "Set"){
-								this.title = (!disablePrefix ? "Set_" : "") + type;
-							}
-							if (this.widgets[0].value === '*'){
-								this.widgets[0].value = type	
-							}
-							
-							this.validateName(node.graph);
-							this.inputs[0].type = type;
-							this.inputs[0].name = type;
-							
-							if (app.ui.settings.getSettingValue("KJNodes.nodeAutoColor")){
-								setColorAndBgColor.call(this, type);	
-							}
-						} else {
-                showAlert(`node ${this.title} input undefined.`)
-						}
-					}
-					if (link_info && node.graph && slotType == 2 && isChangeConnect) {
-						const fromNode = node.graph._nodes.find((otherNode) => otherNode.id == link_info.origin_id);
-						
-						if (fromNode && fromNode.inputs && fromNode.inputs[link_info.origin_slot]) {
-							const type = fromNode.inputs[link_info.origin_slot].type;
-							
-							this.outputs[0].type = type;
-							this.outputs[0].name = type;
-						} else {
-							showAlert(`node ${this.title} output undefined.`);
-						}
-					}
-					
-
-					//Update either way
 					this.update();
 				}
-
-				this.validateName = function(graph) {
-					let widgetValue = node.widgets[0].value;
-				
-					if (widgetValue !== '') {
-						let tries = 0;
-						const existingValues = new Set();
-				
-						graph._nodes.forEach(otherNode => {
-							if (otherNode !== this && otherNode.type === 'SetNode') {
-								existingValues.add(otherNode.widgets[0].value);
+				if (slotType === LiteGraph.OUTPUT && !isChangeConnect) {
+					if (this.outputs && this.outputs[slot]) {
+						// Keep type if input has a real connection
+						const inputConnected = this.inputs[0]?.link != null;
+						if (inputConnected) {
+							this.outputs[slot].type = this.inputs[0].type;
+							this.outputs[slot].name = this.inputs[0].name;
+						} else {
+							this.inputs[0].type = '*';
+							this.inputs[0].name = '*';
+							this.outputs[slot].type = '*';
+							this.outputs[slot].name = '*';
+							this.color = null;
+							this.bgcolor = null;
+						}
+					}
+				}
+				//On Connect
+				if (link_info && this.graph && slotType === LiteGraph.INPUT && isChangeConnect) {
+					const resolve = link_info.resolve(this.graph)
+					const resolvedSlot = resolve?.subgraphInput ?? resolve?.output;
+					const type = resolvedSlot?.type;
+					if (type) {
+						if (this.title === "Set"){
+							this.title = (!getDisablePrefix() ? "Set_" : "") + type;
+						}
+						if (this.widgets[0].value === '' || this.widgets[0].value === '*'){
+							// Determine the initial widget value based on naming setting
+							const namingMode = app.ui.settings.getSettingValue("KJNodes.setGetNaming") ?? "empty";
+							if (namingMode !== "empty") {
+								const link = getLink(this.graph, this.inputs[0]?.link);
+								const sourceNode = link ? this.graph.getNodeById(link.origin_id) : null;
+								const slotName = sourceNode?.outputs?.[link?.origin_slot]?.name || type;
+								switch (namingMode) {
+									case "slot name": this.widgets[0].value = slotName; break;
+									case "slot name (lowercase)": this.widgets[0].value = slotName.toLowerCase(); break;
+									case "slot name (UPPERCASE)": this.widgets[0].value = slotName.toUpperCase(); break;
+								}
 							}
-						});
-				
-						while (existingValues.has(widgetValue)) {
-							widgetValue = node.widgets[0].value + "_" + tries;
-							tries++;
 						}
-				
-						node.widgets[0].value = widgetValue;
-						this.update();
+
+						this.validateName(this.graph);
+						this.inputs[0].type = type;
+						this.inputs[0].name = type;
+						this.outputs[0].type = type;
+						this.outputs[0].name = type;
+
+						if (app.ui.settings.getSettingValue("KJNodes.nodeAutoColor")){
+							setColorAndBgColor(this, type);
+						}
+					} else {
+						showAlert(`node ${this.title} input undefined.`, this)
+					}
+				}
+				if (link_info && this.graph && slotType === LiteGraph.OUTPUT && isChangeConnect) {
+					// Prefer input type; fall back to target's input type
+					const inputType = this.inputs[0]?.type;
+					if (inputType && inputType !== '*') {
+						this.outputs[0].type = inputType;
+						this.outputs[0].name = inputType;
+					} else {
+						const resolve = link_info.resolve(this.graph);
+						const type = resolve?.input?.type;
+						if (type && type !== '*') {
+							this.inputs[0].type = type;
+							this.inputs[0].name = type;
+							this.outputs[0].type = type;
+							this.outputs[0].name = type;
+							if (app.ui.settings.getSettingValue("KJNodes.nodeAutoColor")){
+								setColorAndBgColor(this, type);
+							}
+						}
 					}
 				}
 
-				this.clone = function () {
-					const cloned = SetNode.prototype.clone.apply(this);
-					cloned.inputs[0].name = '*';
-					cloned.inputs[0].type = '*';
-					cloned.value = '';
-					cloned.properties.previousName = '';
-					cloned.size = cloned.computeSize();
-					return cloned;
-				};
+				//Update either way
+				this.update();
+			}
 
-				this.onAdded = function(graph) {
-					this.validateName(graph);
-				}
+			// Returns true if the name was changed
+			validateName(graph, sameGraphOnly) {
+				let widgetValue = this.widgets[0].value;
 
+				if (widgetValue !== '') {
+					let tries = 0;
+					const existingValues = new Set();
 
-				this.update = function() {
-					if (!node.graph) {
-						return;
-					}
-				
-					const getters = this.findGetters(node.graph);
-					getters.forEach(getter => {
-						getter.setType(this.inputs[0].type);
-					});
-				
-					if (this.widgets[0].value) {
-						const gettersWithPreviousName = this.findGetters(node.graph, true);
-						gettersWithPreviousName.forEach(getter => {
-							getter.setName(this.widgets[0].value);
-						});
-					}
-				
-					const allGetters = node.graph._nodes.filter(otherNode => otherNode.type === "GetNode");
-					allGetters.forEach(otherNode => {
-						if (otherNode.setComboValues) {
-							otherNode.setComboValues();
+					// sameGraphOnly: only check the immediate graph (for paste/clone)
+					// otherwise check full scope (own graph + ancestors)
+					const scopeGraphs = sameGraphOnly ? [graph] : getGraphAncestors(graph);
+					const scopedSetNodes = collectNodesOfType(scopeGraphs, 'SetNode');
+					scopedSetNodes.forEach(entry => {
+						if (entry.node !== this) {
+							existingValues.add(entry.node.widgets[0].value);
 						}
 					});
-				}
 
-
-				this.findGetters = function(graph, checkForPreviousName) {
-					const name = checkForPreviousName ? this.properties.previousName : this.widgets[0].value;
-					return graph._nodes.filter(otherNode => otherNode.type === 'GetNode' && otherNode.widgets[0].value === name && name !== '');
-				}
-
-				
-				// This node is purely frontend and does not impact the resulting prompt so should not be serialized
-				this.isVirtualNode = true;
-			}
-				
-
-			onRemoved() {
-				const allGetters = this.graph._nodes.filter((otherNode) => otherNode.type == "GetNode");
-				allGetters.forEach((otherNode) => {
-					if (otherNode.setComboValues) {
-						otherNode.setComboValues([this]);
+					const originalValue = widgetValue;
+					// Only strip _N suffix during paste to avoid FOO_0_1_2 accumulation.
+					// For manual renames, keep the full name as base (user may intend FOO_3).
+					const baseName = this._justAdded ? widgetValue.replace(/_\d+$/, '') : widgetValue;
+					while (existingValues.has(widgetValue)) {
+						widgetValue = baseName + "_" + tries;
+						tries++;
 					}
-				})
+
+					this.widgets[0].value = widgetValue;
+					this.title = (!getDisablePrefix() ? "Set_" : "") + widgetValue;
+					return widgetValue !== originalValue;
+				}
+				return false;
 			}
+
+			clone() {
+				const cloned = super.clone();
+				cloned.inputs[0].name = '*';
+				cloned.inputs[0].type = '*';
+				cloned.properties.previousName = '';
+				cloned.size = cloned.computeSize();
+				return cloned;
+			}
+
+			onAdded() {
+				this._justAdded = true;
+			}
+
+			onConfigure() {
+				if (this._justAdded && this.graph) {
+					const oldName = this.widgets[0].value;
+					this.validateName(this.graph, true);
+					this._justAdded = false;
+					const newName = this.widgets[0].value;
+					if (newName !== oldName) {
+						_pasteRenameMap.set(oldName, newName);
+						// Clear the map after this paste cycle
+						setTimeout(() => _pasteRenameMap.delete(oldName), 0);
+					}
+					// Reset type and color on paste — nothing is connected yet
+					if (this.inputs[0]?.link == null) {
+						this.inputs[0].type = '*';
+						this.inputs[0].name = '*';
+						this.outputs[0].type = '*';
+						this.outputs[0].name = '*';
+						this.color = null;
+						this.bgcolor = null;
+					}
+				}
+			}
+
+			update() {
+				if (!this.graph) return;
+
+				const getters = this.findGetters(this.graph);
+				getters.forEach(getter => {
+					getter.setType(this.inputs[0].type);
+				});
+
+				if (this.widgets[0].value && this.properties.previousName) {
+					const gettersWithPreviousName = this.findGetters(this.graph, true);
+					gettersWithPreviousName.forEach(getter => {
+						getter.setName(this.widgets[0].value);
+					});
+				}
+			}
+
+			findGetters(graph, checkForPreviousName) {
+				const name = checkForPreviousName ? this.properties.previousName : this.widgets[0].value;
+				if (!name || name === '') return [];
+				// Scoped: searches own graph + descendant subgraphs
+				return findGettersByName(graph, name).map(entry => entry.node);
+			}
+
 			getExtraMenuOptions(_, options) {
-				this.menuEntry = this.drawConnection ? "Hide connections" : "Show connections";
 				options.unshift(
 					{
-						content: this.menuEntry,
+						content: this.drawConnection ? "Hide connections" : "Show connections",
 						callback: () => {
-							this.currentGetters = this.findGetters(this.graph);								
-							if (this.currentGetters.length == 0) return;
-							let linkType = (this.currentGetters[0].outputs[0].type);	
-							this.slotColor = this.canvas.default_connection_color_byType[linkType]
-							this.menuEntry = this.drawConnection ? "Hide connections" : "Show connections";
 							this.drawConnection = !this.drawConnection;
+							const linkType = this.inputs[0].type;
+							this.slotColor = this.canvas.default_connection_color_byType[linkType];
 							this.canvas.setDirty(true, true);
-							
-						},
-						has_submenu: true,
-						submenu: {
-							title: "Color",
-                            options: [ 
-								{
-								content: "Highlight",
-								callback: () => {
-									this.slotColor = "orange"
-									this.canvas.setDirty(true, true);
-									}
-								}
-							],
 						},
 					},
 					{
 						content: "Hide all connections",
 						callback: () => {
-							const allGetters = this.graph._nodes.filter(otherNode => otherNode.type === "GetNode" || otherNode.type === "SetNode");
-							allGetters.forEach(otherNode => {
-								otherNode.drawConnection = false;
-								console.log(otherNode);
-							});
-							
-							this.menuEntry = "Show connections";
-							this.drawConnection = false
+							for (const n of this.graph._nodes) {
+								if (n.type === "GetNode" || n.type === "SetNode") n.drawConnection = false;
+							}
 							this.canvas.setDirty(true, true);
-							
 						},
 					
 					},
@@ -334,23 +776,55 @@ app.registerExtension({
 				options.unshift({
 					content: "Convert to links",
 					callback: () => {
-						convertSetGetToLinks(this.graph, this);
+						const graph = this.graph;
+						for (const n of snapshotSelectedNodes(this, 'SetNode')) convertSetGetToLinks(graph, n);
+					},
+				});
+				options.unshift({
+					content: "Add paired GetNode",
+					callback: () => {
+						const graph = this.graph;
+						const getNode = LiteGraph.createNode("GetNode");
+						if (!getNode) return;
+						getNode.pos = [this.pos[0] + this.size[0] + 30, this.pos[1]];
+						graph.add(getNode);
+						// Set the widget value to match — this drives type, color, and connection
+						const name = this.widgets[0].value;
+						if (getNode.widgets?.[0]) {
+							getNode.widgets[0].value = name;
+						}
+						getNode.onRename?.();
+						app.canvas.selectNode(getNode, false);
+						app.canvas.setDirty(true, true);
 					},
 				});
 				// Dynamically add a submenu for all getters
-				this.currentGetters = this.findGetters(this.graph);
-				if (this.currentGetters) {
-					
-					let gettersSubmenu = this.currentGetters.map(getter => ({
-						
-						content: `${getter.title} id: ${getter.id}`,
-						callback: () => {
-							this.canvas.centerOnNode(getter);
-							this.canvas.selectNode(getter, false);
-							this.canvas.setDirty(true, true);
-							
-						},
-					}));
+				const allGettersForMenu = this.findGetters(this.graph);
+				if (allGettersForMenu.length) {
+					let gettersSubmenu = allGettersForMenu.map(getter => {
+						const sameGraph = getter.graph === this.graph;
+						const sgNode = !sameGraph ? findSubgraphNodeFor(this.graph, getter) : null;
+						const label = sameGraph
+							? `${getter.title} id: ${getter.id}`
+							: `${getter.title} (in subgraph${sgNode ? ': ' + (sgNode.title || sgNode.type) : ''})`;
+						return {
+							content: label,
+							callback: () => {
+								if (sameGraph) {
+									this.canvas.centerOnNode(getter);
+									this.canvas.selectNode(getter, false);
+								} else if (sgNode) {
+									this.canvas.openSubgraph(sgNode.subgraph, sgNode);
+									// Center on the getter after entering the subgraph
+									setTimeout(() => {
+										this.canvas.centerOnNode(getter);
+										this.canvas.selectNode(getter, false);
+									}, 0);
+								}
+								this.canvas.setDirty(true, true);
+							},
+						};
+					});
 			
 					options.unshift({
 						content: "Getters",
@@ -362,89 +836,21 @@ app.registerExtension({
 					});
 				}
 			}
-			
-			
-			onDrawForeground(ctx, lGraphCanvas) {
-				if (this.drawConnection) {
-					this._drawVirtualLinks(lGraphCanvas, ctx);
-				}
-			}
-			// onDrawCollapsed(ctx, lGraphCanvas) {
-			// 	if (this.drawConnection) {
-			// 		this._drawVirtualLinks(lGraphCanvas, ctx);
-			// 	}
-			// }
-			_drawVirtualLinks(lGraphCanvas, ctx) {
-				if (!this.currentGetters?.length) return;
-				var title = this.getTitle ? this.getTitle() : this.title;
-				var title_width = ctx.measureText(title).width;
-				if (!this.flags.collapsed) {
-					var start_node_slotpos = [
-						this.size[0],
-						LiteGraph.NODE_TITLE_HEIGHT * 0.5,
-						];
-				}
-				else {
-					
-					var start_node_slotpos = [
-						title_width + 55,
-						-15,
-
-						];
-				}
-				// Provide a default link object with necessary properties, to avoid errors as link can't be null anymore
-				const defaultLink = { type: 'default', color: this.slotColor };
-
-				for (const getter of this.currentGetters) {
-					if (!this.flags.collapsed) {
-					var end_node_slotpos = this.getConnectionPos(false, 0);
-					end_node_slotpos = [
-						getter.pos[0] - end_node_slotpos[0] + this.size[0],
-						getter.pos[1] - end_node_slotpos[1]
-						];
-					}
-					else {
-						var end_node_slotpos = this.getConnectionPos(false, 0);
-						end_node_slotpos = [
-						getter.pos[0] - end_node_slotpos[0] + title_width + 50,
-						getter.pos[1] - end_node_slotpos[1] - 30
-						];
-					}
-					lGraphCanvas.renderLink(
-						ctx,
-						start_node_slotpos,
-						end_node_slotpos,
-						defaultLink,
-						false,
-						null,
-						this.slotColor,
-						LiteGraph.RIGHT,
-						LiteGraph.LEFT
-					);
-				}
-			}
 		}
 
-		LiteGraph.registerNodeType(
-			"SetNode",
-			Object.assign(SetNode, {
-				title: "Set",
-			})
-		);
-
-		SetNode.category = "KJNodes";
+		LiteGraph.registerNodeType("SetNode", SetNode);
 	},
 });
 
+// region GetNode
 app.registerExtension({
-	name: "GetNode",
+	name: "KJNodes.GetNode",
 	registerCustomNodes() {
 		class GetNode extends LGraphNode {
-
-			defaultVisibility = true;
+			static title = "Get";
+			static category = "KJNodes";
 			serialize_widgets = true;
 			drawConnection = false;
-			slotColor = "#FFF";
 			currentSetter = null;
 			canvas = app.canvas;
 
@@ -453,209 +859,573 @@ app.registerExtension({
 				if (!this.properties) {
 					this.properties = {};
 				}
-				this.properties.showOutputText = GetNode.defaultVisibility;
-				const node = this;
-				const comboOptions = {};
+				this.properties["Node name for S&R"] = "GetNode";
+				this.properties["aux_id"] = "GetNode";
+				this.isVirtualNode = true; // This node is purely frontend and does not impact the resulting prompt so should not be serialized
+				const comboOptions = {
+					getOptionLabel: (value) => {
+						if (!value) return "";
+						const source = _setNameSourceMap.get(value);
+						if (!source || source === "local") return value;
+						return `${value} (${source})`;
+					},
+				};
 				Object.defineProperty(comboOptions, 'values', {
 					get: () => {
-						if (!node.graph) return [];
-						const setterNodes = node.graph._nodes.filter((otherNode) => otherNode.type == 'SetNode');
-						return setterNodes.map((otherNode) => otherNode.widgets[0].value).sort();
+						if (!this.graph) return [];
+						return getVisibleSetNames(this.graph);
 					},
 					enumerable: true,
 					configurable: true
 				});
-				this.addWidget(
-					"combo",
-					"Constant",
-					"",
-					(e) => {
-						this.onRename();
-					},
-					comboOptions
-				)
+				this.addWidget("combo", "Constant", "", () => this.onRename(), comboOptions)
+				this.addOutput("*", '*');
+			}
 
-				// Keep for compatibility - called by SetNode.update() and SetNode.onRemoved()
-				this.setComboValues = function() {}
+			onConnectionsChange() {
+				this.validateLinks();
+			}
 
-				this.addOutput("*", '*');			
-				this.onConnectionsChange = function(
-					slotType,	//0 = output, 1 = input
-					slot,	//self-explanatory
-					isChangeConnect,
-                    link_info,
-                    output
-				) {
-					this.validateLinks();	
-				}
+			setName(name) {
+				this.widgets[0].value = name;
+				this.onRename();
+				this.serialize();
+			}
 
-				this.setName = function(name) {
-					node.widgets[0].value = name;
-					node.onRename();
-					node.serialize();
-				}
-				
-				this.onRename = function() {
-					const setter = this.findSetter(node.graph);
-					if (setter) {
-						let linkType = (setter.inputs[0].type);
-						
-						this.setType(linkType);
-						this.title = (!disablePrefix ? "Get_" : "") + setter.widgets[0].value;
-						
-						if (app.ui.settings.getSettingValue("KJNodes.nodeAutoColor")){
-							setColorAndBgColor.call(this, linkType);	
-						}
-
-					} else {
-						this.setType('*');
-					}
-				}
-
-				this.clone = function () {
-					const cloned = GetNode.prototype.clone.apply(this);
-					cloned.size = cloned.computeSize();
-					return cloned;
-				};
-
-				this.validateLinks = function() {
-					if (this.outputs[0].type !== '*' && this.outputs[0].links && node.graph?.links) {
-						this.outputs[0].links.filter(linkId => {
-							const link = node.graph.links[linkId];
-							return link && (!link.type.split(",").includes(this.outputs[0].type) && link.type !== '*');
-						}).forEach(linkId => {
-							node.graph.removeLink(linkId);
-						});
-					}
-				};
-
-				this.setType = function(type) {
-					this.outputs[0].name = type;
-					this.outputs[0].type = type;
-					this.validateLinks();
-				}
-
-				this.findSetter = function(graph) {
+			onRename() {
+				const setter = this.findSetter(this.graph);
+				if (setter) {
+					this.setType(setter.inputs[0].type);
+					this.title = (!getDisablePrefix() ? "Get_" : "") + setter.widgets[0].value;
+				} else {
+					this.setType('*');
 					const name = this.widgets[0].value;
-					const foundNode = graph._nodes.find(otherNode => otherNode.type === 'SetNode' && otherNode.widgets[0].value === name && name !== '');
-					return foundNode;
-				};
+					this.title = name ? (!getDisablePrefix() ? "Get_" : "") + name : "Get";
+				}
+			}
 
-				this.goToSetter = function() {
+			clone() {
+				const cloned = super.clone();
+				cloned.size = cloned.computeSize();
+				return cloned;
+			}
+
+			validateLinks() {
+				if (this.outputs[0].type !== '*' && this.outputs[0].links && this.graph) {
+					this.outputs[0].links.filter(linkId => {
+						const link = getLink(this.graph, linkId);
+						return link && link.type && (!link.type.split(",").includes(this.outputs[0].type) && link.type !== '*');
+					}).forEach(linkId => {
+						this.graph.removeLink(linkId);
+					});
+				}
+			}
+
+			setType(type) {
+				this.outputs[0].name = type;
+				this.outputs[0].type = type;
+				this.validateLinks();
+				if (app.ui.settings.getSettingValue("KJNodes.nodeAutoColor")) {
+					if (type === '*') {
+						this.color = null;
+						this.bgcolor = null;
+					} else {
+						setColorAndBgColor(this, type);
+					}
+				}
+			}
+
+			findSetter(graph) {
+				const name = this.widgets[0].value;
+				// Scoped: searches own graph first, then ancestors
+				const result = findSetterByName(graph, name);
+				return result ? result.node : undefined;
+			}
+
+			goToSetter() {
+				if (!this.currentSetter) return;
+				const setterGraph = this.currentSetter.graph;
+				if (setterGraph && setterGraph !== this.graph) {
+					this.canvas.setGraph(setterGraph);
+					setTimeout(() => {
+						this.canvas.centerOnNode(this.currentSetter);
+						this.canvas.selectNode(this.currentSetter, false);
+						this.canvas.setDirty(true, true);
+					}, 0);
+				} else {
 					this.canvas.centerOnNode(this.currentSetter);
 					this.canvas.selectNode(this.currentSetter, false);
-				};
-				
-				// This node is purely frontend and does not impact the resulting prompt so should not be serialized
-				this.isVirtualNode = true;
+				}
 			}
-			
-			getInputLink(slot) {
-				const setter = this.findSetter(this.graph);
 
+			onAdded() {
+				this._justAdded = true;
+			}
+
+			onConfigure() {
+				if (this._justAdded) {
+					const name = this.widgets[0].value;
+					this._justAdded = false;
+					if (!name) return;
+					// Check if our paired SetNode was renamed during this paste
+					const newName = _pasteRenameMap.get(name);
+					if (newName) {
+						this.widgets[0].value = newName;
+					}
+					// Restore type/color from setter after paste
+					setTimeout(() => this.onRename(), 0);
+				}
+			}
+
+			getInputLink(slot) {
+				// Same-graph: standard resolveOutput path.
+				// Cross-graph: handled by resolveVirtualOutput.
+				const name = this.widgets[0].value;
+				if (!name || name === '') return null;
+				const setter = this.graph?._nodes?.find(
+					n => n.type === 'SetNode' && n.widgets[0].value === name
+				);
 				if (setter) {
 					const slotInfo = setter.inputs[slot];
-					const link = this.graph.links[slotInfo.link];
-					return link;
-				} else {
-					const errorMessage = "No SetNode found for " + this.widgets[0].value + "(" + this.type + ")";
-					showAlert(errorMessage);
-					//throw new Error(errorMessage);
+					if (!slotInfo || slotInfo.link == null) return null;
+					return getLink(this.graph, slotInfo.link);
 				}
+				// Scoped lookup: no setter found in own graph or ancestors
+				if (name && !findSetterByName(this.graph, name)) {
+					showAlert("No SetNode found for " + name + "(" + this.type + ")", this);
+				}
+				return null;
 			}
-			onAdded(graph) {
+
+			resolveVirtualOutput(slot) {
+				const name = this.widgets[0].value;
+				// Scoped lookup: own graph first, then ancestors
+				const result = findSetterByName(this.graph, name);
+				if (!result) return undefined;
+
+				// Same graph — let the standard getInputLink path handle it
+				if (result.graph === this.graph) return undefined;
+
+				// Warn if multiple SetNodes with this name exist in scope
+				const scopeGraphs = getGraphAncestors(this.graph);
+				const scopedSetters = collectNodesOfType(scopeGraphs, 'SetNode')
+					.filter(e => e.node.widgets[0].value === name);
+				if (scopedSetters.length > 1) {
+					showAlert(`Multiple SetNodes named "${name}" found in scope. Rename duplicates or use "Convert to links" to resolve`, [this, ...scopedSetters.map(e => e.node)]);
+					return undefined;
+				}
+
+				const { node: setter, graph: setterGraph } = result;
+				const slotInfo = setter.inputs[slot];
+				if (!slotInfo || slotInfo.link == null) return undefined;
+
+				const link = getLink(setterGraph, slotInfo.link);
+				if (!link) return undefined;
+
+				const sourceNode = setterGraph.getNodeById(link.origin_id);
+				if (!sourceNode) return undefined;
+
+				return { node: sourceNode, slot: link.origin_slot };
 			}
 			getExtraMenuOptions(_, options) {
-				let menuEntry = this.drawConnection ? "Hide connections" : "Show connections";
 				this.currentSetter = this.findSetter(this.graph)
 				if (!this.currentSetter) return
-				options.unshift(
-					{
-						content: "Convert to links",
-						callback: () => {
-							convertSetGetToLinks(this.graph, this.currentSetter);
+				const sameGraph = this.currentSetter.graph === this.graph;
+				if (sameGraph) {
+					let menuEntry = this.drawConnection ? "Hide connections" : "Show connections";
+					options.unshift(
+						{
+							content: "Convert to links",
+							callback: () => {
+								const graph = this.graph;
+								const setters = new Set(snapshotSelectedNodes(this, 'GetNode')
+									.map(n => n.findSetter?.(graph)).filter(Boolean));
+								for (const s of setters) convertSetGetToLinks(graph, s);
+							},
 						},
-					},
-					{
-						content: "Go to setter",
-						callback: () => {
-							this.goToSetter();
+						{
+							content: "Go to setter",
+							callback: () => {
+								this.goToSetter();
+							},
 						},
-					},
-					{
-						content: menuEntry,
-						callback: () => {
-							let linkType = (this.currentSetter.inputs[0].type);
-							this.drawConnection = !this.drawConnection;
-							this.slotColor = this.canvas.default_connection_color_byType[linkType]
-							this.canvas.setDirty(true, true);
+						{
+							content: menuEntry,
+							callback: () => {
+								if (!this.currentSetter) return;
+								const linkType = this.currentSetter.inputs[0].type;
+								// Toggle on the SetNode so the canvas-level hook draws it
+								this.currentSetter.drawConnection = !this.currentSetter.drawConnection;
+								this.currentSetter.slotColor = this.canvas.default_connection_color_byType[linkType];
+								this.drawConnection = this.currentSetter.drawConnection;
+								this.canvas.setDirty(true, true);
+							},
 						},
-					},
-				);
-			}
-
-			onDrawForeground(ctx, lGraphCanvas) {
-				if (this.drawConnection) {
-					this._drawVirtualLink(lGraphCanvas, ctx);
+					);
+				} else {
+					// Cross-graph setter — navigate to its graph
+					const setterGraph = this.currentSetter.graph;
+					const isRoot = setterGraph === findRootGraph(this.graph);
+					options.unshift(
+						{
+							content: `Go to setter (in ${isRoot ? 'parent graph' : 'subgraph'})`,
+							callback: () => {
+								const canvas = this.canvas;
+								canvas.setGraph(setterGraph);
+								setTimeout(() => {
+									canvas.centerOnNode(this.currentSetter);
+									canvas.selectNode(this.currentSetter, false);
+									canvas.setDirty(true, true);
+								}, 0);
+							},
+						},
+					);
 				}
-			}
-			// onDrawCollapsed(ctx, lGraphCanvas) {
-			// 	if (this.drawConnection) {
-			// 		this._drawVirtualLink(lGraphCanvas, ctx);
-			// 	}
-			// }
-			_drawVirtualLink(lGraphCanvas, ctx) {
-				if (!this.currentSetter) return;
-
-				// Provide a default link object with necessary properties, to avoid errors as link can't be null anymore
-				const defaultLink = { type: 'default', color: this.slotColor };
-				
-				let start_node_slotpos = this.currentSetter.getConnectionPos(false, 0);
-				start_node_slotpos = [
-					start_node_slotpos[0] - this.pos[0],
-					start_node_slotpos[1] - this.pos[1],
-				];
-				let end_node_slotpos = [0, -LiteGraph.NODE_TITLE_HEIGHT * 0.5];
-				lGraphCanvas.renderLink(
-					ctx,
-					start_node_slotpos,
-					end_node_slotpos,
-					defaultLink,
-					false,
-					null,
-					this.slotColor
-				);
 			}
 		}
 
-		LiteGraph.registerNodeType(
-			"GetNode",
-			Object.assign(GetNode, {
-				title: "Get",
-			})
-		);
-
-		GetNode.category = "KJNodes";
+		LiteGraph.registerNodeType("GetNode", GetNode);
 	},
 });
 
-// Patch link context menu to add "Convert to Set/Get" option
+// region UI: commands, keybindings, canvas menu, draw hook, settings
+app.registerExtension({
+	name: "KJNodes.SetGetUI",
+	settings: [
+		{
+			id: "KJNodes.setGetNaming",
+			name: "Default SetNode widget value",
+			category: ["KJNodes", "Set & Get", "Default SetNode widget value"],
+			tooltip: "Initial Constant value when a Set node is first connected to a slot",
+			type: "combo",
+			options: ["empty", "slot name", "slot name (lowercase)", "slot name (UPPERCASE)"],
+			defaultValue: "empty",
+		},
+		{
+			id: "KJNodes.showSetGetLinks",
+			name: "Show links",
+			category: ["KJNodes", "Set & Get", "Show links"],
+			tooltip: "When to show virtual links between Set/Get pairs",
+			type: "combo",
+			options: ["never", "selected", "always"],
+			defaultValue: "never",
+			onChange: () => app.canvas?.setDirty(true, true),
+		},
+	],
+	commands: [
+		{
+			id: "KJNodes.AddSetNodeToSelected",
+			label: "Add Set node to selected / at cursor",
+			function: () => {
+				const selected = Object.values(app.canvas.selected_nodes || {});
+				if (selected.length > 0) {
+					for (const n of selected) {
+						window.kjNodes.addNode("SetNode", n, { side: "right", offset: 30 });
+					}
+				} else {
+					const canvas = app.canvas;
+					const graph = canvas.graph || app.graph;
+					const node = LiteGraph.createNode("SetNode");
+					if (!node) return;
+					node.pos = [canvas.graph_mouse[0], canvas.graph_mouse[1]];
+					graph.add(node);
+					canvas.selectNode(node, false);
+					canvas.setDirty(true, true);
+				}
+			},
+		},
+		{
+			id: "KJNodes.AddGetNodeAtCursor",
+			label: "Add Get node at cursor",
+			function: () => {
+				const canvas = app.canvas;
+				const graph = canvas.graph || app.graph;
+				const node = LiteGraph.createNode("GetNode");
+				if (!node) return;
+				node.pos = [canvas.graph_mouse[0], canvas.graph_mouse[1]];
+				graph.add(node);
+				canvas.selectNode(node, false);
+				canvas.setDirty(true, true);
+			},
+		},
+		{
+			id: "KJNodes.ToggleForceShowSetGetLinks",
+			label: "Toggle force-show all Set/Get connections",
+			function: () => {
+				_forceShowAllLinks = !_forceShowAllLinks;
+				app.canvas.setDirty(true, true);
+			},
+		},
+	],
+	keybindings: [
+		{
+			commandId: "KJNodes.AddSetNodeToSelected",
+			combo: { key: "s", ctrl: true, shift: true },
+		},
+		{
+			commandId: "KJNodes.AddGetNodeAtCursor",
+			combo: { key: "g", ctrl: true, shift: true },
+		},
+		{
+			commandId: "KJNodes.ToggleForceShowSetGetLinks",
+			combo: { key: "l", ctrl: true, shift: true },
+		},
+	],
+	getCanvasMenuItems() {
+		return [
+			{
+				content: "KJNodes",
+				has_submenu: true,
+				submenu: {
+					options: [
+						{
+							content: "Convert outputs on all selected nodes to Set/Get",
+							callback: () => {
+								const selected = Object.values(app.canvas.selected_nodes || {});
+								if (selected.length === 0) return;
+								for (const n of selected) convertOutputsToSetGet(app.graph, n);
+							},
+						},
+						{
+							content: "Convert selected Set/Get to links",
+							callback: () => {
+								const graph = app.graph;
+								const selected = Object.values(app.canvas.selected_nodes || {});
+								const setNodes = selected.filter(n => n.type === 'SetNode');
+								const getNodes = selected.filter(n => n.type === 'GetNode');
+								for (const n of setNodes) convertSetGetToLinks(graph, n);
+								const setters = new Set(getNodes.map(n => n.findSetter?.(graph)).filter(Boolean));
+								for (const s of setters) convertSetGetToLinks(graph, s);
+							},
+						},
+					],
+				},
+			},
+		];
+	},
+	setup() {
+		// Double-click GetNode to jump to its SetNode (works in both legacy and Vue modes)
+		document.addEventListener("dblclick", () => {
+			const canvas = app.canvas;
+			if (!canvas) return;
+			const selected = Object.values(canvas.selected_nodes || {});
+			if (selected.length !== 1) return;
+			const node = selected[0];
+			if (node.type === "GetNode") {
+				node.currentSetter = node.findSetter(node.graph);
+				if (node.currentSetter) node.goToSetter();
+			}
+		});
+
+		// Monkey-patch: no extension hook exists for filtering visible nodes.
+		// Keep Set/Get nodes with visible virtual connections in the visible set
+		// even when offscreen, so the link lines don't get clipped.
+		const originalComputeVisibleNodes = LGraphCanvas.prototype.computeVisibleNodes;
+		LGraphCanvas.prototype.computeVisibleNodes = function () {
+			const visible = originalComputeVisibleNodes.apply(this, arguments);
+			for (const node of this.graph._nodes) {
+				if ((node.type === "SetNode" || node.type === "GetNode") && node.drawConnection && !visible.includes(node)) {
+					visible.push(node);
+				}
+			}
+			return visible;
+		};
+
+		// Monkey-patch: no extension hook exists for custom canvas drawing.
+		// Draws virtual links between Set/Get pairs.
+		// Handles per-node "Show connections", "selected" mode, and "always" mode.
+		const origCanvasOnDrawBackground = app.canvas.onDrawBackground;
+		app.canvas.onDrawBackground = function(ctx, visibleArea) {
+			origCanvasOnDrawBackground?.call(this, ctx, visibleArea);
+
+			const graph = this.graph || app.graph;
+			if (!graph?._nodes) return;
+			const mode = getShowLinksMode();
+
+			// Build set of selected Set/Get names for "selected" mode
+			let selectedNames = null;
+			if (mode === "selected") {
+				const sel = Object.values(this.selected_nodes || {});
+				if (!sel.length) {
+					// No selection — still honor per-node drawConnection
+					if (!graph._nodes.some(n => n.type === 'SetNode' && n.drawConnection)) return;
+				} else {
+					selectedNames = new Set();
+					for (const n of sel) {
+						if (n.type === 'SetNode' || n.type === 'GetNode') {
+							selectedNames.add(n.widgets?.[0]?.value ?? n.title);
+						}
+					}
+					if (!selectedNames.size && !graph._nodes.some(n => n.type === 'SetNode' && n.drawConnection)) return;
+				}
+			} else if (mode === "never") {
+				if (!graph._nodes.some(n => n.type === 'SetNode' && n.drawConnection)) return;
+			}
+
+			// Collect all GetNodes once across current graph + descendants, grouped by name.
+			// This avoids re-discovering descendant graphs and re-scanning nodes per SetNode.
+			const gettersByName = new Map();
+			const scopeGraphs = [graph, ...getGraphDescendants(graph)];
+			for (const g of scopeGraphs) {
+				if (!g?._nodes) continue;
+				for (const node of g._nodes) {
+					if (node.type !== 'GetNode') continue;
+					const n = node.widgets?.[0]?.value;
+					if (!n) continue;
+					let list = gettersByName.get(n);
+					if (!list) { list = []; gettersByName.set(n, list); }
+					list.push(node);
+				}
+			}
+
+			for (const setNode of graph._nodes) {
+				if (setNode.type !== 'SetNode') continue;
+				const name = setNode.widgets?.[0]?.value ?? setNode.title;
+				const showByMode = mode === "always" || (mode === "selected" && selectedNames?.has(name));
+				if (!showByMode && !setNode.drawConnection) continue;
+
+				const allGetters = gettersByName.get(name) || [];
+				const drawTargets = [];
+				const seenSubgraphs = new Set();
+				for (const getter of allGetters) {
+					if (getter.graph === graph) {
+						drawTargets.push(getter);
+					} else {
+						const sgNode = findSubgraphNodeFor(graph, getter);
+						if (sgNode && !seenSubgraphs.has(sgNode)) {
+							seenSubgraphs.add(sgNode);
+							drawTargets.push(sgNode);
+						}
+					}
+				}
+				if (!drawTargets.length) continue;
+
+				const linkType = setNode.inputs[0]?.type;
+				const slotColor = app.canvas.default_connection_color_byType?.[linkType]
+					|| LGraphCanvas.link_type_colors?.[linkType]
+					|| setNode.bgcolor
+					|| (setNode.slotColor !== "#FFF" ? setNode.slotColor : null) || "#AAA";
+
+				const startPos = setNode.getConnectionPos(false, 0);
+
+				for (const target of drawTargets) {
+					const endPos = target.getConnectionPos(true, 0);
+					const highlighted = setNode.is_selected || target.is_selected;
+					const color = highlighted ? "#FFF" : slotColor;
+					app.canvas.renderLink(
+						ctx,
+						startPos,
+						endPos,
+						null,
+						false,
+						null,
+						color,
+						LiteGraph.RIGHT,
+						LiteGraph.LEFT
+					);
+				}
+			}
+		};
+
+		app.ui.settings.addSetting({
+			id: "KJNodes.convertAllSetGet",
+			name: "Convert ALL Set/Get to links",
+			category: ["KJNodes", "Set & Get", "Convert ALL Set/Get to links"],
+			tooltip: "Replaces all Set/Get node pairs with direct links, including across subgraph boundaries (irreversible)",
+			type: () => {
+				const btn = document.createElement("button");
+				btn.textContent = "Convert ALL Set/Get to links";
+				btn.style.cssText = "padding: 6px 12px; cursor: pointer;";
+				btn.onclick = () => {
+					if (confirm("This will replace ALL Set/Get pairs with direct links. This is irreversible. Continue?")) {
+						convertAllSetGetToLinks(app.graph);
+						app.canvas?.setDirty(true, true);
+						app.extensionManager.toast.add({
+							severity: 'info',
+							summary: "KJ Set/Get",
+							detail: "All Set/Get nodes converted to direct links",
+							life: 3000,
+						});
+					}
+				};
+				return btn;
+			},
+			defaultValue: false,
+		});
+	}
+});
+
+// Temporary backwards-compat patch: makes cross-subgraph Set/Get work on frontends
+// that don't natively support resolveVirtualOutput. Remove when no longer needed.
+app.registerExtension({
+	name: "KJNodes.CrossGraphSetGet",
+	setup() {
+		let patched = false;
+
+		const originalGraphToPrompt = app.graphToPrompt.bind(app);
+		app.graphToPrompt = async function(...args) {
+			if (!patched) {
+				try {
+					const subgraphNode = app.graph._nodes.find(n => typeof n.getInnerNodes === 'function');
+					if (subgraphNode) {
+						const tempMap = new Map();
+						const dtos = subgraphNode.getInnerNodes(tempMap, []);
+						if (dtos.length > 0) {
+							const proto = Object.getPrototypeOf(dtos[0]);
+							const DtoClass = proto.constructor;
+							const nativeSource = proto.resolveOutput.toString();
+							const hasNativeSupport = nativeSource.includes('resolveVirtualOutput');
+							console.log(`[KJNodes] Cross-graph Set/Get: frontend native support ${hasNativeSupport ? 'detected, skipping patch' : 'not found, applying patch'}`);
+							if (!hasNativeSupport) {
+								const origResolveOutput = proto.resolveOutput;
+								proto.resolveOutput = function(slot, type, visited) {
+									if (typeof this.node?.resolveVirtualOutput === 'function') {
+										const virtualSource = this.node.resolveVirtualOutput(slot);
+										if (virtualSource) {
+											const inputNodeDto = [...this.nodesByExecutionId.values()]
+												.find(dto => dto instanceof DtoClass && dto.node === virtualSource.node);
+											if (inputNodeDto) {
+												return inputNodeDto.resolveOutput(virtualSource.slot, type, visited);
+											}
+											throw new Error(`KJNodes: No DTO found for cross-graph source node [${virtualSource.node.id}]`);
+										}
+									}
+									return origResolveOutput.call(this, slot, type, visited);
+								};
+							}
+							patched = true;
+						}
+					}
+				} catch (e) {
+					console.warn('[KJNodes] Failed to probe ExecutableNodeDTO for cross-graph patch:', e);
+				}
+			}
+			return originalGraphToPrompt(...args);
+		};
+	}
+});
+
+// Monkey-patch: no hook exists to extend the link context menu.
+// Appends a "Convert to Set/Get" entry by counting DOM menus before/after
+// the original call to find the newly created one. Fragile but unavoidable.
 app.registerExtension({
 	name: "KJNodes.LinkToSetGet",
 	setup() {
 		const originalShowLinkMenu = LGraphCanvas.prototype.showLinkMenu;
 		LGraphCanvas.prototype.showLinkMenu = function(segment, e) {
+			const menusBefore = document.querySelectorAll(".litecontextmenu").length;
 			const result = originalShowLinkMenu.call(this, segment, e);
 
 			const graph = this.graph;
 			if (!graph) return result;
 
 			// Get the full link object to access target info
-			const link = graph._links?.get(segment.id) ?? graph.links?.[segment.id];
+			const link = getLink(graph, segment.id);
 			if (!link || link.origin_id == null || link.target_id == null) return result;
 
-			// Find the existing context menu that was just created and add our option
+			// Find the newly created context menu
 			const menus = document.querySelectorAll(".litecontextmenu");
+			if (menus.length <= menusBefore) return result;
 			const lastMenu = menus[menus.length - 1];
 			if (!lastMenu) return result;
 
@@ -712,8 +1482,9 @@ app.registerExtension({
 
 				// Set the name widget on the Set node
 				setNode.widgets[0].value = linkName;
-				setNode.title = (!disablePrefix ? "Set_" : "") + linkName;
+				setNode.title = (!getDisablePrefix() ? "Set_" : "") + linkName;
 				setNode.validateName(graph);
+				setNode.properties.previousName = setNode.widgets[0].value;
 
 				// Update Get node to match
 				const finalName = setNode.widgets[0].value;

@@ -1,10 +1,8 @@
 # KJNodes for ComfyUI
 
-Various quality of life and masking related -nodes and scripts made by combining functionality of existing nodes for ComfyUI.
+At this point pretty random collection of utility, model optimization and QoL nodes, while keeping dependencies at minimum.
 
-I know I'm bad at documentation, especially this project that has grown from random practice nodes to... too many lines in one file.
-I have however started to add descriptions to the nodes themselves, there's a small ? you can click for info what the node does.
-This is still work in progress, like everything else.
+Documentation is mostly in the node descriptions and tooltips.
 
 # Installation
 1. Clone this repo into `custom_nodes` folder.
@@ -13,53 +11,62 @@ This is still work in progress, like everything else.
 
   `python_embeded\python.exe -m pip install -r ComfyUI\custom_nodes\ComfyUI-KJNodes\requirements.txt`
    
-
-## Javascript
-
-### browserstatus.js
-Sets the favicon to green circle when not processing anything, sets it to red when processing and shows progress percentage and the length of your queue. 
-Default off, needs to be enabled from options, overrides Custom-Scripts favicon when enabled.
-
-## Nodes:
-
 ### Set/Get
 
-Javascript nodes to set and get constants to reduce unnecessary lines. Takes in and returns anything, purely visual nodes.
-On the right click menu of these nodes there's now an options to visualize the paths, as well as option to jump to the corresponding node on the other end.
+# UPDATE March 19th 2026
 
-**Known limitations**:
-  - Will not work with any node that dynamically sets it's outpute, such as reroute or other Set/Get node
-  - Will not work when directly connected to a bypassed node
-  - Other possible conflicts with javascript based nodes.
+Complete (backwards compatible as far as I'm aware currently) rewrite of Set/Get nodes.
 
-### ColorToMask
+# Changelog March 19th 2026
 
-RBG color value to mask, works with batches and AnimateDiff.
+## New Features
 
-### ConditioningMultiCombine
+- **Nodes 2.0 support** - Works with nodes 2.0 as well as legacy.
 
-Combine any number of conditions, saves space.
+- **Subgraph support** — Set/Get now works across subgraph boundaries. A Set in a parent graph is visible to all child subgraphs, and Get nodes search upward through ancestors. Cross-graph connections are resolved during prompt execution.
 
-### ConditioningSetMaskAndCombine
+- **Convert link to Set/Get** — Right-click any link midpoint to convert it into a Set/Get pair.
 
-Mask and combine two sets of conditions, saves space.
+- **Convert to links** — Right-click a Set or Get node to convert the pair back to direct links.
 
-### GrowMaskWithBlur
+- **Convert outputs to Set/Get** — Batch operation to convert all outputs of selected nodes into Set/Get pairs at once.
 
-Grows or shrinks (with negative values) mask, option to invert input, returns mask and inverted mask. Additionally Blurs the mask, this is a slow operation especially with big batches.
+- **Canvas right-click menu** — "Convert outputs on all selected nodes to Set/Get" and "Convert selected Set/Get to links".
 
-### RoundMask
+- **Keyboard shortcuts** — Ctrl+Shift+S (add Set to selected / at cursor), Ctrl+Shift+G (add Get at cursor), Ctrl+Shift+L (force-show all connections toggle).
 
-![image](https://github.com/kijai/ComfyUI-KJNodes/assets/40791699/52c85202-f74e-4b96-9dac-c8bda5ddcc40)
+- **"Convert ALL Set/Get to links" setting** — One-click button in settings to replace every Set/Get pair with direct links, including across subgraph boundaries.
 
-### WidgetToString
-Outputs the value of a widget on any node as a string
-![example of use](docs/images/2024-04-03_20_49_29-ComfyUI.png)
+- **Show links setting** — Combo setting (never / selected / always) to control when virtual links between Set/Get pairs are drawn. "Selected" mode shows links only for currently selected Set/Get nodes. Ctrl+Shift+L temporarily forces all links visible.
 
-Enable node id display from Manager menu, to get the ID of the node you want to read a widget from:
-![enable node id display](docs/images/319121636-706b5081-9120-4a29-bd76-901691ada688.png)
+- **Add Set/Get from connection menu** — When dragging from a slot, "Add SetNode" and "Add GetNode" entries appear next to "Add Reroute" in the connection menu.
 
-Use the node id of the target node, and add the name of the widget to read from
-![use node id and widget name](docs/images/319121566-05f66385-7568-4b1f-8bbc-11053660b02f.png)
+- **Shift+middle-click creates Set/Get** — Shift+middle-click on an output slot creates a connected SetNode; on an input slot creates a connected GetNode. Optional setting to override normal middle-click to also create Set/Get instead of Reroute.
 
-Recreating or reloading the target node will change its id, and the WidgetToString node will no longer be able to find it until you update the node id value with the new id.
+- **Add paired GetNode** — Right-click a SetNode to add a paired GetNode pre-configured with the same name.
+
+- **Double-click Get to jump to Set** — Double-click a GetNode to center and select its paired SetNode.
+
+- **Default widget value setting** — Controls the initial Constant value when a Set node is first connected: empty (default), slot name, slot name (lowercase), or slot name (UPPERCASE).
+
+- **Type inference from output** — If a SetNode's input is unconnected but its output is connected to a typed input, the Set adopts that type and recolors accordingly.
+
+- **Getters submenu navigates into subgraphs** — SetNode's getter list now includes cross-subgraph GetNodes and can navigate into subgraphs to focus them.
+
+## Fixes
+
+- **Paste rename coordination** — When pasting Set+Get pairs, GetNodes now correctly follow their SetNode's rename (e.g., `MODEL` -> `MODEL_0`).
+
+- **Type/color reset on disconnect** — Disconnecting input or output now correctly resets type and color, but only when neither side is still connected.
+
+- **Suffix stripping only on paste** — `validateName` no longer strips intentional `_N` suffixes from user-typed names. Only strips during paste to avoid `FOO_0_1_2` accumulation.
+
+- **Connection drawing moved to canvas level** — Visualization links remain visible even when nodes are off-screen or collapsed.
+
+## Settings
+
+- Settings are now organized under **KJNodes > Set & Get** and **KJNodes > General** categories in the settings panel.
+
+
+---
+
