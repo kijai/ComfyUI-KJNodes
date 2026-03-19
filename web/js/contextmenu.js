@@ -3,7 +3,8 @@ const { app } = window.comfyAPI.app;
 function addNode(name, nextTo, options) {
 	options = { side: "left", select: true, shiftY: 0, shiftX: 0, ...(options || {}) };
 	const node = LiteGraph.createNode(name);
-	app.graph.add(node);
+	const graph = app.canvas?.graph || app.graph;
+	graph.add(node);
 
 	node.pos = [
 		options.side === "left" ? nextTo.pos[0] - (node.size[0] + options.offset): nextTo.pos[0] + nextTo.size[0] + options.offset,
