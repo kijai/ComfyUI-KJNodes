@@ -171,11 +171,11 @@ class LTXVAudioVideoMask(io.ComfyNode):
             inputs=[
                 io.Latent.Input("video_latent", optional=True),
                 io.Latent.Input("audio_latent", optional=True),
-                io.Float.Input("video_fps", default=25, min=0.0, max=100.0, step=0.1),
-                io.Float.Input("video_start_time", default=0.0, min=0.0, max=10000.0, step=0.1, tooltip="Start time in seconds for the video mask."),
-                io.Float.Input("video_end_time", default=5.0, min=0.0, max=10000.0, step=0.1, tooltip="End time in seconds for the video mask."),
-                io.Float.Input("audio_start_time", default=0.0, min=0.0, max=10000.0, step=0.1, tooltip="Start time in seconds for the audio mask."),
-                io.Float.Input("audio_end_time", default=5.0, min=0.0, max=10000.0, step=0.1, tooltip="End time in seconds for the audio mask."),
+                io.Float.Input("video_fps", default=25, min=0.0, max=100.0, step=0.01),
+                io.Float.Input("video_start_time", default=0.0, min=0.0, max=10000.0, step=0.01, tooltip="Start time in seconds for the video mask."),
+                io.Float.Input("video_end_time", default=5.0, min=0.0, max=10000.0, step=0.01, tooltip="End time in seconds for the video mask."),
+                io.Float.Input("audio_start_time", default=0.0, min=0.0, max=10000.0, step=0.01, tooltip="Start time in seconds for the audio mask."),
+                io.Float.Input("audio_end_time", default=5.0, min=0.0, max=10000.0, step=0.01, tooltip="End time in seconds for the audio mask."),
                 io.Combo.Input(
                     "max_length",
                     options=["truncate", "pad", "partial"],
@@ -243,7 +243,7 @@ class LTXVAudioVideoMask(io.ComfyNode):
             video_latent_frame_index_end = min(video_latent_frame_index_end, video_latent_frame_count)
 
             # Get existing noise mask if present, otherwise create new one
-            if "noise_mask" in video_latent and existing_mask_mode != "overwrite":
+            if "noise_mask" in video_latent and video_latent["noise_mask"] is not None and existing_mask_mode != "overwrite":
                 video_mask = video_latent["noise_mask"].clone()
                 # Adjust mask size based on mode
                 if max_length == "pad" and video_samples.shape[2] > video_latent["samples"].shape[2]:
@@ -303,7 +303,7 @@ class LTXVAudioVideoMask(io.ComfyNode):
             audio_latent_frame_index_end = min(audio_latent_frame_index_end, audio_latent_frame_count)
 
             # Get existing noise mask if present, otherwise create new one
-            if "noise_mask" in audio_latent:
+            if "noise_mask" in audio_latent and audio_latent["noise_mask"] is not None and existing_mask_mode != "overwrite":
                 audio_mask = audio_latent["noise_mask"].clone()
                 # Adjust mask size based on mode
                 if max_length == "pad" and audio_samples.shape[2] > audio_latent["samples"].shape[2]:
