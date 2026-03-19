@@ -541,7 +541,7 @@ app.registerExtension({
 					"Constant",
 					'',
 					() => {
-						if (!this.graph) return;
+						if (!this.graph || app.configuringGraph) return;
 						this.validateName(this.graph);
 						if (this.widgets[0].value !== '') {
 							this.title = (!getDisablePrefix() ? "Set_" : "") + this.widgets[0].value;
@@ -562,6 +562,8 @@ app.registerExtension({
 				isChangeConnect,
 				link_info
 			) {
+				// During graph load, slots are restored by configure — skip side effects
+				if (app.configuringGraph) return;
 				//On Disconnect
 				if (slotType === LiteGraph.INPUT && !isChangeConnect) {
 					const outputConnected = this.outputs[0]?.links?.length > 0;
@@ -706,7 +708,8 @@ app.registerExtension({
 			}
 
 			onConfigure() {
-				if (this._justAdded && this.graph) {
+				// Only run paste logic when actually pasting, not during workflow load
+				if (this._justAdded && this.graph && !app.configuringGraph) {
 					const oldName = this.widgets[0].value;
 					this.validateName(this.graph, true);
 					this._justAdded = false;
@@ -726,6 +729,7 @@ app.registerExtension({
 						this.bgcolor = null;
 					}
 				}
+				this._justAdded = false;
 			}
 
 			update() {
@@ -878,11 +882,12 @@ app.registerExtension({
 					enumerable: true,
 					configurable: true
 				});
-				this.addWidget("combo", "Constant", "", () => this.onRename(), comboOptions)
+				this.addWidget("combo", "Constant", "", () => { if (!app.configuringGraph) this.onRename(); }, comboOptions)
 				this.addOutput("*", '*');
 			}
 
 			onConnectionsChange() {
+				if (app.configuringGraph) return;
 				this.validateLinks();
 			}
 
@@ -963,18 +968,19 @@ app.registerExtension({
 			}
 
 			onConfigure() {
-				if (this._justAdded) {
+				if (this._justAdded && !app.configuringGraph) {
 					const name = this.widgets[0].value;
-					this._justAdded = false;
-					if (!name) return;
-					// Check if our paired SetNode was renamed during this paste
-					const newName = _pasteRenameMap.get(name);
-					if (newName) {
-						this.widgets[0].value = newName;
+					if (name) {
+						// Check if our paired SetNode was renamed during this paste
+						const newName = _pasteRenameMap.get(name);
+						if (newName) {
+							this.widgets[0].value = newName;
+						}
+						// Restore type/color from setter after paste
+						setTimeout(() => this.onRename(), 0);
 					}
-					// Restore type/color from setter after paste
-					setTimeout(() => this.onRename(), 0);
 				}
+				this._justAdded = false;
 			}
 
 			getInputLink(slot) {
@@ -1136,16 +1142,23 @@ app.registerExtension({
 		},
 		{
 			id: "KJNodes.AddGetNodeAtCursor",
-			label: "Add Get node at cursor",
+			label: "Add Get node to selected / at cursor",
 			function: () => {
-				const canvas = app.canvas;
-				const graph = canvas.graph || app.graph;
-				const node = LiteGraph.createNode("GetNode");
-				if (!node) return;
-				node.pos = [canvas.graph_mouse[0], canvas.graph_mouse[1]];
-				graph.add(node);
-				canvas.selectNode(node, false);
-				canvas.setDirty(true, true);
+				const selected = Object.values(app.canvas.selected_nodes || {});
+				if (selected.length > 0) {
+					for (const n of selected) {
+						window.kjNodes.addNode("GetNode", n, { side: "left", offset: 30 });
+					}
+				} else {
+					const canvas = app.canvas;
+					const graph = canvas.graph || app.graph;
+					const node = LiteGraph.createNode("GetNode");
+					if (!node) return;
+					node.pos = [canvas.graph_mouse[0], canvas.graph_mouse[1]];
+					graph.add(node);
+					canvas.selectNode(node, false);
+					canvas.setDirty(true, true);
+				}
 			},
 		},
 		{
@@ -1214,6 +1227,14 @@ app.registerExtension({
 			if (node.type === "GetNode") {
 				node.currentSetter = node.findSetter(node.graph);
 				if (node.currentSetter) node.goToSetter();
+			}
+		});
+		// Suppress title rename on collapsed GetNodes so double-click navigates instead
+		document.addEventListener("litegraph:canvas", (e) => {
+			if (e.detail?.subType !== 'node-double-click') return;
+			const node = e.detail.node;
+			if (node?.type === "GetNode" && node.flags?.collapsed) {
+				e.stopImmediatePropagation();
 			}
 		});
 
