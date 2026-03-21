@@ -623,6 +623,7 @@ app.registerExtension({
 						}
 
 						this.validateName(this.graph);
+						this.properties.previousName = this.widgets[0].value;
 						this.inputs[0].type = type;
 						this.inputs[0].name = type;
 						this.outputs[0].type = type;
@@ -746,6 +747,7 @@ app.registerExtension({
 						getter.setName(this.widgets[0].value);
 					});
 				}
+				app.canvas?.setDirty(true, true);
 			}
 
 			findGetters(graph, checkForPreviousName) {
