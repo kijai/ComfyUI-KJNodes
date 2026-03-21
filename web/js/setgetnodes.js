@@ -907,6 +907,7 @@ app.registerExtension({
 					const name = this.widgets[0].value;
 					this.title = name ? (!getDisablePrefix() ? "Get_" : "") + name : "Get";
 				}
+				app.canvas?.setDirty(true, true);
 			}
 
 			clone() {
