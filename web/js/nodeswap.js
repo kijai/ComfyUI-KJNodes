@@ -176,7 +176,29 @@ function reconnectInternalOneDirection(snap, fromNodeId, srcNode, dstNode) {
 	}
 }
 
-function animateSwap(nodeA, fromA, toA, nodeB, fromB, toB, duration) {
+function getNodeElement(nodeId) {
+	return document.querySelector(`[data-node-id="${nodeId}"]`);
+}
+
+function animateSwapVue(nodeA, toA, nodeB, toB, duration) {
+	const elA = getNodeElement(nodeA.id);
+	const elB = getNodeElement(nodeB.id);
+	const transition = `transform ${duration}ms cubic-bezier(0.65, 0, 0.35, 1)`;
+
+	if (elA) elA.style.transition = transition;
+	if (elB) elB.style.transition = transition;
+
+	nodeA.pos = [toA[0], toA[1]];
+	nodeB.pos = [toB[0], toB[1]];
+	app.canvas.setDirty(true, true);
+
+	setTimeout(() => {
+		if (elA) elA.style.transition = "";
+		if (elB) elB.style.transition = "";
+	}, duration + 16);
+}
+
+function animateSwapCanvas(nodeA, fromA, toA, nodeB, fromB, toB, duration) {
 	const start = performance.now();
 
 	function ease(t) {
@@ -186,7 +208,6 @@ function animateSwap(nodeA, fromA, toA, nodeB, fromB, toB, duration) {
 	function frame(now) {
 		const t = Math.min((now - start) / duration, 1);
 		const e = ease(t);
-		// Assign pos as new array to trigger Vue reactivity setter
 		nodeA.pos = [
 			fromA[0] + (toA[0] - fromA[0]) * e,
 			fromA[1] + (toA[1] - fromA[1]) * e,
@@ -220,8 +241,12 @@ function executeNodeSwap(canvas, nodeA, nodeB, originalPosA) {
 	reconnectInternalOneDirection(snapA, nodeB.id, nodeB, nodeA);
 	reconnectInternalOneDirection(snapB, nodeA.id, nodeA, nodeB);
 
-	animateSwap(nodeA, [nodeA.pos[0], nodeA.pos[1]], posB,
-		nodeB, [nodeB.pos[0], nodeB.pos[1]], posA, 300);
+	if (LiteGraph.vueNodesMode) {
+		animateSwapVue(nodeA, posB, nodeB, posA, 200);
+	} else {
+		animateSwapCanvas(nodeA, [nodeA.pos[0], nodeA.pos[1]], posB,
+			nodeB, [nodeB.pos[0], nodeB.pos[1]], posA, 200);
+	}
 
 	graph.change();
 	canvas.setDirty(true, true);
@@ -256,6 +281,15 @@ app.registerExtension({
 			active: () => swapKeyDown,
 			function: () => {
 				swapKeyDown = true;
+				// If already dragging a node, check for overlap immediately
+				// (handles case where node is already on top of another when key is pressed)
+				if (swapDraggedNode) {
+					const graph = app.canvas?.graph || app.graph;
+					if (graph) {
+						swapTargetNode = getOverlappingNode(graph, swapDraggedNode);
+						if (swapTargetNode) startHighlightAnim(app.canvas);
+					}
+				}
 			},
 		},
 	],
@@ -285,7 +319,7 @@ app.registerExtension({
 			if (swapKeyDown) {
 				swapKeyDown = false;
 				if (swapTargetNode) {
-					clearSwapState();
+					swapTargetNode = null;
 					lgCanvas.setDirty(false, true);
 				}
 			}
