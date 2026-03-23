@@ -1203,14 +1203,17 @@ app.registerExtension({
 		{
 			commandId: "KJNodes.AddSetNodeToSelected",
 			combo: { key: "s", ctrl: true, shift: true },
+			targetElementId: "graph-canvas",
 		},
 		{
 			commandId: "KJNodes.AddGetNodeAtCursor",
 			combo: { key: "g", ctrl: true, shift: true },
+			targetElementId: "graph-canvas",
 		},
 		{
 			commandId: "KJNodes.ToggleForceShowSetGetLinks",
 			combo: { key: "l", ctrl: true, shift: true },
+			targetElementId: "graph-canvas",
 		},
 	],
 	getCanvasMenuItems() {
