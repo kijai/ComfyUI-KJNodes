@@ -39,10 +39,10 @@ export const loadScript = (
 }
 
 loadScript('kjweb_async/marked.min.js').catch((e) => {
-  console.log(e)
+  console.error(e)
 })
 loadScript('kjweb_async/purify.min.js').catch((e) => {
-  console.log(e)
+  console.error(e)
 })
 
 const categories = ["KJNodes", "SUPIR", "VoiceCraft", "Marigold", "IC-Light", "WanVideoWrapper"];

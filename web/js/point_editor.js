@@ -73,11 +73,8 @@ const create_documentation_stylesheet = () => {
   }
 }
 
-loadScript('kjweb_async/svg-path-properties.min.js').catch((e) => {
-  console.log(e)
-})
 loadScript('kjweb_async/protovis.min.js').catch((e) => {
-  console.log(e)
+  console.error(e)
 })
 create_documentation_stylesheet()
 
@@ -178,14 +175,17 @@ app.registerExtension({
         document.body.appendChild(this.contextMenu);
 
         this.addWidget("button", "New canvas", null, () => {
-          if (!this.properties || !("points" in this.properties)) {
-            this.editor = new PointsEditor(this);
-            this.addProperty("points", this.constructor.type, "string");
-            this.addProperty("neg_points", this.constructor.type, "string");
-
-          }
-          else {
-            this.editor = new PointsEditor(this, true);
+          try {
+            if (!this.properties || !("points" in this.properties)) {
+              this.editor = new PointsEditor(this);
+              this.addProperty("points", this.constructor.type, "string");
+              this.addProperty("neg_points", this.constructor.type, "string");
+            }
+            else {
+              this.editor = new PointsEditor(this, true);
+            }
+          } catch (error) {
+            console.error("An error occurred while creating the point editor:", error);
           }
         });
 
