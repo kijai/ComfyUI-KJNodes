@@ -1432,24 +1432,25 @@ class PointsEditor:
     FUNCTION = "pointdata"
     CATEGORY = "KJNodes/experimental"
     DESCRIPTION = """
-# WORK IN PROGRESS  
-Do not count on this as part of your workflow yet,  
-probably contains lots of bugs and stability is not  
-guaranteed!!  
-  
+# WORK IN PROGRESS
+Do not count on this as part of your workflow yet,
+probably contains lots of bugs and stability is not
+guaranteed!!
+
 ## Graphical editor to create coordinates
 
 **Shift + click** to add a positive (green) point.
 **Shift + right click** to add a negative (red) point.
-**Ctrl + click** to draw a box.  
-**Right click on a point** to delete it.    
-Note that you can't delete from start/end of the points array.  
-  
-To add an image select the node and copy/paste or drag in the image.  
-Or from the bg_image input on queue (first frame of the batch).  
+**Right click on a point** to delete it.
+**Ctrl + click** to draw a bounding box.
+**Drag bbox corners** to resize, **drag inside** to move.
+**Right click on bbox** to delete it.
 
-**THE IMAGE IS SAVED TO THE NODE AND WORKFLOW METADATA**  
-you can clear the image from the context menu by right clicking on the canvas  
+To add an image select the node and copy/paste or drag in the image.
+Or from the bg_image input on queue (first frame of the batch).
+
+**THE IMAGE IS SAVED TO THE NODE AND WORKFLOW METADATA**
+you can clear the image from the context menu by right clicking on the canvas
 
 """
 
