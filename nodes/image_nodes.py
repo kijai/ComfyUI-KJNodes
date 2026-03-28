@@ -715,7 +715,66 @@ Can be used for realtime diffusion with autoqueue.
                     time.sleep(delay)
         
         return (torch.stack(captures, 0),)
-    
+
+class ScreencapStream:
+
+    @classmethod
+    def IS_CHANGED(s, **kwargs):
+        return float("NaN")
+
+    RETURN_TYPES = ("IMAGE",)
+    RETURN_NAMES = ("image",)
+    FUNCTION = "capture"
+    CATEGORY = "KJNodes/image"
+    DESCRIPTION = """
+Captures a frame from a browser screen/window share stream.  
+Click 'Start capture' to select a screen or window to share.  
+Live preview is shown in the node.  
+"""
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "frame_data": ("STRING", {"default": "", "multiline": False}),
+                "width": ("INT", {"default": 512, "min": 1, "max": MAX_RESOLUTION, "step": 1}),
+                "height": ("INT", {"default": 512, "min": 1, "max": MAX_RESOLUTION, "step": 1}),
+                "resize_mode": (["crop", "stretch", "fit"],),
+            },
+        }
+
+    def capture(self, width, height, resize_mode, frame_data):
+        if not frame_data:
+            return (torch.zeros(1, height, width, 3),)
+        img_bytes = base64.b64decode(frame_data.split(",", 1)[-1])
+        img = Image.open(BytesIO(img_bytes)).convert("RGB")
+        if img.width != width or img.height != height:
+            if resize_mode == "stretch":
+                img = img.resize((width, height), Image.LANCZOS)
+            elif resize_mode == "crop":
+                # center crop to target aspect, then resize
+                target_ratio = width / height
+                src_ratio = img.width / img.height
+                if src_ratio > target_ratio:
+                    new_w = int(img.height * target_ratio)
+                    left = (img.width - new_w) // 2
+                    img = img.crop((left, 0, left + new_w, img.height))
+                else:
+                    new_h = int(img.width / target_ratio)
+                    top = (img.height - new_h) // 2
+                    img = img.crop((0, top, img.width, top + new_h))
+                img = img.resize((width, height), Image.LANCZOS)
+            else:  # fit
+                img.thumbnail((width, height), Image.LANCZOS)
+                background = Image.new("RGB", (width, height), (0, 0, 0))
+                x = (width - img.width) // 2
+                y = (height - img.height) // 2
+                background.paste(img, (x, y))
+                img = background
+        img_np = np.array(img).astype(np.float32) / 255.0
+        img_tensor = torch.from_numpy(img_np).unsqueeze(0)
+        return (img_tensor,)
+
 class WebcamCaptureCV2:
 
     @classmethod

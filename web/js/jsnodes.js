@@ -384,7 +384,78 @@ app.registerExtension({
 					this.addWidget("button", "Stop mic capture", null, stopMicrophoneCapture);
 				};
 			break;
-		case "SaveImageKJ":
+		case "ScreencapStream":
+				nodeType.prototype.onNodeCreated = function () {
+					const node = this;
+					const frameWidget = this.widgets.find(w => w.name === "frame_data");
+					frameWidget.computeSize = () => [0, -4];
+
+					let stream = null;
+					const grabCanvas = document.createElement("canvas");
+					const previewHeight = 240;
+
+					// button first, before the preview
+					this.addWidget("button", "Start capture", null, async () => {
+						if (stream) {
+							stream.getTracks().forEach(t => t.stop());
+							stream = null;
+							video.srcObject = null;
+							return;
+						}
+						try {
+							stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+							video.srcObject = stream;
+							const track = stream.getVideoTracks()[0];
+							track.addEventListener("ended", () => {
+								stream = null;
+								video.srcObject = null;
+							});
+							// auto-set width/height once video dimensions are known
+							video.addEventListener("loadedmetadata", () => {
+								const wWidget = node.widgets.find(w => w.name === "width");
+								const hWidget = node.widgets.find(w => w.name === "height");
+								if (video.videoWidth) wWidget.value = video.videoWidth;
+								if (video.videoHeight) hWidget.value = video.videoHeight;
+								app.graph.setDirtyCanvas(true);
+							}, { once: true });
+						} catch { /* user cancelled */ }
+					});
+
+					// video preview as DOM widget
+					const container = document.createElement("div");
+					container.style.cssText = `width:100%;height:${previewHeight}px;background:#000;border-radius:4px;overflow:hidden;`;
+					const video = document.createElement("video");
+					video.autoplay = true;
+					video.muted = true;
+					video.style.cssText = `width:100%;height:${previewHeight}px;display:block;object-fit:contain;`;
+					container.appendChild(video);
+
+					this.addDOMWidget("preview", "ScreencapPreview", container, {
+						serialize: false,
+						hideOnZoom: false,
+						getMinHeight: () => previewHeight,
+						getMaxHeight: () => previewHeight,
+						getHeight: () => previewHeight,
+					});
+
+					// serialize current frame as base64 when queued
+					frameWidget.serializeValue = () => {
+						if (!stream || !video.videoWidth) return "";
+						grabCanvas.width = video.videoWidth;
+						grabCanvas.height = video.videoHeight;
+						grabCanvas.getContext("2d").drawImage(video, 0, 0);
+						return grabCanvas.toDataURL("image/jpeg", 0.9);
+					};
+
+					const origOnRemoved = this.onRemoved;
+					this.onRemoved = function () {
+						if (stream) stream.getTracks().forEach(t => t.stop());
+						origOnRemoved?.apply(this, arguments);
+					};
+				};
+				break;
+
+			case "SaveImageKJ":
 			const onNodeCreated = nodeType.prototype.onNodeCreated;
 			nodeType.prototype.onNodeCreated = function() {
 				const r = onNodeCreated ? onNodeCreated.apply(this, arguments) : void 0;

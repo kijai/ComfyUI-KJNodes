@@ -182,6 +182,7 @@ NODE_CONFIG = {
     "Intrinsic_lora_sampling": {"class": Intrinsic_lora_sampling, "name": "Intrinsic Lora Sampling"},
     "CheckpointPerturbWeights": {"class": CheckpointPerturbWeights, "name": "CheckpointPerturbWeights"},
     "Screencap_mss": {"class": Screencap_mss, "name": "Screencap mss"},
+    "ScreencapStream": {"class": ScreencapStream, "name": "Screencap Stream"},
     "WebcamCaptureCV2": {"class": WebcamCaptureCV2, "name": "Webcam Capture CV2"},
     "DifferentialDiffusionAdvanced": {"class": DifferentialDiffusionAdvanced, "name": "Differential Diffusion Advanced"},
     "DiTBlockLoraLoader": {"class": DiTBlockLoraLoader, "name": "DiT Block Lora Loader"},
