@@ -392,25 +392,34 @@ app.registerExtension({
 
 					let stream = null;
 					const grabCanvas = document.createElement("canvas");
+					const grabCtx = grabCanvas.getContext("2d");
 					const previewHeight = 240;
 
-					// button first, before the preview
-					this.addWidget("button", "Start capture", null, async () => {
-						if (stream) {
-							stream.getTracks().forEach(t => t.stop());
-							stream = null;
-							video.srcObject = null;
-							return;
-						}
+					// video preview
+					const container = document.createElement("div");
+					container.style.cssText = `width:100%;height:${previewHeight}px;background:#000;border-radius:4px;overflow:hidden;`;
+					const video = document.createElement("video");
+					video.autoplay = true;
+					video.muted = true;
+					video.style.cssText = `width:100%;height:${previewHeight}px;display:block;object-fit:contain;`;
+					container.appendChild(video);
+
+					function stopStream() {
+						if (stream) stream.getTracks().forEach(t => t.stop());
+						stream = null;
+						video.srcObject = null;
+						btnWidget.name = "Start capture";
+						app.graph.setDirtyCanvas(true);
+					}
+
+					const btnWidget = this.addWidget("button", "Start capture", null, async () => {
+						if (stream) { stopStream(); return; }
 						try {
 							stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
 							video.srcObject = stream;
+							btnWidget.name = "Stop capture";
 							const track = stream.getVideoTracks()[0];
-							track.addEventListener("ended", () => {
-								stream = null;
-								video.srcObject = null;
-							});
-							// auto-set width/height once video dimensions are known
+							track.addEventListener("ended", stopStream);
 							video.addEventListener("loadedmetadata", () => {
 								const wWidget = node.widgets.find(w => w.name === "width");
 								const hWidget = node.widgets.find(w => w.name === "height");
@@ -420,15 +429,6 @@ app.registerExtension({
 							}, { once: true });
 						} catch { /* user cancelled */ }
 					});
-
-					// video preview as DOM widget
-					const container = document.createElement("div");
-					container.style.cssText = `width:100%;height:${previewHeight}px;background:#000;border-radius:4px;overflow:hidden;`;
-					const video = document.createElement("video");
-					video.autoplay = true;
-					video.muted = true;
-					video.style.cssText = `width:100%;height:${previewHeight}px;display:block;object-fit:contain;`;
-					container.appendChild(video);
 
 					this.addDOMWidget("preview", "ScreencapPreview", container, {
 						serialize: false,
@@ -443,13 +443,13 @@ app.registerExtension({
 						if (!stream || !video.videoWidth) return "";
 						grabCanvas.width = video.videoWidth;
 						grabCanvas.height = video.videoHeight;
-						grabCanvas.getContext("2d").drawImage(video, 0, 0);
-						return grabCanvas.toDataURL("image/jpeg", 0.9);
+						grabCtx.drawImage(video, 0, 0);
+						return grabCanvas.toDataURL("image/jpeg", 0.85);
 					};
 
 					const origOnRemoved = this.onRemoved;
 					this.onRemoved = function () {
-						if (stream) stream.getTracks().forEach(t => t.stop());
+						stopStream();
 						origOnRemoved?.apply(this, arguments);
 					};
 				};
