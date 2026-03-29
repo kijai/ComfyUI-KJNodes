@@ -17,9 +17,10 @@ from io import BytesIO
 
 try:
     import cv2
+    HAS_CV2 = True
 except:
     logging.warning("OpenCV not installed")
-    pass
+    HAS_CV2 = False
 
 from PIL import ImageGrab, ImageDraw, ImageFont, Image, ImageOps, ImageSequence, ImageStat
 from PIL.PngImagePlugin import PngInfo
@@ -37,9 +38,10 @@ import folder_paths
 from ..utility.utility import string_to_color
 
 try:
-    from server import PromptServer
+    from server import PromptServer, BinaryEventTypes
 except:
     PromptServer = None
+    BinaryEventTypes = None
 from concurrent.futures import ThreadPoolExecutor
 
 script_directory = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -3621,8 +3623,13 @@ class FastPreview:
         return {
             "required": {
                 "image": ("IMAGE", ),
-                "format": (["JPEG", "PNG", "WEBP"], {"default": "JPEG"}),
-                "quality" : ("INT", {"default": 75, "min": 1, "max": 100, "step": 1}),
+                "format": (["JPEG", "PNG"], {"default": "JPEG"}),
+                "max_size": ("INT", {"default": 768, "min": 128, "max": 4096, "step": 64,
+                             "tooltip": "Maximum width or height for the preview. Images larger than this are downscaled before encoding."}),
+            },
+            "hidden": {
+                "unique_id": "UNIQUE_ID",
+                "prompt_id": "PROMPT_ID",
             },
         }
 
@@ -3630,21 +3637,30 @@ class FastPreview:
     FUNCTION = "preview"
     CATEGORY = "KJNodes/experimental"
     OUTPUT_NODE = True
-    DESCRIPTION = "Experimental node for faster image previews by displaying through base64 it without saving to disk."
+    DESCRIPTION = "Fast image preview using binary websocket, bypassing base64/JSON overhead."
 
-    def preview(self, image, format, quality):        
-        pil_image = to_pil_image(image[0].permute(2, 0, 1))
+    def preview(self, image, format, max_size, unique_id=None, prompt_id=None):
+        arr = image[0].cpu().mul(255).clamp(0, 255).byte().numpy()
+        h, w = arr.shape[:2]
 
-        with BytesIO() as buffered:
-            pil_image.save(buffered, format=format, quality=quality)
-            img_bytes = buffered.getvalue()
+        if HAS_CV2 and (w > max_size or h > max_size):
+            scale = max_size / max(w, h)
+            arr = cv2.resize(arr, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_LINEAR)
 
-        img_base64 = base64.b64encode(img_bytes).decode('utf-8')
-    
-        return {
-            "ui": {"bg_image": [img_base64]}, 
-            "result": ()
-        }
+        pil_image = Image.fromarray(arr)
+
+        if PromptServer is not None and unique_id is not None:
+            PromptServer.instance.send_sync(
+                BinaryEventTypes.PREVIEW_IMAGE_WITH_METADATA,
+                (
+                    (format, pil_image, None),
+                    {"node_id": unique_id, "prompt_id": prompt_id or ""},
+                ),
+                PromptServer.instance.client_id,
+            )
+
+        return {"ui": {"fast_preview": [True]}, "result": ()}
+
     
 class ImageCropByMaskAndResize:
     @classmethod
