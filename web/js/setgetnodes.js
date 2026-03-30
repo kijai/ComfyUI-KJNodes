@@ -540,7 +540,7 @@ app.registerExtension({
 					};
 				}
 				this.properties["Node name for S&R"] = "SetNode";
-				this.properties["aux_id"] = "SetNode";
+				this.properties["aux_id"] = "kijai/ComfyUI-KJNodes";
 				this.isVirtualNode = true; // This node is purely frontend and does not impact the resulting prompt so should not be serialized
 
 				this.addWidget(
@@ -873,7 +873,7 @@ app.registerExtension({
 					this.properties = {};
 				}
 				this.properties["Node name for S&R"] = "GetNode";
-				this.properties["aux_id"] = "GetNode";
+				this.properties["aux_id"] = "kijai/ComfyUI-KJNodes";
 				this.isVirtualNode = true; // This node is purely frontend and does not impact the resulting prompt so should not be serialized
 				const comboOptions = {
 					getOptionLabel: (value) => {
