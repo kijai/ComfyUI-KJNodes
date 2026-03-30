@@ -3340,23 +3340,45 @@ class PlaySoundKJ(io.ComfyNode):
             return False
         return float("NaN")
 
+    @staticmethod
+    def _generate_chime():
+        sr = 32000
+        C, Ab, Bb = 523.26, 421.30, 466.16  # note frequencies
+        e = 0.14  # eighth note — adjust to change tempo
+        S, M, H = 16, 7, 2.5  # staccato / medium / held decay
+        melody = [
+            (C,e,S), (C,e,S), (C,e,S), (C,e*3,M),
+            (Ab,e*3,M), (Bb,e*3,M), (C,e*2,S), (Bb,e,S), (C,e*5,H),
+        ]
+        k = torch.exp(-torch.linspace(-2, 2, 15) ** 2)
+        k = (k / k.sum()).reshape(1, 1, -1)
+        parts = []
+        for freq, dur, decay in melody:
+            t = torch.linspace(0, dur, int(sr * dur))
+            tone = torch.tanh(3 * torch.sin(2 * math.pi * freq * t))
+            tone = torch.nn.functional.conv1d(tone.reshape(1, 1, -1), k, padding=7).squeeze()
+            parts.append(tone * torch.exp(-t * decay))
+        wav = torch.cat(parts) * 0.45
+        return {"waveform": wav.unsqueeze(0).unsqueeze(0), "sample_rate": sr}
+
     @classmethod
     def execute(cls, audio=None, audio_path="", mode="always", volume=0.5, duration=5.0, any_input=None) -> io.NodeOutput:
         if audio is None:
-            if not audio_path:
-                raise ValueError("Either audio input or audio_path must be provided.")
-            import av
-            with av.open(audio_path) as af:
-                stream = af.streams.audio[0]
-                sr = stream.codec_context.sample_rate
-                frames = []
-                for frame in af.decode(streams=stream.index):
-                    buf = torch.from_numpy(frame.to_ndarray())
-                    if buf.shape[0] != stream.channels:
-                        buf = buf.view(-1, stream.channels).t()
-                    frames.append(buf)
-                wav = torch.cat(frames, dim=1).float()
-            audio = {"waveform": wav.unsqueeze(0), "sample_rate": sr}
+            if audio_path:
+                import av
+                with av.open(audio_path) as af:
+                    stream = af.streams.audio[0]
+                    sr = stream.codec_context.sample_rate
+                    frames = []
+                    for frame in af.decode(streams=stream.index):
+                        buf = torch.from_numpy(frame.to_ndarray())
+                        if buf.shape[0] != stream.channels:
+                            buf = buf.view(-1, stream.channels).t()
+                        frames.append(buf)
+                    wav = torch.cat(frames, dim=1).float()
+                audio = {"waveform": wav.unsqueeze(0), "sample_rate": sr}
+            else:
+                audio = cls._generate_chime()
 
         preview = ui.PreviewAudio(audio, cls=cls)
         ui_dict = preview.as_dict()
