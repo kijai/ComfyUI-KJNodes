@@ -1,4 +1,5 @@
 const { app } = window.comfyAPI.app;
+import { getSlotPos } from "./utility.js";
 
 /**
  * Check type compatibility. Returns a match tier:
@@ -12,11 +13,6 @@ function typeMatchTier(outType, inType) {
 	return 1;
 }
 
-function getSlotPos(node, isInput, slotIdx) {
-	const out = [0, 0];
-	node.getConnectionPos(isInput, slotIdx, out);
-	return out;
-}
 
 /**
  * Order selected nodes for connection.

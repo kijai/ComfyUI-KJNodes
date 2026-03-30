@@ -157,7 +157,10 @@ function createDocPopup(description, signal, onClose, opts = {}) {
 
   contentWrapper.classList.add('content-wrapper')
   docElement.classList.add('kj-documentation-popup')
-  if (typeof marked !== 'undefined' && typeof DOMPurify !== 'undefined') {
+  // Try ComfyUI's built-in markdown renderer first (available after frontend PR #10700)
+  if (app.extensionManager?.renderMarkdownToHtml) {
+    contentWrapper.innerHTML = app.extensionManager.renderMarkdownToHtml(description)
+  } else if (typeof marked !== 'undefined' && typeof DOMPurify !== 'undefined') {
     contentWrapper.innerHTML = DOMPurify.sanitize(marked.parse(description))
   } else {
     // Fallback: convert markdown links to <a> tags, auto-link bare URLs, preserve line breaks

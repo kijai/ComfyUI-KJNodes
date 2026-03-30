@@ -1,4 +1,5 @@
 const { app } = window.comfyAPI.app;
+import { typesCompatible, clientToCanvas, getNodeAtPoint } from "./utility.js";
 
 let swapTargetNode = null;
 let swapDraggedNode = null;
@@ -6,22 +7,6 @@ let swapDragStartPos = null;
 let swapAnimating = false;
 let swapHasMoved = false;
 let swapKeyDown = false;
-
-function typesCompatible(a, b) {
-	if (a === "*" || b === "*") return true;
-	if (a === b) return true;
-	if (typeof a === "string" && typeof b === "string" && a.toUpperCase() === b.toUpperCase()) return true;
-	return false;
-}
-
-/** Convert client (screen) coordinates to graph (canvas) coordinates */
-function clientToCanvas(lgCanvas, clientX, clientY) {
-	const rect = lgCanvas.canvas.getBoundingClientRect();
-	return [
-		(clientX - rect.left) / lgCanvas.ds.scale - lgCanvas.ds.offset[0],
-		(clientY - rect.top) / lgCanvas.ds.scale - lgCanvas.ds.offset[1],
-	];
-}
 
 /** Find the topmost node whose bounding box overlaps with draggedNode */
 function getOverlappingNode(graph, draggedNode) {
@@ -43,13 +28,6 @@ function getOverlappingNode(graph, draggedNode) {
 	return null;
 }
 
-/** Find the node at a specific canvas point */
-function getNodeAtPoint(graph, cx, cy) {
-	for (let i = graph._nodes.length - 1; i >= 0; i--) {
-		if (graph._nodes[i].isPointInside(cx, cy)) return graph._nodes[i];
-	}
-	return null;
-}
 
 function startHighlightAnim(lgCanvas) {
 	if (swapAnimating) return;
