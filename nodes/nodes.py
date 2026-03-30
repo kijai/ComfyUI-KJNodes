@@ -3310,3 +3310,43 @@ class PreviewLatentNoiseMask(io.ComfyNode):
             noise_mask = noise_mask[0, 0]
 
         return io.NodeOutput(noise_mask)
+
+
+class PlaySoundKJ(io.ComfyNode):
+    """Plays audio in the browser when execution reaches this node."""
+
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="PlaySoundKJ",
+            category="KJNodes/audio",
+            description="Plays the input audio in the browser. Modes: 'always' plays on every execution, 'on_empty_queue' plays only when the queue finishes, 'on_change' plays only when the audio content changes. Duration limits playback length (0 = full audio).",
+            inputs=[
+                io.Audio.Input("audio"),
+                io.Combo.Input("mode", options=["always", "on_empty_queue", "on_change"], default="always"),
+                io.Float.Input("volume", default=0.5, min=0.0, max=1.0, step=0.01),
+                io.Float.Input("duration", default=5.0, min=0.0, max=300.0, step=0.1, tooltip="Duration in seconds to play. 0 = play full audio."),
+                io.AnyType.Input("any_input", optional=True),
+            ],
+            outputs=[
+                io.AnyType.Output("any_output", display_name="any_output"),
+            ],
+            is_output_node=True,
+        )
+
+    @classmethod
+    def fingerprint_inputs(cls, **kwargs):
+        if kwargs.get("mode") == "on_change":
+            return False
+        return float("NaN")
+
+    @classmethod
+    def execute(cls, audio, mode="always", volume=0.5, duration=5.0, any_input=None) -> io.NodeOutput:
+        preview = ui.PreviewAudio(audio, cls=cls)
+        ui_dict = preview.as_dict()
+        waveform = audio["waveform"]
+        ui_dict["audio_hash"] = [hash(waveform.sum().item())]
+        return io.NodeOutput(
+            any_input,
+            ui=ui_dict,
+        )
