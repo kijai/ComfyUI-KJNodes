@@ -3311,7 +3311,6 @@ class PreviewLatentNoiseMask(io.ComfyNode):
 
         return io.NodeOutput(noise_mask)
 
-
 class PlaySoundKJ(io.ComfyNode):
     """Plays audio in the browser when execution reaches this node."""
 
@@ -3323,7 +3322,8 @@ class PlaySoundKJ(io.ComfyNode):
             description="Plays the input audio in the browser. Modes: 'always' plays on every execution, 'on_empty_queue' plays only when the queue finishes, 'on_change' plays only when the audio content changes. Duration limits playback length (0 = full audio).",
             inputs=[
                 io.AnyType.Input("any_input", optional=True),
-                io.Audio.Input("audio"),
+                io.Audio.Input("audio", optional=True),
+                io.String.Input("audio_path", default="", tooltip="Path to an audio file. Used when audio input is not connected."),
                 io.Combo.Input("mode", options=["always", "on_empty_queue", "on_change"], default="always"),
                 io.Float.Input("volume", default=0.5, min=0.0, max=1.0, step=0.01),
                 io.Float.Input("duration", default=5.0, min=0.0, max=300.0, step=0.1, tooltip="Duration in seconds to play. 0 = play full audio."),
@@ -3341,11 +3341,26 @@ class PlaySoundKJ(io.ComfyNode):
         return float("NaN")
 
     @classmethod
-    def execute(cls, audio, mode="always", volume=0.5, duration=5.0, any_input=None) -> io.NodeOutput:
+    def execute(cls, audio=None, audio_path="", mode="always", volume=0.5, duration=5.0, any_input=None) -> io.NodeOutput:
+        if audio is None:
+            if not audio_path:
+                raise ValueError("Either audio input or audio_path must be provided.")
+            import av
+            with av.open(audio_path) as af:
+                stream = af.streams.audio[0]
+                sr = stream.codec_context.sample_rate
+                frames = []
+                for frame in af.decode(streams=stream.index):
+                    buf = torch.from_numpy(frame.to_ndarray())
+                    if buf.shape[0] != stream.channels:
+                        buf = buf.view(-1, stream.channels).t()
+                    frames.append(buf)
+                wav = torch.cat(frames, dim=1).float()
+            audio = {"waveform": wav.unsqueeze(0), "sample_rate": sr}
+
         preview = ui.PreviewAudio(audio, cls=cls)
         ui_dict = preview.as_dict()
-        waveform = audio["waveform"]
-        ui_dict["audio_hash"] = [hash(waveform.sum().item())]
+        ui_dict["audio_hash"] = [hash(audio["waveform"].sum().item())]
         return io.NodeOutput(
             any_input,
             ui=ui_dict,
