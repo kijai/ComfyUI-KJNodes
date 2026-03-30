@@ -15,7 +15,7 @@ import folder_paths
 from nodes import MAX_RESOLUTION
 from comfy.utils import common_upscale, ProgressBar, load_torch_file, save_torch_file
 from comfy.comfy_types.node_typing import IO
-from comfy_api.latest import io
+from comfy_api.latest import io, ui
 import comfy.latent_formats
 import node_helpers
 from io import BytesIO
@@ -3322,11 +3322,11 @@ class PlaySoundKJ(io.ComfyNode):
             category="KJNodes/audio",
             description="Plays the input audio in the browser. Modes: 'always' plays on every execution, 'on_empty_queue' plays only when the queue finishes, 'on_change' plays only when the audio content changes. Duration limits playback length (0 = full audio).",
             inputs=[
+                io.AnyType.Input("any_input", optional=True),
                 io.Audio.Input("audio"),
                 io.Combo.Input("mode", options=["always", "on_empty_queue", "on_change"], default="always"),
                 io.Float.Input("volume", default=0.5, min=0.0, max=1.0, step=0.01),
                 io.Float.Input("duration", default=5.0, min=0.0, max=300.0, step=0.1, tooltip="Duration in seconds to play. 0 = play full audio."),
-                io.AnyType.Input("any_input", optional=True),
             ],
             outputs=[
                 io.AnyType.Output("any_output", display_name="any_output"),
