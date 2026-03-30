@@ -141,7 +141,7 @@ Plots coordinates to sequence of images using Matplotlib.
         plot_image_tensor = plot_coordinates_to_tensor(coordinates, height, width, bbox_height, bbox_width, size_multiplier, text)
         
         return (plot_image_tensor, width, height, bbox_width, bbox_height)
-    
+
 class SplineEditor:
 
     @classmethod
@@ -164,7 +164,7 @@ class SplineEditor:
                     "default": 'time'
                 }),
                 "interpolation": (
-                [   
+                [
                     'cardinal',
                     'monotone',
                     'basis',
@@ -173,6 +173,7 @@ class SplineEditor:
                     'step-after',
                     'polar',
                     'polar-reverse',
+                    'bezier',
                 ],
                 {
                 "default": 'cardinal'
@@ -180,7 +181,7 @@ class SplineEditor:
                 "tension": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.01}),
                 "repeat_output": ("INT", {"default": 1, "min": 1, "max": 4096, "step": 1}),
                 "float_output_type": (
-                [   
+                [
                     'list',
                     'pandas series',
                     'tensor',
@@ -1456,6 +1457,8 @@ you can clear the image from the context menu by right clicking on the canvas
 
     def pointdata(self, points_store, bbox_store, width, height, coordinates, neg_coordinates, normalize, bboxes, bbox_format="xyxy", bg_image=None):
         coordinates = json.loads(coordinates)
+        if not coordinates:
+            raise ValueError("No points on the canvas. Use Shift+click to add positive points or Shift+right-click to add negative points before executing.")
         pos_coordinates = []
         for coord in coordinates:
             coord['x'] = int(round(coord['x']))
@@ -1483,7 +1486,6 @@ you can clear the image from the context menu by right clicking on the canvas
         # Create a blank mask
         mask = np.zeros((height, width), dtype=np.uint8)
         bboxes = json.loads(bboxes)
-        print(bboxes)
         valid_bboxes = []
         for bbox in bboxes:
             if (bbox.get("startX") is None or
@@ -1523,24 +1525,22 @@ you can clear the image from the context menu by right clicking on the canvas
         if bg_image is not None and len(valid_bboxes) > 0:
             x_min, y_min, x_max, y_max = bboxes[0]
             cropped_image = bg_image[:, y_min:y_max, x_min:x_max, :]
-
         elif bg_image is not None:
             cropped_image = bg_image
+        else:
+            cropped_image = torch.zeros(1, height, width, 3, dtype=torch.float32)
 
         if bg_image is None:
-            return (json.dumps(pos_coordinates), json.dumps(neg_coordinates), bboxes, mask_tensor)
+            return (json.dumps(pos_coordinates), json.dumps(neg_coordinates), bboxes, mask_tensor, cropped_image)
         else:
             transform = transforms.ToPILImage()
             image = transform(bg_image[0].permute(2, 0, 1))
             buffered = BytesIO()
             image.save(buffered, format="JPEG", quality=75)
+            img_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
 
-            # Step 3: Encode the image bytes to a Base64 string
-            img_bytes = buffered.getvalue()
-            img_base64 = base64.b64encode(img_bytes).decode('utf-8')
-        
             return {
-                "ui": {"bg_image": [img_base64]}, 
+                "ui": {"bg_image": [img_base64]},
                 "result": (json.dumps(pos_coordinates), json.dumps(neg_coordinates), bboxes, mask_tensor, cropped_image)
             }
 
