@@ -35,6 +35,28 @@ function setColorAndBgColor(node, type) {
 function getDisablePrefix() {
 	return app.ui.settings.getSettingValue("KJNodes.disablePrefix") ?? false;
 }
+function prefixedTitle(prefix, name) {
+	return (getDisablePrefix() ? "" : prefix + "_") + name;
+}
+function autoColor(node, type) {
+	if (!app.ui.settings.getSettingValue("KJNodes.nodeAutoColor")) return;
+	if (type === '*') { node.color = null; node.bgcolor = null; }
+	else setColorAndBgColor(node, type);
+}
+function addNodeToSelectedOrCursor(nodeType, side) {
+	const selected = Object.values(app.canvas.selected_nodes || {});
+	if (selected.length > 0) {
+		for (const n of selected) window.kjNodes.addNode(nodeType, n, { side, offset: 30 });
+	} else {
+		const canvas = app.canvas, graph = canvas.graph || app.graph;
+		const node = LiteGraph.createNode(nodeType);
+		if (!node) return;
+		node.pos = [canvas.graph_mouse[0], canvas.graph_mouse[1]];
+		graph.add(node);
+		canvas.selectNode(node, false);
+		canvas.setDirty(true, true);
+	}
+}
 // Temporary map for paste rename coordination between Set and Get nodes.
 // Key: old name, Value: new name. Cleared via setTimeout(0) after each paste cycle.
 // This works because both onConfigure calls (Set + Get) fire synchronously within
@@ -252,7 +274,7 @@ function convertOutputsToSetGet(graph, node) {
 
 		// Set the name widget
 		setNode.widgets[0].value = linkName;
-		setNode.title = (!getDisablePrefix() ? "Set_" : "") + linkName;
+		setNode.title = prefixedTitle("Set", linkName);
 		setNode.validateName(graph);
 		const finalName = setNode.widgets[0].value;
 		setNode.properties.previousName = finalName;
@@ -551,7 +573,7 @@ app.registerExtension({
 						if (!this.graph || app.configuringGraph) return;
 						this.validateName(this.graph);
 						if (this.widgets[0].value !== '') {
-							this.title = (!getDisablePrefix() ? "Set_" : "") + this.widgets[0].value;
+							this.title = prefixedTitle("Set", this.widgets[0].value);
 						}
 						this.update();
 						this.properties.previousName = this.widgets[0].value;
@@ -612,7 +634,7 @@ app.registerExtension({
 					const type = resolvedSlot?.type;
 					if (type) {
 						if (this.title === "Set"){
-							this.title = (!getDisablePrefix() ? "Set_" : "") + type;
+							this.title = prefixedTitle("Set", type);
 						}
 						if (this.widgets[0].value === '' || this.widgets[0].value === '*'){
 							// Determine the initial widget value based on naming setting
@@ -636,15 +658,12 @@ app.registerExtension({
 						this.outputs[0].type = type;
 						this.outputs[0].name = type;
 
-						if (app.ui.settings.getSettingValue("KJNodes.nodeAutoColor")){
-							setColorAndBgColor(this, type);
-						}
+						autoColor(this, type);
 					} else {
 						showAlert(`node ${this.title} input undefined.`, this)
 					}
 				}
 				if (link_info && this.graph && slotType === LiteGraph.OUTPUT && isChangeConnect) {
-					// Prefer input type; fall back to target's input type
 					const inputType = this.inputs[0]?.type;
 					if (inputType && inputType !== '*') {
 						this.outputs[0].type = inputType;
@@ -657,9 +676,7 @@ app.registerExtension({
 							this.inputs[0].name = type;
 							this.outputs[0].type = type;
 							this.outputs[0].name = type;
-							if (app.ui.settings.getSettingValue("KJNodes.nodeAutoColor")){
-								setColorAndBgColor(this, type);
-							}
+							autoColor(this, type);
 						}
 					}
 				}
@@ -696,7 +713,7 @@ app.registerExtension({
 					}
 
 					this.widgets[0].value = widgetValue;
-					this.title = (!getDisablePrefix() ? "Set_" : "") + widgetValue;
+					this.title = prefixedTitle("Set", widgetValue);
 					return widgetValue !== originalValue;
 				}
 				return false;
@@ -920,11 +937,11 @@ app.registerExtension({
 				const setter = this.findSetter(this.graph);
 				if (setter) {
 					this.setType(setter.inputs[0].type);
-					this.title = (!getDisablePrefix() ? "Get_" : "") + setter.widgets[0].value;
+					this.title = prefixedTitle("Get", setter.widgets[0].value);
 				} else {
 					this.setType('*');
 					const name = this.widgets[0].value;
-					this.title = name ? (!getDisablePrefix() ? "Get_" : "") + name : "Get";
+					this.title = name ? prefixedTitle("Get", name) : "Get";
 				}
 				app.canvas?.setDirty(true, true);
 			}
@@ -959,14 +976,7 @@ app.registerExtension({
 				this.outputs[0].name = type;
 				this.outputs[0].type = type;
 				this.validateLinks();
-				if (app.ui.settings.getSettingValue("KJNodes.nodeAutoColor")) {
-					if (type === '*') {
-						this.color = null;
-						this.bgcolor = null;
-					} else {
-						setColorAndBgColor(this, type);
-					}
-				}
+				autoColor(this, type);
 			}
 
 			findSetter(graph) {
@@ -1151,44 +1161,12 @@ app.registerExtension({
 		{
 			id: "KJNodes.AddSetNodeToSelected",
 			label: "Add Set node to selected / at cursor",
-			function: () => {
-				const selected = Object.values(app.canvas.selected_nodes || {});
-				if (selected.length > 0) {
-					for (const n of selected) {
-						window.kjNodes.addNode("SetNode", n, { side: "right", offset: 30 });
-					}
-				} else {
-					const canvas = app.canvas;
-					const graph = canvas.graph || app.graph;
-					const node = LiteGraph.createNode("SetNode");
-					if (!node) return;
-					node.pos = [canvas.graph_mouse[0], canvas.graph_mouse[1]];
-					graph.add(node);
-					canvas.selectNode(node, false);
-					canvas.setDirty(true, true);
-				}
-			},
+			function: () => addNodeToSelectedOrCursor("SetNode", "right"),
 		},
 		{
 			id: "KJNodes.AddGetNodeAtCursor",
 			label: "Add Get node to selected / at cursor",
-			function: () => {
-				const selected = Object.values(app.canvas.selected_nodes || {});
-				if (selected.length > 0) {
-					for (const n of selected) {
-						window.kjNodes.addNode("GetNode", n, { side: "left", offset: 30 });
-					}
-				} else {
-					const canvas = app.canvas;
-					const graph = canvas.graph || app.graph;
-					const node = LiteGraph.createNode("GetNode");
-					if (!node) return;
-					node.pos = [canvas.graph_mouse[0], canvas.graph_mouse[1]];
-					graph.add(node);
-					canvas.selectNode(node, false);
-					canvas.setDirty(true, true);
-				}
-			},
+			function: () => addNodeToSelectedOrCursor("GetNode", "left"),
 		},
 		{
 			id: "KJNodes.ToggleForceShowSetGetLinks",
@@ -1545,7 +1523,7 @@ app.registerExtension({
 
 				// Set the name widget on the Set node
 				setNode.widgets[0].value = linkName;
-				setNode.title = (!getDisablePrefix() ? "Set_" : "") + linkName;
+				setNode.title = prefixedTitle("Set", linkName);
 				setNode.validateName(graph);
 				setNode.properties.previousName = setNode.widgets[0].value;
 
