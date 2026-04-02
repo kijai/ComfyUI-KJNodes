@@ -1,5 +1,7 @@
 const { app } = window.comfyAPI.app;
 
+const _savedRoundRadius = typeof LiteGraph !== "undefined" ? LiteGraph.ROUND_RADIUS : 8;
+
 function getSetting(id, fallback) {
 	return app.ui.settings.getSettingValue(id) ?? fallback;
 }
@@ -35,6 +37,13 @@ app.registerExtension({
 			active: () => getSetting("KJNodes.perf.disableConnectionBorders", false),
 		},
 		{
+			id: "KJNodes.perf.toggleDisableRoundedCorners",
+			label: "Disable rounded corners",
+			menubarLabel: "Disable rounded corners",
+			function: () => toggleSetting("KJNodes.perf.disableRoundedCorners"),
+			active: () => getSetting("KJNodes.perf.disableRoundedCorners", false),
+		},
+		{
 			id: "KJNodes.perf.toggleThrottleRenderInfo",
 			label: "Throttle info overlay",
 			menubarLabel: "Throttle info overlay",
@@ -50,6 +59,7 @@ app.registerExtension({
 				"KJNodes.perf.toggleSingleCanvasPan",
 				"KJNodes.perf.toggleDisableShadows",
 				"KJNodes.perf.toggleDisableConnectionBorders",
+				"KJNodes.perf.toggleDisableRoundedCorners",
 				"KJNodes.perf.toggleThrottleRenderInfo",
 			],
 		},
@@ -102,6 +112,20 @@ app.registerExtension({
 			},
 		},
 		{
+			id: "KJNodes.perf.disableRoundedCorners",
+			name: "Disable rounded corners",
+			category: ["KJNodes", "Performance", "Disable rounded corners"],
+			tooltip: "Use square corners on nodes instead of rounded. Avoids roundRect calls in software rendering.",
+			type: "boolean",
+			defaultValue: false,
+			onChange: (value) => {
+				if (typeof LiteGraph !== "undefined") {
+					LiteGraph.ROUND_RADIUS = value ? 0 : _savedRoundRadius;
+					app.canvas?.setDirty(true, true);
+				}
+			},
+		},
+		{
 			id: "KJNodes.perf.throttleRenderInfo",
 			name: "Throttle info overlay",
 			category: ["KJNodes", "Performance", "Throttle info overlay"],
@@ -132,6 +156,9 @@ app.registerExtension({
 		}
 		if (getSetting("KJNodes.perf.disableConnectionBorders", false)) {
 			canvas.render_connections_border = false;
+		}
+		if (getSetting("KJNodes.perf.disableRoundedCorners", false)) {
+			LiteGraph.ROUND_RADIUS = 0;
 		}
 		if (getSetting("KJNodes.perf.throttleRenderInfo", false)) {
 			installThrottleRenderInfo(canvas);
