@@ -4776,8 +4776,7 @@ class PreviewImageOrMask(io.ComfyNode):
         return io.Schema(
             node_id="PreviewImageOrMask",
             display_name="Preview Image Or Mask",
-            category="image",
-            essentials_category="Basics",
+            category="KJNodes/misc",
             description="Previews the input images or masks.",
             search_aliases=["output"],
             inputs=[
