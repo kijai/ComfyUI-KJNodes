@@ -2821,6 +2821,14 @@ highest dimension.
     def resize(self, image, width, height, keep_proportion, upscale_method, divisible_by, pad_color, crop_position, unique_id, device="cpu", mask=None, per_batch=64):
         B, H, W, C = image.shape
 
+        # Treat ComfyUI's 64x64 placeholder mask as no mask
+        if mask is not None and mask.shape[-2:] == (64, 64) and (H != 64 or W != 64):
+            mask = None
+
+        # Scale mask to match image dimensions if they differ
+        if mask is not None and mask.shape[-2:] != (H, W):
+            mask = common_upscale(mask.unsqueeze(1), W, H, "bilinear", crop="disabled").squeeze(1)
+
         if device == "gpu":
             if upscale_method == "lanczos":
                 raise Exception("Lanczos is not supported on the GPU")
