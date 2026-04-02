@@ -4773,13 +4773,21 @@ class DecodeAndSaveVideo(io.ComfyNode):
 class PreviewImageOrMask(io.ComfyNode):
     @classmethod
     def define_schema(cls):
+        _extra = {}
+        try:
+            import inspect
+            if "essentials_category" in inspect.signature(io.Schema.__init__).parameters:
+                _extra["essentials_category"] = "Basics"
+            if "search_aliases" in inspect.signature(io.Schema.__init__).parameters:
+                _extra["search_aliases"] = ["output"]
+        except Exception:
+            pass
         return io.Schema(
             node_id="PreviewImageOrMask",
             display_name="Preview Image Or Mask",
             category="image",
-            essentials_category="Basics",
             description="Previews the input images or masks.",
-            search_aliases=["output"],
+            **_extra,
             inputs=[
                 io.MultiType.Input("input", [io.Image, io.Mask], tooltip="The image or mask to preview."),
             ],
