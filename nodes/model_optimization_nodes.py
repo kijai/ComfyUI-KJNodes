@@ -1659,7 +1659,10 @@ class GGUFLoaderKJ(io.ComfyNode):
         if extra_model_name is not None and extra_model_name != "none":
             if extra_model_name.endswith(".gguf"):
                 extra_model_full_path = folder_paths.get_full_path("unet", extra_model_name)
-                extra_model = gguf_nodes.loader.gguf_sd_loader(extra_model_full_path)
+                try:
+                    extra_model, _ = gguf_nodes.loader.gguf_sd_loader(extra_model_full_path)
+                except:
+                    extra_model = gguf_nodes.loader.gguf_sd_loader(extra_model_full_path)
             elif "connector" in extra_model_name.lower():
                 extra_model_full_path = folder_paths.get_full_path("text_encoders", extra_model_name)
                 extra_model = comfy.utils.load_torch_file(extra_model_full_path)
