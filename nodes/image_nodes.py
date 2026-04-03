@@ -35,7 +35,7 @@ from fractions import Fraction
 import node_helpers
 import folder_paths
 
-from ..utility.utility import string_to_color
+from ..utility.utility import string_to_color, schema_extra
 
 try:
     from server import PromptServer, BinaryEventTypes
@@ -4357,7 +4357,7 @@ class EncodeVideoComponents(io.ComfyNode):
         ]
         return io.Schema(
             node_id="EncodeVideoComponents",
-            search_aliases=["video to latent", "encode video", "vae encode video"],
+            **schema_extra(search_aliases=["video to latent", "encode video", "vae encode video"]),
             display_name="Encode Video Components",
             category="KJNodes/image",
             description="Extracts video frames, resizes them, and encodes with a VAE directly, avoiding storing the full image tensor.",
@@ -4605,7 +4605,7 @@ class DecodeAndSaveVideo(io.ComfyNode):
     def define_schema(cls):
         return io.Schema(
             node_id="DecodeAndSaveVideo",
-            search_aliases=["video to latent", "decode video"],
+            **schema_extra(search_aliases=["video to latent", "decode video"]),
             display_name="Decode and Save Video",
             category="KJNodes/image",
             description="Decodes video frames and audio from latent representations, combines them, and saves as a video file, without keeping intermediate images in memory.",
@@ -4773,21 +4773,12 @@ class DecodeAndSaveVideo(io.ComfyNode):
 class PreviewImageOrMask(io.ComfyNode):
     @classmethod
     def define_schema(cls):
-        _extra = {}
-        try:
-            import inspect
-            if "essentials_category" in inspect.signature(io.Schema.__init__).parameters:
-                _extra["essentials_category"] = "Basics"
-            if "search_aliases" in inspect.signature(io.Schema.__init__).parameters:
-                _extra["search_aliases"] = ["output"]
-        except Exception:
-            pass
         return io.Schema(
             node_id="PreviewImageOrMask",
             display_name="Preview Image Or Mask",
             category="image",
             description="Previews the input images or masks.",
-            **_extra,
+            **schema_extra(essentials_category="Basics", search_aliases=["output"]),
             inputs=[
                 io.MultiType.Input("input", [io.Image, io.Mask], tooltip="The image or mask to preview."),
             ],

@@ -20,6 +20,8 @@ import comfy.latent_formats
 import node_helpers
 from io import BytesIO
 
+from ..utility.utility import schema_extra
+
 script_directory = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 folder_paths.add_model_folder_path("kjnodes_fonts", os.path.join(script_directory, "fonts"))
 
@@ -2867,7 +2869,7 @@ Calculator node that evaluates a mathematical expression using inputs a and b.
     Supported functions: abs(), round(), min(), max(), pow(), sqrt(), sin(), cos(), tan(), log(), log10(), exp(), floor(), ceil()  
     Supported constants: pi, euler, True, False  
 """,
-            search_aliases=["math", "arithmetic", "expression", "logic"],
+            **schema_extra(search_aliases=["math", "arithmetic", "expression", "logic"]),
             inputs=[
                 io.String.Input("expression", default="a + b", multiline=True),
                 io.Autogrow.Input("variables", template=template),

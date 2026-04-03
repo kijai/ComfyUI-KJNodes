@@ -3,6 +3,17 @@ import numpy as np
 from PIL import Image, ImageColor
 from typing import Union, List
 import logging
+import inspect
+
+def schema_extra(**kwargs):
+    # Filter io.Schema kwargs to only those supported by the current ComfyUI version.
+    # Older versions lack essentials_category, search_aliases, etc.
+    from comfy_api.latest import io
+    try:
+        params = inspect.signature(io.Schema.__init__).parameters
+    except (ValueError, TypeError):
+        return {}
+    return {k: v for k, v in kwargs.items() if k in params}
 
 # Utility functions from mtb nodes: https://github.com/melMass/comfy_mtb
 def pil2tensor(image: Union[Image.Image, List[Image.Image]]) -> torch.Tensor:
