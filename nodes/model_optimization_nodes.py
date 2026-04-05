@@ -1930,8 +1930,8 @@ if v3_available:
                 description="Loads a GGUF model with advanced options, requires [ComfyUI-GGUF](https://github.com/city96/ComfyUI-GGUF) to be installed.",
                 is_experimental=True,
                 inputs=[
-                    io.Combo.Input("model_name", options=[x for x in folder_paths.get_filename_list("unet_gguf")]),
-                    io.Combo.Input("extra_model_name", options=[x for x in folder_paths.get_filename_list("unet_gguf")] + ["none"], default="none", tooltip="An extra gguf model to load and merge into the main model, for example VACE module"),
+                    io.Combo.Input("model_name", options=[x for x in folder_paths.get_filename_list("unet_gguf")] if "unet_gguf" in folder_paths.folder_names_and_paths else []),
+                    io.Combo.Input("extra_model_name", options=([x for x in folder_paths.get_filename_list("unet_gguf")] if "unet_gguf" in folder_paths.folder_names_and_paths else []) + ["none"], default="none", tooltip="An extra gguf model to load and merge into the main model, for example VACE module"),
                     io.Combo.Input("dequant_dtype", options=["default", "target", "float32", "float16", "bfloat16"], default="default"),
                     io.Combo.Input("patch_dtype", options=["default", "target", "float32", "float16", "bfloat16"], default="default"),
                     io.Boolean.Input("patch_on_device", default=False),
