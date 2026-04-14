@@ -653,9 +653,21 @@ class SplineEditor extends BaseEditorCanvas {
 
         if (isHovered) {
           ctx.font = '11px monospace';
-          const label = `${i}: (${Math.round(p.x)}, ${Math.round(p.y)})`;
-          ctx.strokeStyle = '#000'; ctx.lineWidth = 3; ctx.strokeText(label, cp.x + dotRadius + 5, cp.y - 5);
-          ctx.fillStyle = '#fff'; ctx.fillText(label, cp.x + dotRadius + 5, cp.y - 5);
+          const ax = String(Math.round(p.x)), ay = String(Math.round(p.y));
+          const nx = (p.x / this.coordWidth).toFixed(3), ny = (p.y / this.coordHeight).toFixed(3);
+          const ml = Math.max(ax.length, nx.length), mr = Math.max(ay.length, ny.length);
+          const pre = `${i}: `, L1 = `[${ax.padStart(ml)}, ${ay.padStart(mr)}]`, L2 = `[${nx.padStart(ml)}, ${ny.padStart(mr)}]`;
+          const preW = ctx.measureText(pre).width, totW = preW + Math.max(ctx.measureText(L1).width, ctx.measureText(L2).width);
+          const pad = dotRadius + 5, lineH = 13;
+          let lx = cp.x + pad, ly = cp.y - lineH;
+          if (lx + totW > this.width) lx = cp.x - pad - totW;
+          if (ly - lineH < 0) ly = cp.y + pad;
+          for (const [style, fill] of [['#000', 3], ['#fff', 0]]) {
+            ctx.strokeStyle = style; ctx.lineWidth = fill; ctx.fillStyle = style;
+            const draw = fill ? 'strokeText' : 'fillText';
+            ctx[draw](pre + L1, lx, ly);
+            ctx[draw](L2, lx + preW, ly + lineH);
+          }
         }
       }
     }
