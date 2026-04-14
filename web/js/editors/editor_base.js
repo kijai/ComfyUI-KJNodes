@@ -523,8 +523,20 @@ export class BaseEditorCanvas {
     document.body.appendChild(node.contextMenu);
 
     node.addWidget("button", "Reset canvas", null, () => {
-      try { node.editor = new editorClass(node, true); }
-      catch (error) { console.error(`Error creating ${editorClass.name}:`, error); }
+      try {
+        node.editor = new editorClass(node, true);
+        // If a background image exists, re-apply it to restore correct dimensions
+        const imgData = node.properties.imgData;
+        if (imgData) {
+          const img = new Image();
+          img.onload = () => { if (node.editor) node.editor.processImage(img); };
+          if (imgData.base64) {
+            img.src = `data:${imgData.type || 'image/png'};base64,${imgData.base64}`;
+          } else if (imgData.filename) {
+            img.src = `/view?filename=${encodeURIComponent(imgData.filename)}&type=temp&no-cache=${Date.now()}`;
+          }
+        }
+      } catch (error) { console.error(`Error creating ${editorClass.name}:`, error); }
     });
 
     node.setSize(initialSize);
