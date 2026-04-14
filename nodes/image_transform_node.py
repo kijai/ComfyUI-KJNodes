@@ -292,10 +292,10 @@ Use extra_padding to add padding with color or edge fill (clamp/repeat/mirror)."
                     mask = _resize_single_channel(mask, img_width, img_height)
 
         # "Pad first" modes: apply extra padding to the full image before cropping
+        # Skip for keep_proportion pad modes — those handle extra padding via target subtraction
         is_pad_first = extra_pad_mode in ("pad_color", "pad_edge")
-        # Skip pre-crop padding when keep_proportion is pad — it handles extra padding itself
-        kp_is_pad = keep_proportion in ("pad_color", "pad_edge")
-        if is_pad_first and not kp_is_pad and (extra_top > 0 or extra_bottom > 0 or extra_left > 0 or extra_right > 0):
+        kp_is_pad_mode = keep_proportion in ("pad_color", "pad_edge")
+        if is_pad_first and not kp_is_pad_mode and (extra_top > 0 or extra_bottom > 0 or extra_left > 0 or extra_right > 0):
             pad_mode = "color" if extra_pad_mode == "pad_color" else "edge"
             padded_img = _apply_padding(image, extra_top, extra_bottom, extra_left, extra_right, pad_mode, extra_edge_mode, fill_rgb)
 
@@ -368,6 +368,17 @@ Use extra_padding to add padding with color or edge fill (clamp/repeat/mirror)."
                 tw = target_width if target_width > 0 else crop_w
                 th = target_height if target_height > 0 else crop_h
 
+                # Subtract extra padding from target so content + padding = original target
+                # For pad-first + non-pad keep_proportion, padding is on the source (don't subtract)
+                # For pad modes or pad-crop, subtract so padding is in the output
+                has_extra = extra_top > 0 or extra_bottom > 0 or extra_left > 0 or extra_right > 0
+                kp_is_pad = keep_proportion in ("pad_color", "pad_edge")
+                if has_extra and (kp_is_pad or not is_pad_first):
+                    if target_width > 0:
+                        tw = max(1, tw - extra_left - extra_right)
+                    if target_height > 0:
+                        th = max(1, th - extra_top - extra_bottom)
+
                 if keep_proportion == "keep_long_edge":
                     ratio = min(tw / crop_w, th / crop_h)
                     tw = round(crop_w * ratio)
@@ -402,17 +413,15 @@ Use extra_padding to add padding with color or edge fill (clamp/repeat/mirror)."
                     scale_h = round(crop_h * ratio)
                     samples = common_upscale(cropped.movedim(-1, 1), scale_w, scale_h, upscale_method, "disabled")
                     resized = samples.movedim(1, -1)
-                    # Include extra padding in the pad area so pad_x/pad_y position across the full output
-                    has_extra = extra_top > 0 or extra_bottom > 0 or extra_left > 0 or extra_right > 0
-                    full_w = tw + (extra_left + extra_right if has_extra else 0)
-                    full_h = th + (extra_top + extra_bottom if has_extra else 0)
-                    pad_left = round((full_w - scale_w) * pad_x)
-                    pad_top = round((full_h - scale_h) * pad_y)
-                    pad_right = full_w - pad_left - scale_w
-                    pad_bottom = full_h - pad_top - scale_h
-                    if has_extra:
-                        tw = full_w
-                        th = full_h
+                    # pad_x/pad_y position across full target (not just content area)
+                    full_tw = target_width if target_width > 0 else crop_w
+                    full_th = target_height if target_height > 0 else crop_h
+                    pad_left = round((full_tw - scale_w) * pad_x)
+                    pad_top = round((full_th - scale_h) * pad_y)
+                    pad_right = full_tw - pad_left - scale_w
+                    pad_bottom = full_th - pad_top - scale_h
+                    tw = full_tw
+                    th = full_th
 
                     pad_mode = "edge" if keep_proportion == "pad_edge" else "color"
                     cropped = _apply_padding(resized, pad_top, pad_bottom, pad_left, pad_right, pad_mode, edge_mode, fill_rgb)
@@ -453,9 +462,9 @@ Use extra_padding to add padding with color or edge fill (clamp/repeat/mirror)."
                         cropped_mask = cropped_mask[:, :final_h, :final_w]
                     cropped_content_mask = cropped_content_mask[:, :final_h, :final_w]
 
-            # Apply extra padding (skip for "pad first" modes and when already incorporated into keep_proportion pad)
-            extra_in_pad = keep_proportion in ("pad_color", "pad_edge")
-            if not is_pad_first and not extra_in_pad and (extra_top > 0 or extra_bottom > 0 or extra_left > 0 or extra_right > 0):
+            # Apply extra padding (skip for pad-first and keep_proportion pad modes which handle it above)
+            kp_handles_ep = keep_proportion in ("pad_color", "pad_edge")
+            if not is_pad_first and not kp_handles_ep and (extra_top > 0 or extra_bottom > 0 or extra_left > 0 or extra_right > 0):
                 h_cur, w_cur = cropped.shape[1], cropped.shape[2]
                 pad_mode = "edge" if extra_pad_mode == "pad_crop_edge" else "color"
                 cropped = _apply_padding(cropped, extra_top, extra_bottom, extra_left, extra_right, pad_mode, extra_edge_mode, fill_rgb)

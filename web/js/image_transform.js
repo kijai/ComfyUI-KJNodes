@@ -386,13 +386,12 @@ app.registerExtension({
           drawCanvas();
           fitNodeToCanvas();
           fitNodeToImage(true);
-          // Hook dynamic sub-widgets when they appear
           if (w === kpWidget || w === icWidget || w === epWidget) {
             // Restore values with increasing delays to catch ComfyUI's own default-setting
             const restoreSaved = () => {
               hookSubWidgets();
               _refreshSubWidgetCache();
-              if (w === epWidget && node._savedEpValues) {
+              if (w === epWidget && node._savedEpValues && epWidget.value !== "disabled") {
                 for (const [n, v] of Object.entries(node._savedEpValues)) {
                   const sw = _getSubWidget(`extra_padding.${n}`);
                   if (sw) sw.value = v;
@@ -427,9 +426,12 @@ app.registerExtension({
             } else if (subName.startsWith("keep_proportion.") && node._savedKpValues && shortName in node._savedKpValues) {
               sw.value = node._savedKpValues[shortName];
             }
-            // Hook callback
+            // Hook callback — save values on change so they persist across mode switches
             const swOrig = sw.callback;
             sw.callback = function (...a) {
+              if (_suppressSubCallbacks) return;
+              if (subName.startsWith("extra_padding.")) node._savedEpValues[shortName] = sw.value;
+              else if (subName.startsWith("keep_proportion.")) node._savedKpValues[shortName] = sw.value;
               if (swOrig) swOrig.apply(this, a);
               drawCanvas();
             };
@@ -453,21 +455,6 @@ app.registerExtension({
       const origDrawFg = node.onDrawForeground;
       node.onDrawForeground = function (...args) {
         if (origDrawFg) origDrawFg.apply(this, args);
-        // Save current sub-widget values (before a mode switch might destroy them)
-        const epVal = epWidget?.value;
-        if (epVal && epVal !== "disabled") {
-          for (const n of ["pad_top", "pad_bottom", "pad_left", "pad_right"]) {
-            const sw = _getSubWidget(`extra_padding.${n}`);
-            if (sw && sw.value) node._savedEpValues[n] = sw.value;
-          }
-        }
-        const kpVal = kpWidget?.value;
-        if (isPadMode(kpVal)) {
-          for (const n of ["pad_x", "pad_y"]) {
-            const sw = _getSubWidget(`keep_proportion.${n}`);
-            if (sw && sw.value !== undefined && sw.value !== 0.5) node._savedKpValues[n] = sw.value;
-          }
-        }
         const snap = _snapshotNames.map(n => _getSubWidget(n)?.value ?? (n === "extra_padding" ? epWidget?.value : "") ?? "").join("|");
         if (snap !== _lastWidgetSnapshot) {
           _lastWidgetSnapshot = snap;
@@ -521,11 +508,20 @@ app.registerExtension({
       function rotRad() { return node._rotation * Math.PI / 180; }
       function getDivBy() { return divWidget ? divWidget.value : 0; }
       function getGridSize() { return parseInt(gridSlider.value) || 0; }
+      // Subtract extra padding from target dims for non-pad keep_proportion modes
+      function adjustTargetForPadding(rw, rh, tgtW, tgtH) {
+        const ep = getExtraPadding();
+        if (hasExtraPad(ep) && !ep.isFirst) {
+          if (tgtW > 0) rw = Math.max(1, rw - ep.left - ep.right);
+          if (tgtH > 0) rh = Math.max(1, rh - ep.top - ep.bottom);
+        }
+        return { rw, rh };
+      }
       function getEffectiveTargetDims(fallbackW, fallbackH) {
         const divBy = getDivBy();
         const { w: tgtW, h: tgtH } = getTgt();
-        return { rw: roundDown(tgtW > 0 ? tgtW : fallbackW, divBy),
-                 rh: roundDown(tgtH > 0 ? tgtH : fallbackH, divBy) };
+        let { rw, rh } = adjustTargetForPadding(tgtW > 0 ? tgtW : fallbackW, tgtH > 0 ? tgtH : fallbackH, tgtW, tgtH);
+        return { rw: roundDown(rw, divBy), rh: roundDown(rh, divBy) };
       }
 
       function getFillColor() { return node.properties.fillColor || "#000000"; }
@@ -574,9 +570,14 @@ app.registerExtension({
         const { w: tgtW, h: tgtH } = getTgt();
         let outW = cropW, outH = cropH;
         const kp = getKp();
+        // For pad-first non-pad modes, the source is padded before keep_proportion
+        const ep = getExtraPadding();
+        if (ep.isFirst && hasExtraPad(ep) && !isPadMode(kp)) {
+          cropW += ep.left + ep.right;
+          cropH += ep.top + ep.bottom;
+        }
         if (tgtW > 0 || tgtH > 0) {
-          let rw = tgtW > 0 ? tgtW : cropW;
-          let rh = tgtH > 0 ? tgtH : cropH;
+          let { rw, rh } = adjustTargetForPadding(tgtW > 0 ? tgtW : cropW, tgtH > 0 ? tgtH : cropH, tgtW, tgtH);
           if (kp === "keep_long_edge") {
             const ratio = Math.min(rw / cropW, rh / cropH);
             rw = Math.round(cropW * ratio);
@@ -606,9 +607,13 @@ app.registerExtension({
       function computeOutputDims(cropW, cropH) {
         const content = computeContentDims(cropW, cropH);
         if (!content) return null;
+        let outW = content.w, outH = content.h;
+        // Add extra padding (skip for pad-first — handled on the source image)
         const ep = getExtraPadding();
-        let outW = content.w + ep.left + ep.right;
-        let outH = content.h + ep.top + ep.bottom;
+        if (!ep.isFirst) {
+          outW += ep.left + ep.right;
+          outH += ep.top + ep.bottom;
+        }
         const divBy = getDivBy();
         outW = roundDown(outW, divBy);
         outH = roundDown(outH, divBy);
@@ -623,11 +628,18 @@ app.registerExtension({
         return { x: px ? px.value : 0.5, y: py ? py.value : 0.5 };
       }
 
-      function setPadXY(x, y) {
-        const px = _getSubWidget("keep_proportion.pad_x"), py = _getSubWidget("keep_proportion.pad_y");
-        if (px) px.value = Math.max(0, Math.min(1, x));
-        if (py) py.value = Math.max(0, Math.min(1, y));
-        _framePadXY = { x: px ? px.value : 0.5, y: py ? py.value : 0.5 };
+      let _suppressSubCallbacks = false;
+      function setPadXY(x, y, defer) {
+        x = Math.max(0, Math.min(1, x));
+        y = Math.max(0, Math.min(1, y));
+        _framePadXY = { x, y };
+        if (!defer) {
+          const px = _getSubWidget("keep_proportion.pad_x"), py = _getSubWidget("keep_proportion.pad_y");
+          _suppressSubCallbacks = true;
+          if (px) px.value = x;
+          if (py) py.value = y;
+          _suppressSubCallbacks = false;
+        }
       }
 
       function _readExtraPadding() {
@@ -715,10 +727,8 @@ app.registerExtension({
 
       // Compute pad mode layout: fit target AR, compute content rect inside
       function computePadLayout(rw, rh, cropW, cropH, fitW, fitH, fitX, fitY) {
-        const ep = getExtraPadding();
-        const baseW = rw - ep.left - ep.right, baseH = rh - ep.top - ep.bottom;
         const { pW, pH, pX, pY } = fitAspect(rw / rh, fitW, fitH, fitX, fitY);
-        const imgRatio = Math.min(baseW / cropW, baseH / cropH);
+        const imgRatio = Math.min(rw / cropW, rh / cropH);
         const cW = pW * (cropW * imgRatio / rw), cH = pH * (cropH * imgRatio / rh);
         const { cX, cY } = computePadContentPos(pX, pY, pW, pH, cW, cH);
         return { pW, pH, pX, pY, cW, cH, cX, cY };
@@ -1031,7 +1041,7 @@ app.registerExtension({
           const rangeX = pW - cW, rangeY = pH - cH;
           const newX = rangeX > 0 ? node._padDragStart.x + dx / rangeX : 0.5;
           const newY = rangeY > 0 ? node._padDragStart.y + dy / rangeY : 0.5;
-          setPadXY(newX, newY);
+          setPadXY(newX, newY, true);
           drawCanvas();
           return;
         }
@@ -1177,8 +1187,11 @@ app.registerExtension({
       function onDragEnd(e) {
         if (!node._drawing) return;
         const wasRotate = node._dragMode === "rotate";
+        const wasPadDrag = node._dragMode === "pad_drag";
         Object.assign(node, { _drawing: false, _dragMode: null, _dragStart: null,
           _bboxAtDragStart: null, _padDragStart: null, _extraPadStart: null });
+        // Flush deferred pad_x/pad_y widget values
+        if (wasPadDrag) setPadXY(_framePadXY.x, _framePadXY.y);
         document.removeEventListener("mousemove", onDragMove);
         document.removeEventListener("mouseup", onDragEnd);
 
@@ -1273,13 +1286,8 @@ app.registerExtension({
         if (!hasBboxes && node._previewImg && node._previewEnabled && node._rotation === 0 && (tgtW > 0 || tgtH > 0) &&
             (kp === "stretch" || isPadMode(kp))) {
           const { w: imgW, h: imgH } = getEffectiveImageDims(kp !== "pad_edge");
-          const ep = getExtraPadding();
           let rw = tgtW > 0 ? tgtW : imgW;
           let rh = tgtH > 0 ? tgtH : imgH;
-          if (isPadMode(kp)) {
-            rw += ep.left + ep.right;
-            rh += ep.top + ep.bottom;
-          }
           const outAR = rw / rh;
           const newH = Math.round(canvasEl.width / outAR);
           if (Math.abs(newH - canvasEl.height) > 2) {
@@ -1493,12 +1501,7 @@ app.registerExtension({
           }
 
           if ((tgtW > 0 || tgtH > 0) && (kp === "crop" || isPadMode(kp))) {
-            let { rw, rh } = getEffectiveTargetDims(cropW, cropH);
-            if (isPadMode(kp)) {
-              const ep = getExtraPadding();
-              rw += ep.left + ep.right;
-              rh += ep.top + ep.bottom;
-            }
+            const { rw, rh } = getEffectiveTargetDims(cropW, cropH);
 
             if (kp === "crop") {
               const ratio = Math.max(rw / cropW, rh / cropH);
@@ -1596,7 +1599,8 @@ app.registerExtension({
       function drawCanvas() {
         const ctx = canvasCtx;
         ctx.clearRect(0, 0, canvasEl.width, canvasEl.height);
-        _frameEp = _readExtraPadding(); _framePadXY = _readPadXY();
+        _frameEp = _readExtraPadding();
+        if (node._dragMode !== "pad_drag") _framePadXY = _readPadXY();
         const _kpVal = getKp(), { w: _tgtW, h: _tgtH } = getTgt();
         const hasBboxes = node._bboxes.length > 0;
         const showPreview = node._previewImg && node._previewEnabled;
@@ -1692,18 +1696,37 @@ app.registerExtension({
             }
             if ((tgtW > 0 || tgtH > 0) && (kp === "stretch" || isPadMode(kp) || kp === "crop")) {
               const { w: imgW, h: imgH } = getEffectiveImageDims(kp !== "pad_edge");
-              let { rw, rh } = getEffectiveTargetDims(imgW, imgH);
-              if (isPadMode(kp)) {
-                const ep = getExtraPadding();
-                rw += ep.left + ep.right;
-                rh += ep.top + ep.bottom;
-              }
+              const { rw, rh } = getEffectiveTargetDims(imgW, imgH);
 
               if (kp === "stretch") {
                 drawStretchOverlay(ctx, rw / rh, 0, 0, cW0, cH0);
               } else if (isPadMode(kp)) {
-                const { pW, pH, pX, pY, cW, cH, cX, cY } = computePadLayout(rw, rh, imgW, imgH, cW0, cH0);
+                const epPad = getExtraPadding();
+                const hasEp = hasExtraPad(epPad);
+                // Full output = target. Content = target - extra padding.
+                const fullTgtW = tgtW > 0 ? tgtW : imgW;
+                const fullTgtH = tgtH > 0 ? tgtH : imgH;
+                const contentTgtW = hasEp ? Math.max(1, fullTgtW - epPad.left - epPad.right) : fullTgtW;
+                const contentTgtH = hasEp ? Math.max(1, fullTgtH - epPad.top - epPad.bottom) : fullTgtH;
+                // Fit the full output to the canvas
+                const { pW: outerW, pH: outerH, pX: outerX, pY: outerY } = fitAspect(fullTgtW / fullTgtH, cW0, cH0);
+                // Content area within the output (offset by padding)
+                const contentW = outerW * (contentTgtW / fullTgtW);
+                const contentH = outerH * (contentTgtH / fullTgtH);
+                const contentX = outerX + outerW * (epPad.left / fullTgtW);
+                const contentY = outerY + outerH * (epPad.top / fullTgtH);
+                // Image is sized to fit the content area, but positioned across the full output via pad_x/pad_y
+                const imgRatio = Math.min(contentTgtW / imgW, contentTgtH / imgH);
+                const scaledW = imgW * imgRatio, scaledH = imgH * imgRatio;
+                const pW = outerW, pH = outerH, pX = outerX, pY = outerY;
+                const cW = outerW * (scaledW / fullTgtW), cH = outerH * (scaledH / fullTgtH);
+                const { cX, cY } = computePadContentPos(outerX, outerY, outerW, outerH, cW, cH);
                 ctx.clearRect(0, 0, cW0, cH0);
+                // Fill outer area (extra padding region)
+                if (hasEp) {
+                  ctx.fillStyle = getFillColor();
+                  ctx.fillRect(outerX, outerY, outerW, outerH);
+                }
                 if (kp === "pad_edge") {
                   renderToTmp(Math.max(1, Math.round(cW)), Math.max(1, Math.round(cH)),
                     null, 0, 0, 0, 0, true);
@@ -1715,6 +1738,7 @@ app.registerExtension({
                   drawPreviewRegion(ctx, 0, 0, cW0, cH0, cX, cY, cW, cH);
                 }
                 drawDashedBorder(ctx, cX, cY, cW, cH, "rgba(100, 200, 255, 0.8)");
+                if (hasEp) drawDashedBorder(ctx, contentX, contentY, contentW, contentH, "rgba(255, 200, 100, 0.6)");
               } else if (kp === "crop") {
                 const ratio = Math.max(rw / imgW, rh / imgH);
                 const visW = rw / ratio, visH = rh / ratio;
@@ -1729,7 +1753,7 @@ app.registerExtension({
             }
           }
           const _ep = getExtraPadding();
-          if (hasExtraPad(_ep) && node._previewImg && !(isPadMode(_kpVal) && (_tgtW > 0 || _tgtH > 0)) && !_isFirst) {
+          if (hasExtraPad(_ep) && node._previewImg && !_isFirst && !(isPadMode(_kpVal) && (_tgtW > 0 || _tgtH > 0))) {
             const { w: rawImgW, h: rawImgH } = getEffectiveImageDims(_ep.mode !== "pad_edge");
             const content = computeContentDims(rawImgW, rawImgH);
             const epImgW = content ? content.w : rawImgW;
