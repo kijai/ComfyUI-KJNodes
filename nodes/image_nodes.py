@@ -4746,8 +4746,21 @@ class DecodeAndSaveVideo(io.ComfyNode):
         audio_latent = samples["samples"]
         if audio_latent.is_nested:
             audio_latent = audio_latent.unbind()[-1]
-        audio = audio_vae.decode(audio_latent).to(audio_latent.device)
-        output_audio_sample_rate = audio_vae.output_sample_rate
+        audio = audio_vae.decode(audio_latent)
+        # Post-PR #13486: audio_vae is a comfy.sd.VAE wrapper returning channels-last (BTC).
+        # Pre-PR: audio_vae is a raw AudioVAE returning channels-first (BCT).
+        if hasattr(audio_vae, "first_stage_model"):
+            audio = audio.movedim(-1, 1)
+        audio = audio.to(audio_latent.device)
+        output_audio_sample_rate = getattr(
+            audio_vae,
+            "audio_sample_rate_output",
+            getattr(audio_vae, "output_sample_rate", None),
+        )
+        if output_audio_sample_rate is None:
+            output_audio_sample_rate = getattr(
+                getattr(audio_vae, "first_stage_model", None), "output_sample_rate", 44100
+            )
         return {"waveform": audio, "sample_rate": int(output_audio_sample_rate)}
 
     @classmethod

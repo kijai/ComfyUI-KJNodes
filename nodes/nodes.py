@@ -2450,9 +2450,26 @@ class VAELoaderKJ:
                 vae_path = folder_paths.get_full_path_or_raise("vae", vae_name)
             sd, metadata = load_torch_file(vae_path, return_metadata=True)
 
-        if "vocoder.conv_post.weight" in sd or "vocoder.vocoder.conv_post.weight" in sd:
-            from comfy.ldm.lightricks.vae.audio_vae import AudioVAE
-            vae = AudioVAE(sd, metadata)
+
+        is_audio_vae = (
+            "vocoder.conv_post.weight" in sd
+            or "vocoder.vocoder.conv_post.weight" in sd
+            or "vocoder.resblocks.0.convs1.0.weight" in sd
+            or "vocoder.vocoder.resblocks.0.convs1.0.weight" in sd
+        )
+        if is_audio_vae:
+            # Post-PR #13486: AudioVAE is wrapped by comfy.sd.VAE; prefix-rename keys and let VAE detect it.
+            # Pre-PR: AudioVAE(sd, metadata) takes the raw state dict.
+            import comfy.utils
+            try:
+                sd_audio = comfy.utils.state_dict_prefix_replace(
+                    sd, {"audio_vae.": "autoencoder.", "vocoder.": "vocoder."}, filter_keys=True
+                )
+                vae = VAE(sd=sd_audio, metadata=metadata)
+                vae.throw_exception_if_invalid()
+            except Exception:
+                from comfy.ldm.lightricks.vae.audio_vae import AudioVAE
+                vae = AudioVAE(sd, metadata)
         else:
             vae = VAE(sd=sd, device=device, dtype=dtype, metadata=metadata)
             vae.throw_exception_if_invalid()
