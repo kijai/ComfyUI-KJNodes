@@ -1,6 +1,9 @@
 import { chainCallback, addMiddleClickPan, addWheelPassthrough } from './utility.js';
 const { app } = window.comfyAPI.app;
 
+// Shared across all HDR Preview nodes so synced nodes can drive each other.
+const hdrSyncGroup = new Set();
+
 const VERTEX_SHADER = `#version 300 es
 out vec2 v_texCoord;
 void main() {
@@ -161,6 +164,13 @@ app.registerExtension({
             playBtn.style.cssText =
                 "background:#333;color:#ccc;border:1px solid #555;cursor:pointer;padding:1px 8px;font-size:11px;min-width:24px;";
 
+            const syncBtn = document.createElement("button");
+            syncBtn.type = "button";
+            syncBtn.textContent = "⛓";
+            syncBtn.title = "Sync playback with other HDR Preview nodes that have sync enabled.";
+            syncBtn.style.cssText =
+                "background:#333;color:#888;border:1px solid #555;cursor:pointer;padding:1px 6px;font-size:11px;min-width:22px;";
+
             const frameSlider = document.createElement("input");
             frameSlider.type = "range";
             frameSlider.min = "0";
@@ -174,6 +184,7 @@ app.registerExtension({
             frameLabel.style.cssText = "min-width:50px;text-align:right;font-variant-numeric:tabular-nums;";
 
             frameRow.appendChild(playBtn);
+            frameRow.appendChild(syncBtn);
             frameRow.appendChild(frameSlider);
             frameRow.appendChild(frameLabel);
 
@@ -181,7 +192,7 @@ app.registerExtension({
             container.appendChild(frameRow);
 
             const stopProp = (e) => e.stopPropagation();
-            for (const el of [frameSlider, playBtn]) {
+            for (const el of [frameSlider, playBtn, syncBtn]) {
                 el.addEventListener("pointerdown", stopProp);
                 el.addEventListener("mousedown", stopProp);
             }
@@ -306,19 +317,79 @@ app.registerExtension({
             hookLiveWidget(exposureWidget, "exposure");
             hookLiveWidget(saturationWidget, "saturation");
 
+            // Sync handle: other nodes in the group call these to follow along.
+            let syncEnabled = false;
+            const syncHandle = {
+                setFrameFraction(fraction) {
+                    if (state.frameCount <= 0) return;
+                    const maxIdx = Math.max(state.frameCount - 1, 0);
+                    const frame = Math.min(maxIdx, Math.max(0, Math.round(fraction * maxIdx)));
+                    if (frame === state.currentFrame) return;
+                    state.currentFrame = frame;
+                    frameSlider.value = String(frame);
+                    updateFrameLabel();
+                    requestRender();
+                },
+                showPlaying(play) {
+                    state.playing = play;
+                    playBtn.textContent = play ? "■" : "▶";
+                    if (!play && state.playTimer !== null) {
+                        clearInterval(state.playTimer);
+                        state.playTimer = null;
+                    }
+                },
+            };
+
+            function broadcastFraction() {
+                if (!syncEnabled || state.frameCount <= 1) return;
+                const fraction = state.currentFrame / (state.frameCount - 1);
+                for (const other of hdrSyncGroup) {
+                    if (other !== syncHandle) other.setFrameFraction(fraction);
+                }
+            }
+
+            function broadcastPlaying(play) {
+                if (!syncEnabled) return;
+                for (const other of hdrSyncGroup) {
+                    if (other !== syncHandle) other.showPlaying(play);
+                }
+            }
+
+            syncBtn.addEventListener("click", () => {
+                syncEnabled = !syncEnabled;
+                syncBtn.style.color = syncEnabled ? "#5fa" : "#888";
+                syncBtn.style.borderColor = syncEnabled ? "#5fa" : "#555";
+                if (syncEnabled) {
+                    hdrSyncGroup.add(syncHandle);
+                } else {
+                    hdrSyncGroup.delete(syncHandle);
+                }
+            });
+
             frameSlider.addEventListener("input", () => {
                 state.currentFrame = parseInt(frameSlider.value, 10) || 0;
                 updateFrameLabel();
                 requestRender();
+                broadcastFraction();
             });
-            frameSlider.addEventListener("pointerdown", stopPlayback);
+            frameSlider.addEventListener("pointerdown", () => {
+                stopPlayback();
+                broadcastPlaying(false);
+            });
 
             playBtn.addEventListener("click", () => {
                 if (state.playing) {
                     stopPlayback();
+                    broadcastPlaying(false);
                     return;
                 }
                 if (state.frameCount <= 1) return;
+                // Ensure no other synced node has an active timer — we become the sole driver.
+                if (syncEnabled) {
+                    for (const other of hdrSyncGroup) {
+                        if (other !== syncHandle) other.showPlaying(false);
+                    }
+                }
                 const intervalMs = Math.max(16, 1000 / Math.max(state.fps, 1));
                 state.playing = true;
                 playBtn.textContent = "■";
@@ -327,7 +398,9 @@ app.registerExtension({
                     frameSlider.value = String(state.currentFrame);
                     updateFrameLabel();
                     requestRender();
+                    broadcastFraction();
                 }, intervalMs);
+                broadcastPlaying(true);
             });
 
             node.addDOMWidget("hdr_preview", "hdr_preview", container, {
@@ -445,6 +518,7 @@ app.registerExtension({
             chainCallback(node, "onRemoved", function () {
                 stopPlayback();
                 controlsObserver.disconnect();
+                hdrSyncGroup.delete(syncHandle);
                 for (const f of state.frames) {
                     try { f.close?.(); } catch {}
                 }
