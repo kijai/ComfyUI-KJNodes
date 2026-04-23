@@ -2463,7 +2463,7 @@ class VAELoaderKJ:
             import comfy.utils
             try:
                 sd_audio = comfy.utils.state_dict_prefix_replace(
-                    sd, {"audio_vae.": "autoencoder.", "vocoder.": "vocoder."}, filter_keys=True
+                    dict(sd), {"audio_vae.": "autoencoder.", "vocoder.": "vocoder."}, filter_keys=True
                 )
                 vae = VAE(sd=sd_audio, metadata=metadata)
                 vae.throw_exception_if_invalid()
