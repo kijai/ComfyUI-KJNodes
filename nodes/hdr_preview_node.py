@@ -87,49 +87,70 @@ class HDRPreviewKJ(io.ComfyNode):
 
         B, H, W, _ = image.shape
         device = mm.get_torch_device()
-        image_rgb = image[..., :3].float().to(device)
+        exposure_mul = 2.0 ** exposure
+        luma_weights = torch.tensor([0.2126, 0.7152, 0.0722], device=device)
 
+        bytes_per_frame = H * W * 3 * 4
+        chunk_size = max(1, min(B, int(1_000_000_000 // max(bytes_per_frame * 10, 1))))
 
-        # --- Preview frames (8-bit PNG, always sent in the "raw" pre-exposure space) ---
+        # For linear input we need the global max across all frames to normalize previews.
+        norm_scale = 1.0
         if input_space == "linear":
-            max_val = float(image_rgb.max().clamp(min=1e-6).item())
+            max_val = float(image[..., :3].max().item())
             norm_scale = max_val if max_val > 1.0 else 1.0
-            preview = (image_rgb / norm_scale).clamp_(0.0, 1.0)
-        else:
-            norm_scale = 1.0
-            preview = image_rgb.clamp(0.0, 1.0)
-
-        preview_np = preview.mul_(255.0).add_(0.5).clamp_(0.0, 255.0).to(torch.uint8).cpu().numpy()
 
         filenames = []
-        for i in range(B):
-            fname = f"{prefix}_{i:05d}.png"
-            Image.fromarray(preview_np[i], mode="RGB").save(
-                os.path.join(temp_dir, fname),
-                format="PNG",
-                compress_level=1,
-            )
-            filenames.append(fname)
+        srgb_chunks = []
 
-        # --- Baked sRGB output (same math as the shader in hdr_preview.js) ---
-        if input_space == "logc3":
-            hdr = _logc3_decompress(image_rgb).clamp_(min=0.0)
-        elif input_space == "srgb":
-            hdr = _srgb_to_linear(image_rgb).clamp_(min=0.0)
-        else:
-            hdr = image_rgb.clamp(min=0.0)
+        for start in range(0, B, chunk_size):
+            end = min(start + chunk_size, B)
+            image_rgb = image[start:end, ..., :3].float().to(device, non_blocking=True)
 
-        exposed = hdr.mul_(2.0 ** exposure)
-        luma = (exposed * torch.tensor([0.2126, 0.7152, 0.0722], device=device, dtype=exposed.dtype)).sum(
-            dim=-1, keepdim=True
-        )
-        saturated = (luma + (exposed - luma) * saturation).clamp_(min=0.0)
-        if input_space == "srgb":
-            # Already display-ready linear; skip Reinhard, just clip over-exposed highlights.
-            tonemapped = saturated.clamp_(0.0, 1.0)
-        else:
-            tonemapped = saturated / (1.0 + saturated)
-        srgb = _linear_to_srgb(tonemapped).cpu()
+            # --- Preview frames (8-bit PNG, always in the "raw" pre-exposure space) ---
+            if input_space == "linear":
+                preview = (image_rgb / norm_scale).clamp_(0.0, 1.0)
+            else:
+                preview = image_rgb.clamp(0.0, 1.0)
+
+            preview_np = preview.mul_(255.0).add_(0.5).clamp_(0.0, 255.0).to(torch.uint8).cpu().numpy()
+            del preview
+
+            for i in range(end - start):
+                fname = f"{prefix}_{start + i:05d}.png"
+                Image.fromarray(preview_np[i], mode="RGB").save(
+                    os.path.join(temp_dir, fname),
+                    format="PNG",
+                    compress_level=1,
+                )
+                filenames.append(fname)
+            del preview_np
+
+            # --- Baked sRGB output (same math as the shader in hdr_preview.js) ---
+            if input_space == "logc3":
+                hdr = _logc3_decompress(image_rgb).clamp_(min=0.0)
+            elif input_space == "srgb":
+                hdr = _srgb_to_linear(image_rgb).clamp_(min=0.0)
+            else:
+                hdr = image_rgb.clamp(min=0.0)
+            del image_rgb
+
+            exposed = hdr.mul_(exposure_mul)
+            luma = (exposed * luma_weights.to(exposed.dtype)).sum(dim=-1, keepdim=True)
+            saturated = (luma + (exposed - luma) * saturation).clamp_(min=0.0)
+            del luma, exposed
+
+            if input_space == "srgb":
+                # Already display-ready linear; skip Reinhard, just clip over-exposed highlights.
+                tonemapped = saturated.clamp_(0.0, 1.0)
+            else:
+                tonemapped = saturated / (1.0 + saturated)
+                del saturated
+
+            srgb_chunks.append(_linear_to_srgb(tonemapped).cpu())
+            del tonemapped
+
+        srgb = torch.cat(srgb_chunks, dim=0)
+        del srgb_chunks
 
         data = {
             "frames": [{"filename": f, "type": "temp"} for f in filenames],
