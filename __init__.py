@@ -9,6 +9,7 @@ from .nodes.model_optimization_nodes import *
 from .nodes.lora_nodes import *
 from .nodes.image_transform_node import ImageTransformKJ
 from .nodes.sharpen_nodes import ImageSharpenKJ
+from .nodes.hdr_preview_node import HDRPreviewKJ
 
 
 NODE_CONFIG = {
@@ -112,6 +113,7 @@ NODE_CONFIG = {
     "EncodeVideoComponents": {"class": EncodeVideoComponents, "name": "Encode Video Components"},
     "DecodeAndSaveVideo": {"class": DecodeAndSaveVideo, "name": "Decode And Save Video"},
     "ImageTransformKJ": {"class": ImageTransformKJ, "name": "Image Transform KJ"},
+    "HDRPreviewKJ": {"class": HDRPreviewKJ, "name": "HDR Preview KJ"},
     "PreviewImageOrMask": {"class": PreviewImageOrMask, "name": "Preview Image Or Mask"},
     "ImageSharpenKJ": {"class": ImageSharpenKJ, "name": "Image Sharpen KJ"},
     #batch cropping
