@@ -146,8 +146,9 @@ app.registerExtension({
                 "position:relative;width:100%;background:#111;display:flex;flex-direction:column;align-items:center;overflow:hidden;";
 
             const viewport = document.createElement("div");
+            // flex-shrink:0 — legacy container can be shorter than this height; without it the viewport collapses to 0.
             viewport.style.cssText =
-                "position:relative;width:100%;height:0;background:#000;overflow:hidden;";
+                "position:relative;width:100%;height:0;background:#000;overflow:hidden;flex-shrink:0;";
 
             const canvas = document.createElement("canvas");
             canvas.style.cssText =
@@ -376,11 +377,19 @@ app.registerExtension({
                 stopPlayback();
                 broadcastPlaying(false);
             });
+            function persistCurrentFrame() {
+                if (!node.properties?.hdrLastPreview) return;
+                node.properties.hdrLastPreview.current_frame = state.currentFrame;
+                node.graph?.change?.();
+                try { app.extensionManager?.workflow?.activeWorkflow?.changeTracker?.checkState?.(); } catch {}
+            }
+            frameSlider.addEventListener("change", persistCurrentFrame);
 
             playBtn.addEventListener("click", () => {
                 if (state.playing) {
                     stopPlayback();
                     broadcastPlaying(false);
+                    persistCurrentFrame();
                     return;
                 }
                 if (state.frameCount <= 1) return;
@@ -403,7 +412,7 @@ app.registerExtension({
                 broadcastPlaying(true);
             });
 
-            node.addDOMWidget("hdr_preview", "hdr_preview", container, {
+            const domWidget = node.addDOMWidget("hdr_preview", "hdr_preview", container, {
                 serialize: false,
                 hideOnZoom: false,
                 margin: 0,
@@ -413,14 +422,27 @@ app.registerExtension({
             });
             node.resizable = true;
 
-            // Measure the actual rendered frame-row height once it's laid out.
+            // LiteGraph's computeSize uses a fixed per-widget height that ignores DOM widgets — sum manually.
+            const NATIVE_ROW_H = (LiteGraph?.NODE_WIDGET_HEIGHT ?? 20) + 4;
+            const TITLE_H = LiteGraph?.NODE_TITLE_HEIGHT ?? 30;
+            function computeNodeHeight() {
+                let nativeCount = 0;
+                for (const w of node.widgets || []) {
+                    if (w === domWidget) continue;
+                    if (w.hidden || w.type === "converted-widget") continue;
+                    nativeCount++;
+                }
+                return TITLE_H + nativeCount * NATIVE_ROW_H + node._widgetHeight + 8;
+            }
+
+            // Don't gate on state.frames — a fire during async bitmap load would wipe _widgetHeight and collapse the node.
             const controlsObserver = new ResizeObserver(() => {
                 const measured = frameRow.offsetHeight;
                 if (measured <= 0 || measured === controlsHeight) return;
                 controlsHeight = measured;
-                const viewportPx = state.frames.length ? parseInt(viewport.style.height, 10) || 0 : 0;
+                const viewportPx = parseInt(viewport.style.height, 10) || 0;
                 node._widgetHeight = viewportPx + controlsHeight;
-                node.setSize([node.size[0], node.computeSize([node.size[0], 0])[1]]);
+                node.setSize([node.size[0], computeNodeHeight()]);
                 node.graph?.setDirtyCanvas(true, true);
             });
             controlsObserver.observe(frameRow);
@@ -434,10 +456,13 @@ app.registerExtension({
                     const availW = Math.max(100, node.size[0] - 30);
                     const ratio = srcH / srcW;
                     const displayH = Math.round(availW * ratio);
+                    const totalH = displayH + controlsHeight;
                     viewport.style.width = availW + "px";
                     viewport.style.height = displayH + "px";
-                    node._widgetHeight = displayH + controlsHeight;
-                    node.setSize([node.size[0], node.computeSize([node.size[0], 0])[1]]);
+                    // min-height keeps children visible when ComfyUI sets the container height from a stale computeSize.
+                    container.style.minHeight = totalH + "px";
+                    node._widgetHeight = totalH;
+                    node.setSize([node.size[0], computeNodeHeight()]);
                     node.graph?.setDirtyCanvas(true, true);
                 } finally {
                     resizing = false;
@@ -465,10 +490,11 @@ app.registerExtension({
                 state.fps = data.fps || 24;
                 state.inputSpace = data.input_space || "logc3";
                 state.linearScale = data.linear_scale || 1.0;
-                state.currentFrame = 0;
+                const restoredFrame = Number.isInteger(data.current_frame) ? data.current_frame : 0;
+                state.currentFrame = Math.min(Math.max(0, restoredFrame), Math.max(0, state.frameCount - 1));
 
                 frameSlider.max = String(Math.max(0, state.frameCount - 1));
-                frameSlider.value = "0";
+                frameSlider.value = String(state.currentFrame);
                 updateFrameLabel();
 
                 if (!state.gl) initGL();
@@ -487,6 +513,8 @@ app.registerExtension({
                 }
 
                 state.frames = bitmaps.filter(Boolean);
+                // Re-assert size in case the ResizeObserver fired mid-await with empty frames.
+                resizeToFit();
                 requestRender();
             }
 
@@ -504,15 +532,22 @@ app.registerExtension({
                     linear_scale: data.linear_scale,
                     frame_count: data.frame_count,
                 };
+                // Autosave snapshots before execution, so post-execute property updates need an explicit dirty nudge.
+                node.graph?.change?.();
+                try {
+                    const ct = app.extensionManager?.workflow?.activeWorkflow?.changeTracker;
+                    ct?.checkState?.();
+                } catch {}
+                try { app.workflowManager?.activeWorkflow?.changeTracker?.checkState?.(); } catch {}
 
                 await applyPreviewData(data);
             });
 
             chainCallback(node, "onConfigure", function () {
+                if (exposureWidget && isFinite(exposureWidget.value)) state.exposure = exposureWidget.value;
+                if (saturationWidget && isFinite(saturationWidget.value)) state.saturation = saturationWidget.value;
                 const saved = node.properties?.hdrLastPreview;
-                if (saved?.frames?.length) {
-                    applyPreviewData(saved);
-                }
+                if (saved?.frames?.length) applyPreviewData(saved);
             });
 
             chainCallback(node, "onRemoved", function () {
