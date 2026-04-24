@@ -3652,23 +3652,40 @@ class FastPreview:
         else:
             pil_image = Image.fromarray(arr)
 
-
         if format == "JPEG" and pil_image.mode != "RGB":
             pil_image = pil_image.convert("RGB")
 
         if PromptServer is not None and unique_id is not None:
-            PromptServer.instance.send_sync(
-                BinaryEventTypes.PREVIEW_IMAGE_WITH_METADATA,
-                (
+            server = PromptServer.instance
+            client_supports_metadata = False
+            if hasattr(BinaryEventTypes, "PREVIEW_IMAGE_WITH_METADATA"):
+                try:
+                    from comfy_api import feature_flags
+                    client_supports_metadata = feature_flags.supports_feature(
+                        server.sockets_metadata, server.client_id, "supports_preview_metadata"
+                    )
+                except Exception:
+                    client_supports_metadata = False
+
+            if client_supports_metadata:
+                server.send_sync(
+                    BinaryEventTypes.PREVIEW_IMAGE_WITH_METADATA,
+                    (
+                        (format, pil_image, None),
+                        {
+                            "node_id": unique_id,
+                            "display_node_id": unique_id,
+                            "prompt_id": prompt_id or "",
+                        },
+                    ),
+                    server.client_id,
+                )
+            else:
+                server.send_sync(
+                    BinaryEventTypes.UNENCODED_PREVIEW_IMAGE,
                     (format, pil_image, None),
-                    {
-                        "node_id": unique_id,
-                        "display_node_id": unique_id,
-                        "prompt_id": prompt_id or "",
-                    },
-                ),
-                PromptServer.instance.client_id,
-            )
+                    server.client_id,
+                )
 
         return {"ui": {"fast_preview": [True]}, "result": ()}
 
