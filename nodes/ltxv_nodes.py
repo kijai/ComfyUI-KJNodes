@@ -66,7 +66,7 @@ class LTXVAddGuideMulti(LTXVAddGuide):
         latent_image = latent["samples"]
         noise_mask = get_noise_mask(latent)
 
-        _, _, latent_length, latent_height, latent_width = latent_image.shape
+        _, _, _, latent_height, latent_width = latent_image.shape
 
         # num_guides is a dict containing the inputs from the selected option
         # e.g., {'image_1': tensor, 'frame_idx_1': 0, 'strength_1': 1.0, 'image_2': tensor, 'frame_idx_2': 20, 'strength_2': 0.8, ...}
@@ -75,6 +75,7 @@ class LTXVAddGuideMulti(LTXVAddGuide):
 
         for img_key in image_keys:
             i = img_key.split('_')[1]
+            latent_length = latent_image.shape[2]
 
             img = num_guides[f"image_{i}"]
             f_idx = num_guides[f"frame_idx_{i}"]
@@ -127,7 +128,7 @@ class LTXVAddGuidesFromBatch(LTXVAddGuide):
         latent_image = latent["samples"]
         noise_mask = get_noise_mask(latent)
 
-        _, _, latent_length, latent_height, latent_width = latent_image.shape
+        _, _, _, latent_height, latent_width = latent_image.shape
 
         # Process each image in the batch
         batch_size = images.shape[0]
@@ -138,6 +139,7 @@ class LTXVAddGuidesFromBatch(LTXVAddGuide):
             # Check if image is not black and use batch index as frame index
             if img.max() > 0.001:
                 f_idx = i
+                latent_length = latent_image.shape[2]
 
                 image_1, t = cls.encode(vae, latent_width, latent_height, img, scale_factors)
 
