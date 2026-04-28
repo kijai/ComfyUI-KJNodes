@@ -3597,19 +3597,26 @@ class SaveStringKJ:
     def save_string(self, string, output_folder, filename_prefix="text", file_extension=".txt"):
         filename_prefix += self.prefix_append
 
-        full_output_folder, filename, counter, subfolder, filename_prefix = folder_paths.get_save_image_path(filename_prefix, self.output_dir)
         if output_folder and not os.path.isabs(output_folder) and args.base_directory:
             output_folder = os.path.join(args.base_directory, output_folder)
-        if output_folder != "output":
-            if not os.path.exists(output_folder):
-                os.makedirs(output_folder, exist_ok=True)
-            full_output_folder = output_folder
+        if output_folder and output_folder != "output":
+            target_dir = os.path.abspath(output_folder)
+            os.makedirs(target_dir, exist_ok=True)
+        else:
+            target_dir = self.output_dir
+
+        full_output_folder, filename, counter, subfolder, filename_prefix = folder_paths.get_save_image_path(filename_prefix, target_dir)
 
         base_file_name = f"{filename_prefix}_{counter:05}_"
         results = list()
 
         txt_file = base_file_name + file_extension
         file_path = os.path.join(full_output_folder, txt_file)
+        while os.path.exists(file_path):
+            counter += 1
+            base_file_name = f"{filename_prefix}_{counter:05}_"
+            txt_file = base_file_name + file_extension
+            file_path = os.path.join(full_output_folder, txt_file)
         with open(file_path, 'w', encoding="utf-8") as f:
             f.write(string)
 
