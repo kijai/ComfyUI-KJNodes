@@ -171,14 +171,11 @@ class CheckpointLoaderKJ():
             args.fast.discard("cublas_ops")
 
         ckpt_path = folder_paths.get_full_path_or_raise("checkpoints", ckpt_name)
-        sd, metadata = comfy.utils.load_torch_file(ckpt_path, return_metadata=True)
-
-        model, clip, vae, _ = comfy.sd.load_state_dict_guess_config(
-            sd,
+        model, clip, vae, _ = comfy.sd.load_checkpoint_guess_config(
+            ckpt_path,
             output_vae=True,
             output_clip=True,
             embedding_directory=folder_paths.get_folder_paths("embeddings"),
-            metadata=metadata,
             model_options=model_options)
 
         if dtype := DTYPE_MAP.get(compute_dtype):
