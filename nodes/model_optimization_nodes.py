@@ -246,10 +246,7 @@ def _load_diffusion_model_kj(unet_path, model_options=None, extra_state_dict=Non
         disable_dynamic=disable_dynamic,
     )
 
-    model.cached_patcher_init = (
-        _load_diffusion_model_kj,
-        (unet_path, model_options, extra_state_dict),
-    )
+    model.cached_patcher_init = (_load_diffusion_model_kj, (unet_path, model_options, extra_state_dict))
     return model
 
 class DiffusionModelLoaderKJ():
@@ -307,11 +304,7 @@ class DiffusionModelLoaderKJ():
 
         unet_path = folder_paths.get_full_path_or_raise("diffusion_models", model_name)
 
-        model = _load_diffusion_model_kj(
-            unet_path,
-            model_options=model_options,
-            extra_state_dict=extra_state_dict,
-        )
+        model = _load_diffusion_model_kj(unet_path, model_options=model_options, extra_state_dict=extra_state_dict)
         if dtype := DTYPE_MAP.get(compute_dtype):
             model.set_model_compute_dtype(dtype)
             model.force_cast_weights = False
