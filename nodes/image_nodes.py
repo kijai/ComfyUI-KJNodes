@@ -573,56 +573,70 @@ Concatenates the 9 input images into a 3x3 grid.
         bottom_row = torch.cat((image7, image8, image9), dim=2)
         grid = torch.cat((top_row, mid_row, bottom_row), dim=1)
         return (grid,)
-    
-class ImageBatchTestPattern:
+
+
+class ImageBatchTestPattern(io.ComfyNode):
     @classmethod
-    def INPUT_TYPES(s):
-        return {"required": {
-            "batch_size": ("INT", {"default": 1,"min": 1, "max": 255, "step": 1}),
-            "start_from": ("INT", {"default": 0,"min": 0, "max": 255, "step": 1}),
-            "text_x": ("INT", {"default": 256,"min": 0, "max": 4096, "step": 1}),
-            "text_y": ("INT", {"default": 256,"min": 0, "max": 4096, "step": 1}),
-            "width": ("INT", {"default": 512,"min": 16, "max": 4096, "step": 1}),
-            "height": ("INT", {"default": 512,"min": 16, "max": 4096, "step": 1}),
-            "font": (folder_paths.get_filename_list("kjnodes_fonts"), ),
-            "font_size": ("INT", {"default": 255,"min": 8, "max": 4096, "step": 1}),
-        }}
+    def define_schema(cls):
+        return io.Schema(
+            node_id="ImageBatchTestPattern",
+            category="KJNodes/text",
+            description="Generate a batch of images with sequential numbers rendered in a chosen font.",
+            inputs=[
+                io.Int.Input("batch_size", default=1, min=1, max=4096, step=1),
+                io.Int.Input("start_from", default=0, min=0, max=4096, step=1),
+                io.Int.Input("text_x", default=256, min=0, max=4096, step=1),
+                io.Int.Input("text_y", default=256, min=0, max=4096, step=1),
+                io.Int.Input("width", default=512, min=16, max=4096, step=1),
+                io.Int.Input("height", default=512, min=16, max=4096, step=1),
+                io.Combo.Input("font", options=folder_paths.get_filename_list("kjnodes_fonts")),
+                io.Int.Input("font_size", default=255, min=8, max=4096, step=1),
+            ],
+            outputs=[
+                io.Image.Output(display_name="image"),
+            ],
+        )
 
-    RETURN_TYPES = ("IMAGE",)
-    FUNCTION = "generatetestpattern"
-    CATEGORY = "KJNodes/text"
-
-    def generatetestpattern(self, batch_size, font, font_size, start_from, width, height, text_x, text_y):
-        out = []
-        # Generate the sequential numbers for each image
-        numbers = np.arange(start_from, start_from + batch_size)
+    @classmethod
+    def execute(cls, batch_size, font, font_size, start_from, width, height, text_x, text_y) -> io.NodeOutput:
         font_path = folder_paths.get_full_path("kjnodes_fonts", font)
+        pil_font = ImageFont.truetype(font_path, font_size)
 
-        for number in numbers:
-            # Create a black image with the number as a random color text
-            image = Image.new("RGB", (width, height), color='black')
-            draw = ImageDraw.Draw(image)
-            
-            # Generate a random color for the text
+        # Probe once whether the '-liga' feature is supported by this PIL build/font
+        use_liga = True
+        try:
+            ImageDraw.Draw(Image.new("RGB", (1, 1))).text(
+                (0, 0), "0", font=pil_font, fill=(0, 0, 0), features=['-liga']
+            )
+        except Exception:
+            use_liga = False
+
+        image = Image.new("RGB", (width, height), color='black')
+        draw = ImageDraw.Draw(image)
+
+        out_buf = np.empty((batch_size, height, width, 3), dtype=np.uint8)
+        pbar = ProgressBar(batch_size)
+
+        for i in range(batch_size):
+            # Reset canvas to black instead of allocating a new PIL image
+            draw.rectangle((0, 0, width, height), fill='black')
+
             font_color = (random.randint(0, 255), random.randint(0, 255), random.randint(0, 255))
-            
-            font = ImageFont.truetype(font_path, font_size)
-            
-            # Get the size of the text and position it in the center
-            text = str(number)
-           
-            try:
-                draw.text((text_x, text_y), text, font=font, fill=font_color, features=['-liga'])
-            except:
-                draw.text((text_x, text_y), text, font=font, fill=font_color,)
-            
-            # Convert the image to a numpy array and normalize the pixel values
-            image_np = np.array(image).astype(np.float32) / 255.0
-            image_tensor = torch.from_numpy(image_np).unsqueeze(0)
-            out.append(image_tensor)
-        out_tensor = torch.cat(out, dim=0)
-  
-        return (out_tensor,)
+            text = str(start_from + i)
+
+            if use_liga:
+                draw.text((text_x, text_y), text, font=pil_font, fill=font_color, features=['-liga'])
+            else:
+                draw.text((text_x, text_y), text, font=pil_font, fill=font_color)
+
+            out_buf[i] = np.asarray(image)
+            pbar.update(1)
+
+        out_tensor = torch.from_numpy(out_buf).to(
+            device=model_management.intermediate_device(),
+            dtype=model_management.intermediate_dtype(),
+        ).div_(255.0)
+        return io.NodeOutput(out_tensor)
 
 class ImageGrabPIL:
 
