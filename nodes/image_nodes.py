@@ -1970,6 +1970,94 @@ Returns a range of images from a batch.
 
         return (chosen_images, chosen_masks,)
 
+class RandomImageFromBatch(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        template = io.MatchType.Template("input_type", [io.Image, io.Mask])
+        return io.Schema(
+            node_id="RandomImageFromBatch",
+            display_name="Random Image From Batch",
+            search_aliases=["random", "mask", "sequence", "frame"],
+            category="KJNodes/image",
+            description="Picks a sequence of frames from an image or mask batch within a selected index range. "
+                        "At randomness=0 the picks are evenly spaced across the range; at randomness=1 they are "
+                        "uniformly random without replacement; values in between blend linearly. "
+                        "Output is always sorted by batch index. Negative indices count from the end (-1 = last).",
+            inputs=[
+                io.MatchType.Input("input", template=template,
+                                   tooltip="Image or mask batch to sample from."),
+                io.Int.Input("start_index", default=0, min=-4096, max=4096,
+                             tooltip="Inclusive start of the sampling range. Negative values count from the end."),
+                io.Int.Input("end_index", default=-1, min=-4096, max=4096,
+                             tooltip="Inclusive end of the sampling range. -1 means the last frame."),
+                io.Int.Input("num_frames", default=1, min=1, max=4096,
+                             tooltip="How many frames to pick from the range."),
+                io.Float.Input("randomness", default=1.0, min=0.0, max=1.0, step=0.01,
+                               tooltip="0 = evenly spaced across the range, 1 = uniformly random without replacement, "
+                                       "in-between = linear blend (jittered even spacing)."),
+                io.Int.Input("min_distance", default=0, min=0, max=4096,
+                             tooltip="Minimum gap (in frames) between consecutive picks. 0 = no minimum. "
+                                     "Picks are pushed forward to satisfy this; later picks may clamp to the range end."),
+                io.Int.Input("max_distance", default=0, min=0, max=4096,
+                             tooltip="Maximum gap (in frames) between consecutive picks. 0 = no maximum. "
+                                     "Picks are pulled in to satisfy this, which may compress the sequence toward the start."),
+                io.Int.Input("seed", default=0, min=0, max=0xffffffffffffffff, step=1,
+                             tooltip="Random seed for reproducible sampling. Ignored when randomness is 0."),
+            ],
+            outputs=[
+                io.MatchType.Output(template=template, display_name="output"),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, input, start_index, end_index, num_frames, randomness, min_distance, max_distance, seed) -> io.NodeOutput:
+        n = input.shape[0]
+        if n == 0:
+            raise ValueError("Input batch is empty.")
+
+        s = start_index if start_index >= 0 else n + start_index
+        e = end_index if end_index >= 0 else n + end_index
+        s = max(0, min(s, n - 1))
+        e = max(0, min(e, n - 1))
+        if e < s:
+            s, e = e, s
+        range_size = e - s + 1
+
+        if num_frames == 1:
+            even = [(s + e) / 2]
+        else:
+            even = [s + i * (e - s) / (num_frames - 1) for i in range(num_frames)]
+
+        if randomness <= 0:
+            picks_float = even
+        else:
+            rng = random.Random(seed)
+            if num_frames <= range_size:
+                random_picks = rng.sample(range(s, e + 1), num_frames)
+            else:
+                random_picks = [rng.randint(s, e) for _ in range(num_frames)]
+            random_picks.sort()
+            picks_float = [(1 - randomness) * ev + randomness * rp for ev, rp in zip(even, random_picks)]
+
+        picks = sorted(max(s, min(e, int(round(p)))) for p in picks_float)
+
+        if num_frames > 1 and (min_distance > 0 or max_distance > 0):
+            adjusted = [picks[0]]
+            for i in range(1, len(picks)):
+                prev = adjusted[-1]
+                target = picks[i]
+                if min_distance > 0 and target - prev < min_distance:
+                    target = prev + min_distance
+                if max_distance > 0 and target - prev > max_distance:
+                    target = prev + max_distance
+                adjusted.append(min(e, max(s, target)))
+            picks = adjusted
+
+        idx = torch.tensor(picks, dtype=torch.long, device=input.device)
+        chosen = input.index_select(0, idx)
+
+        return io.NodeOutput(chosen)
+
 class ImageBatchExtendWithOverlap:
 
     RETURN_TYPES = ("IMAGE", "IMAGE", "IMAGE", )
