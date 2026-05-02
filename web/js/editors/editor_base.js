@@ -236,10 +236,14 @@ export class BaseEditorCanvas {
     this.heightWidget.value = img.height;
     this.onImageResize?.(img);
 
-    // Cap display size, preserving aspect ratio
+    // Cap display size to the current node width if the user has already resized it,
+    // otherwise fall back to maxDisplayDim. This prevents the node from expanding to
+    // fill the image — instead the image scales to fit the node.
+    const nodeCanvasW = Math.max(64, Math.round(this.node.size[0] - 45));
+    const fitDim = Math.min(nodeCanvasW, maxDisplayDim);
     let displayW = img.width, displayH = img.height;
-    if (displayW > maxDisplayDim || displayH > maxDisplayDim) {
-      const scale = maxDisplayDim / Math.max(displayW, displayH);
+    if (displayW > fitDim || displayH > fitDim) {
+      const scale = fitDim / Math.max(displayW, displayH);
       displayW = Math.round(displayW * scale);
       displayH = Math.round(displayH * scale);
     }
@@ -249,7 +253,8 @@ export class BaseEditorCanvas {
       this.height = displayH;
       this.resizeCanvas();
 
-      if (displayW > 256) this.setNodeWidth(displayW + 45);
+      // Only expand the node width if it's narrower than the image — never shrink it
+      if (displayW + 45 > this.node.size[0]) this.setNodeWidth(displayW + 45);
       this.onSizeChanged();
       if (this.node.graph) {
         try { this.node.arrange?.(); } catch (_) {}
@@ -522,20 +527,42 @@ export class BaseEditorCanvas {
     setupMenuItems(node.contextMenu, menuEls);
     document.body.appendChild(node.contextMenu);
 
+    // Shared helper — loads the stored background image into the editor.
+    // alignToImage: if true, resizes the node to fit the image first (old behaviour).
+    //               if false, scales the image to fit the current node size (new behaviour).
+    const _reloadBgImage = (alignToImage) => {
+      const imgData = node.properties.imgData;
+      if (!imgData) return;
+      const img = new Image();
+      img.onload = () => {
+        if (!node.editor) return;
+        if (alignToImage) {
+          // Temporarily lift the node-size cap so processImage can expand the node
+          const savedSize = [node.size[0], node.size[1]];
+          node.setSize([Math.min(img.width, maxDisplayDim) + 45, savedSize[1]]);
+        }
+        node.editor.processImage(img);
+      };
+      if (imgData.base64) {
+        img.src = `data:${imgData.type || 'image/png'};base64,${imgData.base64}`;
+      } else if (imgData.filename) {
+        img.src = `/view?filename=${encodeURIComponent(imgData.filename)}&type=temp&no-cache=${Date.now()}`;
+      }
+    };
+
+    // "Reset canvas" — clears points and re-fits the image to the current node size
     node.addWidget("button", "Reset canvas", null, () => {
       try {
         node.editor = new editorClass(node, true);
-        // If a background image exists, re-apply it to restore correct dimensions
-        const imgData = node.properties.imgData;
-        if (imgData) {
-          const img = new Image();
-          img.onload = () => { if (node.editor) node.editor.processImage(img); };
-          if (imgData.base64) {
-            img.src = `data:${imgData.type || 'image/png'};base64,${imgData.base64}`;
-          } else if (imgData.filename) {
-            img.src = `/view?filename=${encodeURIComponent(imgData.filename)}&type=temp&no-cache=${Date.now()}`;
-          }
-        }
+        _reloadBgImage(false);
+      } catch (error) { console.error(`Error creating ${editorClass.name}:`, error); }
+    });
+
+    // "Align to image" — resizes the node to match the image dimensions (legacy behaviour)
+    node.addWidget("button", "Align to image", null, () => {
+      try {
+        node.editor = new editorClass(node, true);
+        _reloadBgImage(true);
       } catch (error) { console.error(`Error creating ${editorClass.name}:`, error); }
     });
 
