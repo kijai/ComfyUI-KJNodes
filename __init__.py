@@ -65,6 +65,7 @@ NODE_CONFIG = {
     "GetLatentSizeAndCount": {"class": GetLatentSizeAndCount, "name": "Get Latent Size & Count"},
     "GetImageSizeAndCount": {"class": GetImageSizeAndCount, "name": "Get Image Size & Count"},
     "FastPreview": {"class": FastPreview, "name": "Fast Preview"},
+    "FastPreviewBatch": {"class": FastPreviewBatch, "name": "Fast Preview Batch"},
     "ImageBatchFilter": {"class": ImageBatchFilter, "name": "Image Batch Filter"},
     "ImageAndMaskPreview": {"class": ImageAndMaskPreview},
     "ImageAddMulti": {"class": ImageAddMulti, "name": "Image Add Multi"},
