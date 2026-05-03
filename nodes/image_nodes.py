@@ -331,103 +331,111 @@ Saves an image and mask as .PNG with the mask as the alpha channel.
 
         return { "ui": { "images": results } }
 
-class ImageConcanate:
+
+class ImageConcanate(io.ComfyNode):
     @classmethod
-    def INPUT_TYPES(s):
-        return {"required": {
-            "image1": ("IMAGE",),
-            "image2": ("IMAGE",),
-            "direction": (
-            [   'right',
-                'down',
-                'left',
-                'up',
+    def define_schema(cls):
+        return io.Schema(
+            node_id="ImageConcanate",
+            category="KJNodes/image",
+            description=(
+                "Concatenates the image2 to image1 in the specified direction.\n"
+                "When match_image_size is False and dimensions don't match along the shared axis,\n"
+                "the smaller image is centered and zero-padded instead of erroring."
+            ),
+            inputs=[
+                io.Image.Input("image1"),
+                io.Image.Input("image2"),
+                io.Combo.Input("direction", options=['right', 'down', 'left', 'up'], default='right'),
+                io.Boolean.Input("match_image_size", default=True),
             ],
-            {
-            "default": 'right'
-             }),
-            "match_image_size": ("BOOLEAN", {"default": True}),
-        }}
+            outputs=[
+                io.Image.Output(display_name="image"),
+            ],
+        )
 
-    RETURN_TYPES = ("IMAGE",)
-    FUNCTION = "concatenate"
-    CATEGORY = "KJNodes/image"
-    DESCRIPTION = """
-Concatenates the image2 to image1 in the specified direction.
-"""
+    @classmethod
+    def execute(cls, image1, image2, direction, match_image_size) -> io.NodeOutput:
+        return io.NodeOutput(cls.concatenate(image1, image2, direction, match_image_size))
 
-    def concatenate(self, image1, image2, direction, match_image_size, first_image_shape=None):
-        # Check if the batch sizes are different
-        batch_size1 = image1.shape[0]
-        batch_size2 = image2.shape[0]
+    @staticmethod
+    def concatenate(image1, image2, direction, match_image_size, first_image_shape=None):
+        bs1 = image1.shape[0]
+        bs2 = image2.shape[0]
+        B = max(bs1, bs2)
 
-        if batch_size1 != batch_size2:
-            # Calculate the number of repetitions needed
-            max_batch_size = max(batch_size1, batch_size2)
-            repeats1 = max_batch_size - batch_size1
-            repeats2 = max_batch_size - batch_size2
-            
-            # Repeat the last image to match the largest batch size
-            if repeats1 > 0:
-                last_image1 = image1[-1].unsqueeze(0).repeat(repeats1, 1, 1, 1)
-                image1 = torch.cat([image1.clone(), last_image1], dim=0)
-            if repeats2 > 0:
-                last_image2 = image2[-1].unsqueeze(0).repeat(repeats2, 1, 1, 1)
-                image2 = torch.cat([image2.clone(), last_image2], dim=0)
+        H1, W1 = image1.shape[1], image1.shape[2]
+        C1, C2 = image1.shape[-1], image2.shape[-1]
+        out_C = max(C1, C2)
 
         if match_image_size:
-            # Use first_image_shape if provided; otherwise, default to image1's shape
             target_shape = first_image_shape if first_image_shape is not None else image1.shape
-
-            original_height = image2.shape[1]
-            original_width = image2.shape[2]
-            original_aspect_ratio = original_width / original_height
-
-            if direction in ['left', 'right']:
-                # Match the height and adjust the width to preserve aspect ratio
-                target_height = target_shape[1]  # B, H, W, C format
-                target_width = int(target_height * original_aspect_ratio)
-            elif direction in ['up', 'down']:
-                # Match the width and adjust the height to preserve aspect ratio
-                target_width = target_shape[2]  # B, H, W, C format
-                target_height = int(target_width / original_aspect_ratio)
-            
-            # Adjust image2 to the expected format for common_upscale
-            image2_for_upscale = image2.movedim(-1, 1)  # Move C to the second position (B, C, H, W)
-            
-            # Resize image2 to match the target size while preserving aspect ratio
-            image2_resized = common_upscale(image2_for_upscale, target_width, target_height, "lanczos", "disabled")
-            
-            # Adjust image2 back to the original format (B, H, W, C) after resizing
-            image2_resized = image2_resized.movedim(1, -1)
-        else:
-            image2_resized = image2
-
-        # Ensure both images have the same number of channels
-        channels_image1 = image1.shape[-1]
-        channels_image2 = image2_resized.shape[-1]
-
-        if channels_image1 != channels_image2:
-            if channels_image1 < channels_image2:
-                # Add alpha channel to image1 if image2 has it
-                alpha_channel = torch.ones((*image1.shape[:-1], channels_image2 - channels_image1), device=image1.device)
-                image1 = torch.cat((image1, alpha_channel), dim=-1)
+            orig_aspect = image2.shape[2] / image2.shape[1]
+            if direction in ('left', 'right'):
+                H2 = target_shape[1]
+                W2 = int(H2 * orig_aspect)
             else:
-                # Add alpha channel to image2 if image1 has it
-                alpha_channel = torch.ones((*image2_resized.shape[:-1], channels_image1 - channels_image2), device=image2_resized.device)
-                image2_resized = torch.cat((image2_resized, alpha_channel), dim=-1)
+                W2 = target_shape[2]
+                H2 = int(W2 / orig_aspect)
+        else:
+            H2, W2 = image2.shape[1], image2.shape[2]
 
+        if direction in ('right', 'left'):
+            out_H, out_W = max(H1, H2), W1 + W2
+        else:
+            out_H, out_W = H1 + H2, max(W1, W2)
 
-        # Concatenate based on the specified direction
         if direction == 'right':
-            concatenated_image = torch.cat((image1, image2_resized), dim=2)  # Concatenate along width
-        elif direction == 'down':
-            concatenated_image = torch.cat((image1, image2_resized), dim=1)  # Concatenate along height
+            i1_y, i1_x, i2_y, i2_x = (out_H - H1) // 2, 0, (out_H - H2) // 2, W1
         elif direction == 'left':
-            concatenated_image = torch.cat((image2_resized, image1), dim=2)  # Concatenate along width
-        elif direction == 'up':
-            concatenated_image = torch.cat((image2_resized, image1), dim=1)  # Concatenate along height
-        return concatenated_image,
+            i1_y, i1_x, i2_y, i2_x = (out_H - H1) // 2, W2, (out_H - H2) // 2, 0
+        elif direction == 'down':
+            i1_y, i1_x, i2_y, i2_x = 0, (out_W - W1) // 2, H1, (out_W - W2) // 2
+        else:  # 'up'
+            i1_y, i1_x, i2_y, i2_x = H2, (out_W - W1) // 2, 0, (out_W - W2) // 2
+
+        output = torch.zeros(
+            (B, out_H, out_W, out_C),
+            dtype=model_management.intermediate_dtype(),
+            device=model_management.intermediate_device(),
+        )
+
+        def write(dst, src, src_C):
+            if dst.shape[-1] == src_C:
+                dst.copy_(src)
+            else:
+                dst[..., :src_C].copy_(src)
+                dst[..., src_C:].fill_(1.0)
+
+        slot1 = output[:, i1_y:i1_y + H1, i1_x:i1_x + W1, :]
+        if bs1 == B:
+            write(slot1, image1, C1)
+        else:
+            write(slot1[:bs1], image1, C1)
+            write(slot1[bs1:], image1[-1:].expand(B - bs1, -1, -1, -1), C1)
+        del slot1
+
+        slot2 = output[:, i2_y:i2_y + H2, i2_x:i2_x + W2, :]
+        if match_image_size:
+            pbar = ProgressBar(B)
+            device = model_management.get_torch_device()
+            for i in range(B):
+                src_i = min(i, bs2 - 1)
+                frame = image2[src_i:src_i + 1].to(device, non_blocking=True).permute(0, 3, 1, 2)
+                resized = F.interpolate(frame, size=(H2, W2), mode='bicubic', antialias=True).permute(0, 2, 3, 1)
+                write(slot2[i:i + 1], resized, C2)
+                del frame, resized
+                pbar.update(1)
+        else:
+            if bs2 == B:
+                write(slot2, image2, C2)
+            else:
+                write(slot2[:bs2], image2, C2)
+                write(slot2[bs2:], image2[-1:].expand(B - bs2, -1, -1, -1), C2)
+        del slot2
+
+        return output
+
 
 class ImageConcatFromBatch:
     @classmethod
@@ -2677,50 +2685,47 @@ with the **inputcount** and clicking update.
                 image = torch.sub(image, new_image)
         return (image,)    
 
-class ImageConcatMulti:
+
+class ImageConcatMulti(io.ComfyNode):
     @classmethod
-    def INPUT_TYPES(s):
-        return {
-            "required": {
-                "inputcount": ("INT", {"default": 2, "min": 2, "max": 1000, "step": 1}),
-                "image_1": ("IMAGE", ),
-                
-                "direction": (
-                [   'right',
-                    'down',
-                    'left',
-                    'up',
-                ],
-            {
-            "default": 'right'
-             }),
-            "match_image_size": ("BOOLEAN", {"default": False}),
-            },
-            "optional": {
-                "image_2": ("IMAGE", ),
-            },
-    }
+    def define_schema(cls):
+        return io.Schema(
+            node_id="ImageConcatMulti",
+            display_name="Image Concatenate Multi",
+            category="KJNodes/image",
+            description=(
+                "Creates an image from multiple images.\n"
+                "Set the input count and click 'Update inputs' to add more image slots."
+            ),
+            accept_all_inputs=True, # JS dynamically adds image_3..image_N beyond the declared inputs
+            inputs=[
+                io.Int.Input("inputcount", default=2, min=2, max=1000, step=1),
+                io.Image.Input("image_1"),
+                io.Combo.Input("direction", options=['right', 'down', 'left', 'up'], default='right'),
+                io.Boolean.Input("match_image_size", default=False),
+                io.Image.Input("image_2", optional=True),
+            ],
+            outputs=[
+                io.Image.Output(display_name="images"),
+            ],
+        )
 
-    RETURN_TYPES = ("IMAGE",)
-    RETURN_NAMES = ("images",)
-    FUNCTION = "combine"
-    CATEGORY = "KJNodes/image"
-    DESCRIPTION = """
-Creates an image from multiple images.  
-You can set how many inputs the node has,  
-with the **inputcount** and clicking update.
-"""
-
-    def combine(self, inputcount, direction, match_image_size, **kwargs):
-        image = kwargs["image_1"]
-        first_image_shape = None
-        if first_image_shape is None:
-            first_image_shape = image.shape
+    @classmethod
+    def execute(cls, inputcount, image_1, direction, match_image_size, image_2=None, **kwargs) -> io.NodeOutput:
+        kwargs["image_1"] = image_1
+        if image_2 is not None:
+            kwargs["image_2"] = image_2
+        image = image_1
+        first_image_shape = image.shape
+        device = model_management.intermediate_device()
+        dtype = model_management.intermediate_dtype()
         for c in range(1, inputcount):
-            new_image = kwargs.get(f"image_{c + 1}", torch.zeros(first_image_shape))
-            image, = ImageConcanate.concatenate(self, image, new_image, direction, match_image_size, first_image_shape=first_image_shape)
-        first_image_shape = None
-        return (image,)
+            key = f"image_{c + 1}"
+            new_image = kwargs[key] if key in kwargs else torch.zeros(
+                first_image_shape, dtype=dtype, device=device
+            )
+            image = ImageConcanate.concatenate(image, new_image, direction, match_image_size, first_image_shape=first_image_shape)
+        return io.NodeOutput(image)
 
 class PreviewAnimation:
     def __init__(self):
