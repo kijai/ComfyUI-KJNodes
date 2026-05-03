@@ -62,7 +62,15 @@ export function getNodeAtPoint(graph, cx, cy) {
 export function typesCompatible(a, b) {
   if (a === "*" || b === "*") return true;
   if (a === b) return true;
-  if (typeof a === "string" && typeof b === "string" && a.toUpperCase() === b.toUpperCase()) return true;
+  if (typeof a !== "string" || typeof b !== "string") return false;
+  if (a.toUpperCase() === b.toUpperCase()) return true;
+  // ComfyUI accepts union types like "STRING,INT" — match if any token overlaps
+  if (a.includes(",") || b.includes(",")) {
+    const aTokens = a.toUpperCase().split(",").map(s => s.trim()).filter(Boolean);
+    const bTokens = b.toUpperCase().split(",").map(s => s.trim()).filter(Boolean);
+    if (aTokens.includes("*") || bTokens.includes("*")) return true;
+    return aTokens.some(t => bTokens.includes(t));
+  }
   return false;
 }
 
@@ -109,7 +117,7 @@ export function resolveSourcePreview(node, inputSlot) {
   if (!node.graph) return null;
   const input = node.inputs?.[inputSlot];
   if (!input || input.link == null) return null;
-  const link = node.graph.links?.[input.link] ?? node.graph.links?.get?.(input.link);
+  const link = node.graph.links?.get(input.link);
   if (!link) return null;
   const srcNode = node.graph.getNodeById(link.origin_id);
   if (!srcNode) return null;
@@ -168,7 +176,7 @@ export function watchImageInputs(node, inputName, onChange) {
     for (const slotIdx of slots) {
       const input = node.inputs[slotIdx];
       if (!input || input.link == null) continue;
-      const link = node.graph.links?.[input.link] ?? node.graph.links?.get?.(input.link);
+      const link = node.graph.links?.get(input.link);
       if (!link) continue;
       const srcNode = node.graph.getNodeById(link.origin_id);
       if (!srcNode) continue;
@@ -183,7 +191,9 @@ export function watchImageInputs(node, inputName, onChange) {
     }
   }
 
-  chainCallback(node, "onConnectionsChange", function () {
+  chainCallback(node, "onConnectionsChange", function (type) {
+    // Only react to input connection changes, not output
+    if (type != null && type !== 1) return;
     setTimeout(() => {
       watch();
       onChange(resolve());
@@ -219,13 +229,20 @@ export function captureVideoFrame(videoEl, callback) {
 
 // ─── Bounding box hit test ───
 // Tests whether (mx, my) hits a corner handle or the interior of a rect defined by (x1, y1)–(x2, y2).
-// Returns "resize-tl", "resize-tr", "resize-bl", "resize-br", "move", or null.
+// Returns "resize-tl", "resize-tr", "resize-bl", "resize-br", "resize-t", "resize-b", "resize-l", "resize-r", "move", or null.
 export function rectHitTest(mx, my, x1, y1, x2, y2, radius) {
   const hit = (cx, cy) => Math.abs(mx - cx) < radius && Math.abs(my - cy) < radius;
+  // Corners first (higher priority)
   if (hit(x1, y1)) return "resize-tl";
   if (hit(x2, y1)) return "resize-tr";
   if (hit(x1, y2)) return "resize-bl";
   if (hit(x2, y2)) return "resize-br";
+  // Edges
+  if (mx >= x1 && mx <= x2 && Math.abs(my - y1) < radius) return "resize-t";
+  if (mx >= x1 && mx <= x2 && Math.abs(my - y2) < radius) return "resize-b";
+  if (my >= y1 && my <= y2 && Math.abs(mx - x1) < radius) return "resize-l";
+  if (my >= y1 && my <= y2 && Math.abs(mx - x2) < radius) return "resize-r";
+  // Interior
   if (mx >= x1 && mx <= x2 && my >= y1 && my <= y2) return "move";
   return null;
 }
@@ -235,6 +252,8 @@ export function cursorForBboxMode(mode) {
   if (mode === "move") return "move";
   if (mode === "resize-tl" || mode === "resize-br") return "nwse-resize";
   if (mode === "resize-tr" || mode === "resize-bl") return "nesw-resize";
+  if (mode === "resize-t" || mode === "resize-b") return "ns-resize";
+  if (mode === "resize-l" || mode === "resize-r") return "ew-resize";
   return null;
 }
 
