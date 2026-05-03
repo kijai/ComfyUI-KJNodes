@@ -1,4 +1,4 @@
-import { chainCallback, addMiddleClickPan, addWheelPassthrough, watchImageInputs, rectHitTest, cursorForBboxMode } from './utility.js';
+import { chainCallback, addMiddleClickPan, addWheelPassthrough, captureVideoFrame, watchImageInputs, rectHitTest, cursorForBboxMode } from './utility.js';
 const { app } = window.comfyAPI.app;
 
 const BBOX_PALETTE = ["#46b4e6", "#e68246", "#82e646", "#e646b4", "#e6e646", "#46e6c8"];
@@ -1906,20 +1906,10 @@ app.registerExtension({
         loadPreviewImage(`/view?filename=${encodeURIComponent(filename)}&type=temp`, true);
       }
 
-      function captureVideoFrame(videoEl, preserveBbox) {
-        const capture = () => {
-          const tmpCanvas = document.createElement("canvas");
-          tmpCanvas.width = videoEl.videoWidth;
-          tmpCanvas.height = videoEl.videoHeight;
-          tmpCanvas.getContext("2d").drawImage(videoEl, 0, 0);
-          loadPreviewImage(tmpCanvas.toDataURL("image/webp", 0.9), preserveBbox);
-        };
-        if (videoEl.readyState >= 2) {
-          capture();
-        } else {
-          const onReady = () => { videoEl.removeEventListener("loadeddata", onReady); capture(); };
-          videoEl.addEventListener("loadeddata", onReady);
-        }
+      function captureVideoFrameToPreview(videoEl, preserveBbox) {
+        captureVideoFrame(videoEl, (canvas) => {
+          loadPreviewImage(canvas.toDataURL("image/webp", 0.9), preserveBbox);
+        });
       }
 
       function handleSourceChange(sources, preserveBbox) {
@@ -1938,7 +1928,7 @@ app.registerExtension({
         }
         const src = sources[0];
         if (src.isVideo && src.videoEl) {
-          captureVideoFrame(src.videoEl, preserveBbox);
+          captureVideoFrameToPreview(src.videoEl, preserveBbox);
         } else if (src.url) {
           loadPreviewImage(src.url, preserveBbox);
         }
