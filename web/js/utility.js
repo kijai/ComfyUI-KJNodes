@@ -195,6 +195,28 @@ export function watchImageInputs(node, inputName, onChange) {
   return unwatchWidgets;
 }
 
+// ─── Video frame capture ───
+// Draws the current frame of a video element to a fresh canvas at native resolution.
+// If the video isn't decoded yet (readyState < 2), waits once for "loadeddata" before capturing.
+// Calls callback(canvas) with the resulting canvas. Caller decides whether to use it directly
+// (drawImage accepts canvas) or convert via toDataURL.
+export function captureVideoFrame(videoEl, callback) {
+  const capture = () => {
+    if (!videoEl.videoWidth || !videoEl.videoHeight) return;
+    const c = document.createElement("canvas");
+    c.width = videoEl.videoWidth;
+    c.height = videoEl.videoHeight;
+    c.getContext("2d").drawImage(videoEl, 0, 0);
+    callback(c);
+  };
+  if (videoEl.readyState >= 2) {
+    capture();
+  } else {
+    const onReady = () => { videoEl.removeEventListener("loadeddata", onReady); capture(); };
+    videoEl.addEventListener("loadeddata", onReady);
+  }
+}
+
 // ─── Bounding box hit test ───
 // Tests whether (mx, my) hits a corner handle or the interior of a rect defined by (x1, y1)–(x2, y2).
 // Returns "resize-tl", "resize-tr", "resize-bl", "resize-br", "move", or null.
