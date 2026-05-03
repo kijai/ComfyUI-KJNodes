@@ -335,22 +335,28 @@ Saves an image and mask as .PNG with the mask as the alpha channel.
 class ImageConcanate(io.ComfyNode):
     @classmethod
     def define_schema(cls):
+        # image1 drives the output type; image2 can independently be IMAGE or MASK and gets
+        # converted to image1's type inside concatenate().
+        type_template = io.MatchType.Template("image_or_mask", allowed_types=[io.Image, io.Mask])
         return io.Schema(
             node_id="ImageConcanate",
             category="KJNodes/image",
             description=(
-                "Concatenates the image2 to image1 in the specified direction.\n"
+                "Concatenates image2 to image1 in the specified direction.\n"
+                "Both inputs accept IMAGE or MASK; the output type follows image1.\n"
+                "If image2 is a different type than image1 it's converted (RGB mean for image→mask,\n"
+                "channel-replicate for mask→image).\n"
                 "When match_image_size is False and dimensions don't match along the shared axis,\n"
                 "the smaller image is centered and zero-padded instead of erroring."
             ),
             inputs=[
-                io.Image.Input("image1"),
-                io.Image.Input("image2"),
+                io.MatchType.Input("image1", template=type_template),
+                io.MultiType.Input("image2", types=[io.Image, io.Mask]),
                 io.Combo.Input("direction", options=['right', 'down', 'left', 'up'], default='right'),
                 io.Boolean.Input("match_image_size", default=True),
             ],
             outputs=[
-                io.Image.Output(display_name="image"),
+                io.MatchType.Output(template=type_template, display_name="output"),
             ],
         )
 
@@ -360,6 +366,18 @@ class ImageConcanate(io.ComfyNode):
 
     @staticmethod
     def concatenate(image1, image2, direction, match_image_size, first_image_shape=None):
+        # IMAGE is BHWC, MASK is BHW. Output type follows image1; convert image2 to match,
+        # then unsqueeze any masks to BHW1 so the rest of the function can stay BHWC-only.
+        output_is_mask = image1.dim() == 3
+        if output_is_mask and image2.dim() == 4:
+            ch = min(3, image2.shape[-1])
+            image2 = image2[..., :ch].mean(dim=-1)
+        elif not output_is_mask and image2.dim() == 3:
+            image2 = image2.unsqueeze(-1).expand(-1, -1, -1, image1.shape[-1])
+        if output_is_mask:
+            image1 = image1.unsqueeze(-1)
+            image2 = image2.unsqueeze(-1)
+
         bs1 = image1.shape[0]
         bs2 = image2.shape[0]
         B = max(bs1, bs2)
@@ -434,6 +452,8 @@ class ImageConcanate(io.ComfyNode):
                 write(slot2[bs2:], image2[-1:].expand(B - bs2, -1, -1, -1), C2)
         del slot2
 
+        if output_is_mask:
+            return output.squeeze(-1)
         return output
 
 
@@ -2689,24 +2709,27 @@ with the **inputcount** and clicking update.
 class ImageConcatMulti(io.ComfyNode):
     @classmethod
     def define_schema(cls):
+        # image_1 drives the output type; image_2 (and JS-added image_3+) can independently be IMAGE or MASK
+        type_template = io.MatchType.Template("multi_image_or_mask", allowed_types=[io.Image, io.Mask])
         return io.Schema(
             node_id="ImageConcatMulti",
             display_name="Image Concatenate Multi",
             category="KJNodes/image",
             description=(
-                "Creates an image from multiple images.\n"
-                "Set the input count and click 'Update inputs' to add more image slots."
+                "Creates an image from multiple images or masks.\n"
+                "Set the input count and click 'Update inputs' to add more slots.\n"
+                "The output type follows image_1; other inputs are converted to match."
             ),
             accept_all_inputs=True, # JS dynamically adds image_3..image_N beyond the declared inputs
             inputs=[
                 io.Int.Input("inputcount", default=2, min=2, max=1000, step=1),
-                io.Image.Input("image_1"),
+                io.MatchType.Input("image_1", template=type_template),
                 io.Combo.Input("direction", options=['right', 'down', 'left', 'up'], default='right'),
                 io.Boolean.Input("match_image_size", default=False),
-                io.Image.Input("image_2", optional=True),
+                io.MultiType.Input("image_2", types=[io.Image, io.Mask], optional=True),
             ],
             outputs=[
-                io.Image.Output(display_name="images"),
+                io.MatchType.Output(template=type_template, display_name="output"),
             ],
         )
 

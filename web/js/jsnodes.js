@@ -35,7 +35,6 @@ app.registerExtension({
 				break;
 			case "ImageBatchMulti":
 			case "ImageAddMulti":
-			case "ImageConcatMulti":
 			case "CrossFadeImagesMulti":
 			case "TransitionImagesMulti":
 				nodeType.prototype.onNodeCreated = function () {
@@ -56,9 +55,35 @@ app.registerExtension({
 					}
 					else{
 						for(let i = num_inputs+1; i <= target_number_of_inputs; ++i)
-							this.addInput(`image_${i}`, this._type, {shape: 7});						
+							this.addInput(`image_${i}`, this._type, {shape: 7});
 					}
-					
+
+					});
+				}
+				break;
+			case "ImageConcatMulti":
+				// Split out from the IMAGE-only case so dynamic slots accept MASK too.
+				nodeType.prototype.onNodeCreated = function () {
+				this._type = "IMAGE,MASK"
+				const acceptedTypes = ["IMAGE", "IMAGE,MASK"];
+				this.addWidget("button", "Update inputs", null, () => {
+					if (!this.inputs) {
+						this.inputs = [];
+					}
+					const target_number_of_inputs = this.widgets.find(w => w.name === "inputcount")["value"];
+					const num_inputs = this.inputs.filter(input => acceptedTypes.includes(input.type)).length
+					if(target_number_of_inputs===num_inputs)return;
+
+					if(target_number_of_inputs < num_inputs){
+						const inputs_to_remove = num_inputs - target_number_of_inputs;
+						for(let i = 0; i < inputs_to_remove; i++) {
+							this.removeInput(this.inputs.length - 1);
+						}
+					}
+					else{
+						for(let i = num_inputs+1; i <= target_number_of_inputs; ++i)
+							this.addInput(`image_${i}`, this._type, {shape: 7});
+					}
 					});
 				}
 				break;
