@@ -16,8 +16,11 @@ Documentation is mostly in the node descriptions and tooltips.
 
 Node insert (default hotkey D, configurable) and shake to disconnect (default disabled, found in settings to enable):
 
-
 https://github.com/user-attachments/assets/e81f02e6-9cb0-4cb3-bcdd-67e7bd5bf6fb
+
+Node swap (default hotkey S, configurable):
+
+https://github.com/user-attachments/assets/735d973e-1b8b-4936-a1fb-29736b9c063a
 
 
 ### Set/Get
