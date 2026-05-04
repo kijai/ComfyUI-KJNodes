@@ -74,7 +74,7 @@ Segments an image or batch of images using CLIPSeg.
                         from huggingface_hub import snapshot_download
                         snapshot_download(repo_id="Kijai/clipseg-rd64-refined-fp16", local_dir=checkpoint_path, local_dir_use_symlinks=False)
                     self.model = CLIPSegForImageSegmentation.from_pretrained(checkpoint_path)
-                except:
+                except Exception:
                     checkpoint_path = "CIDAS/clipseg-rd64-refined"
                     self.model = CLIPSegForImageSegmentation.from_pretrained(checkpoint_path)
             processor = CLIPSegProcessor.from_pretrained(checkpoint_path)
@@ -269,7 +269,7 @@ creates animation between them.
                 text_center_y = y_offset + text_height / 2
                 try:
                     draw.text((text_x, y_offset), line, font=font, fill=font_color, features=['-liga'])
-                except:
+                except Exception:
                     draw.text((text_x, y_offset), line, font=font, fill=font_color)
                 y_offset += text_height # Move to the next line
 
@@ -371,7 +371,7 @@ class CreateFluidMask:
         from ..utility.fluid import Fluid
         try:
             from scipy.special import erf
-        except:
+        except ImportError:
             from scipy.spatial import erf
         out = []
         masks = []
