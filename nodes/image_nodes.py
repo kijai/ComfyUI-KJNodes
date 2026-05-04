@@ -3041,11 +3041,11 @@ highest dimension.
                 if unique_id and PromptServer is not None:
                     try:
                         PromptServer.instance.send_progress_text(msg, unique_id)
-                    except:
+                    except Exception:
                         pass
                 else:
                     logging.info(f"[ImageResizeKJv2] estimated output ~{est_mb:.2f} MB; batching {per_batch}/{B}")
-            except:
+            except Exception:
                 pass
 
         # NVIDIA RTX Video Super Resolution setup
@@ -3054,7 +3054,7 @@ highest dimension.
         if upscale_method == "nvidia_rtx_vsr":
             try:
                 import nvvfx
-            except:
+            except ImportError:
                 raise ImportError("NVIDIA RTX Video Super Resolution is not available. Please install the nvidia-vfx library and ensure you have a compatible NVIDIA GPU.")
             nvvfx_ctx = nvvfx.VideoSuperRes(nvvfx.effects.QualityLevel.ULTRA)
             nvvfx_sr = nvvfx_ctx.__enter__()
@@ -3164,13 +3164,10 @@ highest dimension.
                             f"<tr><td>Resize v2</td><td>batch {current_batch}/{total_batches} · images {end_idx}/{B}</td></tr>",
                             unique_id
                         )
-                    except:
+                    except Exception:
                         pass
                 else:
-                    try:
-                        logging.info(f"[ImageResizeKJv2] batch {current_batch}/{total_batches} · images {end_idx}/{B}")
-                    except:
-                        pass
+                    logging.info(f"[ImageResizeKJv2] batch {current_batch}/{total_batches} · images {end_idx}/{B}")
             out_image = torch.cat(chunks, dim=0)
             if mask is not None and any(m is not None for m in mask_chunks):
                 out_mask = torch.cat([m for m in mask_chunks if m is not None], dim=0)
@@ -3191,7 +3188,7 @@ highest dimension.
                     f"<tr><td>Output: </td><td><b>{out_image.shape[0]}</b> x <b>{out_image.shape[2]}</b> x <b>{out_image.shape[1]} | {memory_size_mb:.2f}MB</b></td></tr>",
                     unique_id
                 )
-            except:
+            except Exception:
                 pass
 
         return (out_image.cpu(), out_image.shape[2], out_image.shape[1], out_mask.cpu() if out_mask is not None else torch.zeros(64,64, device=torch.device("cpu"), dtype=torch.float32))
@@ -4591,7 +4588,7 @@ class LoadVideosFromFolder:
                 font_size = max(16, w // 20)
                 try:
                     font = ImageFont.truetype("arial.ttf", font_size)
-                except:
+                except OSError:
                     font = ImageFont.load_default()
                 dummy_img = Image.new("RGB", (w, 10), (0,0,0))
                 draw = ImageDraw.Draw(dummy_img)
