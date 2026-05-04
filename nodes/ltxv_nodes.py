@@ -1656,7 +1656,7 @@ _cuda_archs = None
 try:
     from sageattention.core import per_thread_int8_triton, per_warp_int8_cuda, per_block_int8_triton, per_channel_fp8, get_cuda_arch_versions, attn_false
     _cuda_archs = get_cuda_arch_versions()
-except:
+except Exception:
     pass
 try:
     from sageattention.core import _qattn_sm89

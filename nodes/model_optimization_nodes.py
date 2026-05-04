@@ -1286,7 +1286,6 @@ def normalized_attention_guidance(self, x_positive, x_negative):
     if self.inplace:
         return nag_guidance.sub_(x_positive).mul_(self.nag_alpha).add_(x_positive)
     else:
-        return nag_guidance * self.nag_alpha + x_positive * (1 - self.nag_alpha)
         nag_guidance.mul_(self.nag_alpha)
         return nag_guidance.add_(x_positive * (1 - self.nag_alpha))
 

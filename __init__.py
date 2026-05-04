@@ -11,6 +11,7 @@ from .nodes.image_transform_node import ImageTransformKJ
 from .nodes.sharpen_nodes import ImageSharpenKJ
 from .nodes.hdr_preview_node import HDRPreviewKJ
 
+import logging
 
 NODE_CONFIG = {
     #constants
@@ -275,7 +276,7 @@ try:
     "LTX2LoraLoaderAdvanced": {"class": LTX2LoraLoaderAdvanced, "name": "LTX2 Lora Loader Advanced"},
     })
 except Exception as e:
-    logging.warning(f"KJNodes: LTXV nodes could not be imported. LTXV nodes will be unavailable. Error: {e}")
+    logging.warning(f"KJNodes: LTXV nodes could not be imported. LTXV nodes will be unavailable. Error: {e}", exc_info=True)
 
 def generate_node_mappings(node_config):
     node_class_mappings = {}
@@ -304,5 +305,5 @@ if hasattr(PromptServer, "instance"):
         PromptServer.instance.app.add_routes(
             [web.static("/kjweb_async", (Path(__file__).parent.absolute() / "kjweb_async").as_posix())]
         )
-    except:
-        pass
+    except Exception:
+        logging.exception("KJNodes: failed to register /kjweb_async static route")

@@ -3289,7 +3289,7 @@ class VisualizeSigmasKJ(io.ComfyNode):
             buf = np.frombuffer(fig.canvas.tostring_argb(), dtype=np.uint8)
             buf = buf.reshape(h, w, 4)
             buf = buf[:, :, [1, 2, 3]]  # Convert ARGB to RGB
-        except:
+        except AttributeError:
             buf = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
             buf = buf.reshape(h, w, 3).copy()
         image = torch.from_numpy(buf).float() / 255.0

@@ -18,7 +18,7 @@ from io import BytesIO
 try:
     import cv2
     HAS_CV2 = True
-except:
+except ImportError:
     logging.warning("OpenCV not installed")
     HAS_CV2 = False
 
@@ -3694,7 +3694,7 @@ class SaveImageKJ:
             counter += 1
 
         return file, 
-    
+
 class SaveStringKJ:
     def __init__(self):
         self.output_dir = folder_paths.get_output_directory()
