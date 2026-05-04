@@ -370,10 +370,8 @@ def normalized_attention_guidance(self, x_positive, x_negative):
     del mask, adjustment
 
     if self.inplace:
-        nag_guidance.sub_(x_positive).mul_(self.nag_alpha).add_(x_positive)
         return nag_guidance.sub_(x_positive).mul_(self.nag_alpha).add_(x_positive)
     else:
-        nag_guidance = nag_guidance * self.nag_alpha + x_positive * (1 - self.nag_alpha)
         nag_guidance.mul_(self.nag_alpha)
         return nag_guidance.add_(x_positive * (1 - self.nag_alpha))
 
@@ -1435,7 +1433,7 @@ def ltx2_forward(
                     _gate = _a1.to_gate_logits(norm_vx)
                     _b, _t, _ = _sa_out.shape
                     _sa_out = _sa_out.view(_b, _t, _a1.heads, _a1.dim_head)
-                    _sa_out = (_sa_out * (2.0 * torch.sigmoid(_gate)).unsqueeze(-1)).view(_b, _t, _a1.heads * _a1.dim_head)
+                    _sa_out.mul_((2.0 * torch.sigmoid(_gate)).unsqueeze(-1))
                     _sa_out = _sa_out.view(_b, _t, _a1.heads * _a1.dim_head)
                     del _gate
 
