@@ -854,7 +854,7 @@ class WanVideoEnhanceAVideoKJ:
 
 try:
     from comfy.ldm.lightricks.model import apply_rotary_emb
-except:
+except ImportError:
     apply_rotary_emb = None
 
 
