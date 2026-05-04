@@ -730,26 +730,15 @@ def modified_wan_self_attention_forward(self, x, freqs, transformer_options={}):
         return q, k, v
 
     q, k, v = qkv_fn(x)
-
     q, k = apply_rope(q, k, freqs)
-
     feta_scores = get_feta_scores(q, k, self.num_frames, self.enhance_weight)
 
-    try:
-        x = comfy.ldm.modules.attention.optimized_attention(
+    x = comfy.ldm.modules.attention.optimized_attention(
             q.view(b, s, n * d),
             k.view(b, s, n * d),
             v,
             heads=self.num_heads,
             transformer_options=transformer_options,
-        )
-    except:
-        # backward compatibility for now
-        x = comfy.ldm.modules.attention.attention(
-            q.view(b, s, n * d),
-            k.view(b, s, n * d),
-            v,
-            heads=self.num_heads,
         )
 
     x = self.o(x)
