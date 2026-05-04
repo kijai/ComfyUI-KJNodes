@@ -222,8 +222,8 @@ https://github.com/hahnec/color-matcher/
 
         try:
             from color_matcher import ColorMatcher
-        except:
-            raise Exception("Can't import color-matcher, did you install requirements.txt? Manual install: pip install color-matcher")
+        except ImportError as e:
+            raise ImportError("Can't import color-matcher, did you install requirements.txt? Manual install: pip install color-matcher") from e
 
         batch_size = image_target.size(0)
         ref_batch_size = image_ref.size(0)
@@ -842,25 +842,25 @@ Can be used for realtime diffusion with autoqueue.
             try:
                 self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
                 self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
-            except:
+            except cv2.error:
                 pass
             if not self.cap.isOpened():
                 raise Exception("Could not open webcam")
-    
+
         ret, frame = self.cap.read()
         if not ret:
             raise Exception("Failed to capture image from webcam")
-    
+
         # Crop the frame to the specified bbox
         frame = frame[y:y+height, x:x+width]
         img_torch = torch.from_numpy(frame[..., [2, 1, 0]]).float() / 255.0
-    
+
         if release:
             self.cap.release()
             self.cap = None
-    
+
         return (img_torch.unsqueeze(0),)
-    
+
 class AddLabel:
     @classmethod
     def INPUT_TYPES(s):
@@ -961,7 +961,7 @@ ComfyUI/custom_nodes/ComfyUI-KJNodes/fonts
             for line in lines:
                 try:
                     draw.text((text_x, y_offset), line, font=font, fill=font_color_tuple, features=['-liga'])
-                except:
+                except Exception:
                     draw.text((text_x, y_offset), line, font=font, fill=font_color_tuple)
                 y_offset += font_size
 
