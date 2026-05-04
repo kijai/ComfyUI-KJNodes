@@ -39,7 +39,7 @@ from ..utility.utility import string_to_color
 
 try:
     from server import PromptServer, BinaryEventTypes
-except:
+except ImportError:
     PromptServer = None
     BinaryEventTypes = None
 from concurrent.futures import ThreadPoolExecutor
@@ -73,15 +73,7 @@ class ColorMatch:
             "required": {
                 "image_ref": ("IMAGE",),
                 "image_target": ("IMAGE",),
-                "method": (
-            [   
-                'mkl',
-                'hm', 
-                'reinhard', 
-                'mvgd', 
-                'hm-mvgd-hm', 
-                'hm-mkl-hm',
-            ], {
+                "method": (['mkl','hm', 'reinhard', 'mvgd', 'hm-mvgd-hm', 'hm-mkl-hm'], {
                "default": 'mkl'
             }),
             },
@@ -90,12 +82,13 @@ class ColorMatch:
                 "multithread": ("BOOLEAN", {"default": True}),
             }
         }
-    
+
     CATEGORY = "KJNodes/image"
 
     RETURN_TYPES = ("IMAGE",)
     RETURN_NAMES = ("image",)
     FUNCTION = "colormatch"
+    DEPRECATED = True
     DESCRIPTION = """
 color-matcher enables color transfer across images which comes in handy for automatic  
 color-grading of photographs, paintings and film sequences as well as light-field  
@@ -108,7 +101,7 @@ matching. As shown below our HM-MVGD-HM compound outperforms existing methods.
 https://github.com/hahnec/color-matcher/
 
 """
-    
+
     def colormatch(self, image_ref, image_target, method, strength=1.0, multithread=True):
         # Skip unnecessary processing
         if strength == 0:
@@ -116,13 +109,13 @@ https://github.com/hahnec/color-matcher/
 
         try:
             from color_matcher import ColorMatcher
-        except:
-            raise Exception("Can't import color-matcher, did you install requirements.txt? Manual install: pip install color-matcher")
-        
+        except ImportError as e:
+            raise ImportError("Can't import color-matcher, did you install requirements.txt? Manual install: pip install color-matcher") from e
+
         image_ref = image_ref.cpu()
         image_target = image_target.cpu()
         batch_size = image_target.size(0)
-        
+
         images_target = image_target.squeeze()
         images_ref = image_ref.squeeze()
 
@@ -137,9 +130,9 @@ https://github.com/hahnec/color-matcher/
                 image_result = cm.transfer(src=image_target_np_i, ref=image_ref_np_i, method=method) # Avoid potential blur when only the fully color-matched image is used
                 if strength != 1:
                     image_result = image_target_np_i + strength * (image_result - image_target_np_i)
-                    
+
                 return torch.from_numpy(image_result)
-                
+
             except Exception as e:
                 logging.warning(f"Thread {i} error: {e}")
                 return torch.from_numpy(image_target_np_i)  # fallback
