@@ -2140,7 +2140,7 @@ class ModelSaveKJ:
 
         load_models = [model]
 
-        model_management.load_models_gpu(load_models, force_patch_weights=True)
+        model_management.load_models_gpu(load_models)
         default_prefix = "model.diffusion_model."
 
         sd = model.state_dict_for_saving(None, None, None)
