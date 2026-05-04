@@ -349,10 +349,11 @@ def nag_attention(self, query, context_positive, nag_context, attn_precision=Non
 def normalized_attention_guidance(self, x_positive, x_negative):
     if self.inplace:
         nag_guidance = x_negative.mul_(self.nag_scale - 1).neg_().add_(x_positive, alpha=self.nag_scale)
+        del x_negative
     else:
-        nag_guidance = x_positive * self.nag_scale - x_negative * (self.nag_scale - 1)
-
-    del x_negative
+        nag_guidance = x_negative * (self.nag_scale - 1)
+        del x_negative
+        nag_guidance = (x_positive * self.nag_scale).sub_(nag_guidance)
 
     norm_positive = torch.norm(x_positive, p=1, dim=-1, keepdim=True)
     norm_guidance = torch.norm(nag_guidance, p=1, dim=-1, keepdim=True)
@@ -370,11 +371,11 @@ def normalized_attention_guidance(self, x_positive, x_negative):
 
     if self.inplace:
         nag_guidance.sub_(x_positive).mul_(self.nag_alpha).add_(x_positive)
+        return nag_guidance.sub_(x_positive).mul_(self.nag_alpha).add_(x_positive)
     else:
         nag_guidance = nag_guidance * self.nag_alpha + x_positive * (1 - self.nag_alpha)
-    del x_positive
-
-    return nag_guidance
+        nag_guidance.mul_(self.nag_alpha)
+        return nag_guidance.add_(x_positive * (1 - self.nag_alpha))
 
 #region NAG
 def ltxv_crossattn_forward_nag(self, x, context, mask=None, transformer_options={}, **kwargs):
@@ -1435,6 +1436,7 @@ def ltx2_forward(
                     _b, _t, _ = _sa_out.shape
                     _sa_out = _sa_out.view(_b, _t, _a1.heads, _a1.dim_head)
                     _sa_out = (_sa_out * (2.0 * torch.sigmoid(_gate)).unsqueeze(-1)).view(_b, _t, _a1.heads * _a1.dim_head)
+                    _sa_out = _sa_out.view(_b, _t, _a1.heads * _a1.dim_head)
                     del _gate
 
                 attn1_out = _a1.to_out(_sa_out)
