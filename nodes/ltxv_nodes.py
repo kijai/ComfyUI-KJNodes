@@ -1726,7 +1726,7 @@ def ltx2_sageattn_forward(self, x, context=None, mask=None, pe=None, k_pe=None, 
         q_int8, q_scale, k_int8, k_scale = per_thread_int8_triton(q, k, km=k.mean(dim=1, keepdim=True), tensor_layout=tensor_layout, BLKQ=128, WARPQ=32, BLKK=64, WARPK=64)
         del q, k
         o = torch.empty(q_int8.size(), dtype=dtype, device=q_int8.device)
-        v_fp16 = v.to(torch.float16).contiguous()
+        v_fp16 = v.to(torch.float16)
         del v
         _qattn_sm80.qk_int8_sv_f16_accum_f32_attn(q_int8, k_int8, v_fp16, o, q_scale, k_scale, _tensor_layout, _is_caual, _qk_quant_gran, sm_scale, _return_lse)
     elif _cuda_archs[0] == "sm75":
@@ -1778,17 +1778,13 @@ def ltx2_sageattn_forward(self, x, context=None, mask=None, pe=None, k_pe=None, 
 
     del q_int8, q_scale, k_int8, k_scale
 
-    o = o.view(batch_size, seq_len, -1)
-
+    # o is [B, T, H, D] from sage kernel (NHD layout)
     if self.to_gate_logits is not None:
         gate_logits = self.to_gate_logits(x)  # (B, T, H)
-        b, t, _ = o.shape
-        o = o.view(b, t, self.heads, self.dim_head)
-        gates = 2.0 * torch.sigmoid(gate_logits)  # zero-init -> identity
-        o = o * gates.unsqueeze(-1)
-        o = o.view(b, t, self.heads * self.dim_head)
+        o.mul_((2.0 * torch.sigmoid(gate_logits)).unsqueeze(-1))
+        del gate_logits
 
-    return self.to_out(o)
+    return self.to_out(o.view(batch_size, seq_len, -1))
 
 
 import folder_paths
