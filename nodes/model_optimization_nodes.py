@@ -1349,7 +1349,7 @@ class GGUFLoaderKJ(io.ComfyNode):
         model_path = folder_paths.get_full_path("unet", model_name)
         try:
             sd, extra = gguf_nodes.loader.gguf_sd_loader(model_path)
-        except:
+        except TypeError:
             sd = gguf_nodes.loader.gguf_sd_loader(model_path)
 
         if extra_model_name is not None and extra_model_name != "none":
@@ -1357,7 +1357,7 @@ class GGUFLoaderKJ(io.ComfyNode):
                 extra_model_full_path = folder_paths.get_full_path("unet", extra_model_name)
                 try:
                     extra_model, _ = gguf_nodes.loader.gguf_sd_loader(extra_model_full_path)
-                except:
+                except TypeError:
                     extra_model = gguf_nodes.loader.gguf_sd_loader(extra_model_full_path)
             elif "connector" in extra_model_name.lower():
                 extra_model_full_path = folder_paths.get_full_path("text_encoders", extra_model_name)
@@ -1397,7 +1397,7 @@ class GGUFLoaderKJ(io.ComfyNode):
 
 try:
     from torch.nn.attention.flex_attention import flex_attention, BlockMask
-except:
+except ImportError:
     flex_attention = None
     BlockMask = None
 
@@ -1575,10 +1575,9 @@ class EndRecordCUDAMemoryHistory():
         torch.cuda.memory._record_memory_history(enabled=None)
         return input, output_path
 
-
 try:
     from server import PromptServer
-except:
+except ImportError:
     PromptServer = None
 
 class VisualizeCUDAMemoryHistory():
