@@ -764,7 +764,7 @@ and returns that as the selected output type.
             for image in images:
                 mean_values.append(image.mean().item())
         elif masks is not None and images is not None:
-            raise Exception("MaskOrImageToWeight: Use either mask or image input only.")
+            raise ValueError("MaskOrImageToWeight: Use either mask or image input only.")
                   
         # Convert mean_values to the specified output_type
         if output_type == 'list':

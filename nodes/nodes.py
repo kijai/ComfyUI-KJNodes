@@ -2209,7 +2209,7 @@ Concatenates the audio1 to audio2 in the specified direction.
         sample_rate_1 = audio1["sample_rate"]
         sample_rate_2 = audio2["sample_rate"]
         if sample_rate_1 != sample_rate_2:
-            raise Exception("Sample rates of the two audios do not match")
+            raise ValueError("Sample rates of the two audios do not match")
 
         waveform_1 = audio1["waveform"]
         waveform_2 = audio2["waveform"]

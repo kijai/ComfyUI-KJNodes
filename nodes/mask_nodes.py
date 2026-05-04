@@ -448,8 +448,8 @@ class CreateAudioMask:
     def createaudiomask(self, frames, width, height, invert, audio_path, scale):
         try:
             import librosa
-        except ImportError:
-            raise Exception("Can not import librosa. Install it with 'pip install librosa'")
+        except ImportError as e:
+            raise ImportError("Can not import librosa. Install it with 'pip install librosa'") from e
         batch_size = frames
         out = []
         masks = []
