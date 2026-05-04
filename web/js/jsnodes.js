@@ -410,6 +410,11 @@ app.registerExtension({
 				};
 			break;
 		case "SaveImageKJ":
+		case "SaveImageWithAlpha":
+		case "SaveStringKJ":
+		case "DecodeAndSaveVideo":
+		case "ModelSaveKJ":
+		case "LoraExtractKJ":
 			const onNodeCreated = nodeType.prototype.onNodeCreated;
 			nodeType.prototype.onNodeCreated = function() {
 				const r = onNodeCreated ? onNodeCreated.apply(this, arguments) : void 0;
