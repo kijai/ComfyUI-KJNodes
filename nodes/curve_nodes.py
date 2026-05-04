@@ -298,12 +298,9 @@ output types:
         elif float_output_type == 'tensor':
             out_floats = torch.tensor(all_normalized_y_values * repeat_output, dtype=torch.float32)
 
-        # Create a color map for grayscale intensities
         color_map = lambda y: torch.full((mask_height, mask_width, 3), y, dtype=torch.float32)
-
-        # Create a color map for grayscale intensities (from first spline only)
-        color_map = lambda y: torch.full((mask_height, mask_width, 3), y, dtype=torch.float32)
-        mask_tensors = [color_map(y) for y in normalized_y_values]
+        y_values_for_masks = normalized_y_values if normalized_y_values else [min_value]
+        mask_tensors = [color_map(y) for y in y_values_for_masks]
         masks_out = torch.stack(mask_tensors)
         masks_out = masks_out.repeat(repeat_output, 1, 1, 1)
         masks_out = masks_out.mean(dim=-1)

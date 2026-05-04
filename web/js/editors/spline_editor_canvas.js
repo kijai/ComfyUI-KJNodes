@@ -460,8 +460,8 @@ class SplineEditor extends BaseEditorCanvas {
 
   samplePoints(splineIndex, numSamples, samplingMethod) {
     const spline = this.splines[splineIndex];
-    if (!spline || !spline.points || spline.points.length < 2) return [];
-    if (spline.isSinglePoint) {
+    if (!spline || !spline.points || spline.points.length < 1) return [];
+    if (spline.isSinglePoint || spline.points.length === 1) {
       const point = spline.points[0];
       return Array(numSamples).fill().map(() => ({ x: point.x, y: point.y }));
     }
