@@ -424,8 +424,8 @@ class TorchCompileModelFluxAdvancedV2:
                     compile_key_list.append(f"diffusion_model.single_blocks.{i}")
 
             set_torch_compile_wrapper(model=m, keys=compile_key_list, backend=backend, mode=mode, dynamic=dynamic, fullgraph=fullgraph)           
-        except:
-            raise RuntimeError("Failed to compile model")
+        except Exception as e:
+            raise RuntimeError("Failed to compile model") from e
 
         return (m, )
 
@@ -471,8 +471,8 @@ class TorchCompileModelWanVideoV2:
                 compile_key_list =["diffusion_model"]
 
             set_torch_compile_wrapper(model=m, keys=compile_key_list, backend=backend, mode=mode, dynamic=dynamic, fullgraph=fullgraph)           
-        except:
-            raise RuntimeError("Failed to compile model")
+        except Exception as e:
+            raise RuntimeError("Failed to compile model") from e
 
         return (m, )
 
@@ -543,8 +543,8 @@ class TorchCompileModelAdvanced:
                 raise ValueError(f"Invalid dynamic arg {dynamic}")
 
             set_torch_compile_wrapper(model=m, keys=compile_key_list, backend=backend, mode=mode, dynamic=dynamic, fullgraph=fullgraph)
-        except:
-            raise RuntimeError("Failed to compile model")
+        except Exception as e:
+            raise RuntimeError("Failed to compile model") from e
 
         return (m, )
 
@@ -585,8 +585,8 @@ class TorchCompileModelQwenImage:
                 compile_key_list =["diffusion_model"]
 
             set_torch_compile_wrapper(model=m, keys=compile_key_list, backend=backend, mode=mode, dynamic=dynamic, fullgraph=fullgraph)
-        except:
-            raise RuntimeError("Failed to compile model")
+        except Exception as e:
+            raise RuntimeError("Failed to compile model") from e
 
         return (m, )
 
@@ -630,8 +630,8 @@ class TorchCompileVAE:
                         ),
                     )
                     self._compiled_encoder = True
-                except:
-                    raise RuntimeError("Failed to compile model")
+                except Exception as e:
+                    raise RuntimeError("Failed to compile model") from e
         if compile_decoder:
             if not self._compiled_decoder:
                 decoder_name = "decoder"
@@ -650,8 +650,8 @@ class TorchCompileVAE:
                         ),
                     )
                     self._compiled_decoder = True
-                except:
-                    raise RuntimeError("Failed to compile model")
+                except Exception as e:
+                    raise RuntimeError("Failed to compile model") from e
         return (vae, )
 
 class TorchCompileControlNet:
@@ -680,9 +680,9 @@ class TorchCompileControlNet:
                 #     controlnet.control_model.double_blocks[i] = torch.compile(block, mode=mode, fullgraph=fullgraph, backend=backend)
                 controlnet.control_model = torch.compile(controlnet.control_model, mode=mode, fullgraph=fullgraph, backend=backend)
                 self._compiled = True
-            except:
+            except Exception as e:
                 self._compiled = False
-                raise RuntimeError("Failed to compile model")
+                raise RuntimeError("Failed to compile model") from e
 
         return (controlnet, )
 
