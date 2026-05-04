@@ -95,7 +95,7 @@ def plot_coordinates_to_tensor(coordinates, height, width, bbox_height, bbox_wid
             canvas.draw()
             try:
                 image_np = np.frombuffer(canvas.tostring_rgb(), dtype='uint8').reshape(int(height), int(width), 3).copy()
-            except:
+            except AttributeError:
                 image_np = np.frombuffer(canvas.tostring_argb(), dtype='uint8').reshape(int(height), int(width), 4)
                 image_np = image_np[:, :, [1, 2, 3]]  # Convert ARGB to RGB
             image_tensor = torch.from_numpy(image_np).float() / 255.0
@@ -292,8 +292,8 @@ output types:
         elif float_output_type == 'pandas series':
             try:
                 import pandas as pd
-            except:
-                raise Exception("MaskOrImageToWeight: pandas is not installed. Please install pandas to use this output_type")
+            except ImportError as e:
+                raise ImportError("MaskOrImageToWeight: pandas is not installed. Please install pandas to use this output_type") from e
             out_floats = pd.Series(all_normalized_y_values * repeat_output),
         elif float_output_type == 'tensor':
             out_floats = torch.tensor(all_normalized_y_values * repeat_output, dtype=torch.float32)
@@ -604,7 +604,7 @@ Locations are center locations.
                 # Draw the text
                 try:
                     draw.text(text_position, line, fill=color, font=current_font, features=['-liga'])
-                except:
+                except Exception:
                     draw.text(text_position, line, fill=color, font=current_font)
             
             image = pil2tensor(image)
@@ -772,8 +772,8 @@ and returns that as the selected output type.
         elif output_type == 'pandas series':
             try:
                 import pandas as pd
-            except:
-                raise Exception("MaskOrImageToWeight: pandas is not installed. Please install pandas to use this output_type")
+            except ImportError as e:
+                raise ImportError("MaskOrImageToWeight: pandas is not installed. Please install pandas to use this output_type") from e
             out = pd.Series(mean_values),
         elif output_type == 'tensor':
             out = torch.tensor(mean_values, dtype=torch.float32),
