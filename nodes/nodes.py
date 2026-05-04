@@ -38,7 +38,7 @@ class BOOLConstant:
 
     def get_value(self, value):
         return (value,)
-    
+
 class INTConstant:
     @classmethod
     def INPUT_TYPES(s):
@@ -109,9 +109,9 @@ class StringConstantMultiline:
         return (new_string,)
 
 
-    
+
 class ScaleBatchPromptSchedule:
-    
+
     RETURN_TYPES = ("STRING",)
     FUNCTION = "scaleschedule"
     CATEGORY = "KJNodes/misc"
@@ -127,35 +127,35 @@ to a different frame count.
                  "input_str": ("STRING", {"forceInput": True,"default": "0:(0.0),\n7:(1.0),\n15:(0.0)\n"}),
                  "old_frame_count": ("INT", {"forceInput": True,"default": 1,"min": 1, "max": 4096, "step": 1}),
                  "new_frame_count": ("INT", {"forceInput": True,"default": 1,"min": 1, "max": 4096, "step": 1}),
-                
+
         },
-    } 
-    
+    }
+
     def scaleschedule(self, old_frame_count, input_str, new_frame_count):
         pattern = r'"(\d+)"\s*:\s*"(.*?)"(?:,|\Z)'
         frame_strings = dict(re.findall(pattern, input_str))
-        
+
         # Calculate the scaling factor
         scaling_factor = (new_frame_count - 1) / (old_frame_count - 1)
-        
+
         # Initialize a dictionary to store the new frame numbers and strings
         new_frame_strings = {}
-        
+
         # Iterate over the frame numbers and strings
         for old_frame, string in frame_strings.items():
             # Calculate the new frame number
             new_frame = int(round(int(old_frame) * scaling_factor))
-            
+
             # Store the new frame number and corresponding string
             new_frame_strings[new_frame] = string
-        
+
         # Format the output string
         output_str = ', '.join([f'"{k}":"{v}"' for k, v in sorted(new_frame_strings.items())])
         return (output_str,)
 
 
 class GetLatentsFromBatchIndexed:
-    
+
     RETURN_TYPES = ("LATENT",)
     FUNCTION = "indexedlatentsfrombatch"
     CATEGORY = "KJNodes/latents"
@@ -171,19 +171,19 @@ Selects and returns the latents at the specified indices as an latent batch.
                  "indexes": ("STRING", {"default": "0, 1, 2", "multiline": True}),
                  "latent_format": (["BCHW", "BTCHW", "BCTHW"], {"default": "BCHW"}),
         },
-    } 
-    
+    }
+
     def indexedlatentsfrombatch(self, latents, indexes, latent_format):
-        
+
         samples = latents.copy()
-        latent_samples = samples["samples"] 
+        latent_samples = samples["samples"]
 
         # Parse the indexes string into a list of integers
         index_list = [int(index.strip()) for index in indexes.split(',')]
-        
+
         # Convert list of indices to a PyTorch tensor
         indices_tensor = torch.tensor(index_list, dtype=torch.long)
-        
+
         # Select the latents at the specified indices
         if latent_format == "BCHW":
             chosen_latents = latent_samples[indices_tensor]
@@ -194,7 +194,7 @@ Selects and returns the latents at the specified indices as an latent batch.
 
         samples["samples"] = chosen_latents
         return (samples,)
-    
+
 
 class ConditioningMultiCombine:
     @classmethod
@@ -248,10 +248,10 @@ class AppendStringsToList:
             string1 = [string1]
         if not isinstance(string2, list):
             string2 = [string2]
-        
+
         joined_string = string1 + string2
         return (joined_string, )
-    
+
 class JoinStrings:
     @classmethod
     def INPUT_TYPES(cls):
@@ -271,7 +271,7 @@ class JoinStrings:
     def joinstring(self, delimiter, string1="", string2=""):
         joined_string = string1 + delimiter + string2
         return (joined_string, )
-    
+
 class JoinStringMulti:
     @classmethod
     def INPUT_TYPES(s):
@@ -292,9 +292,9 @@ class JoinStringMulti:
     FUNCTION = "combine"
     CATEGORY = "KJNodes/text"
     DESCRIPTION = """
-Creates single string, or a list of strings, from  
-multiple input strings.  
-You can set how many inputs the node has,  
+Creates single string, or a list of strings, from
+multiple input strings.
+You can set how many inputs the node has,
 with the **inputcount** and clicking update.
 """
 
@@ -324,7 +324,7 @@ class CondPassThrough:
             "optional": {
                 "positive": ("CONDITIONING", ),
                 "negative": ("CONDITIONING", ),
-            }, 
+            },
     }
 
     RETURN_TYPES = ("CONDITIONING", "CONDITIONING",)
@@ -343,11 +343,11 @@ class ModelPassThrough:
     @classmethod
     def INPUT_TYPES(s):
         return {
-            "required": {             
+            "required": {
             },
             "optional": {
                 "model": ("MODEL", ),
-            }, 
+            },
     }
 
     RETURN_TYPES = ("MODEL", )
@@ -368,7 +368,7 @@ def append_helper(t, mask, c, set_area_to_bounds, strength):
         n[1]['mask'] = mask
         n[1]['set_area_to_bounds'] = set_area_to_bounds
         n[1]['mask_strength'] = strength
-        c.append(n)  
+        c.append(n)
 
 class ConditioningSetMaskAndCombine:
     @classmethod
@@ -609,15 +609,15 @@ Bundles multiple conditioning mask and combine nodes into one,functionality is i
         for t in negative_5:
             append_helper(t, mask_5, c2, set_area_to_bounds, mask_5_strength)
         return (c, c2)
-    
+
 class VRAM_Debug:
-    
+
     @classmethod
-    
+
     def INPUT_TYPES(s):
       return {
         "required": {
-            
+
             "empty_cache": ("BOOLEAN", {"default": True}),
             "gc_collect": ("BOOLEAN", {"default": True}),
             "unload_all_models": ("BOOLEAN", {"default": False}),
@@ -628,14 +628,14 @@ class VRAM_Debug:
             "model_pass": ("MODEL",),
         }
 	}
-        
+
     RETURN_TYPES = (IO.ANY, "IMAGE","MODEL","INT", "INT",)
     RETURN_NAMES = ("any_output", "image_pass", "model_pass", "freemem_before", "freemem_after")
     FUNCTION = "VRAMdebug"
     CATEGORY = "KJNodes/memory"
     DESCRIPTION = """
-Returns the inputs unchanged, they are only used as triggers,  
-and performs comfy model management functions and garbage collection,  
+Returns the inputs unchanged, they are only used as triggers,
+and performs comfy model management functions and garbage collection,
 reports free VRAM before and after the operations.
 """
 
@@ -653,13 +653,13 @@ reports free VRAM before and after the operations.
         logging.info(f"VRAMdebug: free memory after: {freemem_after:,.0f}")
         logging.info(f"VRAMdebug: freed memory: {freemem_after - freemem_before:,.0f}")
         return {"ui": {
-            "text": [f"{freemem_before:,.0f}x{freemem_after:,.0f}"]}, 
-            "result": (any_input, image_pass, model_pass, freemem_before, freemem_after) 
+            "text": [f"{freemem_before:,.0f}x{freemem_after:,.0f}"]},
+            "result": (any_input, image_pass, model_pass, freemem_before, freemem_after)
         }
 
 class SomethingToString:
     @classmethod
-    
+
     def INPUT_TYPES(s):
      return {
         "required": {
@@ -712,10 +712,10 @@ Delays the execution for the input amount of time.
         total_seconds = minutes * 60 + seconds
         time.sleep(total_seconds)
         return input,
-    
+
 class EmptyLatentImagePresets:
     @classmethod
-    def INPUT_TYPES(cls):  
+    def INPUT_TYPES(cls):
         return {
         "required": {
              "dimensions": (
@@ -734,7 +734,7 @@ class EmptyLatentImagePresets:
             {
             "default": '512 x 512 (1:1)'
              }),
-           
+
             "invert": ("BOOLEAN", {"default": False}),
             "batch_size": ("INT", {
             "default": 1,
@@ -756,7 +756,7 @@ class EmptyLatentImagePresets:
         # Remove the aspect ratio part
         result[0] = result[0].split('(')[0].strip()
         result[1] = result[1].split('(')[0].strip()
-        
+
         if invert:
             width = int(result[1].split(' ')[0])
             height = int(result[0])
@@ -780,7 +780,7 @@ class EmptyLatentImageCustomPresets:
             "dimensions": (
                  [f"{d['label']} - {d['value']}" for d in dimensions_dict],
             ),
-           
+
             "invert": ("BOOLEAN", {"default": False}),
             "batch_size": ("INT", {
             "default": 1,
@@ -795,7 +795,7 @@ class EmptyLatentImageCustomPresets:
     FUNCTION = "generate"
     CATEGORY = "KJNodes/latents"
     DESCRIPTION = """
-Generates an empty latent image with the specified dimensions.  
+Generates an empty latent image with the specified dimensions.
 The choices are loaded from 'custom_dimensions.json' in the nodes folder.
 """
 
@@ -805,12 +805,12 @@ The choices are loaded from 'custom_dimensions.json' in the nodes folder.
        label, value = dimensions.split(' - ')
        # Split the value into width and height
        width, height = [x.strip() for x in value.split('x')]
-   
+
        if invert:
            width, height = height, width
-   
+
        latent = EmptyLatentImage().generate(int(width), int(height), batch_size)[0]
-   
+
        return (latent, int(width), int(height),)
 
 class WidgetToString:
@@ -841,10 +841,10 @@ class WidgetToString:
     FUNCTION = "get_widget_value"
     CATEGORY = "KJNodes/text"
     DESCRIPTION = """
-Selects a node and it's specified widget and outputs the value as a string.  
-If no node id or title is provided it will use the 'any_input' link and use that node.  
+Selects a node and it's specified widget and outputs the value as a string.
+If no node id or title is provided it will use the 'any_input' link and use that node.
 To see node id's, enable "Node ID Badge Mode" in main settings.
-Alternatively you can search with the node title. Node titles ONLY exist if they  
+Alternatively you can search with the node title. Node titles ONLY exist if they
 are manually edited!
 'widget_name' can be a comma separated list.
 The 'any_input' is required for making sure the node you want the value from exists in the workflow.
@@ -1025,13 +1025,13 @@ class DummyOut:
     CATEGORY = "KJNodes/misc"
     OUTPUT_NODE = True
     DESCRIPTION = """
-Does nothing, used to trigger generic workflow output.    
+Does nothing, used to trigger generic workflow output.
 A way to get previews in the UI without saving anything to disk.
 """
 
     def dummy(self, any_input):
         return (any_input,)
-    
+
 class FlipSigmasAdjusted:
     @classmethod
     def INPUT_TYPES(s):
@@ -1048,7 +1048,7 @@ class FlipSigmasAdjusted:
     FUNCTION = "get_sigmas_adjusted"
 
     def get_sigmas_adjusted(self, sigmas, divide_by_last_sigma, divide_by, offset_by):
-        
+
         sigmas = sigmas.flip(0)
         if sigmas[0] == 0:
             sigmas[0] = 0.0001
@@ -1059,9 +1059,9 @@ class FlipSigmasAdjusted:
             if 0 <= offset_index < len(sigmas):
                 adjusted_sigmas[i] = sigmas[offset_index]
             else:
-                adjusted_sigmas[i] = 0.0001 
+                adjusted_sigmas[i] = 0.0001
         if adjusted_sigmas[0] == 0:
-            adjusted_sigmas[0] = 0.0001  
+            adjusted_sigmas[0] = 0.0001
         if divide_by_last_sigma:
             adjusted_sigmas = adjusted_sigmas / adjusted_sigmas[-1]
 
@@ -1069,7 +1069,7 @@ class FlipSigmasAdjusted:
         array_string = np.array2string(sigma_np_array, precision=2, separator=', ', threshold=np.inf)
         adjusted_sigmas = adjusted_sigmas / divide_by
         return (adjusted_sigmas, array_string,)
-    
+
 class CustomSigmas:
     @classmethod
     def INPUT_TYPES(s):
@@ -1084,15 +1084,15 @@ class CustomSigmas:
     CATEGORY = "KJNodes/noise"
     FUNCTION = "customsigmas"
     DESCRIPTION = """
-Creates a sigmas tensor from a string of comma separated values.  
-Examples: 
-   
-Nvidia's optimized AYS 10 step schedule for SD 1.5:  
-14.615, 6.475, 3.861, 2.697, 1.886, 1.396, 0.963, 0.652, 0.399, 0.152, 0.029  
-SDXL:   
-14.615, 6.315, 3.771, 2.181, 1.342, 0.862, 0.555, 0.380, 0.234, 0.113, 0.029  
-SVD:  
-700.00, 54.5, 15.886, 7.977, 4.248, 1.789, 0.981, 0.403, 0.173, 0.034, 0.002  
+Creates a sigmas tensor from a string of comma separated values.
+Examples:
+
+Nvidia's optimized AYS 10 step schedule for SD 1.5:
+14.615, 6.475, 3.861, 2.697, 1.886, 1.396, 0.963, 0.652, 0.399, 0.152, 0.029
+SDXL:
+14.615, 6.315, 3.771, 2.181, 1.342, 0.862, 0.555, 0.380, 0.234, 0.113, 0.029
+SVD:
+700.00, 54.5, 15.886, 7.977, 4.248, 1.789, 0.981, 0.403, 0.173, 0.034, 0.002
 """
     def customsigmas(self, sigmas_string, interpolate_to_steps):
         sigmas_list = sigmas_string.split(', ')
@@ -1102,7 +1102,7 @@ SVD:
             sigmas_tensor = self.loglinear_interp(sigmas_tensor, interpolate_to_steps + 1)
         sigmas_tensor[-1] = 0
         return (sigmas_tensor.float(),)
-     
+
     def loglinear_interp(self, t_steps, num_steps):
         """
         Performs log-linear interpolation of a given array of decreasing numbers.
@@ -1111,14 +1111,14 @@ SVD:
 
         xs = np.linspace(0, 1, len(t_steps_np))
         ys = np.log(t_steps_np[::-1])
-        
+
         new_xs = np.linspace(0, 1, num_steps)
         new_ys = np.interp(new_xs, xs, ys)
-        
+
         interped_ys = np.exp(new_ys)[::-1].copy()
         interped_ys_tensor = torch.tensor(interped_ys)
         return interped_ys_tensor
-    
+
 class StringToFloatList:
     @classmethod
     def INPUT_TYPES(s):
@@ -1136,12 +1136,12 @@ class StringToFloatList:
         float_list = [float(x.strip()) for x in string.split(',')]
         return (float_list,)
 
- 
+
 class InjectNoiseToLatent:
     @classmethod
     def INPUT_TYPES(s):
         return {"required": {
-            "latents":("LATENT",),  
+            "latents":("LATENT",),
             "strength": ("FLOAT", {"default": 0.1, "min": 0.0, "max": 200.0, "step": 0.0001}),
             "noise":  ("LATENT",),
             "normalize": ("BOOLEAN", {"default": False}),
@@ -1153,11 +1153,11 @@ class InjectNoiseToLatent:
                 "seed": ("INT", {"default": 123,"min": 0, "max": 0xffffffffffffffff, "step": 1}),
             }
             }
-    
+
     RETURN_TYPES = ("LATENT",)
     FUNCTION = "injectnoise"
     CATEGORY = "KJNodes/noise"
-        
+
     def injectnoise(self, latents, strength, noise, normalize, average, mix_randn_amount=0, seed=None, mask=None):
         samples = latents["samples"].clone().cpu()
         noise = noise["samples"].clone().cpu()
@@ -1180,13 +1180,13 @@ class InjectNoiseToLatent:
                 generator = torch.manual_seed(seed)
                 rand_noise = torch.randn(noised.size(), dtype=noised.dtype, layout=noised.layout, generator=generator, device="cpu")
                 noised = noised + (mix_randn_amount * rand_noise)
-        
+
         return ({"samples":noised},)
- 
+
 class SoundReactive:
     @classmethod
     def INPUT_TYPES(s):
-        return {"required": {  
+        return {"required": {
             "sound_level": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 99999, "step": 0.01}),
             "start_range_hz": ("INT", {"default": 150, "min": 0, "max": 9999, "step": 1}),
             "end_range_hz": ("INT", {"default": 2000, "min": 0, "max": 9999, "step": 1}),
@@ -1195,17 +1195,17 @@ class SoundReactive:
             "normalize": ("BOOLEAN", {"default": False}),
             },
             }
-    
+
     RETURN_TYPES = ("FLOAT","INT",)
     RETURN_NAMES =("sound_level", "sound_level_int",)
     FUNCTION = "react"
     CATEGORY = "KJNodes/audio"
     DESCRIPTION = """
-Reacts to the sound level of the input.  
-Uses your browsers sound input options and requires.  
+Reacts to the sound level of the input.
+Uses your browsers sound input options and requires.
 Meant to be used with realtime diffusion with autoqueue.
 """
-        
+
     def react(self, sound_level, start_range_hz, end_range_hz, smoothing_factor, multiplier, normalize):
 
         sound_level *= multiplier
@@ -1214,12 +1214,12 @@ Meant to be used with realtime diffusion with autoqueue.
             sound_level /= 255
 
         sound_level_int = int(sound_level)
-        return (sound_level, sound_level_int, )     
-       
+        return (sound_level, sound_level_int, )
+
 class GenerateNoise:
     @classmethod
     def INPUT_TYPES(s):
-        return {"required": { 
+        return {"required": {
             "width": ("INT", {"default": 512,"min": 16, "max": 4096, "step": 1}),
             "height": ("INT", {"default": 512,"min": 16, "max": 4096, "step": 1}),
             "batch_size": ("INT", {"default": 1, "min": 1, "max": 4096}),
@@ -1235,14 +1235,14 @@ class GenerateNoise:
                 "shape": (["BCHW", "BCTHW","BTCHW",],),
             }
         }
-    
+
     RETURN_TYPES = ("LATENT",)
     FUNCTION = "generatenoise"
     CATEGORY = "KJNodes/noise"
     DESCRIPTION = """
 Generates noise for injection or to be used as empty latents on samplers with add_noise off.
 """
-        
+
     def generatenoise(self, batch_size, width, height, seed, multiplier, constant_batch_noise, normalize, sigmas=None, model=None, latent_channels=4, shape="BCHW"):
 
         generator = torch.manual_seed(seed)
@@ -1264,7 +1264,7 @@ Generates noise for injection or to be used as empty latents on samplers with ad
         if constant_batch_noise:
             noise = noise[0].repeat(batch_size, 1, 1, 1)
 
-        
+
         return ({"samples":noise}, )
 
 def camera_embeddings(elevation, azimuth):
@@ -1306,7 +1306,7 @@ class StableZero123_BatchSchedule:
                               "azimuth_points_string": ("STRING", {"default": "0:(0.0),\n7:(1.0),\n15:(0.0)\n", "multiline": True}),
                               "elevation_points_string": ("STRING", {"default": "0:(0.0),\n7:(0.0),\n15:(0.0)\n", "multiline": True}),
                              }}
-    
+
     RETURN_TYPES = ("CONDITIONING", "CONDITIONING", "LATENT")
     RETURN_NAMES = ("positive", "negative", "latent")
     FUNCTION = "encode"
@@ -1325,14 +1325,14 @@ class StableZero123_BatchSchedule:
             return 1 - (1 - t) * (1 - t)
         def ease_in_out(t):
             return 3 * t * t - 2 * t * t * t
-        
+
         # Parse the azimuth input string into a list of tuples
         azimuth_points = []
         azimuth_points_string = azimuth_points_string.rstrip(',\n')
         for point_str in azimuth_points_string.split(','):
             frame_str, azimuth_str = point_str.split(':')
             frame = int(frame_str.strip())
-            azimuth = float(azimuth_str.strip()[1:-1]) 
+            azimuth = float(azimuth_str.strip()[1:-1])
             azimuth_points.append((frame, azimuth))
         # Sort the points by frame number
         azimuth_points.sort(key=lambda x: x[0])
@@ -1343,7 +1343,7 @@ class StableZero123_BatchSchedule:
         for point_str in elevation_points_string.split(','):
             frame_str, elevation_str = point_str.split(':')
             frame = int(frame_str.strip())
-            elevation_val = float(elevation_str.strip()[1:-1]) 
+            elevation_val = float(elevation_str.strip()[1:-1])
             elevation_points.append((frame, elevation_val))
         # Sort the points by frame number
         elevation_points.sort(key=lambda x: x[0])
@@ -1356,7 +1356,7 @@ class StableZero123_BatchSchedule:
         positive_pooled_out = []
         negative_cond_out = []
         negative_pooled_out = []
-        
+
         #azimuth interpolation
         for i in range(batch_size):
             # Find the interpolated azimuth for the current frame
@@ -1376,7 +1376,7 @@ class StableZero123_BatchSchedule:
                     fraction = ease_out(fraction)
                 elif interpolation == "ease_in_out":
                     fraction = ease_in_out(fraction)
-                
+
                 # Use the new interpolate_angle function
                 interpolated_azimuth = interpolate_angle(azimuth_points[prev_point][1], azimuth_points[next_point][1], fraction)
             else:
@@ -1397,7 +1397,7 @@ class StableZero123_BatchSchedule:
                     fraction = ease_out(fraction)
                 elif interpolation == "ease_in_out":
                     fraction = ease_in_out(fraction)
-                
+
                 interpolated_elevation = interpolate_angle(elevation_points[prev_elevation_point][1], elevation_points[next_elevation_point][1], fraction)
             else:
                 interpolated_elevation = elevation_points[prev_elevation_point][1]
@@ -1439,14 +1439,14 @@ class SV3D_BatchSchedule:
                               "azimuth_points_string": ("STRING", {"default": "0:(0.0),\n9:(180.0),\n20:(360.0)\n", "multiline": True}),
                               "elevation_points_string": ("STRING", {"default": "0:(0.0),\n9:(0.0),\n20:(0.0)\n", "multiline": True}),
                              }}
-    
+
     RETURN_TYPES = ("CONDITIONING", "CONDITIONING", "LATENT")
     RETURN_NAMES = ("positive", "negative", "latent")
     FUNCTION = "encode"
     CATEGORY = "KJNodes/experimental"
     DESCRIPTION = """
-Allow scheduling of the azimuth and elevation conditions for SV3D.  
-Note that SV3D is still a video model and the schedule needs to always go forward  
+Allow scheduling of the azimuth and elevation conditions for SV3D.
+Note that SV3D is still a video model and the schedule needs to always go forward
 https://huggingface.co/stabilityai/sv3d
 """
 
@@ -1463,14 +1463,14 @@ https://huggingface.co/stabilityai/sv3d
             return 1 - (1 - t) * (1 - t)
         def ease_in_out(t):
             return 3 * t * t - 2 * t * t * t
-        
+
         # Parse the azimuth input string into a list of tuples
         azimuth_points = []
         azimuth_points_string = azimuth_points_string.rstrip(',\n')
         for point_str in azimuth_points_string.split(','):
             frame_str, azimuth_str = point_str.split(':')
             frame = int(frame_str.strip())
-            azimuth = float(azimuth_str.strip()[1:-1]) 
+            azimuth = float(azimuth_str.strip()[1:-1])
             azimuth_points.append((frame, azimuth))
         # Sort the points by frame number
         azimuth_points.sort(key=lambda x: x[0])
@@ -1481,7 +1481,7 @@ https://huggingface.co/stabilityai/sv3d
         for point_str in elevation_points_string.split(','):
             frame_str, elevation_str = point_str.split(':')
             frame = int(frame_str.strip())
-            elevation_val = float(elevation_str.strip()[1:-1]) 
+            elevation_val = float(elevation_str.strip()[1:-1])
             elevation_points.append((frame, elevation_val))
         # Sort the points by frame number
         elevation_points.sort(key=lambda x: x[0])
@@ -1509,7 +1509,7 @@ https://huggingface.co/stabilityai/sv3d
                     fraction = ease_out(fraction)
                 elif interpolation == "ease_in_out":
                     fraction = ease_in_out(fraction)
-                
+
                 interpolated_azimuth = linear_interpolate(azimuth_points[prev_point][1], azimuth_points[next_point][1], fraction)
             else:
                 interpolated_azimuth = azimuth_points[prev_point][1]
@@ -1531,7 +1531,7 @@ https://huggingface.co/stabilityai/sv3d
                     fraction = ease_out(fraction)
                 elif interpolation == "ease_in_out":
                     fraction = ease_in_out(fraction)
-                
+
                 interpolated_elevation = linear_interpolate(elevation_points[prev_elevation_point][1], elevation_points[next_elevation_point][1], fraction)
             else:
                 interpolated_elevation = elevation_points[prev_elevation_point][1]
@@ -1556,7 +1556,7 @@ class LoadResAdapterNormalization:
             "required": {
                 "model": ("MODEL",),
                 "resadapter_path": (folder_paths.get_filename_list("checkpoints"), )
-            } 
+            }
         }
 
     RETURN_TYPES = ("MODEL",)
@@ -1584,11 +1584,11 @@ class LoadResAdapterNormalization:
                             model_clone.add_object_patch(f"diffusion_model.{key}.data", new_tensor)
                         else:
                             logging.warning("ResAdapter: No match for key: %s", key)
-            except:
+            except Exception:
                 raise Exception("Could not patch model, this way of patching was added to ComfyUI on March 3rd 2024, is your ComfyUI up to date?")
             logging.info("ResAdapter: Added resnet normalization patches")
             return (model_clone, )
-        
+
 class Superprompt:
     @classmethod
     def INPUT_TYPES(s):
@@ -1597,7 +1597,7 @@ class Superprompt:
                 "instruction_prompt": ("STRING", {"default": 'Expand the following prompt to add more detail', "multiline": True}),
                 "prompt": ("STRING", {"default": '', "multiline": True, "forceInput": True}),
                 "max_new_tokens": ("INT", {"default": 128, "min": 1, "max": 4096, "step": 1}),
-            } 
+            }
         }
 
     RETURN_TYPES = ("STRING",)
@@ -1605,10 +1605,10 @@ class Superprompt:
     CATEGORY = "KJNodes/text"
     DESCRIPTION = """
 # SuperPrompt
-A T5 model fine-tuned on the SuperPrompt dataset for  
-upsampling text prompts to more detailed descriptions.  
-Meant to be used as a pre-generation step for text-to-image  
-models that benefit from more detailed prompts.  
+A T5 model fine-tuned on the SuperPrompt dataset for
+upsampling text prompts to more detailed descriptions.
+Meant to be used as a pre-generation step for text-to-image
+models that benefit from more detailed prompts.
 https://huggingface.co/roborovski/superprompt-v1
 """
 
@@ -1620,26 +1620,26 @@ https://huggingface.co/roborovski/superprompt-v1
         if not os.path.exists(checkpoint_path):
                 logging.info(f"Downloading model to: {checkpoint_path}")
                 from huggingface_hub import snapshot_download
-                snapshot_download(repo_id="roborovski/superprompt-v1", 
-                                  local_dir=checkpoint_path, 
+                snapshot_download(repo_id="roborovski/superprompt-v1",
+                                  local_dir=checkpoint_path,
                                   local_dir_use_symlinks=False)
         tokenizer = T5Tokenizer.from_pretrained("google/flan-t5-small", legacy=False)
 
         model = T5ForConditionalGeneration.from_pretrained(checkpoint_path, device_map=device)
         model.to(device)
         input_text = instruction_prompt + ": " + prompt
-  
+
         input_ids = tokenizer(input_text, return_tensors="pt").input_ids.to(device)
         outputs = model.generate(input_ids,  max_new_tokens=max_new_tokens)
         out = (tokenizer.decode(outputs[0]))
         out = out.replace('<pad>', '')
         out = out.replace('</s>', '')
-        
+
         return (out, )
 
 
 class CameraPoseVisualizer:
-                
+
     @classmethod
     def INPUT_TYPES(s):
         return {"required": {
@@ -1655,15 +1655,15 @@ class CameraPoseVisualizer:
                 "cameractrl_poses": ("CAMERACTRL_POSES", {"default": None}),
             }
             }
-    
+
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "plot"
     CATEGORY = "KJNodes/misc"
     DESCRIPTION = """
-Visualizes the camera poses, from Animatediff-Evolved CameraCtrl Pose  
-or a .txt file with RealEstate camera intrinsics and coordinates, in a 3D plot. 
+Visualizes the camera poses, from Animatediff-Evolved CameraCtrl Pose
+or a .txt file with RealEstate camera intrinsics and coordinates, in a 3D plot.
 """
-        
+
     def plot(self, pose_file_path, scale, base_xval, zval, use_exact_fx, relative_c2w, use_viewer, cameractrl_poses=None):
         import matplotlib as mpl
         import matplotlib.pyplot as plt
@@ -1733,7 +1733,7 @@ or a .txt file with RealEstate camera intrinsics and coordinates, in a 3D plot.
         # Assuming you want to set the ticks at every 10th frame
         ticks = np.arange(0, total_frames, 10)
         colorbar.ax.yaxis.set_ticks(ticks)
-        
+
         plt.title('')
         plt.draw()
         buf = BytesIO()
@@ -1792,9 +1792,9 @@ or a .txt file with RealEstate camera intrinsics and coordinates, in a 3D plot.
             ret_poses = [np.linalg.inv(w2c) for w2c in w2cs]
         ret_poses = [transform_matrix @ x for x in ret_poses]
         return np.array(ret_poses, dtype=np.float32)
-    
-    
-            
+
+
+
 class CheckpointPerturbWeights:
 
     @classmethod
@@ -1840,7 +1840,7 @@ class CheckpointPerturbWeights:
             pbar.update(1)
         model_copy.model.diffusion_model.load_state_dict(dict)
         return model_copy,
-    
+
 class DifferentialDiffusionAdvanced():
     @classmethod
     def INPUT_TYPES(s):
@@ -1878,7 +1878,7 @@ class DifferentialDiffusionAdvanced():
         threshold = (current_ts - ts_to) / (ts_from - ts_to) / self.multiplier
 
         return (denoise_mask >= threshold).to(denoise_mask.dtype)
-    
+
 class FluxBlockLoraSelect:
     def __init__(self):
         self.loaded_lora = None
@@ -1895,7 +1895,7 @@ class FluxBlockLoraSelect:
             arg_dict["single_blocks.{}.".format(i)] = argument
 
         return {"required": arg_dict}
-    
+
     RETURN_TYPES = ("SELECTEDDITBLOCKS", )
     RETURN_NAMES = ("blocks", )
     OUTPUT_TOOLTIPS = ("The modified diffusion model.",)
@@ -1906,7 +1906,7 @@ class FluxBlockLoraSelect:
 
     def load_lora(self, **kwargs):
         return (kwargs,)
-    
+
 class HunyuanVideoBlockLoraSelect:
     @classmethod
     def INPUT_TYPES(s):
@@ -1920,7 +1920,7 @@ class HunyuanVideoBlockLoraSelect:
             arg_dict["single_blocks.{}.".format(i)] = argument
 
         return {"required": arg_dict}
-    
+
     RETURN_TYPES = ("SELECTEDDITBLOCKS", )
     RETURN_NAMES = ("blocks", )
     OUTPUT_TOOLTIPS = ("The modified diffusion model.",)
@@ -1942,7 +1942,7 @@ class Wan21BlockLoraSelect:
             arg_dict["blocks.{}.".format(i)] = argument
 
         return {"required": arg_dict}
-    
+
     RETURN_TYPES = ("SELECTEDDITBLOCKS", )
     RETURN_NAMES = ("blocks", )
     OUTPUT_TOOLTIPS = ("The modified diffusion model.",)
@@ -1964,7 +1964,7 @@ class LTX2BlockLoraSelect:
             arg_dict["blocks.{}.".format(i)] = argument
 
         return {"required": arg_dict}
-    
+
     RETURN_TYPES = ("SELECTEDDITBLOCKS", )
     RETURN_NAMES = ("blocks", )
     OUTPUT_TOOLTIPS = ("The modified diffusion model.",)
@@ -1976,7 +1976,7 @@ class LTX2BlockLoraSelect:
     def load_lora(self, **kwargs):
         return (kwargs,)
 
-    
+
 class DiTBlockLoraLoader:
     def __init__(self):
         self.loaded_lora = None
@@ -1986,7 +1986,7 @@ class DiTBlockLoraLoader:
         return {"required": {
                 "model": ("MODEL", {"tooltip": "The diffusion model the LoRA will be applied to."}),
                 "strength_model": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step": 0.01, "tooltip": "How strongly to modify the diffusion model. This value can be negative."}),
-                
+
                 },
                 "optional": {
                     "lora_name": (folder_paths.get_filename_list("loras"), {"tooltip": "The name of the LoRA."}),
@@ -1994,7 +1994,7 @@ class DiTBlockLoraLoader:
                     "blocks": ("SELECTEDDITBLOCKS",),
                 }
                }
-    
+
     RETURN_TYPES = ("MODEL", "STRING", )
     RETURN_NAMES = ("model", "rank", )
     OUTPUT_TOOLTIPS = ("The modified diffusion model.", "possible rank of the LoRA.")
@@ -2002,21 +2002,21 @@ class DiTBlockLoraLoader:
     CATEGORY = "KJNodes/lora"
 
     def load_lora(self, model, strength_model, lora_name=None, opt_lora_path=None, blocks=None):
-        
+
         import comfy.lora
 
         if opt_lora_path:
             lora_path = opt_lora_path
         else:
             lora_path = folder_paths.get_full_path("loras", lora_name)
-        
+
         lora = None
         if self.loaded_lora is not None:
             if self.loaded_lora[0] == lora_path:
                 lora = self.loaded_lora[1]
             else:
                 self.loaded_lora = None
-        
+
         if lora is None:
             lora = load_torch_file(lora_path, safe_load=True)
             self.loaded_lora = (lora_path, lora)
@@ -2080,15 +2080,15 @@ class DiTBlockLoraLoader:
 
         if model is not None:
             new_modelpatcher = model.clone()
-            k = new_modelpatcher.add_patches(loaded, strength_model)  
-    
+            k = new_modelpatcher.add_patches(loaded, strength_model)
+
         k = set(k)
         for x in loaded:
             if (x not in k):
                 logging.warning(f"NOT LOADED {x}")
 
         return (new_modelpatcher, rank)
-    
+
 class CustomControlNetWeightsFluxFromList:
     @classmethod
     def INPUT_TYPES(s):
@@ -2102,7 +2102,7 @@ class CustomControlNetWeightsFluxFromList:
                 "autosize": ("ACNAUTOSIZE", {"padding": 0}),
             }
         }
-    
+
     RETURN_TYPES = ("CONTROL_NET_WEIGHTS", "TIMESTEP_KEYFRAME",)
     RETURN_NAMES = ("CN_WEIGHTS", "TK_SHORTCUT")
     FUNCTION = "load_weights"
@@ -2112,7 +2112,7 @@ class CustomControlNetWeightsFluxFromList:
 
     def load_weights(self, list_of_floats: list[float],
                      uncond_multiplier: float=1.0, cn_extras: dict[str]={}):
-        
+
         adv_control = importlib.import_module("ComfyUI-Advanced-ControlNet.adv_control")
         ControlWeights = adv_control.utils.ControlWeights
         TimestepKeyframeGroup = adv_control.utils.TimestepKeyframeGroup
@@ -2121,7 +2121,7 @@ class CustomControlNetWeightsFluxFromList:
         weights = ControlWeights.controlnet(weights_input=list_of_floats, uncond_multiplier=uncond_multiplier, extras=cn_extras)
         logging.info(weights.weights_input)
         return (weights, TimestepKeyframeGroup.default(TimestepKeyframe(control_weights=weights)))
-    
+
 SHAKKERLABS_UNION_CONTROLNET_TYPES = {
     "canny": 0,
     "tile": 1,
@@ -2173,7 +2173,7 @@ class ModelSaveKJ:
 
     def save(self, model, filename_prefix, model_key_prefix, prompt=None, extra_pnginfo=None):
         full_output_folder, filename, counter, subfolder, filename_prefix = folder_paths.get_save_image_path(filename_prefix, self.output_dir)
-    
+
         output_checkpoint = f"{filename}_{counter:05}_.safetensors"
         output_checkpoint = os.path.join(full_output_folder, output_checkpoint)
 
@@ -2199,7 +2199,7 @@ class ModelSaveKJ:
             os.makedirs(full_output_folder)
         save_torch_file(new_sd, os.path.join(full_output_folder, output_checkpoint))
         return {}
-       
+
 class StyleModelApplyAdvanced:
     @classmethod
     def INPUT_TYPES(s):
@@ -2304,7 +2304,7 @@ class LeapfusionHunyuanI2V:
                         inp[:, :, [index], :, :] = torch.zeros(1)
                 return apply_model(inp, timestep, **c)
             return unet_wrapper
-        
+
         samples = latent["samples"] * 0.476986 * strength
         m = model.clone()
         m.set_model_unet_function_wrapper(outer_wrapper(samples, index, start_percent, end_percent))
@@ -2326,7 +2326,7 @@ class ImageNoiseAugmentation:
     FUNCTION = "add_noise"
     CATEGORY = "KJNodes/image"
     DESCRIPTION = """
-    Add noise to an image.  
+    Add noise to an image.
     """
 
     def add_noise(self, image, noise_aug_strength, seed):
@@ -2513,12 +2513,12 @@ class Guider_ScheduledCFG(CFGGuider):
             uncond = None
             cfg = 1.0
 
-        return sampling_function(self.inner_model, x, timestep, uncond, self.conds.get("positive", None), cfg, model_options=model_options, seed=seed)            
+        return sampling_function(self.inner_model, x, timestep, uncond, self.conds.get("positive", None), cfg, model_options=model_options, seed=seed)
 
 class ScheduledCFGGuidance:
     @classmethod
     def INPUT_TYPES(s):
-        return {"required": { 
+        return {"required": {
                     "model": ("MODEL",),
                     "positive": ("CONDITIONING", ),
                     "negative": ("CONDITIONING", ),
@@ -2531,12 +2531,12 @@ class ScheduledCFGGuidance:
     FUNCTION = "get_guider"
     CATEGORY = "KJNodes/experimental"
     DESCRiPTION = """
-CFG Guider that allows for scheduled CFG changes over steps, the steps outside the range will use CFG 1.0 thus being processed faster.  
-cfg input can be a list of floats matching step count, or a single float for all steps.  
+CFG Guider that allows for scheduled CFG changes over steps, the steps outside the range will use CFG 1.0 thus being processed faster.
+cfg input can be a list of floats matching step count, or a single float for all steps.
 """
 
     def get_guider(self, model, cfg, positive, negative, start_percent, end_percent):
-        guider = Guider_ScheduledCFG(model) 
+        guider = Guider_ScheduledCFG(model)
         guider.set_conds(positive, negative)
         guider.set_cfg(cfg, start_percent, end_percent)
         return (guider, )
@@ -2550,7 +2550,7 @@ class ApplyRifleXRoPE_WanVideo:
                 "model": ("MODEL",),
                 "latent": ("LATENT", {"tooltip": "Only used to get the latent count"}),
                 "k": ("INT", {"default": 6, "min": 1, "max": 100, "step": 1, "tooltip": "Index of intrinsic frequency"}),
-            } 
+            }
         }
 
     RETURN_TYPES = ("MODEL",)
@@ -2561,23 +2561,23 @@ class ApplyRifleXRoPE_WanVideo:
 
     def patch(self, model, latent, k):
         model_class = model.model.diffusion_model
-        
+
         model_clone = model.clone()
         num_frames = latent["samples"].shape[2]
         d = model_class.dim // model_class.num_heads
 
         rope_embedder = EmbedND_RifleX(
-            d, 
-            10000.0, 
+            d,
+            10000.0,
             [d - 4 * (d // 6), 2 * (d // 6), 2 * (d // 6)],
             num_frames,
             k
             )
-        
+
         model_clone.add_object_patch(f"diffusion_model.rope_embedder", rope_embedder)
-                    
+
         return (model_clone, )
-    
+
 class ApplyRifleXRoPE_HunuyanVideo:
     @classmethod
     def INPUT_TYPES(s):
@@ -2586,7 +2586,7 @@ class ApplyRifleXRoPE_HunuyanVideo:
                 "model": ("MODEL",),
                 "latent": ("LATENT", {"tooltip": "Only used to get the latent count"}),
                 "k": ("INT", {"default": 4, "min": 1, "max": 100, "step": 1, "tooltip": "Index of intrinsic frequency"}),
-            } 
+            }
         }
 
     RETURN_TYPES = ("MODEL",)
@@ -2597,20 +2597,20 @@ class ApplyRifleXRoPE_HunuyanVideo:
 
     def patch(self, model, latent, k):
         model_class = model.model.diffusion_model
-        
+
         model_clone = model.clone()
         num_frames = latent["samples"].shape[2]
 
         pe_embedder = EmbedND_RifleX(
-            model_class.params.hidden_size // model_class.params.num_heads, 
-            model_class.params.theta, 
-            model_class.params.axes_dim, 
+            model_class.params.hidden_size // model_class.params.num_heads,
+            model_class.params.theta,
+            model_class.params.axes_dim,
             num_frames,
             k
             )
-        
+
         model_clone.add_object_patch(f"diffusion_model.pe_embedder", pe_embedder)
-                    
+
         return (model_clone, )
 
 def rope_riflex(pos, dim, theta, L_test, k):
@@ -2659,7 +2659,7 @@ class Timer:
 
 class TimerNodeKJ:
     @classmethod
-    
+
     def INPUT_TYPES(s):
       return {
         "required": {
@@ -2680,11 +2680,11 @@ class TimerNodeKJ:
     def timer(self, mode, name, any_input=None, timer=None):
         if timer is None:
             if mode == "start":
-                timer = Timer(name=name)            
+                timer = Timer(name=name)
                 timer.start_time = time.time()
                 return {"ui": {
-                "text": [f"{timer.start_time}"]}, 
-                "result": (any_input, timer, 0) 
+                "text": [f"{timer.start_time}"]},
+                "result": (any_input, timer, 0)
                  }
         elif mode == "stop" and timer is not None:
             end_time = time.time()
@@ -2724,7 +2724,7 @@ class HunyuanVideoEncodeKeyframesToCond:
 
         model_clone.add_object_patch("concat_keys", ("concat_image",))
 
-       
+
         x = (start_frame.shape[1] // 8) * 8
         y = (start_frame.shape[2] // 8) * 8
 
@@ -2757,7 +2757,7 @@ class HunyuanVideoEncodeKeyframesToCond:
         if len(out) == 1:
             out.append(out[0])
         return (model_clone, out[0], out[1], out_latent)
-    
+
 
 class LazySwitchKJ:
     def __init__(self):
@@ -2877,12 +2877,12 @@ class SimpleCalculatorKJ(io.ComfyNode):
             node_id="SimpleCalculatorKJ",
             category="KJNodes/misc",
             description="""
-Calculator node that evaluates a mathematical expression using inputs a and b.  
-    Supported operations: +, -, *, /, //, %, **, <<, >>, unary +/-  
-    Supported comparisons: ==, !=, <, <=, >, >=  
-    Supported logic: and, or, not  
-    Supported functions: abs(), round(), min(), max(), pow(), sqrt(), sin(), cos(), tan(), log(), log10(), exp(), floor(), ceil()  
-    Supported constants: pi, euler, True, False  
+Calculator node that evaluates a mathematical expression using inputs a and b.
+    Supported operations: +, -, *, /, //, %, **, <<, >>, unary +/-
+    Supported comparisons: ==, !=, <, <=, >, >=
+    Supported logic: and, or, not
+    Supported functions: abs(), round(), min(), max(), pow(), sqrt(), sin(), cos(), tan(), log(), log10(), exp(), floor(), ceil()
+    Supported constants: pi, euler, True, False
 """,
             search_aliases=["math", "arithmetic", "expression", "logic"],
             inputs=[
@@ -2904,10 +2904,10 @@ Calculator node that evaluates a mathematical expression using inputs a and b.
         # Allowed operations
         allowed_operators = {
             ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.mul, ast.Div: operator.truediv,
-            ast.FloorDiv: operator.floordiv, ast.Mod: operator.mod, ast.Pow: operator.pow, 
-            ast.USub: operator.neg, ast.UAdd: operator.pos, ast.LShift: operator.lshift, 
+            ast.FloorDiv: operator.floordiv, ast.Mod: operator.mod, ast.Pow: operator.pow,
+            ast.USub: operator.neg, ast.UAdd: operator.pos, ast.LShift: operator.lshift,
             ast.RShift: operator.rshift, ast.Eq: operator.eq, ast.NotEq: operator.ne, ast.Lt: operator.lt,
-            ast.LtE: operator.le, ast.Gt: operator.gt, ast.GtE: operator.ge, ast.And: operator.and_, 
+            ast.LtE: operator.le, ast.Gt: operator.gt, ast.GtE: operator.ge, ast.And: operator.and_,
             ast.Or: operator.or_, ast.Not: operator.not_,
         }
 
@@ -3289,7 +3289,7 @@ class VisualizeSigmasKJ(io.ComfyNode):
             buf = np.frombuffer(fig.canvas.tostring_argb(), dtype=np.uint8)
             buf = buf.reshape(h, w, 4)
             buf = buf[:, :, [1, 2, 3]]  # Convert ARGB to RGB
-        except:
+        except Exception:
             buf = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
             buf = buf.reshape(h, w, 3).copy()
         image = torch.from_numpy(buf).float() / 255.0

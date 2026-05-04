@@ -304,5 +304,5 @@ if hasattr(PromptServer, "instance"):
         PromptServer.instance.app.add_routes(
             [web.static("/kjweb_async", (Path(__file__).parent.absolute() / "kjweb_async").as_posix())]
         )
-    except:
+    except Exception:
         pass

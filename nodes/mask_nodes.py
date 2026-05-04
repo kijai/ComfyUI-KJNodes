@@ -26,10 +26,10 @@ class BatchCLIPSeg:
 
     def __init__(self):
         pass
-    
+
     @classmethod
     def INPUT_TYPES(s):
-       
+
         return {"required":
                     {
                         "images": ("IMAGE",),
@@ -74,7 +74,7 @@ Segments an image or batch of images using CLIPSeg.
                         from huggingface_hub import snapshot_download
                         snapshot_download(repo_id="Kijai/clipseg-rd64-refined-fp16", local_dir=checkpoint_path, local_dir_use_symlinks=False)
                     self.model = CLIPSegForImageSegmentation.from_pretrained(checkpoint_path)
-                except:
+                except Exception:
                     checkpoint_path = "CIDAS/clipseg-rd64-refined"
                     self.model = CLIPSegForImageSegmentation.from_pretrained(checkpoint_path)
             processor = CLIPSegProcessor.from_pretrained(checkpoint_path)
@@ -87,7 +87,7 @@ Segments an image or batch of images using CLIPSeg.
 
         B, H, W, C = images.shape
         images = images.to(device)
-        
+
         autocast_condition = (dtype != torch.float32) and not model_management.is_device_mps(device)
         with torch.autocast(model_management.get_autocast_device(device), dtype=dtype) if autocast_condition else nullcontext():
 
@@ -109,11 +109,11 @@ Segments an image or batch of images using CLIPSeg.
         mask_tensor = mask_tensor.squeeze(1)
 
         self.model.to(offload_device)
-        
+
         if binary_mask:
             mask_tensor = (mask_tensor > 0).float()
         if blur_sigma > 0:
-            kernel_size = int(6 * int(blur_sigma) + 1) 
+            kernel_size = int(6 * int(blur_sigma) + 1)
             blur = transforms.GaussianBlur(kernel_size=(kernel_size, kernel_size), sigma=(blur_sigma, blur_sigma))
             mask_tensor = blur(mask_tensor)
 
@@ -137,19 +137,19 @@ Segments an image or batch of images using CLIPSeg.
         image_tensor = torch.clamp(image_tensor, min=0.0, max=1.0).cpu().float()
 
         mask_tensor = mask_tensor.cpu().float()
-    
-        return mask_tensor, image_tensor, 
+
+        return mask_tensor, image_tensor,
 
 class DownloadAndLoadCLIPSeg:
 
     def __init__(self):
         pass
-    
+
     @classmethod
     def INPUT_TYPES(s):
-       
+
         return {"required":
-                    {     
+                    {
                     "model": (
                     [   'Kijai/clipseg-rd64-refined-fp16',
                         'CIDAS/clipseg-rd64-refined',
@@ -163,7 +163,7 @@ class DownloadAndLoadCLIPSeg:
     RETURN_NAMES = ("clipseg_model",)
     FUNCTION = "segment_image"
     DESCRIPTION = """
-Downloads and loads CLIPSeg model with huggingface_hub,  
+Downloads and loads CLIPSeg model with huggingface_hub,
 to ComfyUI/models/clip_seg
 """
 
@@ -190,11 +190,11 @@ class CreateTextMask:
     FUNCTION = "createtextmask"
     CATEGORY = "KJNodes/text"
     DESCRIPTION = """
-Creates a text image and mask.  
-Looks for fonts from this folder:  
+Creates a text image and mask.
+Looks for fonts from this folder:
 ComfyUI/custom_nodes/ComfyUI-KJNodes/fonts
-  
-If start_rotation and/or end_rotation are different values,  
+
+If start_rotation and/or end_rotation are different values,
 creates animation between them.
 """
 
@@ -215,7 +215,7 @@ creates animation between them.
                  "start_rotation": ("INT", {"default": 0,"min": 0, "max": 359, "step": 1}),
                  "end_rotation": ("INT", {"default": 0,"min": -359, "max": 359, "step": 1}),
         },
-    } 
+    }
 
     def createtextmask(self, frames, width, height, invert, text_x, text_y, text, font_size, font_color, font, start_rotation, end_rotation):
     # Define the number of images in the batch
@@ -269,7 +269,7 @@ creates animation between them.
                 text_center_y = y_offset + text_height / 2
                 try:
                     draw.text((text_x, y_offset), line, font=font, fill=font_color, features=['-liga'])
-                except:
+                except Exception:
                     draw.text((text_x, y_offset), line, font=font, fill=font_color)
                 y_offset += text_height # Move to the next line
 
@@ -279,7 +279,7 @@ creates animation between them.
 
             image = np.array(image).astype(np.float32) / 255.0
             image = torch.from_numpy(image)[None,]
-            mask = image[:, :, :, 0] 
+            mask = image[:, :, :, 0]
             masks.append(mask)
             out.append(image)
 
@@ -288,13 +288,13 @@ creates animation between them.
         return (torch.cat(out, dim=0),torch.cat(masks, dim=0),)
 
 class ColorToMask:
-    
+
     RETURN_TYPES = ("MASK",)
     FUNCTION = "clip"
     CATEGORY = "KJNodes/masking"
     DESCRIPTION = """
-Converts chosen RGB value to a mask.  
-With batch inputs, the **per_batch**  
+Converts chosen RGB value to a mask.
+With batch inputs, the **per_batch**
 controls the number of images processed at once.
 """
 
@@ -310,29 +310,29 @@ controls the number of images processed at once.
                  "threshold": ("INT", {"default": 10,"min": 0, "max": 255, "step": 1}),
                  "per_batch": ("INT", {"default": 16, "min": 1, "max": 4096, "step": 1}),
         },
-    } 
+    }
 
     def clip(self, images, red, green, blue, threshold, invert, per_batch):
 
-        color = torch.tensor([red, green, blue], dtype=torch.uint8)  
+        color = torch.tensor([red, green, blue], dtype=torch.uint8)
         black = torch.tensor([0, 0, 0], dtype=torch.uint8)
         white = torch.tensor([255, 255, 255], dtype=torch.uint8)
-        
+
         if invert:
             black, white = white, black
 
         steps = images.shape[0]
         pbar = ProgressBar(steps)
         tensors_out = []
-        
+
         for start_idx in range(0, images.shape[0], per_batch):
 
             # Calculate color distances
             color_distances = torch.norm(images[start_idx:start_idx+per_batch] * 255 - color, dim=-1)
-            
+
             # Create a mask based on the threshold
             mask = color_distances <= threshold
-            
+
             # Apply the mask to create new images
             mask_out = torch.where(mask.unsqueeze(-1), white, black).float()
             mask_out = mask_out.mean(dim=-1)
@@ -340,13 +340,13 @@ controls the number of images processed at once.
             tensors_out.append(mask_out.cpu())
             batch_count = mask_out.shape[0]
             pbar.update(batch_count)
-       
+
         tensors_out = torch.cat(tensors_out, dim=0)
         tensors_out = torch.clamp(tensors_out, min=0.0, max=1.0)
         return tensors_out,
-      
+
 class CreateFluidMask:
-    
+
     RETURN_TYPES = ("IMAGE", "MASK")
     FUNCTION = "createfluidmask"
     CATEGORY = "KJNodes/masking/generate"
@@ -365,13 +365,13 @@ class CreateFluidMask:
                  "inflow_padding": ("INT", {"default": 50,"min": 0, "max": 255, "step": 1}),
                  "inflow_duration": ("INT", {"default": 60,"min": 0, "max": 255, "step": 1}),
         },
-    } 
+    }
     #using code from https://github.com/GregTJ/stable-fluids
     def createfluidmask(self, frames, width, height, invert, inflow_count, inflow_velocity, inflow_radius, inflow_padding, inflow_duration):
         from ..utility.fluid import Fluid
         try:
             from scipy.special import erf
-        except:
+        except Exception:
             from scipy.spatial import erf
         out = []
         masks = []
@@ -402,7 +402,7 @@ class CreateFluidMask:
             inflow_velocity[:, mask] += n[:, None] * INFLOW_VELOCITY
             inflow_dye[mask] = 1
 
-        
+
         for f in range(DURATION):
             logging.info(f'Computing frame {f + 1} of {DURATION}.')
             if f <= INFLOW_DURATION:
@@ -410,7 +410,7 @@ class CreateFluidMask:
                 fluid.dye += inflow_dye
 
             curl = fluid.step()[1]
-            # Using the error function to make the contrast a bit higher. 
+            # Using the error function to make the contrast a bit higher.
             # Any other sigmoid function e.g. smoothstep would work.
             curl = (erf(curl * 2) + 1) / 4
 
@@ -418,16 +418,16 @@ class CreateFluidMask:
             color = (np.clip(color, 0, 1) * 255).astype('uint8')
             image = np.array(color).astype(np.float32) / 255.0
             image = torch.from_numpy(image)[None,]
-            mask = image[:, :, :, 0] 
+            mask = image[:, :, :, 0]
             masks.append(mask)
             out.append(image)
-        
+
         if invert:
             return (1.0 - torch.cat(out, dim=0),1.0 - torch.cat(masks, dim=0),)
         return (torch.cat(out, dim=0),torch.cat(masks, dim=0),)
 
 class CreateAudioMask:
-       
+
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "createaudiomask"
     CATEGORY = "KJNodes/deprecated"
@@ -443,7 +443,7 @@ class CreateAudioMask:
                  "width": ("INT", {"default": 256,"min": 16, "max": 4096, "step": 1}),
                  "height": ("INT", {"default": 256,"min": 16, "max": 4096, "step": 1}),
         },
-    } 
+    }
 
     def createaudiomask(self, frames, width, height, invert, audio_path, scale):
         try:
@@ -457,7 +457,7 @@ class CreateAudioMask:
             audio_path = os.path.join(script_directory, audio_path)
         audio, sr = librosa.load(audio_path)
         spectrogram = np.abs(librosa.stft(audio))
-        
+
         for i in range(batch_size):
            image = Image.new("RGB", (width, height), "black")
            draw = ImageDraw.Draw(image)
@@ -469,19 +469,19 @@ class CreateAudioMask:
            draw.ellipse([(circle_center[0] - circle_radius, circle_center[1] - circle_radius),
                       (circle_center[0] + circle_radius, circle_center[1] + circle_radius)],
                       fill='white')
-             
+
            image = np.array(image).astype(np.float32) / 255.0
            image = torch.from_numpy(image)[None,]
-           mask = image[:, :, :, 0] 
+           mask = image[:, :, :, 0]
            masks.append(mask)
            out.append(image)
 
         if invert:
             return (1.0 - torch.cat(out, dim=0),)
         return (torch.cat(out, dim=0),torch.cat(masks, dim=0),)
-       
+
 class CreateGradientMask:
-    
+
     RETURN_TYPES = ("MASK",)
     FUNCTION = "createmask"
     CATEGORY = "KJNodes/masking/generate"
@@ -495,7 +495,7 @@ class CreateGradientMask:
                  "width": ("INT", {"default": 256,"min": 16, "max": 4096, "step": 1}),
                  "height": ("INT", {"default": 256,"min": 16, "max": 4096, "step": 1}),
         },
-    } 
+    }
     def createmask(self, frames, width, height, invert):
         # Define the number of images in the batch
         batch_size = frames
@@ -516,7 +516,7 @@ class CreateGradientMask:
         return (torch.cat(out, dim=0),)
 
 class CreateFadeMask:
-    
+
     RETURN_TYPES = ("MASK",)
     FUNCTION = "createfademask"
     CATEGORY = "KJNodes/deprecated"
@@ -535,8 +535,8 @@ class CreateFadeMask:
                  "end_level": ("FLOAT", {"default": 0.0,"min": 0.0, "max": 1.0, "step": 0.01}),
                  "midpoint_frame": ("INT", {"default": 0,"min": 0, "max": 4096, "step": 1}),
         },
-    } 
-    
+    }
+
     def createfademask(self, frames, width, height, invert, interpolation, start_level, midpoint_level, end_level, midpoint_frame):
         def ease_in(t):
             return t * t
@@ -587,23 +587,23 @@ class CreateFadeMask:
         return (torch.cat(out, dim=0),)
 
 class CreateFadeMaskAdvanced:
-    
+
     RETURN_TYPES = ("MASK",)
     FUNCTION = "createfademask"
     CATEGORY = "KJNodes/masking/generate"
     DESCRIPTION = """
-Create a batch of masks interpolated between given frames and values. 
+Create a batch of masks interpolated between given frames and values.
 Uses same syntax as Fizz' BatchValueSchedule.
-First value is the frame index (not that this starts from 0, not 1) 
-and the second value inside the brackets is the float value of the mask in range 0.0 - 1.0  
+First value is the frame index (not that this starts from 0, not 1)
+and the second value inside the brackets is the float value of the mask in range 0.0 - 1.0
 
-For example the default values:  
-0:(0.0)  
-7:(1.0)  
-15:(0.0)  
-  
-Would create a mask batch fo 16 frames, starting from black, 
-interpolating with the chosen curve to fully white at the 8th frame, 
+For example the default values:
+0:(0.0)
+7:(1.0)
+15:(0.0)
+
+Would create a mask batch fo 16 frames, starting from black,
+interpolating with the chosen curve to fully white at the 8th frame,
 and interpolating from that to fully black at the 16th frame.
 """
 
@@ -618,18 +618,18 @@ and interpolating from that to fully black at the 16th frame.
                  "height": ("INT", {"default": 512,"min": 1, "max": 4096, "step": 1}),
                  "interpolation": (["linear", "ease_in", "ease_out", "ease_in_out", "none", "default_to_black"],),
         },
-    } 
-    
+    }
+
     def createfademask(self, frames, width, height, invert, points_string, interpolation):
         def ease_in(t):
             return t * t
-        
+
         def ease_out(t):
             return 1 - (1 - t) * (1 - t)
 
         def ease_in_out(t):
             return 3 * t * t - 2 * t * t * t
-        
+
         # Parse the input string into a list of tuples
         points = []
         points_string = points_string.rstrip(',\n')
@@ -679,7 +679,7 @@ and interpolating from that to fully black at the 16th frame.
                         exact_match = True
                         break
                 if not exact_match:
-                    color = 0        
+                    color = 0
             else:
                 t = (i - points[prev_point][0]) / (points[next_point][0] - points[prev_point][0])
                 if interpolation == "ease_in":
@@ -692,7 +692,7 @@ and interpolating from that to fully black at the 16th frame.
                     pass  # No need to modify `t` for linear interpolation
 
                 color = points[prev_point][1] - t * (points[prev_point][1] - points[next_point][1])
-                
+
             color = np.clip(color, 0, 255)
             image = np.full((height, width), color, dtype=np.float32)
             image_batch[i] = image
@@ -706,7 +706,7 @@ and interpolating from that to fully black at the 16th frame.
         return (torch.cat(out, dim=0),)
 
 class CreateMagicMask:
-    
+
     RETURN_TYPES = ("MASK", "MASK",)
     RETURN_NAMES = ("mask", "mask_inverted",)
     FUNCTION = "createmagicmask"
@@ -724,7 +724,7 @@ class CreateMagicMask:
                  "frame_width": ("INT", {"default": 512,"min": 16, "max": 4096, "step": 1}),
                  "frame_height": ("INT", {"default": 512,"min": 16, "max": 4096, "step": 1}),
         },
-    } 
+    }
 
     def createmagicmask(self, frames, transitions, depth, distortion, seed, frame_width, frame_height):
         from ..utility.magictex import coordinate_grid, random_transform, magic
@@ -765,32 +765,32 @@ class CreateMagicMask:
 
                 ax = fig.add_subplot(111)
                 plt.subplots_adjust(left=0, right=1, bottom=0, top=1)
-                
+
                 ax.get_yaxis().set_ticks([])
                 ax.get_xaxis().set_ticks([])
                 ax.imshow(tex, aspect='auto')
-                
+
                 fig.canvas.draw()
                 img = np.array(fig.canvas.renderer._renderer)
-                
+
                 plt.close(fig)
-                
+
                 pil_img = Image.fromarray(img).convert("L")
                 mask = torch.tensor(np.array(pil_img)) / 255.0
-                
+
                 out.append(mask)
-        
+
         return (torch.stack(out, dim=0), 1.0 - torch.stack(out, dim=0),)
-        
+
 class CreateShapeMask:
-    
+
     RETURN_TYPES = ("MASK", "MASK",)
     RETURN_NAMES = ("mask", "mask_inverted",)
     FUNCTION = "createshapemask"
     CATEGORY = "KJNodes/masking/generate"
     DESCRIPTION = """
-Creates a mask or batch of masks with the specified shape.  
-Locations are center locations.  
+Creates a mask or batch of masks with the specified shape.
+Locations are center locations.
 Grow value is the amount to grow the shape on each frame, creating animated masks.
 """
 
@@ -815,7 +815,7 @@ Grow value is the amount to grow the shape on each frame, creating animated mask
                 "shape_width": ("INT", {"default": 128,"min": 8, "max": 4096, "step": 1}),
                 "shape_height": ("INT", {"default": 128,"min": 8, "max": 4096, "step": 1}),
         },
-    } 
+    }
 
     def createshapemask(self, frames, frame_width, frame_height, location_x, location_y, shape_width, shape_height, grow, shape):
         # Define the number of images in the batch
@@ -840,7 +840,7 @@ Grow value is the amount to grow the shape on each frame, creating animated mask
                     draw.ellipse(two_points, fill=color)
                 elif shape == 'square':
                     draw.rectangle(two_points, fill=color)
-                    
+
             elif shape == 'triangle':
                 # Define the points for the triangle
                 left_up_point = (location_x - current_width // 2, location_y + current_height // 2) # bottom left
@@ -853,9 +853,9 @@ Grow value is the amount to grow the shape on each frame, creating animated mask
             out.append(mask)
         outstack = torch.cat(out, dim=0)
         return (outstack, 1.0 - outstack,)
-    
+
 class CreateVoronoiMask:
-    
+
     RETURN_TYPES = ("MASK", "MASK",)
     RETURN_NAMES = ("mask", "mask_inverted",)
     FUNCTION = "createvoronoi"
@@ -872,7 +872,7 @@ class CreateVoronoiMask:
                  "frame_width": ("INT", {"default": 512,"min": 16, "max": 4096, "step": 1}),
                  "frame_height": ("INT", {"default": 512,"min": 16, "max": 4096, "step": 1}),
         },
-    } 
+    }
 
     def createvoronoi(self, frames, num_points, line_width, speed, frame_width, frame_height):
         from scipy.spatial import Voronoi
@@ -880,14 +880,14 @@ class CreateVoronoiMask:
         # Define the number of images in the batch
         batch_size = frames
         out = []
-          
+
         # Calculate aspect ratio
         aspect_ratio = frame_width / frame_height
-        
+
         # Create start and end points for each point, considering the aspect ratio
         start_points = np.random.rand(num_points, 2)
         start_points[:, 0] *= aspect_ratio
-        
+
         end_points = np.random.rand(num_points, 2)
         end_points[:, 0] *= aspect_ratio
 
@@ -928,7 +928,7 @@ class CreateVoronoiMask:
             out.append(mask)
 
         return (torch.stack(out, dim=0), 1.0 - torch.stack(out, dim=0),)
-    
+
 class GetMaskSizeAndCount:
     @classmethod
     def INPUT_TYPES(s):
@@ -941,8 +941,8 @@ class GetMaskSizeAndCount:
     FUNCTION = "getsize"
     CATEGORY = "KJNodes/masking"
     DESCRIPTION = """
-Returns the width, height and batch size of the mask,  
-and passes it through unchanged.  
+Returns the width, height and batch size of the mask,
+and passes it through unchanged.
 
 """
 
@@ -951,8 +951,8 @@ and passes it through unchanged.
         height = mask.shape[1]
         count = mask.shape[0]
         return {"ui": {
-            "text": [f"{count}x{width}x{height}"]}, 
-            "result": (mask, width, height, count) 
+            "text": [f"{count}x{width}x{height}"]},
+            "result": (mask, width, height, count)
         }
 
 class GrowMaskWithBlur:
@@ -994,7 +994,7 @@ class GrowMaskWithBlur:
 - lerp_alpha: alpha value for interpolation between frames
 - decay_factor: decay value for interpolation between frames
 - fill_holes: fill holes in the mask (slow)"""
-    
+
     def expand_mask(self, mask, expand, tapered_corners, flip_input, blur_radius, incremental_expandrate, lerp_alpha, decay_factor, fill_holes=False):
         import kornia.morphology as morph
         alpha = lerp_alpha
@@ -1018,26 +1018,26 @@ class GrowMaskWithBlur:
                     kernel = torch.tensor([[1, 1, 1],
                                         [1, 1, 1],
                                         [1, 1, 1]], dtype=torch.float32, device=output.device)
-                
+
                 for _ in range(abs(round(current_expand))):
                     if current_expand < 0:
                         output = morph.erosion(output, kernel)
                     else:
                         output = morph.dilation(output, kernel)
-            
+
             output = output.squeeze(0).squeeze(0)  # Remove batch and channel dims
-            
+
             if current_expand < 0:
                 current_expand -= abs(incremental_expandrate)
             else:
                 current_expand += abs(incremental_expandrate)
-                
+
             if fill_holes:
                 binary_mask = output > 0
                 output_np = binary_mask.cpu().numpy()
                 filled = scipy.ndimage.binary_fill_holes(output_np)
                 output = torch.from_numpy(filled.astype(np.float32)).to(output.device)
-            
+
             if alpha < 1.0 and previous_output is not None:
                 output = alpha * output + (1 - alpha) * previous_output
             if decay < 1.0 and previous_output is not None:
@@ -1059,7 +1059,7 @@ class GrowMaskWithBlur:
             return (blurred, 1.0 - blurred)
         else:
             return (torch.stack(out, dim=0), 1.0 - torch.stack(out, dim=0),)
-        
+
 class MaskBatchMulti:
     @classmethod
     def INPUT_TYPES(s):
@@ -1076,8 +1076,8 @@ class MaskBatchMulti:
     FUNCTION = "combine"
     CATEGORY = "KJNodes/masking"
     DESCRIPTION = """
-Creates an image batch from multiple masks.  
-You can set how many inputs the node has,  
+Creates an image batch from multiple masks.
+You can set how many inputs the node has,
 with the **inputcount** and clicking update.
 """
 
@@ -1103,11 +1103,11 @@ class OffsetMask:
                 "roll": ("BOOLEAN", { "default": False }),
                 "incremental": ("BOOLEAN", { "default": False }),
                 "padding_mode": (
-            [   
+            [
                 'empty',
                 'border',
                 'reflection',
-                
+
             ], {
                "default": 'empty'
             }),
@@ -1119,7 +1119,7 @@ class OffsetMask:
     FUNCTION = "offset"
     CATEGORY = "KJNodes/masking"
     DESCRIPTION = """
-Offsets the mask by the specified amount.  
+Offsets the mask by the specified amount.
  - mask: Input mask or mask batch
  - x: Horizontal offset
  - y: Vertical offset
@@ -1160,7 +1160,7 @@ Offsets the mask by the specified amount.
                 if shift_y != 0:
                     mask = torch.roll(mask, shifts=shift_y, dims=1)
         else:
-            
+
             for i in range(batch_size):
                 if incremental:
                     temp_x = min(x * (i+1), width-1)
@@ -1189,21 +1189,21 @@ Offsets the mask by the specified amount.
                         mask[i] = torch.cat([mask[i, :temp_y, :], torch.zeros((-temp_y, width))], dim=0)
                     elif padding_mode in ['replicate', 'reflect']:
                         mask[i] = F.pad(mask[i, -temp_y:, :], (temp_y, 0), mode=padding_mode)
-           
+
         return mask,
-        
+
 class RoundMask:
     @classmethod
     def INPUT_TYPES(s):
         return {"required": {
-            "mask": ("MASK",),  
+            "mask": ("MASK",),
         }}
 
     RETURN_TYPES = ("MASK",)
     FUNCTION = "round"
     CATEGORY = "KJNodes/masking"
     DESCRIPTION = """
-Rounds the mask or batch of masks to a binary mask.  
+Rounds the mask or batch of masks to a binary mask.
 <img src="https://github.com/kijai/ComfyUI-KJNodes/assets/40791699/52c85202-f74e-4b96-9dac-c8bda5ddcc40" width="300" height="250" alt="RoundMask example">
 
 """
@@ -1211,7 +1211,7 @@ Rounds the mask or batch of masks to a binary mask.
     def round(self, mask):
         mask = mask.round()
         return (mask,)
-    
+
 class ResizeMask:
     upscale_methods = ["nearest-exact", "bilinear", "area", "bicubic", "lanczos"]
     @classmethod
@@ -1274,17 +1274,17 @@ Sets new min and max values for the mask.
 
          # Find the maximum value in the mask
         mask_max = torch.max(mask)
-        
+
         # If the maximum mask value is zero, avoid division by zero by setting it to 1
         mask_max = mask_max if mask_max > 0 else 1
-        
+
         # Scale the mask values to the new range defined by min and max
         # The highest pixel value in the mask will be scaled to max
         scaled_mask = (mask / mask_max) * (max - min) + min
-        
+
         # Clamp the values to ensure they are within [0.0, 1.0]
         scaled_mask = torch.clamp(scaled_mask, min=0.0, max=1.0)
-        
+
         return (scaled_mask, )
 
 
@@ -1293,17 +1293,17 @@ def get_mask_polygon(self, mask_np):
     """Helper function to get polygon points from mask"""
     # Find contours
     contours, _ = cv2.findContours(mask_np, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    
+
     if not contours:
         return None
-    
+
     # Get the largest contour
     largest_contour = max(contours, key=cv2.contourArea)
-    
+
     # Approximate polygon
     epsilon = 0.02 * cv2.arcLength(largest_contour, True)
     polygon = cv2.approxPolyDP(largest_contour, epsilon, True)
-    
+
     return polygon.squeeze()
 
 class SeparateMasks:
@@ -1341,43 +1341,43 @@ class SeparateMasks:
         contours, _ = cv2.findContours(mask_np, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         if not contours:
             return None
-        
+
         largest_contour = max(contours, key=cv2.contourArea)
         hull = cv2.convexHull(largest_contour)
-        
+
         # Initialize with smaller epsilon for more points
         perimeter = cv2.arcLength(hull, True)
-        
+
         min_eps = perimeter * 0.001  # Much smaller minimum
         max_eps = perimeter * 0.2   # Smaller maximum
-        
+
         best_approx = None
         best_diff = float('inf')
         max_iterations = 20
-        
+
         #print(f"Target points: {max_points}, Perimeter: {perimeter}")
-        
+
         for i in range(max_iterations):
             curr_eps = (min_eps + max_eps) / 2
             approx = cv2.approxPolyDP(hull, curr_eps, True)
             points_diff = len(approx) - max_points
-            
+
             #print(f"Iteration {i}: points={len(approx)}, eps={curr_eps:.4f}")
-            
+
             if abs(points_diff) < best_diff:
                 best_approx = approx
                 best_diff = abs(points_diff)
-            
+
             if len(approx) > max_points:
                 min_eps = curr_eps * 1.1  # More gradual adjustment
             elif len(approx) < max_points:
                 max_eps = curr_eps * 0.9  # More gradual adjustment
             else:
                 return approx.squeeze()
-            
+
             if abs(max_eps - min_eps) < perimeter * 0.0001:  # Relative tolerance
                 break
-        
+
         # If we didn't find exact match, return best approximation
         return best_approx.squeeze() if best_approx is not None else hull.squeeze()
 
@@ -1386,26 +1386,26 @@ class SeparateMasks:
         separated = []
 
         mask = mask.round()
-        
+
         for b in range(B):
             mask_np = mask[b].cpu().numpy().astype(np.uint8)
             structure = np.ones((3, 3), dtype=np.int8)
             labeled, ncomponents = scipy.ndimage.label(mask_np, structure=structure)
             pbar = ProgressBar(ncomponents)
-            
+
             for component in range(1, ncomponents + 1):
                 component_mask_np = (labeled == component).astype(np.uint8)
-                
+
                 rows = np.any(component_mask_np, axis=1)
                 cols = np.any(component_mask_np, axis=0)
                 y_min, y_max = np.where(rows)[0][[0, -1]]
                 x_min, x_max = np.where(cols)[0][[0, -1]]
-                
+
                 width = x_max - x_min + 1
                 height = y_max - y_min + 1
                 centroid_x = (x_min + x_max) / 2  # Calculate x centroid
                 logging.info(f"Component {component}: width={width}, height={height}, x_pos={centroid_x}")
-                
+
                 if width >= size_threshold_width and height >= size_threshold_height:
                     if mode == "convex_polygons":
                         polygon = self.get_mask_polygon(component_mask_np, max_poly_points)
@@ -1423,7 +1423,7 @@ class SeparateMasks:
                         area_mask = torch.tensor(component_mask_np, device=mask.device)
                         separated.append((centroid_x, area_mask))
                 pbar.update(1)
-        
+
         if len(separated) > 0:
             # Sort by x position and extract only the masks
             separated.sort(key=lambda x: x[0])
@@ -1623,67 +1623,67 @@ class BlockifyMask:
 
     def process(self, masks, block_size, device="cpu"):
         processing_device = main_device if device == "gpu" else torch.device("cpu")
-        
+
         masks = masks.to(processing_device)
         batch_size, height, width = masks.shape
-        
+
         result_masks = torch.zeros_like(masks)
-        
+
         for i in tqdm(range(batch_size), desc="BlockifyMask batch"):
             mask = masks[i]
-            
+
             # Find bounding box efficiently
             mask_bool = mask > 0
             if not mask_bool.any():
                 continue
-                
+
             y_indices = torch.nonzero(mask_bool.any(dim=1), as_tuple=True)[0]
             x_indices = torch.nonzero(mask_bool.any(dim=0), as_tuple=True)[0]
-            
+
             if len(y_indices) == 0 or len(x_indices) == 0:
                 continue
-                
+
             y_min, y_max = y_indices[0], y_indices[-1]
             x_min, x_max = x_indices[0], x_indices[-1]
-            
+
             bbox_width = x_max - x_min + 1
             bbox_height = y_max - y_min + 1
-            
+
             # Calculate block grid
             w_divisions = max(1, bbox_width // block_size)
             h_divisions = max(1, bbox_height // block_size)
-            
+
             w_slice = bbox_width // w_divisions
             h_slice = bbox_height // h_divisions
-            
+
             # Create coordinate grids only for bbox region
             y_coords = torch.arange(y_min, y_max + 1, device=processing_device).view(-1, 1)
             x_coords = torch.arange(x_min, x_max + 1, device=processing_device).view(1, -1)
-            
+
             # Calculate block indices for bbox region
             w_block_indices = (x_coords - x_min) // w_slice
             h_block_indices = (y_coords - y_min) // h_slice
-            
+
             # Clamp to valid range
             w_block_indices = w_block_indices.clamp(0, w_divisions - 1)
             h_block_indices = h_block_indices.clamp(0, h_divisions - 1)
-            
+
             # Create unique block IDs by combining h and w indices
             block_ids = h_block_indices * w_divisions + w_block_indices
-            
+
             # Get mask region within bbox
             mask_region = mask[y_min:y_max+1, x_min:x_max+1]
-            
+
             # Find which blocks have content using scatter_add
             max_blocks = h_divisions * w_divisions
             block_content = torch.zeros(max_blocks, device=processing_device)
             block_content.scatter_add_(0, block_ids.flatten(), mask_region.flatten())
-            
+
             # Create result for blocks that have content
             has_content = block_content > 0
             block_mask = has_content[block_ids]
-            
+
             # Fill the result
             result_masks[i, y_min:y_max+1, x_min:x_max+1] = block_mask.float()
-        
+
         return (result_masks.clamp(0, 1),)

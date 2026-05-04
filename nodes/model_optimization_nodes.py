@@ -334,7 +334,7 @@ class ModelPatchTorchSettings:
     EXPERIMENTAL = True
     CATEGORY = "KJNodes/experimental"
 
-    def patch(self, model, enable_fp16_accumulation):        
+    def patch(self, model, enable_fp16_accumulation):
         model_clone = model.clone()
 
         def patch_enable_fp16_accum(model):
@@ -362,7 +362,7 @@ class ModelPatchTorchSettings:
 class PatchModelPatcherOrder:
     @classmethod
     def INPUT_TYPES(s):
-        return {"required": { 
+        return {"required": {
                     "model": ("MODEL",),
                     "patch_order": (["object_patch_first", "weight_patch_first"], {"default": "weight_patch_first", "tooltip": "Patch the comfy patch_model function to load weight patches (LoRAs) before compiling the model"}),
                     "full_load": (["enabled", "disabled", "auto"], {"default": "auto", "tooltip": "Disabling may help with memory issues when loading large models, when changing this you should probably force model reload to avoid issues!"}),
@@ -383,7 +383,7 @@ class TorchCompileModelFluxAdvancedV2:
 
     @classmethod
     def INPUT_TYPES(s):
-        return {"required": { 
+        return {"required": {
                     "model": ("MODEL",),
                     "backend": (["inductor", "cudagraphs"],),
                     "fullgraph": ("BOOLEAN", {"default": False, "tooltip": "Enable full graph mode"}),
@@ -423,9 +423,9 @@ class TorchCompileModelFluxAdvancedV2:
                 for i, block in enumerate(diffusion_model.single_blocks):
                     compile_key_list.append(f"diffusion_model.single_blocks.{i}")
 
-            set_torch_compile_wrapper(model=m, keys=compile_key_list, backend=backend, mode=mode, dynamic=dynamic, fullgraph=fullgraph)           
-        except:
-            raise RuntimeError("Failed to compile model")
+            set_torch_compile_wrapper(model=m, keys=compile_key_list, backend=backend, mode=mode, dynamic=dynamic, fullgraph=fullgraph)
+        except Exception as exc:
+            raise RuntimeError(f"Failed to compile model. Exception: {exc}")
 
         return (m, )
 
@@ -470,9 +470,9 @@ class TorchCompileModelWanVideoV2:
             else:
                 compile_key_list =["diffusion_model"]
 
-            set_torch_compile_wrapper(model=m, keys=compile_key_list, backend=backend, mode=mode, dynamic=dynamic, fullgraph=fullgraph)           
-        except:
-            raise RuntimeError("Failed to compile model")
+            set_torch_compile_wrapper(model=m, keys=compile_key_list, backend=backend, mode=mode, dynamic=dynamic, fullgraph=fullgraph)
+        except Exception as exc:
+            raise RuntimeError(f"Failed to compile model. Exception: {exc}")
 
         return (m, )
 
@@ -543,8 +543,8 @@ class TorchCompileModelAdvanced:
                 raise ValueError(f"Invalid dynamic arg {dynamic}")
 
             set_torch_compile_wrapper(model=m, keys=compile_key_list, backend=backend, mode=mode, dynamic=dynamic, fullgraph=fullgraph)
-        except:
-            raise RuntimeError("Failed to compile model")
+        except Exception as exc:
+            raise RuntimeError(f"Failed to compile model. Exception: {exc}")
 
         return (m, )
 
@@ -585,8 +585,8 @@ class TorchCompileModelQwenImage:
                 compile_key_list =["diffusion_model"]
 
             set_torch_compile_wrapper(model=m, keys=compile_key_list, backend=backend, mode=mode, dynamic=dynamic, fullgraph=fullgraph)
-        except:
-            raise RuntimeError("Failed to compile model")
+        except Exception as exc:
+            raise RuntimeError(f"Failed to compile model. Exception: {exc}")
 
         return (m, )
 
@@ -597,7 +597,7 @@ class TorchCompileVAE:
 
     @classmethod
     def INPUT_TYPES(s):
-        return {"required": { 
+        return {"required": {
                     "vae": ("VAE",),
                     "backend": (["inductor", "cudagraphs"],),
                     "fullgraph": ("BOOLEAN", {"default": False, "tooltip": "Enable full graph mode"}),
@@ -630,8 +630,8 @@ class TorchCompileVAE:
                         ),
                     )
                     self._compiled_encoder = True
-                except:
-                    raise RuntimeError("Failed to compile model")
+                except Exception as exc:
+                    raise RuntimeError(f"Failed to compile model. Exception: {exc}")
         if compile_decoder:
             if not self._compiled_decoder:
                 decoder_name = "decoder"
@@ -650,8 +650,8 @@ class TorchCompileVAE:
                         ),
                     )
                     self._compiled_decoder = True
-                except:
-                    raise RuntimeError("Failed to compile model")
+                except Exception as exc:
+                    raise RuntimeError(f"Failed to compile model. Exception: {exc}")
         return (vae, )
 
 class TorchCompileControlNet:
@@ -660,7 +660,7 @@ class TorchCompileControlNet:
 
     @classmethod
     def INPUT_TYPES(s):
-        return {"required": { 
+        return {"required": {
                     "controlnet": ("CONTROL_NET",),
                     "backend": (["inductor", "cudagraphs"],),
                     "fullgraph": ("BOOLEAN", {"default": False, "tooltip": "Enable full graph mode"}),
@@ -680,9 +680,9 @@ class TorchCompileControlNet:
                 #     controlnet.control_model.double_blocks[i] = torch.compile(block, mode=mode, fullgraph=fullgraph, backend=backend)
                 controlnet.control_model = torch.compile(controlnet.control_model, mode=mode, fullgraph=fullgraph, backend=backend)
                 self._compiled = True
-            except:
+            except Exception as exc:
                 self._compiled = False
-                raise RuntimeError("Failed to compile model")
+                raise RuntimeError(f"Failed to compile model. Got exception: {exc}")
 
         return (controlnet, )
 
@@ -691,7 +691,7 @@ class TorchCompileControlNet:
 
 try:
     from comfy.ldm.wan.model import sinusoidal_embedding_1d
-except:
+except (ImportError, ModuleNotFoundError):
     pass
 
 from unittest.mock import patch
@@ -707,7 +707,7 @@ def relative_l1_distance(last_tensor, current_tensor):
 def tea_cache(self, x, e0, e, transformer_options):
     #teacache for cond and uncond separately
     rel_l1_thresh = transformer_options["rel_l1_thresh"]
-    
+
     is_cond = True if transformer_options["cond_or_uncond"] == [0] else False
 
     should_calc = True
@@ -716,7 +716,7 @@ def tea_cache(self, x, e0, e, transformer_options):
     # Init cache dict if not exists
     if not hasattr(self, 'teacache_state'):
         self.teacache_state = {
-            'cond': {'accumulated_rel_l1_distance': 0, 'prev_input': None, 
+            'cond': {'accumulated_rel_l1_distance': 0, 'prev_input': None,
                     'teacache_skipped_steps': 0, 'previous_residual': None},
             'uncond': {'accumulated_rel_l1_distance': 0, 'prev_input': None,
                     'teacache_skipped_steps': 0, 'previous_residual': None}
@@ -739,7 +739,7 @@ def tea_cache(self, x, e0, e, transformer_options):
             else:
                 should_calc = True
                 cache['accumulated_rel_l1_distance'] = 0
-        except:
+        except Exception:
             should_calc = True
             cache['accumulated_rel_l1_distance'] = 0
 
@@ -789,7 +789,7 @@ def teacache_wanvideo_vace_forward_orig(self, x, t, context, vace_context, vace_
             should_calc = True
         else:
             should_calc, cache = tea_cache(self, x, e0, e, transformer_options)
-        
+
         if should_calc:
             original_x = x.clone().detach()
             patches_replace = transformer_options.get("patches_replace", {})
@@ -814,7 +814,7 @@ def teacache_wanvideo_vace_forward_orig(self, x, t, context, vace_context, vace_
 
             if teacache_enabled:
                 cache['previous_residual']  = (x - original_x).to(transformer_options["teacache_device"])
-          
+
         # head
         x = self.head(x, e)
 
@@ -849,7 +849,7 @@ def teacache_wanvideo_forward_orig(self, x, t, context, clip_fea=None, freqs=Non
             should_calc = True
         else:
             should_calc, cache = tea_cache(self, x, e0, e, transformer_options)
-        
+
         if should_calc:
             original_x = x.clone().detach()
             patches_replace = transformer_options.get("patches_replace", {})
@@ -867,7 +867,7 @@ def teacache_wanvideo_forward_orig(self, x, t, context, clip_fea=None, freqs=Non
 
             if teacache_enabled:
                 cache['previous_residual']  = (x - original_x).to(transformer_options["teacache_device"])
-          
+
         # head
         x = self.head(x, e)
 
@@ -888,19 +888,19 @@ class WanVideoTeaCacheKJ:
                 "coefficients": (["disabled", "1.3B", "14B", "i2v_480", "i2v_720"], {"default": "i2v_480", "tooltip": "Coefficients for rescaling the relative l1 distance, if disabled the threshold value should be about 10 times smaller than the value used with coefficients."}),
             }
         }
-    
+
     RETURN_TYPES = ("MODEL",)
     RETURN_NAMES = ("model",)
     FUNCTION = "patch_teacache"
     CATEGORY = "KJNodes/deprecated"
     DEPRECATED = True
     DESCRIPTION = """
-Patch WanVideo model to use TeaCache. Speeds up inference by caching the output and  
-applying it instead of doing the step.  Best results are achieved by choosing the  
-appropriate coefficients for the model. Early steps should never be skipped, with too  
-aggressive values this can happen and the motion suffers. Starting later can help with that too.   
-When NOT using coefficients, the threshold value should be  
-about 10 times smaller than the value used with coefficients.  
+Patch WanVideo model to use TeaCache. Speeds up inference by caching the output and
+applying it instead of doing the step.  Best results are achieved by choosing the
+appropriate coefficients for the model. Early steps should never be skipped, with too
+aggressive values this can happen and the motion suffers. Starting later can help with that too.
+When NOT using coefficients, the threshold value should be
+about 10 times smaller than the value used with coefficients.
 
 Official recommended values https://github.com/ali-vilab/TeaCache/tree/main/TeaCache4Wan2.1
 """
@@ -914,7 +914,7 @@ Official recommended values https://github.com/ali-vilab/TeaCache/tree/main/TeaC
             logging.warning("Threshold value is too high for TeaCache without coefficients, consider using coefficients for better results.")
         if coefficients != "disabled" and rel_l1_thresh < 0.1 and "1.3B" not in coefficients:
             logging.warning("Threshold value is too low for TeaCache with coefficients, consider using higher threshold value for better results.")
-        
+
         # type_str = str(type(model.model.model_config).__name__)
         #if model.model.diffusion_model.dim == 1536:
         #    model_type ="1.3B"
@@ -925,8 +925,8 @@ Official recommended values https://github.com/ali-vilab/TeaCache/tree/main/TeaC
         #         model_type = "i2v_480"
         #     else:
         #         model_type = "i2v_720" #how to detect this?
-  
-       
+
+
         teacache_coefficients_map = {
             "disabled": [],
             "1.3B": [2.39676752e+03, -1.31110545e+03, 2.01331979e+02, -8.29855975e+00, 1.37887774e-01],
@@ -935,7 +935,7 @@ Official recommended values https://github.com/ali-vilab/TeaCache/tree/main/TeaC
             "i2v_720": [-114.36346466, 65.26524496, -18.82220707, 4.91518089, -0.23412683],
         }
         coefficients = teacache_coefficients_map[coefficients]
-        
+
         teacache_device = mm.get_torch_device() if cache_device == "main_device" else mm.unet_offload_device()
 
         model_clone = model.clone()
@@ -945,8 +945,8 @@ Official recommended values https://github.com/ali-vilab/TeaCache/tree/main/TeaC
         model_clone.model_options["transformer_options"]["teacache_device"] = teacache_device
         model_clone.model_options["transformer_options"]["coefficients"] = coefficients
         diffusion_model = model_clone.get_model_object("diffusion_model")
-                
-        def outer_wrapper(start_percent, end_percent):        
+
+        def outer_wrapper(start_percent, end_percent):
             def unet_wrapper_function(model_function, kwargs):
                 input = kwargs["input"]
                 timestep = kwargs["timestep"]
@@ -954,7 +954,7 @@ Official recommended values https://github.com/ali-vilab/TeaCache/tree/main/TeaC
                 sigmas = c["transformer_options"]["sample_sigmas"]
                 cond_or_uncond = kwargs["cond_or_uncond"]
                 last_step = (len(sigmas) - 1)
-             
+
                 matched_step_index = (sigmas == timestep[0] ).nonzero()
                 if len(matched_step_index) > 0:
                     current_step_index = matched_step_index.item()
@@ -972,15 +972,15 @@ Official recommended values https://github.com/ali-vilab/TeaCache/tree/main/TeaC
                         if hasattr(diffusion_model, "teacache_state"):
                             delattr(diffusion_model, "teacache_state")
                             logging.info("\nResetting TeaCache state")
-                
+
                 current_percent = current_step_index / (len(sigmas) - 1)
                 c["transformer_options"]["current_percent"] = current_percent
                 if start_percent <= current_percent <= end_percent:
                     c["transformer_options"]["teacache_enabled"] = True
-                
+
                 forward_function = teacache_wanvideo_vace_forward_orig if hasattr(diffusion_model, "vace_layers") else teacache_wanvideo_forward_orig
                 context = patch.multiple(
-                    diffusion_model, 
+                    diffusion_model,
                     forward_orig=forward_function.__get__(diffusion_model, diffusion_model.__class__)
                 )
 
@@ -1003,7 +1003,7 @@ Official recommended values https://github.com/ali-vilab/TeaCache/tree/main/TeaC
                             logging.info(f"{skipped_steps_cond} cond steps")
                             logging.info(f"out of {last_step} steps")
                             logging.info("-----------------------------------")
-                        
+
                     return out
             return unet_wrapper_function
 
@@ -1045,7 +1045,7 @@ def modified_wan_self_attention_forward(self, x, freqs, transformer_options={}):
             heads=self.num_heads,
             transformer_options=transformer_options,
         )
-    except:
+    except Exception:
         # backward compatibility for now
         x = comfy.ldm.modules.attention.attention(
             q.view(b, s, n * d),
@@ -1167,7 +1167,7 @@ class WanVideoEnhanceAVideoKJ:
 
 try:
     from comfy.ldm.lightricks.model import apply_rotary_emb
-except:
+except (ImportError, ModuleNotFoundError):
     apply_rotary_emb = None
 
 
@@ -1259,7 +1259,7 @@ def normalized_attention_guidance(self, query, context_positive, context_negativ
     try:
         x_positive = comfy.ldm.modules.attention.optimized_attention(query, k_positive, v_positive, heads=self.num_heads, transformer_options=transformer_options).flatten(2)
         x_negative = comfy.ldm.modules.attention.optimized_attention(query, k_negative, v_negative, heads=self.num_heads, transformer_options=transformer_options).flatten(2)
-    except: #backwards compatibility for now
+    except Exception: #backwards compatibility for now
         x_positive = comfy.ldm.modules.attention.optimized_attention(query, k_positive, v_positive, heads=self.num_heads).flatten(2)
         x_negative = comfy.ldm.modules.attention.optimized_attention(query, k_negative, v_negative, heads=self.num_heads).flatten(2)
 
@@ -1267,7 +1267,7 @@ def normalized_attention_guidance(self, query, context_positive, context_negativ
 
     norm_positive = torch.norm(x_positive, p=1, dim=-1, keepdim=True).expand_as(x_positive)
     norm_guidance = torch.norm(nag_guidance, p=1, dim=-1, keepdim=True).expand_as(nag_guidance)
-    
+
     scale = torch.nan_to_num(norm_guidance / norm_positive, nan=10.0)
 
     mask = scale > self.nag_tau
@@ -1275,7 +1275,6 @@ def normalized_attention_guidance(self, query, context_positive, context_negativ
     nag_guidance = torch.where(mask, nag_guidance * adjustment, nag_guidance)
 
     x = nag_guidance * self.nag_alpha + x_positive * (1 - self.nag_alpha)
-    del nag_guidance
 
     return x
 
@@ -1307,7 +1306,7 @@ def wan_crossattn_forward_nag(self, x, context, transformer_options={}, **kwargs
         nag_context = nag_context.repeat(x_pos.shape[0], 1, 1)
     try:
         x_pos_out = normalized_attention_guidance(self, q_pos, context_pos, nag_context, transformer_options=transformer_options)
-    except: #backwards compatibility for now
+    except Exception: #backwards compatibility for now
         x_pos_out = normalized_attention_guidance(self, q_pos, context_pos, nag_context)
 
     # Negative branch
@@ -1317,7 +1316,7 @@ def wan_crossattn_forward_nag(self, x, context, transformer_options={}, **kwargs
         v_neg = self.v(context_neg)
         try:
             x_neg_out = comfy.ldm.modules.attention.optimized_attention(q_neg, k_neg, v_neg, heads=self.num_heads, transformer_options=transformer_options)
-        except: #backwards compatibility for now
+        except Exception: #backwards compatibility for now
             x_neg_out = comfy.ldm.modules.attention.optimized_attention(q_neg, k_neg, v_neg, heads=self.num_heads)
         x = torch.cat([x_pos_out, x_neg_out], dim=0)
     else:
@@ -1335,12 +1334,12 @@ def wan_i2v_crossattn_forward_nag(self, x, context, context_img_len, transformer
     context_img = context[:, :context_img_len]
     context = context[:, context_img_len:]
 
-    q_img = self.norm_q(self.q(x))    
+    q_img = self.norm_q(self.q(x))
     k_img = self.norm_k_img(self.k_img(context_img))
     v_img = self.v_img(context_img)
     try:
         img_x = comfy.ldm.modules.attention.optimized_attention(q_img, k_img, v_img, heads=self.num_heads, transformer_options=transformer_options)
-    except: #backwards compatibility for now
+    except Exception: #backwards compatibility for now
         img_x = comfy.ldm.modules.attention.optimized_attention(q_img, k_img, v_img, heads=self.num_heads)
 
     if context.shape[0] == 2:
@@ -1349,7 +1348,7 @@ def wan_i2v_crossattn_forward_nag(self, x, context, context_img_len, transformer
     else:
         context_positive = context
         context_negative = None
-    
+
     q = self.norm_q(self.q(x))
 
     x = normalized_attention_guidance(self, q, context_positive, self.nag_context, transformer_options=transformer_options)
@@ -1360,7 +1359,7 @@ def wan_i2v_crossattn_forward_nag(self, x, context, context_img_len, transformer
         v_real_negative = self.v(context_negative)
         try:
             x_real_negative = comfy.ldm.modules.attention.optimized_attention(q_real_negative, k_real_negative, v_real_negative, heads=self.num_heads, transformer_options=transformer_options)
-        except: #backwards compatibility for now
+        except Exception: #backwards compatibility for now
             x_real_negative = comfy.ldm.modules.attention.optimized_attention(q_real_negative, k_real_negative, v_real_negative, heads=self.num_heads)
         x = torch.cat([x, x_real_negative], dim=0)
 
@@ -1390,7 +1389,7 @@ class WanCrossAttentionPatch:
             else:
                 return wan_crossattn_forward_nag(self_module, *args, **kwargs)
         return types.MethodType(wrapped_attention, obj)
-    
+
 class WanVideoNAG:
     @classmethod
     def INPUT_TYPES(s):
@@ -1405,9 +1404,9 @@ class WanVideoNAG:
            "optional": {
                 "input_type": (["default", "batch"], {"tooltip": "Type of the model input"}),
            },
-                                                 
+
         }
-    
+
     RETURN_TYPES = ("MODEL",)
     RETURN_NAMES = ("model",)
     FUNCTION = "patch"
@@ -1418,7 +1417,7 @@ class WanVideoNAG:
     def patch(self, model, conditioning, nag_scale, nag_alpha, nag_tau, input_type="default"):
         if nag_scale == 0:
             return (model,)
-        
+
         device = mm.get_torch_device()
         dtype = mm.unet_dtype()
 
@@ -1431,14 +1430,14 @@ class WanVideoNAG:
 
         type_str = str(type(model.model.model_config).__name__)
         i2v = True if "WAN21_I2V" in type_str else False
-    
+
         for idx, block in enumerate(diffusion_model.blocks):
             patched_attn = WanCrossAttentionPatch(context, nag_scale, nag_alpha, nag_tau, i2v, input_type=input_type).__get__(block.cross_attn, block.__class__)
-          
+
             model_clone.add_object_patch(f"diffusion_model.blocks.{idx}.cross_attn.forward", patched_attn)
-            
+
         return (model_clone,)
-    
+
 class SkipLayerGuidanceWanVideo:
     @classmethod
     def INPUT_TYPES(s):
@@ -1471,7 +1470,7 @@ class SkipLayerGuidanceWanVideo:
                         "vec": args["vec"][1].unsqueeze(0),
                         "pe": args["pe"][1].unsqueeze(0)
                     }
-                    
+
                     block_out = original_block(new_args)
 
                     out = {
@@ -1512,14 +1511,14 @@ class SkipLayerGuidanceWanVideo:
 
             model_options["patches_replace"]["dit"][block] = skip
             m.model_options["transformer_options"] = model_options
-            
+
 
         return (m, )
 
 class CFGZeroStarAndInit:
     @classmethod
     def INPUT_TYPES(s):
-        return {"required": { 
+        return {"required": {
                     "model": ("MODEL",),
                     "use_zero_init": ("BOOLEAN", {"default": True}),
                     "zero_init_steps": ("INT", {"default": 0, "min": 0, "tooltip": "for zero init, starts from 0 so first step is always zeroed out if use_zero_init enabled"}),
@@ -1549,10 +1548,10 @@ class CFGZeroStarAndInit:
 
             if (current_step_index <= zero_init_steps) and use_zero_init:
                 return cond * 0
-                        
+
             uncond = args["uncond"]
             cond_scale = args["cond_scale"]
-                
+
             batch_size = cond.shape[0]
 
             positive_flat = cond.view(batch_size, -1)
@@ -1663,7 +1662,7 @@ class GGUFLoaderKJ(io.ComfyNode):
         model_path = folder_paths.get_full_path("unet", model_name)
         try:
             sd, extra = gguf_nodes.loader.gguf_sd_loader(model_path)
-        except:
+        except Exception:
             sd = gguf_nodes.loader.gguf_sd_loader(model_path)
 
         if extra_model_name is not None and extra_model_name != "none":
@@ -1671,7 +1670,7 @@ class GGUFLoaderKJ(io.ComfyNode):
                 extra_model_full_path = folder_paths.get_full_path("unet", extra_model_name)
                 try:
                     extra_model, _ = gguf_nodes.loader.gguf_sd_loader(extra_model_full_path)
-                except:
+                except Exception:
                     extra_model = gguf_nodes.loader.gguf_sd_loader(extra_model_full_path)
             elif "connector" in extra_model_name.lower():
                 extra_model_full_path = folder_paths.get_full_path("text_encoders", extra_model_name)
@@ -1711,7 +1710,7 @@ class GGUFLoaderKJ(io.ComfyNode):
 
 try:
     from torch.nn.attention.flex_attention import flex_attention, BlockMask
-except:
+except (ImportError, ModuleNotFoundError):
     flex_attention = None
     BlockMask = None
 
@@ -1892,7 +1891,7 @@ class EndRecordCUDAMemoryHistory():
 
 try:
     from server import PromptServer
-except:
+except (ImportError, ModuleNotFoundError):
     PromptServer = None
 
 class VisualizeCUDAMemoryHistory():
@@ -1941,7 +1940,7 @@ class VisualizeCUDAMemoryHistory():
                     api_url,
                     unique_id
                 )
-            except:
+            except Exception:
                 pass
 
         return api_url,
