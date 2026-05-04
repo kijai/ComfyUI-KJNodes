@@ -845,11 +845,11 @@ Can be used for realtime diffusion with autoqueue.
             except cv2.error:
                 pass
             if not self.cap.isOpened():
-                raise Exception("Could not open webcam")
+                raise RuntimeError("Could not open webcam")
 
         ret, frame = self.cap.read()
         if not ret:
-            raise Exception("Failed to capture image from webcam")
+            raise RuntimeError("Failed to capture image from webcam")
 
         # Crop the frame to the specified bbox
         frame = frame[y:y+height, x:x+width]
@@ -2954,7 +2954,7 @@ highest dimension.
 
         if device == "gpu":
             if upscale_method == "lanczos":
-                raise Exception("Lanczos is not supported on the GPU")
+                raise ValueError("Lanczos is not supported on the GPU")
             device = model_management.get_torch_device()
         else:
             device = torch.device("cpu")
