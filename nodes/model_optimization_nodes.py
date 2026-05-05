@@ -25,8 +25,8 @@ sageattn_modes = ["disabled", "auto", "sageattn_qk_int8_pv_fp16_cuda", "sageattn
 
 def get_sage_func(sage_attention, allow_compile=False):
     logging.info(f"Using sage attention mode: {sage_attention}")
-    from sageattention import sageattn
     if sage_attention == "auto":
+        from sageattention import sageattn
         def sage_func(q, k, v, is_causal=False, attn_mask=None, tensor_layout="NHD"):
             return sageattn(q, k, v, is_causal=is_causal, attn_mask=attn_mask, tensor_layout=tensor_layout)
     elif sage_attention == "sageattn_qk_int8_pv_fp16_cuda":
