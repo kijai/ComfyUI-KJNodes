@@ -3,6 +3,7 @@ __pycache__
 *.code-workspace
 .history
 .vscode
+.codex
 *.ckpt
 *.pth
 types
