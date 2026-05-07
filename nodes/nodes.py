@@ -13,7 +13,7 @@ import logging
 from comfy import model_management
 import folder_paths
 from nodes import MAX_RESOLUTION
-from comfy.utils import common_upscale, ProgressBar, load_torch_file, save_torch_file
+from comfy.utils import common_upscale, ProgressBar, load_torch_file, save_torch_file, state_dict_prefix_replace
 from comfy.comfy_types.node_typing import IO
 from comfy_api.latest import io, ui
 import comfy.latent_formats
@@ -2419,21 +2419,11 @@ class VAELoaderKJ:
             or "vocoder.vocoder.resblocks.0.convs1.0.weight" in sd
         )
         if is_audio_vae:
-            # Post-PR #13486: AudioVAE is wrapped by comfy.sd.VAE; prefix-rename keys and let VAE detect it.
-            # Pre-PR: AudioVAE(sd, metadata) takes the raw state dict.
-            import comfy.utils
-            try:
-                sd_audio = comfy.utils.state_dict_prefix_replace(
-                    dict(sd), {"audio_vae.": "autoencoder.", "vocoder.": "vocoder."}, filter_keys=True
-                )
-                vae = VAE(sd=sd_audio, metadata=metadata)
-                vae.throw_exception_if_invalid()
-            except Exception:
-                from comfy.ldm.lightricks.vae.audio_vae import AudioVAE
-                vae = AudioVAE(sd, metadata)
+            sd_audio = state_dict_prefix_replace(dict(sd), {"audio_vae.": "autoencoder.", "vocoder.": "vocoder."}, filter_keys=True)
+            vae = VAE(sd=sd_audio, metadata=metadata)
         else:
             vae = VAE(sd=sd, device=device, dtype=dtype, metadata=metadata)
-            vae.throw_exception_if_invalid()
+        vae.throw_exception_if_invalid()
         return (vae,)
 
 from comfy.samplers import sampling_function, CFGGuider
