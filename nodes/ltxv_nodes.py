@@ -99,10 +99,7 @@ class LTXVAddGuideMulti(LTXVAddGuide):
             # Track this guide for per-reference attention control.
             pre_filter_count = t.shape[2] * t.shape[3] * t.shape[4]
             guide_latent_shape = list(t.shape[2:])  # [F, H, W]
-            positive, negative = _append_guide_attention_entry(
-                positive, negative, pre_filter_count, guide_latent_shape,
-                strength=strength, latent_start=latent_idx,
-            )
+            positive, negative = _append_guide_attention_entry(positive, negative, pre_filter_count, guide_latent_shape, strength=strength)
 
         return io.NodeOutput(positive, negative, {"samples": latent_image, "noise_mask": noise_mask})
 
@@ -166,10 +163,7 @@ class LTXVAddGuidesFromBatch(LTXVAddGuide):
                     # Track this guide for per-reference attention control.
                     pre_filter_count = t.shape[2] * t.shape[3] * t.shape[4]
                     guide_latent_shape = list(t.shape[2:])  # [F, H, W]
-                    positive, negative = _append_guide_attention_entry(
-                        positive, negative, pre_filter_count, guide_latent_shape,
-                        strength=strength, latent_start=latent_idx,
-                    )
+                    positive, negative = _append_guide_attention_entry(positive, negative, pre_filter_count, guide_latent_shape, strength=strength)
                 else:
                     print(f"Warning: Skipping guide at index {i} - conditioning frames exceed latent sequence length")
 
