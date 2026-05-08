@@ -114,6 +114,7 @@ app.registerExtension({
                 layout: null,
                 gridReady: false,
                 currentIndex: 0,
+                hoverIndex: -1,
             };
 
             const setStatus = (msg) => {
@@ -267,6 +268,30 @@ app.registerExtension({
                     const dy = dRow * cellH + (cellH - fitH) / 2;
                     ctx.drawImage(state.strip, sx, sy, sw, sh, dx, dy, fitW, fitH);
                 }
+                if (state.hoverIndex >= 0 && state.hoverIndex < total) {
+                    const i = state.hoverIndex;
+                    const sx = (i % sCols) * sw;
+                    const sy = Math.floor(i / sCols) * sh;
+                    const dCol = i % layout.cols;
+                    const dRow = Math.floor(i / layout.cols);
+                    const cx = dCol * cellW + cellW / 2;
+                    const cy = dRow * cellH + cellH / 2;
+                    const scale = 1.15;
+                    const zw = fitW * scale;
+                    const zh = fitH * scale;
+                    let dx = cx - zw / 2;
+                    let dy = cy - zh / 2;
+                    dx = Math.max(0, Math.min(gridCanvas.width - zw, dx));
+                    dy = Math.max(0, Math.min(gridCanvas.height - zh, dy));
+                    ctx.save();
+                    ctx.shadowColor = 'rgba(0,0,0,0.65)';
+                    ctx.shadowBlur = 14 * dpr;
+                    ctx.drawImage(state.strip, sx, sy, sw, sh, dx, dy, zw, zh);
+                    ctx.restore();
+                    ctx.strokeStyle = '#5a8ec4';
+                    ctx.lineWidth = Math.max(2, 2 * dpr);
+                    ctx.strokeRect(dx + ctx.lineWidth / 2, dy + ctx.lineWidth / 2, zw - ctx.lineWidth, zh - ctx.lineWidth);
+                }
                 state.gridReady = true;
                 setStatus('');
                 gridCanvas.style.display = 'block';
@@ -287,15 +312,38 @@ app.registerExtension({
                 else startPlayback();
             });
 
-            gridCanvas.addEventListener('click', (e) => {
-                if (!state.gridReady || !state.layout) return;
+            const cellIndexFromEvent = (e) => {
+                if (!state.gridReady || !state.layout) return -1;
                 const rect = gridCanvas.getBoundingClientRect();
+                if (rect.width <= 0 || rect.height <= 0) return -1;
                 const x = e.clientX - rect.left;
                 const y = e.clientY - rect.top;
-                const col = Math.floor(x / state.layout.cellW);
-                const row = Math.floor(y / state.layout.cellH);
+                const cellW = rect.width / state.layout.cols;
+                const cellH = rect.height / state.layout.rows;
+                const col = Math.floor(x / cellW);
+                const row = Math.floor(y / cellH);
+                if (col < 0 || col >= state.layout.cols || row < 0 || row >= state.layout.rows) return -1;
                 const idx = row * state.layout.cols + col;
-                if (idx >= 0 && idx < state.frameCount) enterDetail(idx);
+                return (idx >= 0 && idx < state.frameCount) ? idx : -1;
+            };
+
+            gridCanvas.addEventListener('click', (e) => {
+                const idx = cellIndexFromEvent(e);
+                if (idx >= 0) enterDetail(idx);
+            });
+
+            gridCanvas.addEventListener('pointermove', (e) => {
+                const idx = cellIndexFromEvent(e);
+                if (idx !== state.hoverIndex) {
+                    state.hoverIndex = idx;
+                    renderGrid();
+                }
+            });
+            gridCanvas.addEventListener('pointerleave', () => {
+                if (state.hoverIndex !== -1) {
+                    state.hoverIndex = -1;
+                    renderGrid();
+                }
             });
 
             prevBtn.addEventListener('click', () => {
@@ -393,7 +441,9 @@ app.registerExtension({
                 state.stripCols = info.strip_cols || 1;
                 state.stripCellW = info.strip_cell_w || info.thumb_w;
                 state.stripCellH = info.strip_cell_h || info.thumb_h;
-                state.currentIndex = 0;
+                if (state.currentIndex >= state.frameCount || state.currentIndex < 0) {
+                    state.currentIndex = 0;
+                }
 
                 const v = document.createElement('video');
                 v.muted = true;
