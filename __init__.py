@@ -298,11 +298,11 @@ from server import PromptServer
 from pathlib import Path
 
 if hasattr(PromptServer, "instance"):
-    try:
-        # NOTE: we add an extra static path to avoid comfy mechanism
-        # that loads every script in web.
-        PromptServer.instance.app.add_routes(
-            [web.static("/kjweb_async", (Path(__file__).parent.absolute() / "kjweb_async").as_posix())]
-        )
-    except Exception:
-        logging.exception("KJNodes: failed to register /kjweb_async static route")
+    # NOTE: we add an extra static path to avoid comfy mechanism that loads every script in web.
+    if not PromptServer.instance.app.router.frozen:
+        try:
+            PromptServer.instance.app.add_routes(
+                [web.static("/kjweb_async", (Path(__file__).parent.absolute() / "kjweb_async").as_posix())]
+            )
+        except Exception:
+            logging.exception("KJNodes: failed to register /kjweb_async static route")
