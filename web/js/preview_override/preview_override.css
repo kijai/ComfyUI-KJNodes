@@ -46,6 +46,28 @@
     pointer-events: none;
 }
 
+.kj-pov-scrub {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 6px;
+    background: rgba(0, 0, 0, 0.5);
+    cursor: pointer;
+    z-index: 5;
+    transition: height 80ms ease;
+}
+.kj-pov-scrub:hover { height: 10px; }
+.kj-pov-scrub-fill {
+    height: 100%;
+    width: 0%;
+    background: #e67e22;
+    pointer-events: none;
+}
+.kj-pov-scrub.kj-pov-paused .kj-pov-scrub-fill {
+    background: #707070;
+}
+
 .kj-pov-panel-grip {
     flex: 0 0 5px;
     background: #2a2a2a;
