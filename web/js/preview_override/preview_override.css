@@ -1,0 +1,172 @@
+/* Palette matched to ComfyUI-MemoryVisualization. */
+
+.kj-pov-root {
+    width: 100%;
+    height: 100%;
+    position: relative;
+    background: #181818;
+    color: #b0b0b0;
+    font: 12px monospace;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    user-select: none;
+}
+
+.kj-pov-image-area {
+    flex: 1 1 auto;
+    min-height: 80px;
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #0a0a0a;
+    overflow: hidden;
+}
+
+/* Absolute-fill so latent-resolution previews scale up rather than staying centred-tiny. */
+.kj-pov-img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    image-rendering: pixelated;
+    display: block;
+}
+
+.kj-pov-placeholder {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #707070;
+    font: 12px monospace;
+    pointer-events: none;
+}
+
+.kj-pov-panel-grip {
+    flex: 0 0 5px;
+    background: #2a2a2a;
+    cursor: ns-resize;
+    position: relative;
+    z-index: 4;
+    user-select: none;
+}
+.kj-pov-panel-grip::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: 26px;
+    height: 2px;
+    background: #555;
+    border-radius: 1px;
+}
+.kj-pov-panel-grip:hover { background: #3a3a3a; }
+.kj-pov-panel-grip:hover::after { background: #888; }
+
+.kj-pov-panel {
+    flex: 0 0 auto;
+    height: 140px;
+    min-height: 60px;
+    background: #181818;
+    font: 11px monospace;
+    color: #b0b0b0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.kj-pov-panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 4px 10px;
+    gap: 8px;
+    background: #202020;
+    border-bottom: 1px solid #2a2a2a;
+}
+.kj-pov-header-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.kj-pov-panel-title { color: #b0b0b0; font-size: 11px; }
+.kj-pov-panel-summary { color: #707070; font-size: 10px; }
+
+.kj-pov-toggle {
+    background: #2a2a2a;
+    color: #888;
+    border: 1px solid #333;
+    border-radius: 3px;
+    padding: 1px 7px;
+    font: 10px monospace;
+    cursor: pointer;
+    user-select: none;
+}
+.kj-pov-toggle:hover { background: #333; color: #b0b0b0; }
+.kj-pov-toggle.kj-pov-on {
+    background: #3a2a1a;
+    color: #e67e22;
+    border-color: #c66e1a;
+}
+
+.kj-pov-graphs-grid {
+    display: flex;
+    align-items: stretch;
+    padding: 6px 6px 7px;
+    gap: 6px;
+    flex: 1 1 auto;
+    min-height: 0;
+    box-sizing: border-box;
+}
+
+.kj-pov-graph-cell {
+    flex: 1 1 0;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    background: #0e0e0e;
+    border: 1px solid #1c1c1c;
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.kj-pov-graph-head {
+    flex: 0 0 auto;
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding: 3px 6px 2px;
+    background: #161616;
+    border-bottom: 1px solid #1c1c1c;
+    font-size: 10px;
+    line-height: 1.1;
+    gap: 4px;
+}
+
+.kj-pov-graph-label {
+    color: #707070;
+    letter-spacing: 0.05em;
+    flex: 0 0 auto;
+}
+
+.kj-pov-graph-value {
+    color: #b0b0b0;
+    font-size: 10px;
+    text-align: right;
+    flex: 1 1 auto;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.kj-pov-graph-canvas {
+    flex: 1 1 auto;
+    display: block;
+    width: 100%;
+    min-height: 0;
+}

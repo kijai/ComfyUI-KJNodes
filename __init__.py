@@ -186,6 +186,8 @@ NODE_CONFIG = {
     "DecodeAndSaveVideo": {"class": DecodeAndSaveVideo, "name": "Decode And Save Video"},
     "ImageTransformKJ": {"class": ImageTransformKJ, "name": "Image Transform KJ"},
     "HDRPreviewKJ": {"class": HDRPreviewKJ, "name": "HDR Preview KJ"},
+    "ModelPreviewOverrideKJ": {"class": ModelPreviewOverrideKJ, "name": "Model Preview Override KJ"},
+    "GetPreviewOverrideFramesKJ": {"class": GetPreviewOverrideFramesKJ, "name": "Get Preview Override Frames KJ"},
     "PreviewImageOrMask": {"class": PreviewImageOrMask, "name": "Preview Image Or Mask"},
     "ImageSharpenKJ": {"class": ImageSharpenKJ, "name": "Image Sharpen KJ"},
     #batch cropping
