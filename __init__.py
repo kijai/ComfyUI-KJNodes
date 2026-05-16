@@ -56,7 +56,7 @@ from .nodes.image_nodes import (
     ImageCropByMaskBatch, ImagePadKJ, LoadVideosFromFolder, EncodeVideoComponents,
     DecodeAndSaveVideo, PreviewImageOrMask,
 )
-from .nodes.intrinsic_lora_nodes import Intrinsic_lora_sampling
+
 from .nodes.mask_nodes import (
     BatchCLIPSeg, DownloadAndLoadCLIPSeg, CreateTextMask, ColorToMask, CreateFluidMask,
     CreateAudioMask, CreateGradientMask, CreateFadeMask, CreateFadeMaskAdvanced,
@@ -256,7 +256,6 @@ NODE_CONFIG = {
     "SV3D_BatchSchedule": {"class": SV3D_BatchSchedule, "name": "SV3D Batch Schedule"},
     "Superprompt": {"class": Superprompt, "name": "Superprompt"},
     "GLIGENTextBoxApplyBatchCoords": {"class": GLIGENTextBoxApplyBatchCoords},
-    "Intrinsic_lora_sampling": {"class": Intrinsic_lora_sampling, "name": "Intrinsic Lora Sampling"},
     "CheckpointPerturbWeights": {"class": CheckpointPerturbWeights, "name": "CheckpointPerturbWeights"},
     "Screencap_mss": {"class": Screencap_mss, "name": "Screencap mss"},
     "ScreencapStream": {"class": ScreencapStream, "name": "Screencap Stream"},
