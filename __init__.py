@@ -42,7 +42,7 @@ from .nodes.image_nodes import (
     ImageBatchTestPattern, ImageGrabPIL, Screencap_mss, ScreencapStream, WebcamCaptureCV2,
     AddLabel, GetImageSizeAndCount, GetLatentSizeAndCount, ImageBatchRepeatInterleaving,
     ImageUpscaleWithModelBatched, ImageNormalize_Neg1_To_1, RemapImageRange,
-    SplitImageChannels, MergeImageChannels, ImagePadForOutpaintMasked,
+    SplitImageChannels, MergeImageChannels, ImageMaskSyncCrop, ImagePadForOutpaintMasked,
     ImagePadForOutpaintTargetSize, ImagePrepForICLora, ImageAndMaskPreview,
     CrossFadeImages, CrossFadeImagesMulti, TransitionImagesMulti, TransitionImagesInBatch,
     ImageBatchJoinWithTransition, ShuffleImageBatch, GetImageRangeFromBatch,
