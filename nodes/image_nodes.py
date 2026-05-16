@@ -1245,7 +1245,53 @@ Merges channel data into an image.
         if alpha is not None:
             image = torch.cat([image, alpha.unsqueeze(-1)], dim=-1)
         return (image,)
+        
+class ImageMaskSyncCrop:
+    
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "image": ("IMAGE",),
+                "left": ("INT", {"default": 0, "min": 0, "max": MAX_RESOLUTION, "step": 1}),
+                "top": ("INT", {"default": 0, "min": 0, "max": MAX_RESOLUTION, "step": 1}),
+                "right": ("INT", {"default": 0, "min": 0, "max": MAX_RESOLUTION, "step": 1}),
+                "bottom": ("INT", {"default": 0, "min": 0, "max": MAX_RESOLUTION, "step": 1}),
+            },
+            "optional": {
+                "mask": ("MASK",), 
+            }
+        }
 
+    RETURN_TYPES = ("IMAGE", "MASK")
+    FUNCTION = "do_crop"
+    CATEGORY = "image/utils"
+
+    def do_crop(self, image, left, top, right, bottom, mask=None):
+        B, H, W, C = image.shape
+        
+        left = min(left, W)
+        top = min(top, H)
+        right = min(right, W)
+        bottom = min(bottom, H)
+        
+        new_W = W - left - right
+        new_H = H - top - bottom
+        
+        if new_W <= 0 or new_H <= 0:
+            raise ValueError(f"Clipping parameter is too large! Invalid size after clipping: Width ={new_W}, Height ={new_H}")
+
+        cropped_image = image[:, top:top+new_H, left:left+new_W, :]
+
+        cropped_mask = None
+        if mask is not None:
+            cropped_mask = mask[:, top:top+new_H, left:left+new_W]
+
+        if cropped_mask is None:
+            cropped_mask = torch.zeros((B, new_H, new_W), dtype=torch.float32)
+
+        return (cropped_image, cropped_mask,)
+        
 class ImagePadForOutpaintMasked:
 
     @classmethod
