@@ -662,6 +662,25 @@ app.registerExtension({
                 redrawSd();
             });
 
+            // Arrow-key scrub: only when cursor is over the preview panel so we don't shadow
+            // ComfyUI's global keys. First press initializes the lock at the current step.
+            let mouseOverPanel = false;
+            root.addEventListener("mouseenter", () => { mouseOverPanel = true; });
+            root.addEventListener("mouseleave", () => { mouseOverPanel = false; });
+            const onKey = (ev) => {
+                if (!mouseOverPanel || !cachedSigmas) return;
+                if (ev.key !== "ArrowLeft" && ev.key !== "ArrowRight") return;
+                const xSteps = Math.max(totalSteps || cachedSigmas.length, cachedSigmas.length, history.delta.length);
+                const cur = lockedStep != null ? lockedStep : (hoverStep != null ? hoverStep : lastCurrentStep);
+                const next = Math.max(0, Math.min(xSteps - 1, cur + (ev.key === "ArrowRight" ? 1 : -1)));
+                ev.preventDefault();
+                ev.stopPropagation();
+                lockedStep = next;
+                redrawSd();
+            };
+            document.addEventListener("keydown", onKey, true);
+            chainCallback(node, "onRemoved", () => document.removeEventListener("keydown", onKey, true));
+
             addMiddleClickPan(root);
             addWheelPassthrough(root);
 
