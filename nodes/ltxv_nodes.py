@@ -10,6 +10,11 @@ import logging
 import comfy.model_management as mm
 import comfy.ldm.modules.attention as _comfy_attn
 from comfy.ldm.lightricks.model import apply_rotary_emb as _apply_rope
+try:
+    from comfy.ldm.lightricks.model import GuideAttentionMask as _GuideAttentionMask, _attention_with_guide_mask as _ltx_attn_with_guide_mask
+except ImportError:
+    _GuideAttentionMask = None
+    _ltx_attn_with_guide_mask = None
 device = mm.get_torch_device()
 import latent_preview
 
@@ -1436,6 +1441,8 @@ def ltx2_forward(
 
                 if self_attention_mask is None:
                     _sa_out = _comfy_attn.optimized_attention(q, k, v, _a1.heads, attn_precision=_a1.attn_precision, transformer_options=transformer_options)
+                elif _GuideAttentionMask is not None and isinstance(self_attention_mask, _GuideAttentionMask):
+                    _sa_out = _ltx_attn_with_guide_mask(q, k, v, _a1.heads, self_attention_mask, attn_precision=_a1.attn_precision, transformer_options=transformer_options)
                 else:
                     _sa_out = _comfy_attn.optimized_attention_masked(q, k, v, _a1.heads, self_attention_mask, attn_precision=_a1.attn_precision, transformer_options=transformer_options)
                 del q, k, v
@@ -1450,7 +1457,7 @@ def ltx2_forward(
                 attn1_out = _a1.to_out(_sa_out)
                 del _sa_out, norm_vx
             else:
-                attn1_out = self.attn1(norm_vx, pe=v_pe, transformer_options=transformer_options)
+                attn1_out = self.attn1(norm_vx, pe=v_pe, mask=self_attention_mask, transformer_options=transformer_options)
                 del norm_vx
             # video cross-attention
             vgate_msa = self.get_ada_values(self.scale_shift_table, vx.shape[0], v_timestep, slice(2, 3))[0]
@@ -1715,6 +1722,21 @@ def ltx2_sageattn_forward(self, x, context=None, mask=None, pe=None, k_pe=None, 
             k = apply_rotary_emb(k, k_pe)
     # value
     v = self.to_v(context)
+
+    # Sage kernels don't support masking — fall back to the upstream masked paths.
+    if mask is not None:
+        if _GuideAttentionMask is not None and isinstance(mask, _GuideAttentionMask):
+            o = _ltx_attn_with_guide_mask(q, k, v, self.heads, mask, attn_precision=self.attn_precision, transformer_options=transformer_options)
+        else:
+            o = _comfy_attn.optimized_attention_masked(q, k, v, self.heads, mask, attn_precision=self.attn_precision, transformer_options=transformer_options)
+        if self.to_gate_logits is not None:
+            gate_logits = self.to_gate_logits(x)
+            _b, _t, _ = o.shape
+            o = o.view(_b, _t, self.heads, self.dim_head)
+            o.mul_((2.0 * torch.sigmoid(gate_logits)).unsqueeze(-1))
+            o = o.view(_b, _t, self.heads * self.dim_head)
+            del gate_logits
+        return self.to_out(o)
 
     # Reshape from [batch, seq_len, total_dim] to [batch, seq_len, num_heads, head_dim]
     batch_size, seq_len, _ = q.shape
