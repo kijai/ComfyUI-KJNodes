@@ -463,6 +463,34 @@ def merge_linear(lora_down, lora_up, device):
     return weight
 
 
+def merge_conv3d(lora_down, lora_up, device):
+    in_rank, in_size, kD, kH, kW = lora_down.shape
+    out_size, out_rank, _, _, _ = lora_up.shape
+    assert in_rank == out_rank, f"rank {in_rank} {out_rank} mismatch"
+
+    lora_down = lora_down.to(device)
+    lora_up = lora_up.to(device)
+
+    merged = lora_up.reshape(out_size, -1) @ lora_down.reshape(in_rank, -1)
+    weight = merged.reshape(out_size, in_size, kD, kH, kW)
+    del lora_up, lora_down
+    return weight
+
+
+def extract_conv3d(weight, lora_rank, dynamic_method, dynamic_param, device, scale=1):
+    out_size, in_size, kD, kH, kW = weight.size()
+
+    U, Vh, param_dict = _svd_extract(
+        weight.reshape(out_size, -1), lora_rank, dynamic_method, dynamic_param, device, scale
+    )
+    lora_rank = param_dict["new_rank"]
+
+    param_dict["lora_down"] = Vh.reshape(lora_rank, in_size, kD, kH, kW).cpu()
+    param_dict["lora_up"] = U.reshape(out_size, lora_rank, 1, 1, 1).cpu()
+    del U, Vh, weight
+    return param_dict
+
+
 # Calculate new rank
 
 
@@ -572,6 +600,7 @@ def resize_lora_model(lora_sd, new_rank, save_dtype, device, dynamic_method, dyn
         if weights_loaded:
 
             conv2d = len(lora_down_weight.size()) == 4
+            conv3d = len(lora_down_weight.size()) == 5
             old_rank = lora_down_weight.size()[0]
             max_old_rank = max(max_old_rank or 0, old_rank)
 
@@ -580,6 +609,10 @@ def resize_lora_model(lora_sd, new_rank, save_dtype, device, dynamic_method, dyn
                 in_rank, in_size, kernel_size, _ = lora_down_weight.shape
                 out_size, out_rank, _, _ = lora_up_weight.shape
                 merged_size = out_size * in_size * kernel_size * kernel_size
+            elif conv3d:
+                in_rank, in_size, kD, kH, kW = lora_down_weight.shape
+                out_size, out_rank, _, _, _ = lora_up_weight.shape
+                merged_size = out_size * in_size * kD * kH * kW
             else:
                 in_rank, in_size = lora_down_weight.shape
                 out_size, out_rank = lora_up_weight.shape
@@ -599,6 +632,9 @@ def resize_lora_model(lora_sd, new_rank, save_dtype, device, dynamic_method, dyn
             if conv2d:
                 full_weight_matrix = merge_conv(lora_down_weight, lora_up_weight, device)
                 param_dict = extract_conv(full_weight_matrix, new_rank, dynamic_method, dynamic_param, device, scale)
+            elif conv3d:
+                full_weight_matrix = merge_conv3d(lora_down_weight, lora_up_weight, device)
+                param_dict = extract_conv3d(full_weight_matrix, new_rank, dynamic_method, dynamic_param, device, scale)
             else:
                 full_weight_matrix = merge_linear(lora_down_weight, lora_up_weight, device)
                 param_dict = extract_linear(full_weight_matrix, new_rank, dynamic_method, dynamic_param, device, scale)
