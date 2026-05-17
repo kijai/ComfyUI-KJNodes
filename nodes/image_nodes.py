@@ -1245,9 +1245,8 @@ Merges channel data into an image.
         if alpha is not None:
             image = torch.cat([image, alpha.unsqueeze(-1)], dim=-1)
         return (image,)
-        
+
 class ImageMaskSyncCrop:
-    
     @classmethod
     def INPUT_TYPES(s):
         return {
@@ -1257,41 +1256,50 @@ class ImageMaskSyncCrop:
                 "top": ("INT", {"default": 0, "min": 0, "max": MAX_RESOLUTION, "step": 1}),
                 "right": ("INT", {"default": 0, "min": 0, "max": MAX_RESOLUTION, "step": 1}),
                 "bottom": ("INT", {"default": 0, "min": 0, "max": MAX_RESOLUTION, "step": 1}),
+                "MaskOnly": ("BOOLEAN", {"default": False}),
             },
             "optional": {
-                "mask": ("MASK",), 
+                "mask": ("MASK",),
             }
         }
 
     RETURN_TYPES = ("IMAGE", "MASK")
     FUNCTION = "do_crop"
     CATEGORY = "image/utils"
-
-    def do_crop(self, image, left, top, right, bottom, mask=None):
+    
+    def do_crop(self, image, left, top, right, bottom, MaskOnly=False, mask=None):
         B, H, W, C = image.shape
         
         left = min(left, W)
         top = min(top, H)
         right = min(right, W)
         bottom = min(bottom, H)
-        
+
         new_W = W - left - right
         new_H = H - top - bottom
-        
+
         if new_W <= 0 or new_H <= 0:
             raise ValueError(f"Clipping parameter is too large! Invalid size after clipping: Width ={new_W}, Height ={new_H}")
 
-        cropped_image = image[:, top:top+new_H, left:left+new_W, :]
+        if MaskOnly:
+            output_image = image
+        else:
+            output_image = image[:, top:top+new_H, left:left+new_W, :]
 
-        cropped_mask = None
         if mask is not None:
-            cropped_mask = mask[:, top:top+new_H, left:left+new_W]
+            if MaskOnly:
+                cropped_mask = mask[:, top:top+new_H, left:left+new_W]
+                output_mask = F.pad(cropped_mask, (left, right, top, bottom), mode='constant', value=0)
+            else:
+                output_mask = mask[:, top:top+new_H, left:left+new_W]
+        else:
+            if MaskOnly:
+                output_mask = torch.zeros((B, H, W), dtype=torch.float32)
+            else:
+                output_mask = torch.zeros((B, new_H, new_W), dtype=torch.float32)
 
-        if cropped_mask is None:
-            cropped_mask = torch.zeros((B, new_H, new_W), dtype=torch.float32)
+        return (output_image, output_mask,)
 
-        return (cropped_image, cropped_mask,)
-        
 class ImagePadForOutpaintMasked:
 
     @classmethod
