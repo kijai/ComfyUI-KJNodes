@@ -35,7 +35,7 @@ class LTXVAddGuideMulti(LTXVAddGuide):
                         max=9999,
                         tooltip=f"Frame index for guide {i}.",
                     ),
-                    io.Float.Input(f"strength_{i}", default=1.0, min=0.0, max=1.0, step=0.01, tooltip=f"Strength for guide {i}."),
+                    io.Float.Input(f"strength_{i}", default=1.0, min=0.0, max=10.0, step=0.01, tooltip=f"Strength for guide {i}."),
                 ])
             options.append(io.DynamicCombo.Option(
                 key=str(num_guides),
@@ -122,7 +122,7 @@ class LTXVAddGuidesFromBatch(LTXVAddGuide):
                 io.Vae.Input("vae"),
                 io.Latent.Input("latent"),
                 io.Image.Input("images", tooltip="Batch of images - non-black images will be used as guides"),
-                io.Float.Input("strength", default=1.0, min=0.0, max=1.0, step=0.01),
+                io.Float.Input("strength", default=1.0, min=0.0, max=10.0, step=0.01, tooltip="Strength for all guides."),
             ],
             outputs=[
                 io.Conditioning.Output(display_name="positive"),
