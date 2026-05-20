@@ -848,6 +848,8 @@ Alternatively you can search with the node title. Node titles ONLY exist if they
 are manually edited!
 'widget_name' can be a comma separated list.
 The 'any_input' is required for making sure the node you want the value from exists in the workflow.
+Also supports subgraph nodes: point to a subgraph by id, title, or link and it will  
+read the values of promoted widgets on the subgraph surface.
 """
 
     def get_widget_value(self, id, widget_name, extra_pnginfo, prompt, unique_id, return_all=False, any_input=None, node_title="", allowed_float_decimals=2):
@@ -935,6 +937,104 @@ The 'any_input' is required for making sure the node you want the value from exi
 
         if node_id is None:
             raise ValueError("No matching node found for the given title or id")
+
+        # Find the workflow node entry for the resolved node_id
+        target_workflow_node = None
+        for node in all_nodes:
+            if node["id"] == node_id:
+                target_workflow_node = node
+                break
+
+        # Check if the target node is a subgraph container (type is a UUID)
+        is_subgraph = False
+        if target_workflow_node:
+            node_type = target_workflow_node.get("type", "")
+            if isinstance(node_type, str) and "-" in node_type and len(node_type) == 36:
+                is_subgraph = True
+
+        if is_subgraph:
+            # Subgraph container nodes are virtual and don't appear in the prompt.
+            # Instead, collect values from their promoted widgets (interior nodes
+            # whose widgets are exposed on the subgraph surface).
+            proxy_widgets = target_workflow_node.get("properties", {}).get("proxyWidgets", [])
+            if not proxy_widgets:
+                raise ValueError(f"Subgraph node {node_id} has no promoted widgets to read values from")
+
+            # Build a dict of promoted widget values from the prompt.
+            # Each proxyWidgets entry is [interiorNodeId, widgetName] or
+            # [interiorNodeId, widgetName, disambiguatingSourceNodeId].
+            # Determine the execution path prefix for the target subgraph,
+            # using the same logic as the regular node path below.
+            sg_parent = node_to_subgraph_map.get(node_id)
+
+            subgraph_inputs = {}
+            for pw in proxy_widgets:
+                if len(pw) < 2:
+                    continue
+                interior_node_id = pw[0]
+                pw_widget_name = pw[1]
+                if sg_parent is not None:
+                    prompt_key = f"{sg_parent}:{node_id}:{interior_node_id}"
+                elif subgraph_prefix is not None:
+                    prompt_key = f"{subgraph_prefix}:{node_id}:{interior_node_id}"
+                else:
+                    prompt_key = f"{node_id}:{interior_node_id}"
+                # Fall back to unprefixed key
+                if prompt_key not in prompt:
+                    prompt_key = f"{node_id}:{interior_node_id}"
+                if prompt_key in prompt:
+                    pw_value = prompt[prompt_key].get("inputs", {}).get(pw_widget_name)
+                    if pw_value is not None:
+                        subgraph_inputs[pw_widget_name] = pw_value
+
+            if not subgraph_inputs:
+                raise ValueError(f"Subgraph node {node_id} has promoted widgets but none were found in the prompt")
+
+            # Format output using the same logic as regular nodes
+            widget_names = []
+            if widget_name:
+                widget_names = [w.strip() for w in widget_name.split(",") if w.strip()]
+
+            if return_all:
+                formatted_items = []
+                for k, v in subgraph_inputs.items():
+                    if isinstance(v, float):
+                        item = f"{k}: {v:.{allowed_float_decimals}f}"
+                    else:
+                        item = f"{k}: {str(v)}"
+                    formatted_items.append(item)
+                return (", ".join(formatted_items), )
+
+            elif len(widget_names) == 1:
+                name = widget_names[0]
+                if name in subgraph_inputs:
+                    v = subgraph_inputs[name]
+                    if isinstance(v, float):
+                        v = f"{v:.{allowed_float_decimals}f}"
+                    else:
+                        v = str(v)
+                    return (v, )
+                else:
+                    available = ", ".join(subgraph_inputs.keys())
+                    raise NameError(f"Widget not found: {node_id}.{name}. Available promoted widgets: {available}")
+
+            elif len(widget_names) > 1:
+                formatted_items = []
+                for name in widget_names:
+                    if name not in subgraph_inputs:
+                        available = ", ".join(subgraph_inputs.keys())
+                        raise NameError(f"Widget not found: {node_id}.{name}. Available promoted widgets: {available}")
+                    v = subgraph_inputs[name]
+                    if isinstance(v, float):
+                        v = f"{v:.{allowed_float_decimals}f}"
+                    else:
+                        v = str(v)
+                    formatted_items.append(f"{name}: {v}")
+                return (", ".join(formatted_items), )
+
+            else:
+                available = ", ".join(subgraph_inputs.keys())
+                raise NameError(f"No widget name specified. Available promoted widgets: {available}")
 
         # Determine the correct prompt key
         # First check if the target node is in a subgraph
