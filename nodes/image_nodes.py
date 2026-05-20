@@ -2905,7 +2905,7 @@ v2 of the node. This node is only kept to not completely break older workflows.
         return(image, image.shape[2], image.shape[1],)
 
 class ImageResizeKJv2:
-    upscale_methods = ["nearest-exact", "bilinear", "area", "bicubic", "lanczos", "nvidia_rtx_vsr"]
+    upscale_methods = ["nearest-exact", "bilinear", "area", "bicubic", "lanczos"]
     @classmethod
     def INPUT_TYPES(s):
         return {
@@ -2954,8 +2954,10 @@ highest dimension.
 
         if device == "gpu":
             if upscale_method == "lanczos":
-                raise ValueError("Lanczos is not supported on the GPU")
-            device = model_management.get_torch_device()
+                logging.info("[ImageResizeKJv2] lanczos is CPU-only; falling back to CPU device.")
+                device = torch.device("cpu")
+            else:
+                device = model_management.get_torch_device()
         else:
             device = torch.device("cpu")
 
