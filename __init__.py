@@ -160,6 +160,7 @@ NODE_CONFIG = {
     "ImageNormalize_Neg1_To_1": {"class": ImageNormalize_Neg1_To_1, "name": "Image Normalize -1 to 1"},
     "ImagePass": {"class": ImagePass},
     "ImagePadKJ": {"class": ImagePadKJ, "name": "ImagePad KJ"},
+    "ImageMaskSyncCrop": {"class": ImageMaskSyncCrop, "name": "Image And Mask Sync Crop"},
     "ImagePadForOutpaintMasked": {"class": ImagePadForOutpaintMasked, "name": "Image Pad For Outpaint Masked"},
     "ImagePadForOutpaintTargetSize": {"class": ImagePadForOutpaintTargetSize, "name": "Image Pad For Outpaint Target Size"},
     "ImagePrepForICLora": {"class": ImagePrepForICLora, "name": "Image Prep For ICLora"},
