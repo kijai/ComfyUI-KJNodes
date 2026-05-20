@@ -954,41 +954,199 @@ read the values of promoted widgets on the subgraph surface.
 
         if is_subgraph:
             # Subgraph container nodes are virtual and don't appear in the prompt.
-            # Instead, collect values from their promoted widgets (interior nodes
-            # whose widgets are exposed on the subgraph surface).
+            # Two-step approach:
+            #   Step A: Collect externally-linked inputs (both widget and data-only)
+            #   Step B: Collect unlinked promoted widget values via proxyWidgets + prompt
+            sg_node_inputs = target_workflow_node.get("inputs", [])
             proxy_widgets = target_workflow_node.get("properties", {}).get("proxyWidgets", [])
-            if not proxy_widgets:
-                raise ValueError(f"Subgraph node {node_id} has no promoted widgets to read values from")
+            sg_node_type = target_workflow_node.get("type", "")
 
-            # Build a dict of promoted widget values from the prompt.
-            # Each proxyWidgets entry is [interiorNodeId, widgetName] or
-            # [interiorNodeId, widgetName, disambiguatingSourceNodeId].
-            # Determine the execution path prefix for the target subgraph,
-            # using the same logic as the regular node path below.
+            if not sg_node_inputs and not proxy_widgets:
+                raise ValueError(f"Subgraph node {node_id} has no inputs or promoted widgets to read values from")
+
+            # Build a map of all workflow nodes by id for PrimitiveNode detection
+            workflow_node_map = {}
+            for node in all_nodes:
+                workflow_node_map[node["id"]] = node
+
+            # Build a link map from the correct graph level for resolving external links.
             sg_parent = node_to_subgraph_map.get(node_id)
+            sg_link_map = {}  # link_id -> (origin_id, origin_slot)
 
+            if sg_parent is not None:
+                # Target subgraph is inside another subgraph; find parent definition's links
+                sg_parent_type = None
+                for n in workflow.get("nodes", []):
+                    if n["id"] == sg_parent:
+                        sg_parent_type = n.get("type", "")
+                        break
+                if sg_parent_type:
+                    for sg_def in subgraphs:
+                        if sg_def.get("id") == sg_parent_type:
+                            for link in sg_def.get("links", []):
+                                if isinstance(link, dict):
+                                    sg_link_map[link["id"]] = (link["origin_id"], link.get("origin_slot", 0))
+                                elif isinstance(link, list) and len(link) >= 4:
+                                    sg_link_map[link[0]] = (link[1], link[2])
+                            break
+            else:
+                # Target subgraph is at root level; use workflow links
+                for link in workflow.get("links", []):
+                    if isinstance(link, dict):
+                        sg_link_map[link["id"]] = (link["origin_id"], link.get("origin_slot", 0))
+                    elif isinstance(link, list) and len(link) >= 4:
+                        sg_link_map[link[0]] = (link[1], link[2])
+
+            def make_interior_prompt_key(interior_node_id):
+                """Build the correct colon-delimited prompt key for an interior node."""
+                if sg_parent is not None:
+                    key = f"{sg_parent}:{node_id}:{interior_node_id}"
+                elif subgraph_prefix is not None:
+                    key = f"{subgraph_prefix}:{node_id}:{interior_node_id}"
+                else:
+                    key = f"{node_id}:{interior_node_id}"
+                if key not in prompt:
+                    key = f"{node_id}:{interior_node_id}"
+                return key
+
+            def resolve_link_value(link_id):
+                """Resolve an external link to a PrimitiveNode scalar or a link reference."""
+                if link_id is None:
+                    return None
+                link_info = sg_link_map.get(link_id)
+                if link_info is None:
+                    return None
+                origin_id, origin_slot = link_info
+                source_node = workflow_node_map.get(origin_id)
+                if source_node and source_node.get("type") == "PrimitiveNode":
+                    wv = source_node.get("widgets_values", [])
+                    if wv:
+                        return wv[0]
+                    return None
+                return [str(origin_id), origin_slot]
+
+            # ── Step A: Collect externally-linked inputs ──────────────────────
+            # Iterate sg_node_inputs for any input with a link (widget or data-only).
+            # For data-only inputs (no proxyWidgets entry), these link references
+            # are the final values. For promoted widgets, Step B will overwrite
+            # with the resolved value from the interior node's prompt entry.
             subgraph_inputs = {}
+
+            for inp in sg_node_inputs:
+                surface_name = inp.get("label") or inp.get("name", "unknown")
+                link_val = inp.get("link")
+                if link_val is not None:
+                    value = resolve_link_value(link_val)
+                    if value is not None:
+                        subgraph_inputs[surface_name] = value
+
+            # ── Step B: Collect promoted widget values from interior nodes ─────
+            # Use proxyWidgets + subgraph definition to get surface names and
+            # look up values from interior nodes in the prompt.
+
+            # Find the subgraph definition for name resolution.
+            sg_definition = None
+            for sg_def in subgraphs:
+                if sg_def.get("id") == sg_node_type:
+                    sg_definition = sg_def
+                    break
+
+            def resolve_prompt_value(value):
+                """If a value is a link reference like ['5296', 0], try to
+                resolve it to a scalar by looking up the source node in the
+                prompt. Returns the original value if unresolvable."""
+                if not isinstance(value, list) or len(value) != 2:
+                    return value
+                ref_node_id = str(value[0])
+                if ref_node_id not in prompt:
+                    return value
+                ref_inputs = prompt[ref_node_id].get("inputs", {})
+                scalars = {k: v for k, v in ref_inputs.items()
+                           if isinstance(v, (int, float, str, bool))}
+                # Single scalar input: unambiguous
+                if len(scalars) == 1:
+                    return next(iter(scalars.values()))
+                # Multiple scalars but has a "value" key: common convention
+                if "value" in scalars:
+                    return scalars["value"]
+                return value
+
+            # Build a more specific map: (interior_node_id, widget_name) -> surface_name
+            # by tracing definition links AND matching to the specific widget.
+            interior_widget_to_surface = {}
+            if sg_definition:
+                def_inputs = sg_definition.get("inputs", [])
+                def_links = sg_definition.get("links", [])
+                def_nodes = sg_definition.get("nodes", [])
+
+                # Build: interior_node_id -> {target_slot -> def_input_slot_index}
+                io_links_by_target = {}  # target_node_id -> [(target_slot, def_input_slot_index)]
+                for link in def_links:
+                    if isinstance(link, dict):
+                        l_origin = link.get("origin_id")
+                        l_origin_slot = link.get("origin_slot", 0)
+                        l_target = link.get("target_id")
+                        l_target_slot = link.get("target_slot", 0)
+                    elif isinstance(link, list) and len(link) >= 5:
+                        l_origin = link[1]
+                        l_origin_slot = link[2]
+                        l_target = link[3]
+                        l_target_slot = link[4]
+                    else:
+                        continue
+
+                    if l_origin == -10 and l_origin_slot < len(def_inputs):
+                        if l_target not in io_links_by_target:
+                            io_links_by_target[l_target] = []
+                        io_links_by_target[l_target].append((l_target_slot, l_origin_slot))
+
+                # For each interior node that receives IO links, map target_slot
+                # to widget names using the definition's node inputs array.
+                for def_node in def_nodes:
+                    nid = def_node.get("id")
+                    if nid not in io_links_by_target:
+                        continue
+                    node_inputs = def_node.get("inputs", [])
+                    for target_slot, def_input_idx in io_links_by_target[nid]:
+                        # Find the widget name for this target_slot on the interior node
+                        if target_slot < len(node_inputs):
+                            interior_input = node_inputs[target_slot]
+                            widget_info = interior_input.get("widget")
+                            widget_name_on_node = widget_info.get("name") if widget_info else interior_input.get("name", "")
+                        else:
+                            widget_name_on_node = ""
+
+                        # Get the surface name from the definition input -> sg_node_inputs label
+                        def_input_name = def_inputs[def_input_idx].get("name", "")
+                        surface = def_input_name
+                        for inp in sg_node_inputs:
+                            if inp.get("name") == def_input_name:
+                                surface = inp.get("label") or inp.get("name", def_input_name)
+                                break
+                        interior_widget_to_surface[(nid, widget_name_on_node)] = surface
+
+            # Iterate proxyWidgets and look up resolved values from interior nodes.
+            # Overwrites Step A link references with actual values where available.
             for pw in proxy_widgets:
                 if len(pw) < 2:
                     continue
                 interior_node_id = pw[0]
                 pw_widget_name = pw[1]
-                if sg_parent is not None:
-                    prompt_key = f"{sg_parent}:{node_id}:{interior_node_id}"
-                elif subgraph_prefix is not None:
-                    prompt_key = f"{subgraph_prefix}:{node_id}:{interior_node_id}"
-                else:
-                    prompt_key = f"{node_id}:{interior_node_id}"
-                # Fall back to unprefixed key
-                if prompt_key not in prompt:
-                    prompt_key = f"{node_id}:{interior_node_id}"
-                if prompt_key in prompt:
-                    pw_value = prompt[prompt_key].get("inputs", {}).get(pw_widget_name)
+
+                # Get surface name: try specific (node_id, widget_name) map first,
+                # fall back to interior widget name (which is often correct as-is).
+                surface_name = interior_widget_to_surface.get(
+                    (int(interior_node_id), pw_widget_name), pw_widget_name)
+
+                pkey = make_interior_prompt_key(interior_node_id)
+                if pkey in prompt:
+                    pw_value = prompt[pkey].get("inputs", {}).get(pw_widget_name)
                     if pw_value is not None:
-                        subgraph_inputs[pw_widget_name] = pw_value
+                        pw_value = resolve_prompt_value(pw_value)
+                        subgraph_inputs[surface_name] = pw_value
 
             if not subgraph_inputs:
-                raise ValueError(f"Subgraph node {node_id} has promoted widgets but none were found in the prompt")
+                raise ValueError(f"Subgraph node {node_id}: no input values could be resolved")
 
             # Format output using the same logic as regular nodes
             widget_names = []
@@ -1016,14 +1174,14 @@ read the values of promoted widgets on the subgraph surface.
                     return (v, )
                 else:
                     available = ", ".join(subgraph_inputs.keys())
-                    raise NameError(f"Widget not found: {node_id}.{name}. Available promoted widgets: {available}")
+                    raise NameError(f"Widget not found: {node_id}.{name}. Available: {available}")
 
             elif len(widget_names) > 1:
                 formatted_items = []
                 for name in widget_names:
                     if name not in subgraph_inputs:
                         available = ", ".join(subgraph_inputs.keys())
-                        raise NameError(f"Widget not found: {node_id}.{name}. Available promoted widgets: {available}")
+                        raise NameError(f"Widget not found: {node_id}.{name}. Available: {available}")
                     v = subgraph_inputs[name]
                     if isinstance(v, float):
                         v = f"{v:.{allowed_float_decimals}f}"
@@ -1034,7 +1192,7 @@ read the values of promoted widgets on the subgraph surface.
 
             else:
                 available = ", ".join(subgraph_inputs.keys())
-                raise NameError(f"No widget name specified. Available promoted widgets: {available}")
+                raise NameError(f"No widget name specified. Available: {available}")
 
         # Determine the correct prompt key
         # First check if the target node is in a subgraph
