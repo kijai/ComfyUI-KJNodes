@@ -72,7 +72,7 @@ def _get_core_previewer(load_device, latent_format):
     return fn(load_device, latent_format)
 
 
-def _decode_video_frames_l2rgb(x0, latent_format, max_frames):
+def _decode_video_frames_l2rgb(x0, latent_format, max_frames, stride=1):
     # Bulk-blocking GPU→CPU copy (not per-frame non_blocking) avoids torn frames at high res.
     if x0.ndim != 5:
         return []
@@ -87,6 +87,8 @@ def _decode_video_frames_l2rgb(x0, latent_format, max_frames):
         factors = torch.tensor(rgb_factors, device=x0.device, dtype=x0.dtype).transpose(0, 1)
         bias_t = torch.tensor(bias, device=x0.device, dtype=x0.dtype) if bias is not None else None
         x = x0[0]
+        if stride > 1:
+            x = x[:, ::stride]
         t_total = x.shape[1]
         if max_frames > 0 and max_frames < t_total:
             indices = np.linspace(0, t_total - 1, max_frames).round().astype(int).tolist()
@@ -247,10 +249,12 @@ def _detect_detail_boost_curve(sampler, model_patcher, sigmas_list):
         return None
 
 
-def _ltx_decode_to_pil(ltx_previewer, x0_5d, max_frames=None):
+def _ltx_decode_to_pil(ltx_previewer, x0_5d, max_frames=None, stride=1):
     # Pre-shape (B, C, T, H, W) → (B*T, C, H, W); WrappedPreviewer adds the sequence-batch dim.
     if ltx_previewer is None or x0_5d.ndim != 5:
         return []
+    if stride > 1:
+        x0_5d = x0_5d[:, :, ::stride]
     x_moved = x0_5d.movedim(2, 1)  # (B, T, C, H, W) — must take shape AFTER movedim
     x_in = x_moved.reshape((-1,) + x_moved.shape[-3:])
     rgb = ltx_previewer.decode_latent_to_preview(x_in)
@@ -265,6 +269,30 @@ def _ltx_decode_to_pil(ltx_previewer, x0_5d, max_frames=None):
         indices = np.linspace(0, t_total - 1, max_frames).round().astype(int).tolist()
         rgb = rgb[indices]
     u8 = (rgb * 255).clamp(0, 255).to(torch.uint8).cpu().numpy()
+    return [Image.fromarray(u8[i]) for i in range(u8.shape[0])]
+
+
+def _ltx_full_vae_decode_to_pil(vae, x0_5d, max_frames=None, stride=1):
+    # vae.decode handles device + tiling. Slow vs TAEHV but full quality. Output shape
+    # varies by VAE; we accept (B, T, H, W, C) or (T, H, W, C) and normalize.
+    if vae is None or x0_5d.ndim != 5:
+        return []
+    if stride > 1:
+        x0_5d = x0_5d[:, :, ::stride]
+    try:
+        images = vae.decode(x0_5d)
+    except Exception as e:
+        logging.warning(f"[KJ PreviewOverride] LTX VAE decode failed: {e}")
+        return []
+    if images.ndim == 5:
+        images = images[0]
+    if images.ndim != 4:
+        return []
+    t_total = images.shape[0]
+    if max_frames is not None and 0 < max_frames < t_total:
+        indices = np.linspace(0, t_total - 1, max_frames).round().astype(int).tolist()
+        images = images[indices]
+    u8 = (images.float() * 255).clamp(0, 255).to(torch.uint8).cpu().numpy()
     return [Image.fromarray(u8[i]) for i in range(u8.shape[0])]
 
 
@@ -329,23 +357,29 @@ class _PreviewOverrideWrapper:
 
         # LTX reuses the LTX-specific node's WrappedPreviewer; we call decode_latent_to_preview
         # directly per step, bypassing its decode_latent_to_preview_image rate-limiting.
+        # If a non-TAEHV VAE is supplied, decode via vae.decode() for full quality (slower).
         ltx_previewer = None
+        ltx_full_vae = None
         vae_restore_device = None
         if is_ltx:
             try:
                 factors, bias = _ltx_rgb_factors(is_ltx2)
                 taeltx = None
-                if self.vae is not None and self.vae.first_stage_model.__class__.__name__ == "TAEHV":
-                    # TAEHV-LTX decode needs the VAE on GPU; restored at end of __call__.
-                    target_device = comfy.model_management.get_torch_device()
-                    try:
-                        for p in self.vae.first_stage_model.parameters():
-                            vae_restore_device = p.device
-                            break
-                        self.vae.first_stage_model.to(target_device)
-                        taeltx = self.vae
-                    except Exception as e:
-                        logging.warning(f"[KJ PreviewOverride] Could not move TAEHV-LTX to GPU, skipping: {e}")
+                if self.vae is not None:
+                    if self.vae.first_stage_model.__class__.__name__ == "TAEHV":
+                        # TAEHV-LTX decode needs the VAE on GPU; restored at end of __call__.
+                        target_device = comfy.model_management.get_torch_device()
+                        try:
+                            for p in self.vae.first_stage_model.parameters():
+                                vae_restore_device = p.device
+                                break
+                            self.vae.first_stage_model.to(target_device)
+                            taeltx = self.vae
+                        except Exception as e:
+                            logging.warning(f"[KJ PreviewOverride] Could not move TAEHV-LTX to GPU, skipping: {e}")
+                    else:
+                        # Comfy VAE.decode manages its own device — no pin-to-GPU needed.
+                        ltx_full_vae = self.vae
                 ltx_previewer = _LTXWrappedPreviewer(factors, bias, rate=8, taeltx=taeltx)
             except Exception as e:
                 logging.warning(f"[KJ PreviewOverride] LTX previewer setup failed: {e}")
@@ -456,17 +490,17 @@ class _PreviewOverrideWrapper:
                         x0_view = _normalize_ltx_x0(x0_view, latent_shapes, num_keyframes)
 
                     pil_frames = []
-                    if ltx_previewer is not None and x0_view.ndim == 5:
+                    max_pil = anim_frames if animate_video else 1
+                    if ltx_full_vae is not None and x0_view.ndim == 5:
+                        pil_frames = _ltx_full_vae_decode_to_pil(ltx_full_vae, x0_view, max_frames=max_pil)
+                    if not pil_frames and ltx_previewer is not None and x0_view.ndim == 5:
                         try:
-                            pil_frames = _ltx_decode_to_pil(
-                                ltx_previewer, x0_view,
-                                max_frames=anim_frames if animate_video else 1,
-                            )
+                            pil_frames = _ltx_decode_to_pil(ltx_previewer, x0_view, max_frames=max_pil)
                         except Exception as e:
                             logging.warning(f"LTX preview decode failed: {e}")
                     if not pil_frames and animate_video and x0_view.ndim == 5 and ltx_previewer is None:
                         pil_frames = _decode_video_frames_l2rgb(
-                            x0_view, model_patcher.model.latent_format, anim_frames
+                            x0_view, model_patcher.model.latent_format, anim_frames,
                         )
 
                     if not pil_frames:
@@ -567,6 +601,7 @@ class _PreviewOverrideWrapper:
                                     "delta": delta_v,
                                     "step_ms": step_ms,
                                     "avg_step_ms": avg_step_ms,
+                                    "fps": anim_fps if mime in ("video/mp4", "image/webp") else None,
                                 },
                                 PromptServer.instance.client_id,
                             )
@@ -592,6 +627,8 @@ class _PreviewOverrideWrapper:
                     prev_methods.append((cls, cls.__dict__["decode_latent_to_preview_image"]))
                     cls.decode_latent_to_preview_image = _suppressed_preview_image
         try:
+            # Seeds step 1's duration measurement (sampling-start → end of step 1).
+            state["last_time"] = time.perf_counter()
             return executor(noise, latent_image, sampler, sigmas, denoise_mask, new_callback, disable_pbar, seed, latent_shapes=latent_shapes)
         finally:
             encoder.shutdown(drain_timeout=5.0)
@@ -644,7 +681,7 @@ class ModelPreviewOverrideKJ(io.ComfyNode):
                     "preview_frames",
                     default=1,
                     min=1,
-                    max=257,
+                    max=1024,
                     step=1,
                     tooltip="Frames to sample from each video step's latent for animated preview. "
                             "1 = single frame (current behavior, fastest). >1 = animated WebP playing back at preview_fps. "
@@ -661,9 +698,9 @@ class ModelPreviewOverrideKJ(io.ComfyNode):
                 io.Vae.Input(
                     "vae",
                     optional=True,
-                    tooltip="Optional VAE. If it's a TAEHV-LTX model it's used as the LTX preview "
-                            "decoder (true RGB), with the temporal slice fed per step capped to keep "
-                            "decode bounded. The VAE is moved to GPU for the duration of sampling.",
+                    tooltip="Optional LTX VAE for true-RGB previews. TAEHV-LTX = fast tiny decode "
+                            "(VAE pinned to GPU). Any other LTX VAE = full-quality decode via "
+                            "vae.decode() — MUCH slower per step.",
                 ),
             ],
             outputs=[io.Model.Output(tooltip="Model with preview override attached.")],

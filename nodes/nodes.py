@@ -1919,7 +1919,7 @@ class LTX2BlockLoraSelect:
     @classmethod
     def INPUT_TYPES(s):
         arg_dict = {}
-        argument = ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1000.0, "step": 0.01})
+        argument = ("FLOAT", {"default": 0.0, "min": 0.0, "max": 10000.0, "step": 0.01})
 
         for i in range(48):
             arg_dict["blocks.{}.".format(i)] = argument

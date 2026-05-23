@@ -292,8 +292,7 @@ app.registerExtension({
             const root = el("div", "kj-pov-root");
 
             const imageArea = el("div", "kj-pov-image-area", root);
-            // Double-buffered: decode() must run on the SAME element that becomes visible —
-            // otherwise the bitmap isn't reused and the JPEG decodes progressively (tearing).
+            // Double-buffered: decode() on the visible-to-be element so the bitmap is reused.
             const imgA = el("img", "kj-pov-img", imageArea);
             const imgB = el("img", "kj-pov-img", imageArea);
             imgA.draggable = false;
@@ -306,16 +305,27 @@ app.registerExtension({
             const videoCanvas = el("canvas", "kj-pov-img", imageArea);
             videoCanvas.style.opacity = "0";
             const videoCtx = videoCanvas.getContext("2d");
-            // MP4 path: <video> element; currentTime preserves scrub continuity across steps.
-            const videoEl = el("video", "kj-pov-img", imageArea);
-            videoEl.style.opacity = "0";
-            videoEl.muted = true;
-            videoEl.playsInline = true;
-            videoEl.loop = true;
-            videoEl.autoplay = true;
-            videoEl.disablePictureInPicture = true;
+            // MP4 path: double-buffered <video> for same no-flash reason as imgA/B.
+            function mkVideo() {
+                const v = el("video", "kj-pov-img", imageArea);
+                v.style.opacity = "0";
+                v.muted = true;
+                v.playsInline = true;
+                v.loop = true;
+                v.autoplay = true;
+                v.disablePictureInPicture = true;
+                return v;
+            }
+            const videoA = mkVideo();
+            const videoB = mkVideo();
+            let visibleVideo = videoA;
+            let pendingVideo = videoB;
             const placeholder = el("div", "kj-pov-placeholder", imageArea);
             placeholder.textContent = "waiting for sample…";
+            // Playback scrub bar — hidden until animated content is loaded.
+            const scrubBar = el("div", "kj-pov-scrub", imageArea);
+            const scrubFill = el("div", "kj-pov-scrub-fill", scrubBar);
+            scrubBar.style.display = "none";
 
             const grip = el("div", "kj-pov-panel-grip", root);
             grip.title = "Drag to resize panel";
@@ -375,8 +385,53 @@ app.registerExtension({
                 return { canvas, valEl, lbl };
             }
             const sdRow = makeCell("σ / Δ");
-            const timeRow = makeCell("ms");
+            const timeRow = makeCell("step time (ms)");
             sdRow.canvas.style.cursor = "crosshair";
+            // sdRow.canvas.title = "Hover to scrub steps · click to lock · ← → to step · click again to unlock";
+            timeRow.canvas.title = "Click to toggle ms ↔ s";
+
+            // Click step-time cell to toggle ms ↔ s. Initial unit auto-picked from first value.
+            let timeUnitSeconds = false;
+            let lastStepMs = null;
+            let lastAvgStepMs = null;
+            let lastTotal = null;
+            let lastStep = null;
+            let lastW = null, lastH = null;
+            function fmtTime(ms) {
+                if (ms == null || !Number.isFinite(ms)) return "—";
+                return timeUnitSeconds ? `${(ms / 1000).toFixed(2)}s` : `${ms.toFixed(0)}ms`;
+            }
+            // history.stepMs[k-1] = step k's duration.
+            function stepTimeForDisplay() {
+                let idx = lastCurrentStep;
+                if (hoverStep != null) idx = hoverStep;
+                else if (lockedStep != null) idx = lockedStep;
+                const tIdx = idx - 1;
+                if (tIdx >= 0 && tIdx < history.stepMs.length) return history.stepMs[tIdx];
+                return null;
+            }
+            function renderTime() {
+                timeRow.lbl.textContent = timeUnitSeconds ? "step time (s)" : "step time (ms)";
+                timeRow.valEl.textContent = fmtTime(stepTimeForDisplay());
+                if (lastAvgStepMs != null && lastTotal != null && lastStep != null) {
+                    const eta = Math.max(0, lastTotal - lastStep) * lastAvgStepMs / 1000;
+                    const avgTxt = timeUnitSeconds
+                        ? `${(lastAvgStepMs / 1000).toFixed(2)}s/step`
+                        : `${lastAvgStepMs.toFixed(0)}ms/step`;
+                    headerSummary.textContent = `${lastW}×${lastH} · ${lastStep}/${lastTotal} · ${avgTxt} · ETA ${eta.toFixed(1)}s`;
+                }
+            }
+            timeRow.canvas.style.cursor = "pointer";
+            timeRow.lbl.style.cursor = "pointer";
+            timeRow.valEl.style.cursor = "pointer";
+            const toggleTimeUnit = (ev) => {
+                ev.stopPropagation();
+                timeUnitSeconds = !timeUnitSeconds;
+                renderTime();
+            };
+            timeRow.canvas.addEventListener("click", toggleTimeUnit);
+            timeRow.lbl.addEventListener("click", toggleTimeUnit);
+            timeRow.valEl.addEventListener("click", toggleTimeUnit);
 
             // Per-run state. Declared together so helpers/handlers below can close over them.
             let hoverStep = null;
@@ -396,8 +451,13 @@ app.registerExtension({
             let videoRafId = null;
             let currentMp4Url = null;
 
-            const SD_LEG_BASE = '<span style="color:#d0d0d0">σ</span> / <span style="color:#e67e22">Δ</span>';
-            const SD_LEG_WITH_DB = SD_LEG_BASE + ' / <span style="color:rgb(120,200,220)">DB</span>';
+            const SD_LEG_BASE =
+                '<span title="sigma — noise level at this boundary" style="color:#d0d0d0">σ</span>'
+                + ' / '
+                + '<span title="delta — magnitude of x0 change per step (orange fill = filled area, larger spike = bigger change)" style="color:#e67e22">Δ</span>';
+            const SD_LEG_WITH_DB = SD_LEG_BASE
+                + ' / '
+                + '<span title="SamplerDetailBoost curve — per-σ boost applied by the wrapped sampler (peak = amount setting)" style="color:rgb(120,200,220)">DB</span>';
             function applySdLegend() {
                 sdRow.lbl.innerHTML = cachedDbCurve ? SD_LEG_WITH_DB : SD_LEG_BASE;
             }
@@ -419,8 +479,7 @@ app.registerExtension({
                     pendingImg = prev;
                 }).catch(() => {});
             }
-            // Returns null for single-frame webp / no ImageDecoder. Baked durations are dropped;
-            // playback rate comes live from preview_fps so the widget can retime mid-run.
+            // Baked WebP durations are dropped; rate comes live from preview_fps.
             async function decodeAnimatedBlob(blob) {
                 if (typeof ImageDecoder === "undefined") return null;
                 try {
@@ -456,6 +515,99 @@ app.registerExtension({
                 const v = +fpsWidget?.value;
                 return Number.isFinite(v) && v > 0 ? v : 12;
             }
+
+            // Pause state for the WebP path. MP4 uses videoEl.paused natively.
+            let isPaused = false;
+            let pauseAtMs = 0;
+            function elapsedMs() {
+                if (playbackStartMs == null) return 0;
+                return (isPaused ? pauseAtMs : performance.now()) - playbackStartMs;
+            }
+            // MP4 encode-time fps; scales videoEl.playbackRate for live preview_fps retime.
+            let bakedFps = null;
+
+            function mp4Active() {
+                return currentMp4Url != null && Number.isFinite(visibleVideo.duration) && visibleVideo.duration > 0;
+            }
+            function clipDurationMs() {
+                if (mp4Active()) return visibleVideo.duration * 1000;
+                const v = stepVideoFrames[activeStepIdx()];
+                if (v && v.frames.length > 1) return v.frames.length * (1000 / currentFps());
+                return 0;
+            }
+            function getProgress() {
+                if (mp4Active()) return visibleVideo.currentTime / visibleVideo.duration;
+                const dur = clipDurationMs();
+                if (dur <= 0 || playbackStartMs == null) return 0;
+                return (elapsedMs() % dur) / dur;
+            }
+            function setProgress(pos) {
+                pos = Math.max(0, Math.min(1, pos));
+                const dur = clipDurationMs();
+                if (dur <= 0) return;
+                // Sync the global timer so cross-clip scrub picks up here.
+                const ref = isPaused ? pauseAtMs : performance.now();
+                if (playbackStartMs == null) playbackStartMs = ref;
+                playbackStartMs = ref - pos * dur;
+                if (mp4Active()) {
+                    visibleVideo.currentTime = pos * visibleVideo.duration;
+                }
+            }
+            function togglePause() {
+                const willPause = !isPaused;
+                if (mp4Active()) {
+                    if (willPause) visibleVideo.pause();
+                    else visibleVideo.play().catch(() => {});
+                }
+                if (willPause) {
+                    pauseAtMs = performance.now();
+                    isPaused = true;
+                } else {
+                    if (playbackStartMs != null) playbackStartMs += performance.now() - pauseAtMs;
+                    isPaused = false;
+                }
+                scrubBar.classList.toggle("kj-pov-paused", isPaused);
+            }
+            let scrubRafId = null;
+            function tickScrub() {
+                scrubRafId = requestAnimationFrame(tickScrub);
+                const dur = clipDurationMs();
+                if (dur > 0) {
+                    if (scrubBar.style.display === "none") scrubBar.style.display = "block";
+                    scrubFill.style.width = (getProgress() * 100) + "%";
+                } else if (scrubBar.style.display !== "none") {
+                    scrubBar.style.display = "none";
+                }
+                if (mp4Active() && bakedFps != null && bakedFps > 0) {
+                    const rate = currentFps() / bakedFps;
+                    if (Math.abs(visibleVideo.playbackRate - rate) > 0.001) {
+                        visibleVideo.playbackRate = rate;
+                    }
+                }
+            }
+            scrubRafId = requestAnimationFrame(tickScrub);
+            scrubBar.addEventListener("mousedown", (ev) => {
+                if (ev.button !== 0) return;
+                ev.stopPropagation();
+                ev.preventDefault();
+                const rect = scrubBar.getBoundingClientRect();
+                const seek = (e) => setProgress((e.clientX - rect.left) / rect.width);
+                seek(ev);
+                const move = (e) => seek(e);
+                const up = () => {
+                    document.removeEventListener("mousemove", move);
+                    document.removeEventListener("mouseup", up);
+                };
+                document.addEventListener("mousemove", move);
+                document.addEventListener("mouseup", up);
+            });
+            // Click on the preview frame toggles pause (animated content only).
+            imageArea.addEventListener("click", (ev) => {
+                if (scrubBar.contains(ev.target)) return;
+                if (clipDurationMs() <= 0) return;
+                ev.stopPropagation();
+                togglePause();
+            });
             function drawCurrentVideoFrame() {
                 const idx = activeStepIdx();
                 const v = stepVideoFrames[idx];
@@ -463,7 +615,7 @@ app.registerExtension({
                 if (playbackStartMs == null) playbackStartMs = performance.now();
                 const frameDurMs = 1000 / currentFps();
                 const totalMs = v.frames.length * frameDurMs;
-                const elapsed = (performance.now() - playbackStartMs) % totalMs;
+                const elapsed = elapsedMs() % totalMs;
                 const fIdx = Math.min(v.frames.length - 1, Math.floor(elapsed / frameDurMs));
                 const frame = v.frames[fIdx];
                 if (videoCanvas.width !== frame.displayWidth || videoCanvas.height !== frame.displayHeight) {
@@ -491,34 +643,68 @@ app.registerExtension({
                 videoCanvas.style.opacity = "0";
                 visibleImg.style.opacity = "1";
             }
-            // Seek to global elapsed so scrubbing between MP4s doesn't restart from 0.
+            // seeked → rVFC → double-rAF before hiding old video, to avoid the single-frame black gap.
             function showMp4(url) {
                 if (url === currentMp4Url) return;
                 currentMp4Url = url;
                 if (playbackStartMs == null) playbackStartMs = performance.now();
-                videoEl.src = url;
-                const seekToElapsed = () => {
+                const target = pendingVideo;
+                target.src = url;
+                const promote = () => {
+                    if (currentMp4Url !== url || target !== pendingVideo) return;
+                    // Re-snap to NOW — initial seek drifted during load/paint. Paused-aware.
                     try {
-                        const dur = videoEl.duration;
+                        const dur = target.duration;
                         if (Number.isFinite(dur) && dur > 0) {
-                            const elapsedSec = (performance.now() - playbackStartMs) / 1000;
-                            videoEl.currentTime = elapsedSec % dur;
+                            target.currentTime = (elapsedMs() / 1000) % dur;
                         }
-                        videoEl.play().catch(() => {});
                     } catch {}
+                    target.style.opacity = "1";
+                    requestAnimationFrame(() => requestAnimationFrame(() => {
+                        if (target !== visibleVideo && currentMp4Url === url) {
+                            visibleVideo.style.opacity = "0";
+                            visibleVideo.pause();
+                            const prev = visibleVideo;
+                            visibleVideo = target;
+                            pendingVideo = prev;
+                            imgA.style.opacity = "0";
+                            imgB.style.opacity = "0";
+                            videoCanvas.style.opacity = "0";
+                            // Re-pause if user paused before this step swap.
+                            if (isPaused) visibleVideo.pause();
+                        }
+                    }));
                 };
-                if (videoEl.readyState >= 1) seekToElapsed();
-                else videoEl.addEventListener("loadedmetadata", seekToElapsed, { once: true });
-                if (videoEl.style.opacity !== "1") {
-                    videoEl.style.opacity = "1";
-                    imgA.style.opacity = "0";
-                    imgB.style.opacity = "0";
-                    videoCanvas.style.opacity = "0";
-                }
+                const afterSeek = () => {
+                    if (typeof target.requestVideoFrameCallback === "function") {
+                        target.requestVideoFrameCallback(() => promote());
+                    } else {
+                        promote();
+                    }
+                };
+                const onLoaded = () => {
+                    target.removeEventListener("loadeddata", onLoaded);
+                    try {
+                        const dur = target.duration;
+                        if (Number.isFinite(dur) && dur > 0) {
+                            // 'seeked' fires when the new currentTime is decoded and ready.
+                            target.addEventListener("seeked", afterSeek, { once: true });
+                            target.currentTime = (elapsedMs() / 1000) % dur;
+                        } else {
+                            afterSeek();
+                        }
+                        // Must play during load so rVFC fires; we re-pause after promote.
+                        target.play().catch(() => {});
+                    } catch { promote(); }
+                };
+                if (target.readyState >= 2) onLoaded();
+                else target.addEventListener("loadeddata", onLoaded, { once: true });
             }
             function hideMp4() {
-                videoEl.pause();
-                videoEl.style.opacity = "0";
+                visibleVideo.pause();
+                visibleVideo.style.opacity = "0";
+                pendingVideo.pause();
+                pendingVideo.style.opacity = "0";
                 visibleImg.style.opacity = "1";
                 currentMp4Url = null;
             }
@@ -574,6 +760,9 @@ app.registerExtension({
                 liveMp4Url = null;
                 hideMp4();
                 playbackStartMs = null;
+                bakedFps = null;
+                isPaused = false;
+                scrubBar.classList.remove("kj-pov-paused");
             }
 
             function updateSdHeader() {
@@ -603,6 +792,7 @@ app.registerExtension({
             function redrawSd() {
                 drawSigmaDeltaGraph(sdRow.canvas, cachedSigmas, history.delta, lastCurrentStep, totalSteps, hoverStep, cachedDbCurve, lockedStep);
                 updateSdHeader();
+                renderTime();
                 // Scrub priority: locked > hover > live. Locked persists past mouseleave.
                 const displayStep = lockedStep != null ? lockedStep : hoverStep;
                 const targetIdx = displayStep != null ? displayStep : lastCurrentStep;
@@ -662,13 +852,19 @@ app.registerExtension({
                 redrawSd();
             });
 
-            // Arrow-key scrub: only when cursor is over the preview panel so we don't shadow
-            // ComfyUI's global keys. First press initializes the lock at the current step.
+            // Arrow-key scrub: gated on mouseOverPanel so we don't shadow ComfyUI's global keys.
             let mouseOverPanel = false;
             root.addEventListener("mouseenter", () => { mouseOverPanel = true; });
             root.addEventListener("mouseleave", () => { mouseOverPanel = false; });
             const onKey = (ev) => {
-                if (!mouseOverPanel || !cachedSigmas) return;
+                if (!mouseOverPanel) return;
+                if (ev.key === " " && clipDurationMs() > 0) {
+                    ev.preventDefault();
+                    ev.stopPropagation();
+                    togglePause();
+                    return;
+                }
+                if (!cachedSigmas) return;
                 if (ev.key !== "ArrowLeft" && ev.key !== "ArrowRight") return;
                 const xSteps = Math.max(totalSteps || cachedSigmas.length, cachedSigmas.length, history.delta.length);
                 const cur = lockedStep != null ? lockedStep : (hoverStep != null ? hoverStep : lastCurrentStep);
@@ -694,6 +890,8 @@ app.registerExtension({
                 // Clear hover/lock — setStepBlob skips updates while either is set.
                 hoverStep = null;
                 lockedStep = null;
+                // Allow the next run to re-pick its time unit from the first sample.
+                lastStepMs = null;
             }
 
             const handler = (data) => {
@@ -704,10 +902,10 @@ app.registerExtension({
                         resetHistory();
                         applySdLegend();
                     }
-                    // Indexed by boundary (step 0 = initial noise). Image is optional —
-                    // the boundary-0 message may arrive without one if encoding failed.
+                    // Indexed by boundary; step 0 = initial noise (image optional).
                     if (typeof data.image === "string") {
                         const mime = typeof data.mime === "string" ? data.mime : "image/jpeg";
+                        if (typeof data.fps === "number" && data.fps > 0) bakedFps = data.fps;
                         setStepBlob(data.step, b64ToBlob(data.image, mime));
                     }
 
@@ -716,15 +914,19 @@ app.registerExtension({
                     if (data.step_ms != null) history.stepMs.push(data.step_ms);
                     if (data.delta != null) history.delta.push(data.delta);
 
-                    const etaTxt = data.avg_step_ms != null
-                        ? `${(Math.max(0, data.total - data.step) * data.avg_step_ms / 1000).toFixed(1)}s`
-                        : "—";
-                    const stepMsTxt = data.avg_step_ms != null ? `${data.avg_step_ms.toFixed(0)}ms/step` : "—";
-                    headerSummary.textContent = `${data.w}×${data.h} · ${data.step}/${data.total} · ${stepMsTxt} · ETA ${etaTxt}`;
-
-                    // data.step is 1-based; marker sits at boundary k after step k completes.
+                    // Auto-pick unit from the first sample so slow steps default to seconds.
+                    if (lastStepMs == null && data.step_ms != null && data.step_ms > 1500) {
+                        timeUnitSeconds = true;
+                    }
+                    lastStepMs = data.step_ms;
+                    lastAvgStepMs = data.avg_step_ms;
+                    lastStep = data.step;
+                    lastTotal = data.total;
+                    lastW = data.w;
+                    lastH = data.h;
+                    // data.step is 1-based; set BEFORE renderTime so stepTimeForDisplay sees it.
                     lastCurrentStep = data.step;
-                    timeRow.valEl.textContent = data.step_ms != null ? `${data.step_ms.toFixed(0)}ms` : "—";
+                    renderTime();
 
                     drawSigmaDeltaGraph(sdRow.canvas, cachedSigmas, history.delta, lastCurrentStep, totalSteps, hoverStep, cachedDbCurve);
                     updateSdHeader();
@@ -739,6 +941,7 @@ app.registerExtension({
                 node._kjPreviewHandler = null;
                 resetFrames();
                 stopVideoLoop();
+                if (scrubRafId != null) cancelAnimationFrame(scrubRafId);
             });
         });
     },
