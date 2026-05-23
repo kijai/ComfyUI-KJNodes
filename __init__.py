@@ -28,7 +28,7 @@ from .nodes.curve_nodes import (
     PointsEditor, CutAndDragOnPath,
 )
 from .nodes.batchcrop_nodes import (
-    BatchCropFromMask, BatchUncrop, BatchCropFromMaskAdvanced,BatchCropFromMaskAdvancedv2,
+    BatchCropFromMask, BatchUncrop, BatchCropFromMaskAdvanced, BatchCropFromMaskAdvancedv2,
     FilterZeroMasksAndCorrespondingImages, InsertImageBatchByIndexes, BatchUncropAdvanced,
     SplitBboxes, BboxToInt, BboxVisualize,
 )
