@@ -28,7 +28,7 @@ from .nodes.curve_nodes import (
     PointsEditor, CutAndDragOnPath,
 )
 from .nodes.batchcrop_nodes import (
-    BatchCropFromMask, BatchUncrop, BatchCropFromMaskAdvanced,
+    BatchCropFromMask, BatchUncrop, BatchCropFromMaskAdvanced,BatchCropFromMaskAdvancedv2,
     FilterZeroMasksAndCorrespondingImages, InsertImageBatchByIndexes, BatchUncropAdvanced,
     SplitBboxes, BboxToInt, BboxVisualize,
 )
@@ -160,7 +160,6 @@ NODE_CONFIG = {
     "ImageNormalize_Neg1_To_1": {"class": ImageNormalize_Neg1_To_1, "name": "Image Normalize -1 to 1"},
     "ImagePass": {"class": ImagePass},
     "ImagePadKJ": {"class": ImagePadKJ, "name": "ImagePad KJ"},
-    "ImageMaskSyncCrop": {"class": ImageMaskSyncCrop, "name": "Image And Mask Sync Crop"},
     "ImagePadForOutpaintMasked": {"class": ImagePadForOutpaintMasked, "name": "Image Pad For Outpaint Masked"},
     "ImagePadForOutpaintTargetSize": {"class": ImagePadForOutpaintTargetSize, "name": "Image Pad For Outpaint Target Size"},
     "ImagePrepForICLora": {"class": ImagePrepForICLora, "name": "Image Prep For ICLora"},
@@ -195,6 +194,7 @@ NODE_CONFIG = {
     #batch cropping
     "BatchCropFromMask": {"class": BatchCropFromMask, "name": "Batch Crop From Mask"},
     "BatchCropFromMaskAdvanced": {"class": BatchCropFromMaskAdvanced, "name": "Batch Crop From Mask Advanced"},
+    "BatchCropFromMaskAdvancedv2": {"class": BatchCropFromMaskAdvancedv2, "name": "Batch Crop From Mask Advanced v2"},
     "FilterZeroMasksAndCorrespondingImages": {"class": FilterZeroMasksAndCorrespondingImages},
     "InsertImageBatchByIndexes": {"class": InsertImageBatchByIndexes, "name": "Insert Image Batch By Indexes"},
     "BatchUncrop": {"class": BatchUncrop, "name": "Batch Uncrop"},
