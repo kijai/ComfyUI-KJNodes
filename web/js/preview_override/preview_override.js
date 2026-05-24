@@ -320,6 +320,29 @@ app.registerExtension({
             const videoB = mkVideo();
             let visibleVideo = videoA;
             let pendingVideo = videoB;
+            // Hidden audio sources (LTXAV). Double-buffered like the video for gapless step
+            // swaps; both ride the same playback clock as the visual preview.
+            function mkAudio() {
+                const a = el("audio", null, imageArea);
+                a.style.display = "none";
+                a.preload = "auto";
+                a.loop = true;
+                a.muted = true;  // unmuted only while hovering the preview or step plot
+                return a;
+            }
+            const audioA = mkAudio();
+            const audioB = mkAudio();
+            let visibleAudio = audioA;
+            let pendingAudio = audioB;
+            // Keep audio quiet during normal graph work; it "opens up" only when the cursor is
+            // over the preview frame or the σ/Δ plot. Starting muted also guarantees autoplay.
+            let audioHoverImage = false;
+            let audioHoverPlot = false;
+            function refreshAudioMute() {
+                const muted = !(audioHoverImage || audioHoverPlot);
+                audioA.muted = muted;
+                audioB.muted = muted;
+            }
             const placeholder = el("div", "kj-pov-placeholder", imageArea);
             placeholder.textContent = "waiting for sample…";
             // Playback scrub bar — hidden until animated content is loaded.
@@ -444,8 +467,11 @@ app.registerExtension({
             const stepBlobUrls = [];
             const stepVideoFrames = [];  // WebP path: per-step VideoFrame[]
             const stepMp4Urls = [];      // MP4 path: per-step blob URL
+            const stepAudioUrls = [];    // LTXAV: per-step WAV blob URL
             let liveBlobUrl = null;
             let liveMp4Url = null;
+            let liveAudioUrl = null;
+            let currentAudioUrl = null;
             // Global timer never resets between steps — scrub continues at the equivalent elapsed.
             let playbackStartMs = null;
             let videoRafId = null;
@@ -526,6 +552,43 @@ app.registerExtension({
             // MP4 encode-time fps; scales videoEl.playbackRate for live preview_fps retime.
             let bakedFps = null;
 
+            function audioActive() {
+                return currentAudioUrl != null && Number.isFinite(visibleAudio.duration) && visibleAudio.duration > 0;
+            }
+            // Mirror showMp4: load into the pending element, seek to the master clock, play,
+            // then swap — keeps audio gapless across per-step buffer replacements.
+            function showAudio(url) {
+                if (url === currentAudioUrl) return;
+                currentAudioUrl = url;
+                if (playbackStartMs == null) playbackStartMs = performance.now();
+                const target = pendingAudio;
+                target.src = url;
+                const promote = () => {
+                    if (currentAudioUrl !== url || target !== pendingAudio) return;
+                    try {
+                        const dur = target.duration;
+                        if (Number.isFinite(dur) && dur > 0) target.currentTime = (elapsedMs() / 1000) % dur;
+                    } catch {}
+                    if (!isPaused) target.play().catch(() => {});
+                    const prev = visibleAudio;
+                    prev.pause();
+                    visibleAudio = target;
+                    pendingAudio = prev;
+                };
+                const onLoaded = () => {
+                    target.removeEventListener("loadeddata", onLoaded);
+                    promote();
+                };
+                if (target.readyState >= 2) onLoaded();
+                else target.addEventListener("loadeddata", onLoaded, { once: true });
+            }
+            function stopAudio() {
+                currentAudioUrl = null;
+                for (const a of [audioA, audioB]) {
+                    try { a.pause(); a.removeAttribute("src"); a.load(); } catch {}
+                }
+            }
+
             function mp4Active() {
                 return currentMp4Url != null && Number.isFinite(visibleVideo.duration) && visibleVideo.duration > 0;
             }
@@ -533,6 +596,8 @@ app.registerExtension({
                 if (mp4Active()) return visibleVideo.duration * 1000;
                 const v = stepVideoFrames[activeStepIdx()];
                 if (v && v.frames.length > 1) return v.frames.length * (1000 / currentFps());
+                // Audio drives the scrub timeline when the video preview is a still frame.
+                if (audioActive()) return visibleAudio.duration * 1000;
                 return 0;
             }
             function getProgress() {
@@ -552,12 +617,19 @@ app.registerExtension({
                 if (mp4Active()) {
                     visibleVideo.currentTime = pos * visibleVideo.duration;
                 }
+                if (audioActive()) {
+                    try { visibleAudio.currentTime = ((pos * dur) / 1000) % visibleAudio.duration; } catch {}
+                }
             }
             function togglePause() {
                 const willPause = !isPaused;
                 if (mp4Active()) {
                     if (willPause) visibleVideo.pause();
                     else visibleVideo.play().catch(() => {});
+                }
+                if (audioActive()) {
+                    if (willPause) visibleAudio.pause();
+                    else visibleAudio.play().catch(() => {});
                 }
                 if (willPause) {
                     pauseAtMs = performance.now();
@@ -582,6 +654,19 @@ app.registerExtension({
                     const rate = currentFps() / bakedFps;
                     if (Math.abs(visibleVideo.playbackRate - rate) > 0.001) {
                         visibleVideo.playbackRate = rate;
+                    }
+                }
+                // Keep audio aligned to the master clock. Native playback advances on its own,
+                // so we only re-seek on meaningful drift (after a step swap or a scrub).
+                if (audioActive()) {
+                    if (isPaused) {
+                        if (!visibleAudio.paused) visibleAudio.pause();
+                    } else {
+                        if (visibleAudio.paused) visibleAudio.play().catch(() => {});
+                        const want = (elapsedMs() / 1000) % visibleAudio.duration;
+                        if (Math.abs(visibleAudio.currentTime - want) > 0.25) {
+                            try { visibleAudio.currentTime = want; } catch {}
+                        }
                     }
                 }
             }
@@ -744,6 +829,15 @@ app.registerExtension({
                     }
                 }
             }
+            function setStepAudio(stepIdx, blob) {
+                const url = URL.createObjectURL(blob);
+                if (stepAudioUrls[stepIdx]) {
+                    try { URL.revokeObjectURL(stepAudioUrls[stepIdx]); } catch {}
+                }
+                stepAudioUrls[stepIdx] = url;
+                liveAudioUrl = url;
+                if (hoverStep == null && lockedStep == null) showAudio(url);
+            }
             function resetFrames() {
                 for (const u of stepBlobUrls) {
                     if (u) try { URL.revokeObjectURL(u); } catch {}
@@ -759,6 +853,12 @@ app.registerExtension({
                 stepMp4Urls.length = 0;
                 liveMp4Url = null;
                 hideMp4();
+                for (const u of stepAudioUrls) {
+                    if (u) try { URL.revokeObjectURL(u); } catch {}
+                }
+                stepAudioUrls.length = 0;
+                liveAudioUrl = null;
+                stopAudio();
                 playbackStartMs = null;
                 bakedFps = null;
                 isPaused = false;
@@ -814,6 +914,12 @@ app.registerExtension({
                     hideMp4();
                     showLiveFrame(liveBlobUrl);
                 }
+                // Audio follows the same locked > hover > live priority as the visual.
+                if (displayStep != null && stepAudioUrls[displayStep]) {
+                    showAudio(stepAudioUrls[displayStep]);
+                } else if (liveAudioUrl) {
+                    showAudio(liveAudioUrl);
+                }
             }
 
             sdRow.canvas.addEventListener("mousemove", (ev) => {
@@ -834,6 +940,12 @@ app.registerExtension({
                     redrawSd();
                 }
             });
+
+            // Unmute audio only while hovering the preview frame or the σ/Δ step plot.
+            imageArea.addEventListener("mouseenter", () => { audioHoverImage = true; refreshAudioMute(); });
+            imageArea.addEventListener("mouseleave", () => { audioHoverImage = false; refreshAudioMute(); });
+            sdRow.canvas.addEventListener("mouseenter", () => { audioHoverPlot = true; refreshAudioMute(); });
+            sdRow.canvas.addEventListener("mouseleave", () => { audioHoverPlot = false; refreshAudioMute(); });
 
             // Click toggles a lock at the hover position so the preview survives mouseleave.
             sdRow.canvas.addEventListener("mousedown", (ev) => { ev.stopPropagation(); });
@@ -907,6 +1019,11 @@ app.registerExtension({
                         const mime = typeof data.mime === "string" ? data.mime : "image/jpeg";
                         if (typeof data.fps === "number" && data.fps > 0) bakedFps = data.fps;
                         setStepBlob(data.step, b64ToBlob(data.image, mime));
+                    }
+                    // LTXAV audio for this step — rides the same playback clock as the visual.
+                    if (typeof data.audio === "string") {
+                        const amime = typeof data.audio_mime === "string" ? data.audio_mime : "audio/wav";
+                        setStepAudio(data.step, b64ToBlob(data.audio, amime));
                     }
 
                     totalSteps = data.total || totalSteps;
