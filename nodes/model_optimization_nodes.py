@@ -857,6 +857,12 @@ try:
 except ImportError:
     apply_rotary_emb = None
 
+try:
+    from comfy.ldm.lightricks.model import GuideAttentionMask as _GuideAttentionMask, _attention_with_guide_mask as _ltx_attn_with_guide_mask
+except ImportError:
+    _GuideAttentionMask = None
+    _ltx_attn_with_guide_mask = None
+
 
 def ltxv_feta_forward(self, x, context=None, mask=None, pe=None, k_pe=None, transformer_options={}):
     q = self.to_q(x)
@@ -875,6 +881,8 @@ def ltxv_feta_forward(self, x, context=None, mask=None, pe=None, k_pe=None, tran
 
     if mask is None:
         out = comfy.ldm.modules.attention.optimized_attention(q, k, v, self.heads, attn_precision=self.attn_precision, transformer_options=transformer_options)
+    elif _GuideAttentionMask is not None and isinstance(mask, _GuideAttentionMask):
+        out = _ltx_attn_with_guide_mask(q, k, v, self.heads, mask, attn_precision=self.attn_precision, transformer_options=transformer_options)
     else:
         out = comfy.ldm.modules.attention.optimized_attention_masked(q, k, v, self.heads, mask, attn_precision=self.attn_precision, transformer_options=transformer_options)
 
