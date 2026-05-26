@@ -229,6 +229,23 @@ function getVisibleSetNames(graph, filterType) {
 	return [...sourceMap.keys()].sort();
 }
 
+// Force every GetNode (root + subgraphs) to swap its widget.options reference so Vue re-reads values.
+function refreshAllGetNodeCombos(graph) {
+	const root = findRootGraph(graph);
+	if (!root) return;
+	const allGraphs = [root];
+	const subgraphs = root._subgraphs || root.subgraphs;
+	if (subgraphs) {
+		for (const sg of subgraphs.values()) allGraphs.push(sg);
+	}
+	for (const g of allGraphs) {
+		if (!g?._nodes) continue;
+		for (const node of g._nodes) {
+			if (node.type === 'GetNode') node._refreshComboOptions?.();
+		}
+	}
+}
+
 // Exposed globally for use in contextmenu.js
 window.kjNodes = window.kjNodes || {};
 window.kjNodes.convertOutputsToSetGet = convertOutputsToSetGet;
@@ -732,6 +749,24 @@ app.registerExtension({
 				this._justAdded = true;
 			}
 
+			onRemoved() {
+				// Only Vue mode needs the refresh — legacy re-reads the values getter on every click.
+				if (!LiteGraph.vueNodesMode) return;
+				const name = this.widgets?.[0]?.value;
+				const g = this.graph;
+				if (!g) return;
+				// Defer: onRemoved fires before _nodes is spliced, so getters still see this SetNode.
+				setTimeout(() => {
+					if (name) {
+						for (const entry of findGettersByName(g, name)) {
+							entry.node.widgets[0].value = '';
+							entry.node.onRename?.();
+						}
+					}
+					refreshAllGetNodeCombos(g);
+				}, 0);
+			}
+
 			onConfigure() {
 				// Only run paste logic when actually pasting, not during workflow load
 				if (this._justAdded && this.graph && !app.configuringGraph) {
@@ -919,6 +954,20 @@ app.registerExtension({
 					configurable: true
 				});
 				this.addWidget("combo", "Constant", "", () => { if (!app.configuringGraph) this.onRename(); }, comboOptions)
+				// Fresh options object (live getter preserved) + remove/re-add to force Vue re-extraction.
+				this._refreshComboOptions = () => {
+					const w = this.widgets?.[0];
+					if (!w) return;
+					const newOpts = { getOptionLabel: comboOptions.getOptionLabel };
+					Object.defineProperty(newOpts, 'values',
+						Object.getOwnPropertyDescriptor(comboOptions, 'values'));
+					w.options = newOpts;
+					const idx = this.widgets.indexOf(w);
+					if (idx >= 0) {
+						this.widgets.splice(idx, 1);
+						this.widgets.splice(idx, 0, w);
+					}
+				};
 				this.addOutput("*", '*');
 			}
 
