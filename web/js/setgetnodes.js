@@ -953,7 +953,29 @@ app.registerExtension({
 					enumerable: true,
 					configurable: true
 				});
-				this.addWidget("combo", "Constant", "", () => { if (!app.configuringGraph) this.onRename(); }, comboOptions)
+				const constantWidget = this.addWidget("combo", "Constant", "", () => { if (!app.configuringGraph) this.onRename(); }, comboOptions);
+				// Legacy-only fix: pass pre-labeled values to ContextMenu so the core filter shows the search input.
+				// Sidesteps ComboWidget's empty-array + getOptionLabel bug. Vue mode handles it natively.
+				const origOnClick = constantWidget.onClick?.bind(constantWidget);
+				constantWidget.onClick = (params) => {
+					if (LiteGraph.vueNodesMode) return origOnClick?.(params);
+					const { e, canvas, node } = params;
+					const x = e.canvasX - node.pos[0];
+					const width = constantWidget.width || node.size[0];
+					if (x < 40) return constantWidget.decrementValue({ e, node, canvas });
+					if (x > width - 40) return constantWidget.incrementValue({ e, node, canvas });
+					const rawValues = comboOptions.values;
+					const labels = rawValues.map(v => comboOptions.getOptionLabel(v) || v);
+					new LiteGraph.ContextMenu(labels, {
+						scale: Math.max(1, canvas.ds.scale),
+						event: e,
+						className: 'dark',
+						callback: (selectedLabel) => {
+							const idx = labels.indexOf(selectedLabel);
+							if (idx >= 0) constantWidget.setValue(rawValues[idx], { e, node, canvas });
+						}
+					});
+				};
 				// Fresh options object (live getter preserved) + remove/re-add to force Vue re-extraction.
 				this._refreshComboOptions = () => {
 					const w = this.widgets?.[0];
