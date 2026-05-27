@@ -966,7 +966,7 @@ app.registerExtension({
 					if (x > width - 40) return constantWidget.incrementValue({ e, node, canvas });
 					const rawValues = comboOptions.values;
 					const labels = rawValues.map(v => comboOptions.getOptionLabel(v) || v);
-					new LiteGraph.ContextMenu(labels, {
+					const menu = new LiteGraph.ContextMenu(labels, {
 						scale: Math.max(1, canvas.ds.scale),
 						event: e,
 						className: 'dark',
@@ -974,6 +974,21 @@ app.registerExtension({
 							const idx = labels.indexOf(selectedLabel);
 							if (idx >= 0) constantWidget.setValue(rawValues[idx], { e, node, canvas });
 						}
+					});
+					// Color each entry's left border by its SetNode's type.
+					if (!_typeColorMap) setColorAndBgColor({}, '');   // ensure lazy map is initialized
+					const entries = menu.root?.querySelectorAll('.litemenu-entry');
+					rawValues.forEach((name, i) => {
+						if (!entries?.[i]) return;
+						const setter = findSetterByName(this.graph, name);
+						const type = setter?.node?.inputs?.[0]?.type;
+						const c = _typeColorMap?.[type];
+						const borderColor = canvas.default_connection_color_byType?.[type]
+							|| LGraphCanvas.link_type_colors?.[type]
+							|| (c && (c.groupcolor || c.bgcolor || c.color))
+							|| '#888';
+						entries[i].style.borderLeft = `4px solid ${borderColor}`;
+						entries[i].style.paddingLeft = '8px';
 					});
 				};
 				// Fresh options object (live getter preserved) + remove/re-add to force Vue re-extraction.
