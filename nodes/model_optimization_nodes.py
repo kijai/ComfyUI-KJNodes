@@ -13,6 +13,7 @@ from comfy.cli_args import args
 from comfy.ldm.modules.attention import wrap_attn, optimized_attention, attention_pytorch
 import comfy.utils
 import comfy.sd
+import comfy.ops
 
 try:
     from comfy_api.latest import io
@@ -477,6 +478,43 @@ class TorchCompileModelWanVideoV2:
         return (m, )
 
 
+_aimdo_patched = False
+
+def patch_aimdo_for_compile():
+    # reduce recompiles with dynamic VRAM
+    global _aimdo_patched
+    if _aimdo_patched:
+        return
+    _aimdo_patched = True
+    names = ("cast_bias_weight", "uncast_bias_weight", "cast_modules_with_vbar", "resolve_cast_module_with_vbar")
+    for name in names:
+        fn = getattr(comfy.ops, name, None)
+        if fn is not None:
+            setattr(comfy.ops, name, torch._dynamo.disable(fn))
+    try:
+        import comfy_aimdo.torch as _at
+        _at.get_tensor_from_raw_ptr = torch._dynamo.disable(_at.get_tensor_from_raw_ptr)
+    except Exception:
+        pass
+    logging.info("KJNodes dynamic-compile: comfy.ops weight cast marked as eager graph break (recompile fix active).")
+
+
+def skip_torch_compile_dict(guard_entries):
+    # don't recompile when transformer_options change
+    return [("transformer_options" not in entry.name) for entry in guard_entries]
+
+
+def build_compile_kwargs(backend, mode, fullgraph, dynamic, use_guard_filter=True):
+    # torch.compile forbids passing mode and options together; an explicit mode wins,
+    # otherwise attach the guard filter via options on the default mode.
+    kw = {"backend": backend, "fullgraph": fullgraph, "dynamic": dynamic}
+    if mode and mode != "default":
+        kw["mode"] = mode
+    elif use_guard_filter:
+        kw["options"] = {"guard_filter_fn": skip_torch_compile_dict}
+    return kw
+
+
 class TorchCompileModelAdvanced:
     @classmethod
     def INPUT_TYPES(s):
@@ -519,9 +557,9 @@ class TorchCompileModelAdvanced:
         torch._dynamo.config.cache_size_limit = dynamo_cache_size_limit
 
         try:
+            compile_key_list = []
             if compile_transformer_blocks_only:
-                layer_types = ["double_blocks", "single_blocks", "layers", "transformer_blocks", "blocks", "visual_transformer_blocks", "text_transformer_blocks"]
-                compile_key_list = []
+                layer_types = ["double_blocks", "single_blocks", "layers", "transformer_blocks", "blocks", "visual_transformer_blocks", "text_transformer_blocks", "patch_blocks", "pixel_blocks"]
                 for layer_name in layer_types:
                     if hasattr(diffusion_model, layer_name):
                         blocks = getattr(diffusion_model, layer_name)
@@ -542,7 +580,9 @@ class TorchCompileModelAdvanced:
             except KeyError:
                 raise ValueError(f"Invalid dynamic arg {dynamic}")
 
-            set_torch_compile_wrapper(model=m, keys=compile_key_list, backend=backend, mode=mode, dynamic=dynamic, fullgraph=fullgraph)
+            if not disable_dynamic_vram and getattr(m, "is_dynamic", lambda: False)():
+                patch_aimdo_for_compile() # reduce recompiles with dynamic VRAM, will break the graph still but better than nothing
+            set_torch_compile_wrapper(model=m, keys=compile_key_list, **build_compile_kwargs(backend, mode, fullgraph, dynamic))
         except Exception as e:
             raise RuntimeError("Failed to compile model") from e
 
