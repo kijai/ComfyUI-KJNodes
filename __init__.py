@@ -74,6 +74,7 @@ from .nodes.model_optimization_nodes import (
     StartRecordCUDAMemoryHistory, EndRecordCUDAMemoryHistory, VisualizeCUDAMemoryHistory,
     ModelMemoryUseReportPatch, ModelMemoryUsageFactorOverride, WanChunkFeedForward,
     SamplerSelfRefineVideo,
+    SamplerSelfRefineVideo, PiDColorBiasCorrection,
 )
 from .nodes.lora_nodes import LoraExtractKJ, LoraReduceRank
 from .nodes.image_transform_node import ImageTransformKJ
@@ -289,6 +290,7 @@ NODE_CONFIG = {
     "TimerNodeKJ": {"class": TimerNodeKJ, "name": "Timer Node KJ"},
     "HunyuanVideoEncodeKeyframesToCond": {"class": HunyuanVideoEncodeKeyframesToCond, "name": "HunyuanVideo Encode Keyframes To Cond"},
     "CFGZeroStarAndInit": {"class": CFGZeroStarAndInit, "name": "CFG Zero Star/Init"},
+    "PiDColorBiasCorrection": {"class": PiDColorBiasCorrection, "name": "PiD Color Bias Correction"},
     "ModelPatchTorchSettings": {"class": ModelPatchTorchSettings, "name": "Model Patch Torch Settings"},
     "WanVideoNAG": {"class": WanVideoNAG, "name": "WanVideoNAG"},
     "GGUFLoaderKJ": {"class": GGUFLoaderKJ, "name": "GGUF Loader KJ"},

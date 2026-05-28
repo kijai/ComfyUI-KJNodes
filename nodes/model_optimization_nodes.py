@@ -2053,3 +2053,83 @@ class SamplerSelfRefineVideo(io.ComfyNode):
             "seed": seed,
         })
         return io.NodeOutput(sampler)
+
+
+# Multi-feature linear bias corrector for PiD (Flux2 backbone, 4-step).
+# Calibrated on 124 natural-image samples (LOO-CV per-channel RMSE 0.027/0.026/0.024).
+# Held-out validation on 20 unseen images: 60% reduction in total drift vs uncorrected.
+# Features per row: [R_mean, G_mean, B_mean, R_std, G_std, B_std,
+#                    R_mean*G_mean, R_mean*B_mean, G_mean*B_mean, intercept(1.0)]
+# Columns: predicted bias for R, G, B (subtract from x0_pred at step 0).
+PID_BIAS_COEF_FLUX2 = torch.tensor([
+    [-0.130306, +0.127184, +0.014058],  # R_mean
+    [-0.053279, -0.408929, +0.004243],  # G_mean
+    [-0.009386, +0.109546, -0.134091],  # B_mean
+    [-0.033373, -0.011615, -0.026129],  # R_std
+    [+0.180052, +0.062021, +0.071317],  # G_std
+    [-0.067958, -0.058595, -0.098645],  # B_std
+    [-0.248116, -0.240633, -0.105600],  # R_mean*G_mean
+    [+0.304035, +0.322566, +0.093224],  # R_mean*B_mean
+    [-0.157648, -0.227127, -0.112368],  # G_mean*B_mean
+    [-0.062814, +0.030765, +0.062735],  # intercept
+], dtype=torch.float32)
+
+
+class PiDColorBiasCorrection:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": {
+            "model": ("MODEL",),
+            "strength": ("FLOAT", {"default": 1.0, "min": -20.0, "max": 20.0, "step": 0.01,
+                                   "tooltip": "Correction strength. 1.0 = full predicted bias subtracted. <1 = milder, >1 = stronger, 0 = disabled."}),
+            "backbone": (["flux2"], {"default": "flux2",
+                                     "tooltip": "Calibrated PiD backbone (currently only flux2 — others use the same model but coefficients differ)."}),
+        }}
+    RETURN_TYPES = ("MODEL",)
+    FUNCTION = "patch"
+    CATEGORY = "KJNodes/experimental"
+    EXPERIMENTAL = True
+    DESCRIPTION = (
+        "PiD 4-step decoder color/brightness drift corrector. "
+        "Subtracts a per-channel bias from x0_pred at the first sampling step, "
+        "using a small linear model calibrated against the model's systematic drift "
+        "(model tends to brighten dark scenes and add a blue cast)."
+    )
+
+    def patch(self, model, strength, backbone):
+        if strength == 0.0 or backbone != "flux2":
+            return (model,)
+        coef_cpu = PID_BIAS_COEF_FLUX2  # (10, 3)
+
+        def pid_bias_post_cfg(args):
+            denoised = args["denoised"]
+            # Step detection: only apply at the first sampling step.
+            # Use sample_sigmas like CFGZeroStarAndInit for robustness across schedules.
+            try:
+                sigmas = args["model_options"]["transformer_options"]["sample_sigmas"]
+                sigma = args.get("sigma", args.get("timestep"))
+                # First step matches sigmas[0]
+                if sigma is None or not torch.isclose(sigma.max(), sigmas[0]).item():
+                    return denoised
+            except (KeyError, AttributeError):
+                # Fallback heuristic: PiD's first step has sigma=0.999
+                sigma = args.get("sigma")
+                if sigma is None or sigma.max().item() < 0.95:
+                    return denoised
+
+            coef = coef_cpu.to(denoised.device, dtype=denoised.dtype)
+            rgb_m = denoised.mean(dim=(0, 2, 3))
+            rgb_s = denoised.std(dim=(0, 2, 3))
+            one = torch.tensor(1.0, device=denoised.device, dtype=denoised.dtype)
+            feats = torch.stack([
+                rgb_m[0], rgb_m[1], rgb_m[2],
+                rgb_s[0], rgb_s[1], rgb_s[2],
+                rgb_m[0] * rgb_m[1], rgb_m[0] * rgb_m[2], rgb_m[1] * rgb_m[2],
+                one,
+            ])
+            bias = feats @ coef  # (3,)
+            return denoised - strength * bias.view(1, 3, 1, 1)
+
+        m = model.clone()
+        m.set_model_sampler_post_cfg_function(pid_bias_post_cfg)
+        return (m,)
