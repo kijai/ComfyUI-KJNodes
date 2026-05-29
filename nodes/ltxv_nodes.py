@@ -678,7 +678,7 @@ class WrappedPreviewer():
             message = BytesIO()
             message.write((1).to_bytes(length=4, byteorder='big')*2)
             message.write(ind.to_bytes(length=4, byteorder='big'))
-            message.write(struct.pack('16p', serv.last_node_id.encode('ascii')))
+            message.write(struct.pack('16p', (serv.last_node_id or "").encode('ascii')))
             i.save(message, format="JPEG", quality=95, compress_level=1)
             #NOTE: send sync already uses call_soon_threadsafe
             serv.send_sync(server.BinaryEventTypes.PREVIEW_IMAGE,
