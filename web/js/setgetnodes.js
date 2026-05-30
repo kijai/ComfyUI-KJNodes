@@ -747,24 +747,19 @@ app.registerExtension({
 
 			onAdded() {
 				this._justAdded = true;
+				// Vue mode doesn't always re-extract GetNode options on SetNode add; skip during workflow load.
+				if (LiteGraph.vueNodesMode && this.graph && !app.configuringGraph) {
+					refreshAllGetNodeCombos(this.graph);
+				}
 			}
 
 			onRemoved() {
 				// Only Vue mode needs the refresh — legacy re-reads the values getter on every click.
 				if (!LiteGraph.vueNodesMode) return;
-				const name = this.widgets?.[0]?.value;
 				const g = this.graph;
 				if (!g) return;
 				// Defer: onRemoved fires before _nodes is spliced, so getters still see this SetNode.
-				setTimeout(() => {
-					if (name) {
-						for (const entry of findGettersByName(g, name)) {
-							entry.node.widgets[0].value = '';
-							entry.node.onRename?.();
-						}
-					}
-					refreshAllGetNodeCombos(g);
-				}, 0);
+				setTimeout(() => refreshAllGetNodeCombos(g), 0);
 			}
 
 			onConfigure() {
