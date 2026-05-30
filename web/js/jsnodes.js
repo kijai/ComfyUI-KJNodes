@@ -1,6 +1,37 @@
 const { app } = window.comfyAPI.app;
 const { applyTextReplacements } = window.comfyAPI.utils;
 
+// ─── Dynamic input slot management for *Multi nodes ───
+// Adds an "Update inputs" button that rebuilds prefix_1..prefix_N slots to match the count widget.
+// Also wired to the count callback so API-format reload (bare callback) restores the slots; the
+// canvas arg from interactive edits is the tell, so scrubbing the count doesn't reflow the node.
+function setupDynamicInputs(node, { type, prefix, countWidget = "inputcount", slotOptions } = {}) {
+    const rebuild = () => {
+        if (!node.inputs) node.inputs = [];
+        const countW = node.widgets?.find(w => w.name === countWidget);
+        if (!countW) return;
+        const target = countW.value;
+        const current = node.inputs.filter(i => i.name?.startsWith(prefix)).length;
+        if (target === current) return;
+        if (target < current) {
+            for (let i = 0; i < current - target; i++) node.removeInput(node.inputs.length - 1);
+        } else {
+            for (let i = current + 1; i <= target; i++) node.addInput(`${prefix}${i}`, type, slotOptions);
+        }
+    };
+    node.addWidget("button", "Update inputs", null, rebuild);
+    const countW = node.widgets?.find(w => w.name === countWidget);
+    if (countW) {
+        const origCb = countW.callback;   // guard: may be nullish
+        countW.callback = function (value, canvas) {
+            const r = origCb ? origCb.apply(this, arguments) : undefined;
+            if (!canvas) rebuild();   // bare = API reload; skip interactive scrub
+            return r;
+        };
+    }
+    return rebuild;
+}
+
 app.registerExtension({
 	name: "KJNodes.jsnodes",
 	async beforeRegisterNodeDef(nodeType, nodeData, app) {
@@ -10,27 +41,8 @@ app.registerExtension({
 		switch (nodeData.name) {
 			case "ConditioningMultiCombine":
 				nodeType.prototype.onNodeCreated = function () {
-				this._type = "CONDITIONING"
-				this.inputs_offset = nodeData.name.includes("selective")?1:0
-				this.addWidget("button", "Update inputs", null, () => {
-					if (!this.inputs) {
-						this.inputs = [];
-					}
-					const target_number_of_inputs = this.widgets.find(w => w.name === "inputcount")["value"];
-					const num_inputs = this.inputs.filter(input => input.type === this._type).length
-					if(target_number_of_inputs===num_inputs)return; // already set, do nothing
-
-					if(target_number_of_inputs < num_inputs){
-						const inputs_to_remove = num_inputs - target_number_of_inputs;
-						for(let i = 0; i < inputs_to_remove; i++) {
-							this.removeInput(this.inputs.length - 1);
-						}
-					}
-					else{
-						for(let i = num_inputs+1; i <= target_number_of_inputs; ++i)
-							this.addInput(`conditioning_${i}`, this._type)
-					}
-					});
+					this.inputs_offset = nodeData.name.includes("selective")?1:0
+					setupDynamicInputs(this, { type: "CONDITIONING", prefix: "conditioning_" });
 				}
 				break;
 			case "ImageBatchMulti":
@@ -38,79 +50,20 @@ app.registerExtension({
 			case "CrossFadeImagesMulti":
 			case "TransitionImagesMulti":
 				nodeType.prototype.onNodeCreated = function () {
-				this._type = "IMAGE"
-				this.addWidget("button", "Update inputs", null, () => {
-					if (!this.inputs) {
-						this.inputs = [];
-					}
-					const target_number_of_inputs = this.widgets.find(w => w.name === "inputcount")["value"];
-					const num_inputs = this.inputs.filter(input => input.type === this._type).length
-					if(target_number_of_inputs===num_inputs)return; // already set, do nothing
-
-					if(target_number_of_inputs < num_inputs){
-						const inputs_to_remove = num_inputs - target_number_of_inputs;
-						for(let i = 0; i < inputs_to_remove; i++) {
-							this.removeInput(this.inputs.length - 1);
-						}
-					}
-					else{
-						for(let i = num_inputs+1; i <= target_number_of_inputs; ++i)
-							this.addInput(`image_${i}`, this._type, {shape: 7});
-					}
-
-					});
+					setupDynamicInputs(this, { type: "IMAGE", prefix: "image_", slotOptions: {shape: 7} });
 				}
 				break;
 			case "ImageConcatMulti":
-				// Split out from the IMAGE-only case so dynamic slots accept MASK too.
+				// Dynamic slots accept MASK too; name-prefix counting handles the mixed types.
 				nodeType.prototype.onNodeCreated = function () {
-				this._type = "IMAGE,MASK"
-				const acceptedTypes = ["IMAGE", "IMAGE,MASK"];
-				this.addWidget("button", "Update inputs", null, () => {
-					if (!this.inputs) {
-						this.inputs = [];
-					}
-					const target_number_of_inputs = this.widgets.find(w => w.name === "inputcount")["value"];
-					const num_inputs = this.inputs.filter(input => acceptedTypes.includes(input.type)).length
-					if(target_number_of_inputs===num_inputs)return;
-
-					if(target_number_of_inputs < num_inputs){
-						const inputs_to_remove = num_inputs - target_number_of_inputs;
-						for(let i = 0; i < inputs_to_remove; i++) {
-							this.removeInput(this.inputs.length - 1);
-						}
-					}
-					else{
-						for(let i = num_inputs+1; i <= target_number_of_inputs; ++i)
-							this.addInput(`image_${i}`, this._type, {shape: 7});
-					}
-					});
+					setupDynamicInputs(this, { type: "IMAGE,MASK", prefix: "image_", slotOptions: {shape: 7} });
 				}
 				break;
 			case "MaskBatchMulti":
 				nodeType.prototype.onNodeCreated = function () {
-				this._type = "MASK"
-				this.addWidget("button", "Update inputs", null, () => {
-					if (!this.inputs) {
-						this.inputs = [];
-					}
-					const target_number_of_inputs = this.widgets.find(w => w.name === "inputcount")["value"];
-					const num_inputs = this.inputs.filter(input => input.type === this._type).length
-					if(target_number_of_inputs===num_inputs)return; // already set, do nothing
-
-					if(target_number_of_inputs < num_inputs){
-						const inputs_to_remove = num_inputs - target_number_of_inputs;
-						for(let i = 0; i < inputs_to_remove; i++) {
-							this.removeInput(this.inputs.length - 1);
-						}
-					}
-					else{
-						for(let i = num_inputs+1; i <= target_number_of_inputs; ++i)
-							this.addInput(`mask_${i}`, this._type)
-					}
-					});
-					}
-					break;
+					setupDynamicInputs(this, { type: "MASK", prefix: "mask_" });
+				}
+				break;
 			
 			case "FluxBlockLoraSelect":
 			case "HunyuanVideoBlockLoraSelect":
@@ -284,27 +237,7 @@ app.registerExtension({
 				const originalOnNodeCreated = nodeType.prototype.onNodeCreated || function() {};
 				nodeType.prototype.onNodeCreated = function () {
 					originalOnNodeCreated.apply(this, arguments);
-			
-					this._type = "STRING";
-					this.addWidget("button", "Update inputs", null, () => {
-						if (!this.inputs) {
-							this.inputs = [];
-						}
-						const target_number_of_inputs = this.widgets.find(w => w.name === "inputcount")["value"];
-						const num_inputs = this.inputs.filter(input => input.name && input.name.toLowerCase().includes("string_")).length
-						if (target_number_of_inputs === num_inputs) return; // already set, do nothing
-			
-						if(target_number_of_inputs < num_inputs){
-							const inputs_to_remove = num_inputs - target_number_of_inputs;
-							for(let i = 0; i < inputs_to_remove; i++) {
-								this.removeInput(this.inputs.length - 1);
-							}
-						}
-						else{
-							for(let i = num_inputs+1; i <= target_number_of_inputs; ++i)
-								this.addInput(`string_${i}`, this._type, {shape: 7});
-						}
-					});
+					setupDynamicInputs(this, { type: "STRING", prefix: "string_", slotOptions: {shape: 7} });
 				}
 				break;
 			case "SoundReactive":
