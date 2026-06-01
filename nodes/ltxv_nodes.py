@@ -1724,51 +1724,19 @@ except ImportError:
         _qattn_sm90 = None
 
 from comfy.ldm.lightricks.model import apply_rotary_emb
+try:
+    from comfy.ldm.flux.math import apply_rope as _wan_apply_rope
+except ImportError:
+    _wan_apply_rope = None
 
 
-def ltx2_sageattn_forward(self, x, context=None, mask=None, pe=None, k_pe=None, transformer_options={}):
-    dtype = x.dtype
-    context = x if context is None else context
-
-    # query
-    q = self.to_q(x)
-    q = self.q_norm(q)
-    # key
-    k = self.to_k(context)
-    k = self.k_norm(k)
-    # apply RoPE — fuse q+k into one kernel when both share the same pe
-    if pe is not None:
-        use_triton = getattr(self, 'use_triton_kernels', False)
-        if k_pe is None:
-            q, k = fused_rope_qk(q, k, pe, use_triton=use_triton)
-        else:
-            q = apply_rotary_emb(q, pe)
-            k = apply_rotary_emb(k, k_pe)
-    # value
-    v = self.to_v(context)
-
-    # Sage kernels don't support masking — fall back to the upstream masked paths.
-    if mask is not None:
-        if _GuideAttentionMask is not None and isinstance(mask, _GuideAttentionMask):
-            o = _ltx_attn_with_guide_mask(q, k, v, self.heads, mask, attn_precision=self.attn_precision, transformer_options=transformer_options)
-        else:
-            o = _comfy_attn.optimized_attention_masked(q, k, v, self.heads, mask, attn_precision=self.attn_precision, transformer_options=transformer_options)
-        if self.to_gate_logits is not None:
-            gate_logits = self.to_gate_logits(x)
-            _b, _t, _ = o.shape
-            o = o.view(_b, _t, self.heads, self.dim_head)
-            o.mul_((2.0 * torch.sigmoid(gate_logits)).unsqueeze(-1))
-            o = o.view(_b, _t, self.heads * self.dim_head)
-            del gate_logits
-        return self.to_out(o)
-
-    # Reshape from [batch, seq_len, total_dim] to [batch, seq_len, num_heads, head_dim]
-    batch_size, seq_len, _ = q.shape
-    head_dim_og = self.dim_head
-
-    q = q.view(batch_size, seq_len, self.heads, head_dim_og)
-    k = k.view(batch_size, k.shape[1], self.heads, head_dim_og)
-    v = v.view(batch_size, v.shape[1], self.heads, head_dim_og)
+def _sageattn_int8_fp8_nhd(qkv, dtype):
+    # qkv: [q, k, v], each [batch, seq_len, num_heads, head_dim] in NHD layout. Returns o in the same layout.
+    # The list is consumed so the only references to the float q/k/v are the locals below, letting `del`
+    # actually free them before the kernel runs — attention is the VRAM peak in these models.
+    q, k, v = qkv
+    qkv.clear()
+    head_dim_og = q.shape[-1]
 
     tensor_layout="NHD"
     _tensor_layout = 0 # NHD
@@ -1833,6 +1801,56 @@ def ltx2_sageattn_forward(self, x, context=None, mask=None, pe=None, k_pe=None, 
         del v_fp8, v_scale
 
     del q_int8, q_scale, k_int8, k_scale
+    return o
+
+
+def ltx2_sageattn_forward(self, x, context=None, mask=None, pe=None, k_pe=None, transformer_options={}):
+    dtype = x.dtype
+    context = x if context is None else context
+
+    # query
+    q = self.to_q(x)
+    q = self.q_norm(q)
+    # key
+    k = self.to_k(context)
+    k = self.k_norm(k)
+    # apply RoPE — fuse q+k into one kernel when both share the same pe
+    if pe is not None:
+        use_triton = getattr(self, 'use_triton_kernels', False)
+        if k_pe is None:
+            q, k = fused_rope_qk(q, k, pe, use_triton=use_triton)
+        else:
+            q = apply_rotary_emb(q, pe)
+            k = apply_rotary_emb(k, k_pe)
+    # value
+    v = self.to_v(context)
+
+    # Sage kernels don't support masking — fall back to the upstream masked paths.
+    if mask is not None:
+        if _GuideAttentionMask is not None and isinstance(mask, _GuideAttentionMask):
+            o = _ltx_attn_with_guide_mask(q, k, v, self.heads, mask, attn_precision=self.attn_precision, transformer_options=transformer_options)
+        else:
+            o = _comfy_attn.optimized_attention_masked(q, k, v, self.heads, mask, attn_precision=self.attn_precision, transformer_options=transformer_options)
+        if self.to_gate_logits is not None:
+            gate_logits = self.to_gate_logits(x)
+            _b, _t, _ = o.shape
+            o = o.view(_b, _t, self.heads, self.dim_head)
+            o.mul_((2.0 * torch.sigmoid(gate_logits)).unsqueeze(-1))
+            o = o.view(_b, _t, self.heads * self.dim_head)
+            del gate_logits
+        return self.to_out(o)
+
+    # Reshape from [batch, seq_len, total_dim] to [batch, seq_len, num_heads, head_dim]
+    batch_size, seq_len, _ = q.shape
+    head_dim_og = self.dim_head
+
+    q = q.view(batch_size, seq_len, self.heads, head_dim_og)
+    k = k.view(batch_size, k.shape[1], self.heads, head_dim_og)
+    v = v.view(batch_size, v.shape[1], self.heads, head_dim_og)
+
+    qkv = [q, k, v]
+    del q, k, v
+    o = _sageattn_int8_fp8_nhd(qkv, dtype)
 
     # o is [B, T, H, D] from sage kernel (NHD layout)
     if self.to_gate_logits is not None:
@@ -1841,6 +1859,62 @@ def ltx2_sageattn_forward(self, x, context=None, mask=None, pe=None, k_pe=None, 
         del gate_logits
 
     return self.to_out(o.view(batch_size, seq_len, -1))
+
+
+def wan_sageattn_forward(self, x, freqs, transformer_options={}):
+    r"""
+    Args:
+        x(Tensor): Shape [B, L, num_heads, C / num_heads]
+        freqs(Tensor): Rope freqs, shape [1024, C / num_heads / 2]
+    """
+    dtype = x.dtype
+    b, s, n, d = *x.shape[:2], self.num_heads, self.head_dim
+
+    q = self.norm_q(self.q(x)).view(b, s, n, d)
+    k = self.norm_k(self.k(x)).view(b, s, n, d)
+    q, k = _wan_apply_rope(q, k, freqs)
+    v = self.v(x).view(b, s, n, d)
+
+    qkv = [q, k, v]
+    del q, k, v
+    o = _sageattn_int8_fp8_nhd(qkv, dtype)
+
+    return self.o(o.view(b, s, n * d))
+
+
+class WanVideoMemoryEfficientSageAttentionPatch(io.ComfyNode):
+
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="WanVideoMemoryEfficientSageAttentionPatch",
+            display_name="WanVideo Mem Eff Sage Attention Patch",
+            category="KJNodes/wan",
+            description="EXPERIMENTAL! Activates custom sageattention on the WanVideo self-attention to reduce peak VRAM usage, overrides the attention mode. Requires latest sageattention version.",
+            is_experimental=True,
+            inputs=[
+                io.Model.Input("model"),
+            ],
+            outputs=[
+                io.Model.Output(display_name="model"),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, model) -> io.NodeOutput:
+        if _cuda_archs is None:
+            raise RuntimeError("sageattention is not new enough version or could not determine CUDA architecture, cannot apply WanVideo Memory Efficient Sage Attention Patch.")
+        if _wan_apply_rope is None:
+            raise RuntimeError("Could not import apply_rope from comfy.ldm.flux.math, cannot apply WanVideo Memory Efficient Sage Attention Patch.")
+        model_clone = model.clone()
+        diffusion_model = model_clone.get_model_object("diffusion_model")
+
+        logging.info("Applying WanVideo Memory Efficient Sage Attention Patch to all transformer blocks")
+
+        for idx, block in enumerate(diffusion_model.blocks):
+            model_clone.add_object_patch(f"diffusion_model.blocks.{idx}.self_attn.forward", wan_sageattn_forward.__get__(block.self_attn, block.self_attn.__class__))
+
+        return io.NodeOutput(model_clone)
 
 
 import folder_paths
