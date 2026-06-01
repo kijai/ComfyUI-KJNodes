@@ -14,8 +14,12 @@ import latent_preview
 from comfy_api.latest import io
 from PIL import Image, ImageOps
 
-# Share factor tables + TAEHV-LTX decode with the LTX-specific node rather than copy them.
-from .ltxv_nodes import WrappedPreviewer as _LTXWrappedPreviewer, get_ltx_rgb_factors as _ltx_rgb_factors
+try:
+    from .ltxv_nodes import WrappedPreviewer as _LTXWrappedPreviewer, get_ltx_rgb_factors as _ltx_rgb_factors
+except Exception as e:
+    logging.warning(f"[KJ PreviewOverride] LTX preview helpers unavailable ({e}); LTX previews disabled.")
+    _LTXWrappedPreviewer = None
+    _ltx_rgb_factors = None
 
 
 try:
