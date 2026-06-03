@@ -212,18 +212,33 @@ app.registerExtension({
         if (!cands.length) return null;
         return cands.find((c) => c.index === node._activeIdx && c.mode !== "move") || cands[0];
       }
-      // Title-chip rect (canvas px) at a box's top-left, matching _draw.
-      function titleChipPx(i) {
-        const b = node._boxes[i];
+      // Tag-chip rects (canvas px), placed to avoid overlapping each other: each
+      // box's tag tries top-left, top-right, bottom-right, bottom-left in turn.
+      function tagRects() {
         ctx.font = "bold 10px sans-serif";
-        const tag = (b.type === "text" ? "T" : "O") + (i + 1);
-        return { x: b.x * canvasEl.width, y: b.y * canvasEl.height, w: ctx.measureText(tag).width + 8, h: 14 };
+        const W = canvasEl.width, H = canvasEl.height, h = 14;
+        const placed = [], rects = [];
+        const hits = (a, b) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+        for (let i = 0; i < node._boxes.length; i++) {
+          const b = node._boxes[i];
+          const x1 = b.x * W, y1 = b.y * H, x2 = (b.x + b.w) * W, y2 = (b.y + b.h) * H;
+          const tag = (b.type === "text" ? "T" : "O") + (i + 1);
+          const w = ctx.measureText(tag).width + 8;
+          let pick = [x1, y1];
+          for (const [cx, cy] of [[x1, y1], [x2 - w, y1], [x2 - w, y2 - h], [x1, y2 - h]]) {
+            if (!placed.some((p) => hits({ x: cx, y: cy, w, h }, p))) { pick = [cx, cy]; break; }
+          }
+          const r = { x: pick[0], y: pick[1], w, h, tag };
+          placed.push(r); rects[i] = r;
+        }
+        return rects;
       }
       function titleAt(mN) {
         const px = mN.x * canvasEl.width, py = mN.y * canvasEl.height;
+        const rects = tagRects();
         for (let i = node._boxes.length - 1; i >= 0; i--) {
-          const r = titleChipPx(i);
-          if (px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h) return i;
+          const r = rects[i];
+          if (r && px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h) return i;
         }
         return null;
       }
@@ -293,6 +308,7 @@ app.registerExtension({
         // draw the active box last so it sits in front (kept by array index for color/tag)
         const order = node._boxes.map((_, i) => i).filter((i) => i !== node._activeIdx);
         if (node._activeIdx >= 0 && node._activeIdx < node._boxes.length) order.push(node._activeIdx);
+        const tagR = tagRects();                              // collision-avoided tag positions
         for (const i of order) {
           const b = node._boxes[i], col = boxColor(i), active = i === node._activeIdx;
           const { x1, y1, x2, y2 } = toPx(b);
@@ -308,20 +324,9 @@ app.registerExtension({
             for (const [hx, hy] of [[x1, y1], [x2, y1], [x1, y2], [x2, y2]])
               ctx.fillRect(hx - 4, hy - 4, 8, 8);
           }
-          // in-box content: tag chip + wrapped prompt + palette dots, clipped to the box
+          // in-box content (clipped to the box): prompt text, palette dots, tag chip on top
           ctx.save();
           ctx.beginPath(); ctx.rect(x1, y1, w, h); ctx.clip();
-          const tag = (b.type === "text" ? "T" : "O") + (i + 1);
-          ctx.font = "bold 10px sans-serif";
-          const chipW = ctx.measureText(tag).width + 8;
-          ctx.fillStyle = col;
-          ctx.fillRect(x1, y1, chipW, 14);
-          if (i === node._hoverTitle) {                       // hover highlight on the title chip
-            ctx.fillStyle = "rgba(255,255,255,0.25)"; ctx.fillRect(x1, y1, chipW, 14);
-            ctx.strokeStyle = "#fff"; ctx.lineWidth = 1; ctx.strokeRect(x1 + 0.5, y1 + 0.5, chipW - 1, 13);
-          }
-          ctx.fillStyle = "#000";
-          ctx.fillText(tag, x1 + 4, y1 + 11);
 
           let body = b.desc || "";
           if (b.type === "text" && b.text) body = `"${b.text}"` + (body ? " — " + body : "");
@@ -346,6 +351,17 @@ app.registerExtension({
               ctx.strokeRect(x1 + 2 + p * 9, y2 - 9, 7, 7);
             }
           }
+          // tag chip on top, at its collision-avoided position
+          const tr = tagR[i];
+          ctx.font = "bold 10px sans-serif";
+          ctx.fillStyle = col;
+          ctx.fillRect(tr.x, tr.y, tr.w, 14);
+          if (i === node._hoverTitle) {                       // hover highlight
+            ctx.fillStyle = "rgba(255,255,255,0.25)"; ctx.fillRect(tr.x, tr.y, tr.w, 14);
+            ctx.strokeStyle = "#fff"; ctx.lineWidth = 1; ctx.strokeRect(tr.x + 0.5, tr.y + 0.5, tr.w - 1, 13);
+          }
+          ctx.fillStyle = "#000";
+          ctx.fillText(tr.tag, tr.x + 4, tr.y + 11);
           ctx.restore();
         }
       }
