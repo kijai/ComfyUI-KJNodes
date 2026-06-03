@@ -51,8 +51,19 @@ app.registerExtension({
       const elementsWidget = findW("elements_data");
       const stylePaletteWidget = findW("style_palette_data");
       const wWidget = findW("width"), hWidget = findW("height");
-      if (elementsWidget) elementsWidget.hidden = true;
-      if (stylePaletteWidget) stylePaletteWidget.hidden = true;
+      // Hide the data widgets while keeping them serializable.
+      function hideDataWidgets() {
+        for (const w of [elementsWidget, stylePaletteWidget]) {
+          if (!w) continue;
+          w.hidden = true;
+          w.computeSize = () => [0, -4];
+        }
+        for (const name of ["elements_data", "style_palette_data"]) {
+          const i = node.inputs?.findIndex((inp) => inp.name === name);
+          if (i != null && i !== -1) node.removeInput(i);
+        }
+      }
+      hideDataWidgets();
 
       node._boxes = [];        // {x,y,w,h normalized 0-1, type, text, desc, palette[]}
       node._stylePalette = []; // global style color palette (hex[])
@@ -726,6 +737,7 @@ app.registerExtension({
             if (Array.isArray(sp)) node._stylePalette = sp.filter((c) => typeof c === "string");
           } catch (e) {}
         }
+        hideDataWidgets();
         syncCanvasToDims();
         rebuildStylePalette();
         renderPanel();
@@ -736,6 +748,7 @@ app.registerExtension({
 
       // initial layout (deferred so size/last_y are settled)
       setTimeout(() => {
+        hideDataWidgets();
         if (node.size[0] < 380) node.setSize([380, node.size[1]]);
         syncCanvasToDims();
         rebuildStylePalette();
