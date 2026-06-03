@@ -23,7 +23,7 @@ function injectStyle() {
   s.id = "kjideo-style";
   s.textContent = `
     .kjideo-wrap { display:flex; flex-direction:column; overflow:hidden; position:relative; pointer-events:auto; gap:4px; }
-    .kjideo-canvas { cursor:crosshair; display:block; width:100%; height:auto; flex:0 0 auto; background:#1a1a1a; border-radius:4px; }
+    .kjideo-canvas { cursor:crosshair; display:block; width:100%; height:auto; flex:0 0 auto; background:#1a1a1a; border-radius:4px; outline:none; }
     .kjideo-bar { display:flex; align-items:center; gap:6px; font:11px sans-serif; color:#aaa; user-select:none; padding:0 2px; flex:0 0 auto; }
     .kjideo-panel { display:flex; flex-direction:column; gap:5px; padding:6px; background:#262626; border-radius:4px; font:11px sans-serif; color:#bbb; flex:0 0 auto; }
     .kjideo-row { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
@@ -93,6 +93,7 @@ app.registerExtension({
 
       const canvasEl = document.createElement("canvas");
       canvasEl.className = "kjideo-canvas";
+      canvasEl.tabIndex = 0;                                  // focusable, so it can receive Delete
       const ctx = canvasEl.getContext("2d");
       addWheelPassthrough(wrap);
       addMiddleClickPan(canvasEl);
@@ -312,6 +313,7 @@ app.registerExtension({
           return;
         }
         if (e.button !== 0) return;
+        canvasEl.focus();                // so Delete/Backspace targets this editor
         const mN = mouseN(e);
         const hit = hitTest(mN);
         if (hit) {
@@ -386,6 +388,16 @@ app.registerExtension({
         e.preventDefault(); e.stopPropagation();
         const hit = hitTest(mouseN(e));
         if (hit) openInlineEditor(hit.index);
+      });
+
+      // Delete/Backspace removes the active region (canvas must be focused; stop the
+      // event so LiteGraph doesn't delete the whole node).
+      canvasEl.addEventListener("keydown", (e) => {
+        if ((e.key === "Delete" || e.key === "Backspace") && !node._drawing && node._activeIdx >= 0) {
+          e.preventDefault(); e.stopPropagation();
+          removeBox(node._activeIdx);
+          commit(); fitNode();
+        }
       });
 
       function onMove(e) {
