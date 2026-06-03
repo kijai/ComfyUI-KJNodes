@@ -82,7 +82,10 @@ app.registerExtension({
       const clearBtn = document.createElement("button");
       clearBtn.className = "kjideo-btn";
       clearBtn.textContent = "Clear all";
-      bar.appendChild(hint); bar.appendChild(copyBtn); bar.appendChild(importBtn); bar.appendChild(clearBtn);
+      const tokenSpan = document.createElement("span");
+      tokenSpan.style.cssText = "color:#888; white-space:nowrap;";
+      tokenSpan.title = "Rough token estimate (~chars/4) of the caption prompt — not exact";
+      bar.appendChild(hint); bar.appendChild(tokenSpan); bar.appendChild(copyBtn); bar.appendChild(importBtn); bar.appendChild(clearBtn);
 
       // Persistent global style-palette row
       const styleBar = document.createElement("div");
@@ -177,17 +180,33 @@ app.registerExtension({
         return { ...b, x, y, w: Math.max(0, w), h: Math.max(0, h) };
       }
 
-      function hitTest(mN) {
-        const order = node._activeIdx >= 0 ? [node._activeIdx] : [];
-        for (let i = 0; i < node._boxes.length; i++) if (i !== node._activeIdx) order.push(i);
+      // All boxes under the point, top-first (highest index = drawn on top).
+      function boxesAt(mN) {
         const rx = HANDLE / canvasEl.width, ry = HANDLE / canvasEl.height;
-        for (const idx of order) {
-          const b = node._boxes[idx];
-          // hit-test in normalized space with per-axis radius
+        const res = [];
+        for (let i = node._boxes.length - 1; i >= 0; i--) {
+          const b = node._boxes[i];
           const mode = rectHitTestN(mN.x, mN.y, b.x, b.y, b.x + b.w, b.y + b.h, rx, ry);
-          if (mode) return { index: idx, mode };
+          if (mode) res.push({ index: i, mode });
         }
-        return null;
+        return res;
+      }
+      // Hover / right-click: prefer a resize handle on the active box, else topmost.
+      function hitTest(mN) {
+        const cands = boxesAt(mN);
+        if (!cands.length) return null;
+        return cands.find((c) => c.index === node._activeIdx && c.mode !== "move") || cands[0];
+      }
+      // Click selection: Alt-click cycles to the next overlapping box (reach boxes
+      // behind); plain click grabs the active box's handle if hit, else the topmost.
+      function pickForSelection(mN, cycle) {
+        const cands = boxesAt(mN);
+        if (!cands.length) return null;
+        if (cycle && cands.length > 1) {
+          const pos = cands.findIndex((c) => c.index === node._activeIdx);
+          return cands[(pos + 1) % cands.length];
+        }
+        return cands.find((c) => c.index === node._activeIdx && c.mode !== "move") || cands[0];
       }
       // normalized variant of rectHitTest with separate x/y radii
       function rectHitTestN(mx, my, x1, y1, x2, y2, rx, ry) {
@@ -294,7 +313,7 @@ app.registerExtension({
         if (stylePaletteWidget) stylePaletteWidget.value = node._stylePalette.length ? JSON.stringify(node._stylePalette) : "";
       }
 
-      function commit() { serialize(); renderPanel(); drawCanvas(); }
+      function commit() { serialize(); renderPanel(); drawCanvas(); updateTokens(); }
 
       function removeBox(i) {
         node._boxes.splice(i, 1);
@@ -315,7 +334,7 @@ app.registerExtension({
         if (e.button !== 0) return;
         canvasEl.focus();                // so Delete/Backspace targets this editor
         const mN = mouseN(e);
-        const hit = hitTest(mN);
+        const hit = pickForSelection(mN, e.altKey);
         if (hit) {
           node._activeIdx = hit.index;
           node._dragMode = hit.mode;
@@ -372,7 +391,7 @@ app.registerExtension({
         ta.focus(); ta.select();
         const orig = b.desc || "";
         let cancelled = false;
-        ta.addEventListener("input", () => { b.desc = ta.value; drawCanvas(); });
+        ta.addEventListener("input", () => { b.desc = ta.value; drawCanvas(); updateTokens(); });
         ta.addEventListener("keydown", (e) => {
           e.stopPropagation();
           if (e.key === "Escape") { cancelled = true; b.desc = orig; ta.blur(); }
@@ -386,8 +405,9 @@ app.registerExtension({
       }
       canvasEl.addEventListener("dblclick", (e) => {
         e.preventDefault(); e.stopPropagation();
-        const hit = hitTest(mouseN(e));
-        if (hit) openInlineEditor(hit.index);
+        const cands = boxesAt(mouseN(e));     // edit the active box if it's under the cursor, else topmost
+        const target = cands.find((c) => c.index === node._activeIdx) || cands[0];
+        if (target) openInlineEditor(target.index);
       });
 
       // Delete/Backspace removes the active region (canvas must be focused; stop the
@@ -481,6 +501,10 @@ app.registerExtension({
         });
         cap.compositional_deconstruction = { background: getW("background"), elements };
         return pyJson(cap);
+      }
+      // Rough token estimate (~chars/4); exact count needs the Qwen tokenizer.
+      function updateTokens() {
+        tokenSpan.textContent = "~" + Math.ceil(buildCaption().length / 4) + " tok";
       }
       async function doCopy() {
         const txt = buildCaption();
@@ -617,7 +641,7 @@ app.registerExtension({
           return;
         }
         const col = boxColor(node._activeIdx);
-        hint.innerHTML = `Editing <b style="color:${col}">region ${node._activeIdx + 1}</b> · right-click a region to delete`;
+        hint.innerHTML = `Editing <b style="color:${col}">region ${node._activeIdx + 1}</b> · dbl-click to edit · alt-click overlap · right-click/del to remove`;
 
         // type toggle
         const typeRow = document.createElement("div");
@@ -636,12 +660,12 @@ app.registerExtension({
         // text (only for text type)
         if (b.type === "text") {
           panel.appendChild(makeArea("text", b.text, "text to render (verbatim)",
-            function () { b.text = this.value; serialize(); drawCanvas(); }));
+            function () { b.text = this.value; serialize(); drawCanvas(); updateTokens(); }));
         }
 
         // desc — default ~3x the single-line min height
         panel.appendChild(makeArea("desc", b.desc, "description of this region",
-          function () { b.desc = this.value; serialize(); drawCanvas(); }, 110));
+          function () { b.desc = this.value; serialize(); drawCanvas(); updateTokens(); }, 110));
 
         // palette
         const palRow = document.createElement("div");
@@ -659,6 +683,11 @@ app.registerExtension({
       for (const w of [wWidget, hWidget]) {
         if (!w) continue;
         chainCallback(w, "callback", () => { syncCanvasToDims(); drawCanvas(); fitNode(); });
+      }
+      // Update the token estimate when the caption-level text widgets change.
+      for (const name of ["background", "high_level_description", "aesthetics", "lighting", "medium", "style"]) {
+        const w = findW(name);
+        if (w) chainCallback(w, "callback", () => updateTokens());
       }
 
       // ── keep canvas + getMinHeight in sync while the node is resized ──
@@ -701,6 +730,7 @@ app.registerExtension({
         rebuildStylePalette();
         renderPanel();
         drawCanvas();
+        updateTokens();
         requestAnimationFrame(fitNode);
       });
 
@@ -711,6 +741,7 @@ app.registerExtension({
         rebuildStylePalette();
         renderPanel();
         drawCanvas();
+        updateTokens();
         fitNode();
       }, 0);
     });
