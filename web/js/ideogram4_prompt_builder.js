@@ -72,6 +72,7 @@ app.registerExtension({
       node._dragMode = null;
       node._dragStartN = null; // mouse-down point, normalized
       node._boxAtStart = null; // active box snapshot at drag start
+      node._hoverTitle = null; // index of the title chip under the cursor
       node._areaH = node._areaH || {};      // remembered textarea heights (per field)
       node._areaObservers = [];             // live ResizeObservers to disconnect on rebuild
 
@@ -191,7 +192,8 @@ app.registerExtension({
         return { ...b, x, y, w: Math.max(0, w), h: Math.max(0, h) };
       }
 
-      // All boxes under the point, top-first (highest index = drawn on top).
+      // All boxes under the point, top-first to match draw order: the active box is
+      // drawn last (on top), then the rest by index high→low.
       function boxesAt(mN) {
         const rx = HANDLE / canvasEl.width, ry = HANDLE / canvasEl.height;
         const res = [];
@@ -200,6 +202,8 @@ app.registerExtension({
           const mode = rectHitTestN(mN.x, mN.y, b.x, b.y, b.x + b.w, b.y + b.h, rx, ry);
           if (mode) res.push({ index: i, mode });
         }
+        const ai = res.findIndex((c) => c.index === node._activeIdx);
+        if (ai > 0) res.unshift(res.splice(ai, 1)[0]);
         return res;
       }
       // Hover / right-click: prefer a resize handle on the active box, else topmost.
@@ -208,11 +212,31 @@ app.registerExtension({
         if (!cands.length) return null;
         return cands.find((c) => c.index === node._activeIdx && c.mode !== "move") || cands[0];
       }
-      // Click selection: Alt-click cycles to the next overlapping box (reach boxes
-      // behind); plain click grabs the active box's handle if hit, else the topmost.
+      // Title-chip rect (canvas px) at a box's top-left, matching _draw.
+      function titleChipPx(i) {
+        const b = node._boxes[i];
+        ctx.font = "bold 10px sans-serif";
+        const tag = (b.type === "text" ? "T" : "O") + (i + 1);
+        return { x: b.x * canvasEl.width, y: b.y * canvasEl.height, w: ctx.measureText(tag).width + 8, h: 14 };
+      }
+      function titleAt(mN) {
+        const px = mN.x * canvasEl.width, py = mN.y * canvasEl.height;
+        for (let i = node._boxes.length - 1; i >= 0; i--) {
+          const r = titleChipPx(i);
+          if (px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h) return i;
+        }
+        return null;
+      }
+      // Click selection: active box's resize handle wins (corner resize); then a
+      // title-chip click selects that box (drawn to front); Alt-click cycles the
+      // overlap stack; else the topmost box.
       function pickForSelection(mN, cycle) {
         const cands = boxesAt(mN);
         if (!cands.length) return null;
+        const ah = cands.find((c) => c.index === node._activeIdx && c.mode !== "move");
+        if (ah && !cycle) return ah;
+        const ti = titleAt(mN);
+        if (ti !== null && !cycle) return { index: ti, mode: "move" };
         if (cycle && cands.length > 1) {
           const pos = cands.findIndex((c) => c.index === node._activeIdx);
           return cands[(pos + 1) % cands.length];
@@ -266,7 +290,10 @@ app.registerExtension({
         const W = canvasEl.width, H = canvasEl.height;
         ctx.clearRect(0, 0, W, H);
         ctx.fillStyle = "#1a1a1a"; ctx.fillRect(0, 0, W, H);
-        for (let i = 0; i < node._boxes.length; i++) {
+        // draw the active box last so it sits in front (kept by array index for color/tag)
+        const order = node._boxes.map((_, i) => i).filter((i) => i !== node._activeIdx);
+        if (node._activeIdx >= 0 && node._activeIdx < node._boxes.length) order.push(node._activeIdx);
+        for (const i of order) {
           const b = node._boxes[i], col = boxColor(i), active = i === node._activeIdx;
           const { x1, y1, x2, y2 } = toPx(b);
           const w = x2 - x1, h = y2 - y1;
@@ -286,8 +313,13 @@ app.registerExtension({
           ctx.beginPath(); ctx.rect(x1, y1, w, h); ctx.clip();
           const tag = (b.type === "text" ? "T" : "O") + (i + 1);
           ctx.font = "bold 10px sans-serif";
+          const chipW = ctx.measureText(tag).width + 8;
           ctx.fillStyle = col;
-          ctx.fillRect(x1, y1, ctx.measureText(tag).width + 8, 14);
+          ctx.fillRect(x1, y1, chipW, 14);
+          if (i === node._hoverTitle) {                       // hover highlight on the title chip
+            ctx.fillStyle = "rgba(255,255,255,0.25)"; ctx.fillRect(x1, y1, chipW, 14);
+            ctx.strokeStyle = "#fff"; ctx.lineWidth = 1; ctx.strokeRect(x1 + 0.5, y1 + 0.5, chipW - 1, 13);
+          }
           ctx.fillStyle = "#000";
           ctx.fillText(tag, x1 + 4, y1 + 11);
 
@@ -344,6 +376,7 @@ app.registerExtension({
         }
         if (e.button !== 0) return;
         canvasEl.focus();                // so Delete/Backspace targets this editor
+        node._hoverTitle = null;         // clear hover highlight while interacting
         const mN = mouseN(e);
         const hit = pickForSelection(mN, e.altKey);
         if (hit) {
@@ -367,8 +400,15 @@ app.registerExtension({
 
       canvasEl.addEventListener("mousemove", (e) => {
         if (node._drawing) return;
-        const hit = hitTest(mouseN(e));
+        const mN = mouseN(e);
+        const ti = titleAt(mN);
+        if (ti !== node._hoverTitle) { node._hoverTitle = ti; drawCanvas(); }
+        if (ti !== null) { canvasEl.style.cursor = "pointer"; return; }
+        const hit = hitTest(mN);
         canvasEl.style.cursor = hit ? (cursorForBboxMode(hit.mode) || "crosshair") : "crosshair";
+      });
+      canvasEl.addEventListener("mouseleave", () => {
+        if (node._hoverTitle !== null) { node._hoverTitle = null; drawCanvas(); }
       });
 
       // ── inline description editing (double-click a region) ──
