@@ -160,28 +160,6 @@ def _parse_json_list(s):
     return []
 
 
-def _caption_to_boxes(caption):
-    # A parsed caption's elements -> editor box dicts (for the preview render).
-    cd = caption.get("compositional_deconstruction", {}) if isinstance(caption, dict) else {}
-    boxes = []
-    for idx, el in enumerate(cd.get("elements", []) or []):
-        if not isinstance(el, dict):
-            continue
-        box = {"type": "text" if el.get("type") == "text" else "obj",
-               "text": el.get("text", ""), "desc": el.get("desc", ""),
-               "palette": el.get("color_palette", []) or []}
-        bb = el.get("bbox")
-        if isinstance(bb, list) and len(bb) == 4:
-            ymin, xmin, ymax, xmax = bb
-            box.update(x=xmin / 1000.0, y=ymin / 1000.0,
-                       w=(xmax - xmin) / 1000.0, h=(ymax - ymin) / 1000.0)
-        else:                                               # unplaced — small placeholder
-            k = idx % 6
-            box.update(x=0.03 + k * 0.035, y=0.03 + k * 0.035, w=0.22, h=0.14, nobbox=True)
-        boxes.append(box)
-    return boxes
-
-
 class Ideogram4PromptBuilderKJ(io.ComfyNode):
     @classmethod
     def define_schema(cls):
@@ -222,8 +200,8 @@ the canvas aspect ratio.""",
                 io.String.Input("lighting", default="", tooltip="Style descriptor (blank = omitted)."),
                 io.String.Input("medium", default="", tooltip="Style descriptor (blank = omitted)."),
                 io.String.Input("import_json", default="", optional=True, force_input=True,
-                                tooltip="Optional: a full caption JSON. When connected, it populates the "
-                                        "editor and overrides the output (and preview) on each run."),
+                                tooltip="Optional: a full caption JSON. When connected, it loads into the "
+                                        "editor on run; the output always reflects the editor, never the raw input."),
                 io.String.Input("style_palette_data", default="", socketless=True, advanced=True,
                                 tooltip="Serialized style color palette from the editor (managed by the node UI)."),
                 io.String.Input("elements_data", default="", socketless=True, advanced=True,
@@ -239,18 +217,6 @@ the canvas aspect ratio.""",
     def execute(cls, width, height, background, style,
                 high_level_description="", aesthetics="", lighting="", medium="",
                 style_palette_data="", elements_data="", import_json="") -> io.NodeOutput:
-        # Override: a full caption JSON wired in is emitted (and previewed) as-is,
-        # and sent back via ui so the editor can populate itself (like Paste).
-        if import_json and import_json.strip():
-            try:
-                cap = json.loads(import_json)
-                if isinstance(cap, dict):
-                    out = _dumps(cap)
-                    preview = _render_preview(_caption_to_boxes(cap), width, height)
-                    return io.NodeOutput(out, preview, ui={"caption": [out]})
-            except json.JSONDecodeError:
-                pass
-
         boxes = _parse_json_list(elements_data)
 
         caption = {}
@@ -295,4 +261,16 @@ the canvas aspect ratio.""",
             "elements": elements,
         }
         preview = _render_preview(boxes, width, height)
+        # import_json (if wired) only loads into the editor via ui — the output and
+        # preview always reflect the editor state, never the raw input.
+        ui = {}
+        if import_json and import_json.strip():
+            try:
+                cap = json.loads(import_json)
+                if isinstance(cap, dict):
+                    ui["caption"] = [_dumps(cap)]
+            except json.JSONDecodeError:
+                pass
+        if ui:
+            return io.NodeOutput(_dumps(caption), preview, ui=ui)
         return io.NodeOutput(_dumps(caption), preview)
