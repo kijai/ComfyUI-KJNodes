@@ -306,6 +306,7 @@ NODE_CONFIG = {
     "ModelMemoryUseReportPatch": {"class": ModelMemoryUseReportPatch, "name": "Model Memory Use Report Patch"},
     "ModelMemoryUsageFactorOverride": {"class": ModelMemoryUsageFactorOverride, "name": "Model Memory Usage Factor Override"},
     "WanChunkFeedForward": {"class": WanChunkFeedForward, "name": "Wan ChunkFeedForward"},
+    "Ideogram4OptimizationsKJ": {"class": Ideogram4OptimizationsKJ, "name": "Ideogram4 Optimizations KJ"},
     "SamplerSelfRefineVideo": {"class": SamplerSelfRefineVideo, "name": "Sampler SelfRefineVideo"},
     "PlaySoundKJ": {"class": PlaySoundKJ, "name": "Play Sound KJ"},
 
