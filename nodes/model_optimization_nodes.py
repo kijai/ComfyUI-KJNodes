@@ -1811,6 +1811,120 @@ class WanChunkFeedForward(io.ComfyNode):
 
         return io.NodeOutput(model_clone)
 
+
+# Ideogram4 peak-VRAM patches (FFN sequence chunking + bf16 RoPE)
+from comfy.ldm.lumina.model import FeedForward as _Ideogram4FeedForward
+from comfy.ldm.modules.attention import optimized_attention_masked as _ideogram4_attn
+
+
+def ideogram4_ffn_chunked_forward(self, x):
+    # x: (B, L, dim). Chunk over the token dim so the (B, L, hidden) SwiGLU
+    if x.shape[1] > self.kj_dim_threshold and self.kj_num_chunks > 1:
+        out = [_Ideogram4FeedForward.forward(self, c) for c in torch.chunk(x, self.kj_num_chunks, dim=1)]
+        return torch.cat(out, dim=1)
+    return _Ideogram4FeedForward.forward(self, x)
+
+
+class Ideogram4FFNChunkPatch:
+    def __init__(self, num_chunks, dim_threshold):
+        self.num_chunks = num_chunks
+        self.dim_threshold = dim_threshold
+
+    def __get__(self, obj, objtype=None):
+        def wrapped_forward(self_module, *args, **kwargs):
+            self_module.kj_num_chunks = self.num_chunks
+            self_module.kj_dim_threshold = self.dim_threshold
+            return ideogram4_ffn_chunked_forward(self_module, *args, **kwargs)
+        return types.MethodType(wrapped_forward, obj)
+
+
+def _ideogram4_apply_rope_lowp(xq, xk, freqs_cis):
+    # (bf16/fp16) instead of being upcast to fp32 -> ~halves RoPE activation memory.
+    cos = freqs_cis[0].to(xq.dtype)
+    sin = freqs_cis[1].to(xq.dtype)
+    nsin = freqs_cis[2].to(xq.dtype)
+
+    q_embed = xq * cos
+    qs = q_embed.shape[-1] // 2
+    q_embed[..., :qs].addcmul_(xq[..., qs:], nsin)
+    q_embed[..., qs:].addcmul_(xq[..., :qs], sin)
+
+    k_embed = xk * cos
+    ks = k_embed.shape[-1] // 2
+    k_embed[..., :ks].addcmul_(xk[..., ks:], nsin)
+    k_embed[..., ks:].addcmul_(xk[..., :ks], sin)
+    return q_embed, k_embed
+
+
+def ideogram4_attention_lowp_rope_forward(self, x, attn_mask, freqs_cis, transformer_options={}):
+    batch_size, seq_len, _ = x.shape
+    q, k, v = self.qkv(x).view(batch_size, seq_len, 3, self.num_heads, self.head_dim).unbind(dim=2)
+    q = self.norm_q(q).transpose(1, 2)
+    k = self.norm_k(k).transpose(1, 2)
+    v = v.transpose(1, 2)
+    q, k = _ideogram4_apply_rope_lowp(q, k, freqs_cis)
+    out = _ideogram4_attn(q, k, v, self.num_heads, attn_mask, skip_reshape=True, transformer_options=transformer_options)
+    return self.o(out)
+
+
+class Ideogram4RopePatch:
+    def __get__(self, obj, objtype=None):
+        return types.MethodType(ideogram4_attention_lowp_rope_forward, obj)
+
+
+class Ideogram4OptimizationsKJ(io.ComfyNode):
+
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="Ideogram4OptimizationsKJ",
+            display_name="Ideogram4 Optimizations KJ",
+            category="KJNodes/experimental",
+            description="EXPERIMENTAL AND MAY CHANGE THE MODEL OUTPUT!! Reduces peak VRAM of the Ideogram4 forward. "
+                        "chunk_ffn splits the SwiGLU activations over the token dim; bf16_rope applies RoPE in the model "
+                        "dtype instead of upcasting to fp32. Both target the two largest transient tensors in the block.",
+            is_experimental=True,
+            inputs=[
+                io.Model.Input("model"),
+                io.Boolean.Input("chunk_ffn", default=True,
+                                 tooltip="Chunk the feedforward activations over the sequence dim to cap the (B, L, hidden) intermediate."),
+                io.Int.Input("ffn_chunks", default=2, min=1, max=64, step=1,
+                             tooltip="Number of chunks to split the feedforward sequence into. More chunks = lower peak, slightly more overhead."),
+                io.Int.Input("ffn_seq_threshold", default=1024, min=256, max=65536, step=256,
+                             tooltip="Only chunk when the token sequence length exceeds this (skips chunking for tiny sequences)."),
+                io.Boolean.Input("bf16_rope", default=True,
+                                 tooltip="Apply RoPE in the input dtype instead of fp32. ~Halves RoPE activation memory; matches the HF reference dtype."),
+            ],
+            outputs=[
+                io.Model.Output(display_name="model"),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, model, chunk_ffn, ffn_chunks, ffn_seq_threshold, bf16_rope) -> io.NodeOutput:
+        if not chunk_ffn and not bf16_rope:
+            return io.NodeOutput(model)
+
+        m = model.clone()
+        diffusion_model = m.get_model_object("diffusion_model")
+
+        layers = getattr(diffusion_model, "layers", None)
+        if not layers or not hasattr(layers[0], "feed_forward") or not hasattr(layers[0], "attention"):
+            logging.warning("Ideogram4OptimizationsKJ: model does not look like Ideogram4 "
+                            "(expected diffusion_model.layers[*].feed_forward/.attention); returning model unchanged.")
+            return io.NodeOutput(model)
+
+        for idx, block in enumerate(layers):
+            if chunk_ffn and ffn_chunks > 1:
+                patched_ffn = Ideogram4FFNChunkPatch(ffn_chunks, ffn_seq_threshold).__get__(block.feed_forward, block.feed_forward.__class__)
+                m.add_object_patch(f"diffusion_model.layers.{idx}.feed_forward.forward", patched_ffn)
+            if bf16_rope:
+                patched_attn = Ideogram4RopePatch().__get__(block.attention, block.attention.__class__)
+                m.add_object_patch(f"diffusion_model.layers.{idx}.attention.forward", patched_attn)
+
+        return io.NodeOutput(m)
+
+
 from comfy.samplers import KSAMPLER
 from comfy.k_diffusion.sampling import to_d
 
