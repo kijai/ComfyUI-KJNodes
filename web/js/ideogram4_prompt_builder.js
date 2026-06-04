@@ -1,21 +1,18 @@
 import { chainCallback, addMiddleClickPan, addWheelPassthrough, rectHitTest, cursorForBboxMode } from './utility.js';
 const { app } = window.comfyAPI.app;
 
-const BBOX_PALETTE = ["#46b4e6", "#e68246", "#82e646", "#e646b4", "#e6e646", "#46e6c8"];
-const MAX_CANVAS_W = 1024, MAX_CANVAS_H = 768;
 const HANDLE = 8;            // hit radius (canvas px) for corners/edges
 const MAX_ELEM_COLORS = 5;   // Ideogram 4 per-element palette cap
 const MAX_STYLE_COLORS = 16; // Ideogram 4 style palette cap
+let copiedBox = null;        // internal clipboard for copy/paste of regions (shared across nodes)
 
-function clampToMaxCanvas(w, h) {
-  if (w > MAX_CANVAS_W || h > MAX_CANVAS_H) {
-    const s = Math.min(MAX_CANVAS_W / w, MAX_CANVAS_H / h);
-    return [Math.round(w * s), Math.round(h * s)];
-  }
-  return [w, h];
+// Black or white, whichever contrasts better with the given hex background.
+function textOn(hex) {
+  const h = (hex || "").replace("#", "");
+  if (h.length < 6) return "#000";
+  const r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
+  return (0.299 * r + 0.587 * g + 0.114 * b) > 140 ? "#000" : "#fff";
 }
-
-function boxColor(index) { return BBOX_PALETTE[index % BBOX_PALETTE.length]; }
 
 function injectStyle() {
   if (document.getElementById("kjideo-style")) return;
@@ -30,10 +27,10 @@ function injectStyle() {
     .kjideo-btn { background:#333; border:1px solid #555; border-radius:4px; color:#bbb; font:11px sans-serif; cursor:pointer; padding:2px 8px; line-height:16px; white-space:nowrap; flex-shrink:0; }
     .kjideo-btn:hover { border-color:#46b4e6; color:#fff; }
     .kjideo-btn.active { border-color:#46b4e6; color:#46b4e6; background:#2a3a42; }
-    .kjideo-area { width:100%; box-sizing:border-box; background:#1d1d1d; border:1px solid #444; border-radius:4px; color:#ddd; font:11px sans-serif; padding:4px 6px; resize:vertical; min-height:36px; }
+    .kjideo-area { width:100%; box-sizing:border-box; background:#1d1d1d; border:1px solid #444; border-radius:4px; color:#ddd; font:13px monospace; padding:4px 6px; resize:vertical; min-height:36px; }
     .kjideo-sw { width:20px; height:20px; border:1px solid #666; border-radius:3px; cursor:pointer; flex-shrink:0; position:relative; }
     .kjideo-sw input { position:absolute; opacity:0; width:0; height:0; pointer-events:none; }
-    .kjideo-inline { position:absolute; box-sizing:border-box; background:rgba(18,18,18,0.92); border:2px solid #46b4e6; border-radius:3px; color:#fff; font:11px sans-serif; padding:3px 4px; resize:none; outline:none; z-index:10; }
+    .kjideo-inline { position:absolute; box-sizing:border-box; background:rgba(18,18,18,0.92); border:2px solid #46b4e6; border-radius:3px; color:#fff; font:13px monospace; padding:3px 4px; resize:none; outline:none; z-index:10; }
   `;
   document.head.appendChild(s);
 }
@@ -73,6 +70,9 @@ app.registerExtension({
       node._dragStartN = null; // mouse-down point, normalized
       node._boxAtStart = null; // active box snapshot at drag start
       node._hoverTitle = null; // index of the title chip under the cursor
+      node._hoverBox = null;   // index of the box under the cursor
+      node._focused = false;   // editor (DOM) focused — gates the active-box highlight
+      node._selected = false;  // node selected in the graph
       node._lastImported = ""; // last import_json applied to the editor (avoid re-apply)
       node._areaH = node._areaH || {};      // remembered textarea heights (per field)
       node._areaObservers = [];             // live ResizeObservers to disconnect on rebuild
@@ -109,7 +109,9 @@ app.registerExtension({
 
       const canvasEl = document.createElement("canvas");
       canvasEl.className = "kjideo-canvas";
-      canvasEl.tabIndex = 0;                                  // focusable, so it can receive Delete
+      canvasEl.tabIndex = 0;                                  // focusable, so it can receive key events
+      canvasEl.title = "Drag to draw · click to select · alt-click overlap · dbl-click edit · " +
+        "Del remove · Ctrl/Cmd+C/V/D copy/paste/duplicate";
       const ctx = canvasEl.getContext("2d");
       addWheelPassthrough(wrap);
       addMiddleClickPan(canvasEl);
@@ -128,27 +130,27 @@ app.registerExtension({
       });
       node.resizable = true;
 
-      // ── canvas sizing (aspect from width/height widgets) ──
-      function setCanvasSize(cw, ch) {
-        canvasEl.width = cw; canvasEl.height = ch;
-        canvasEl.style.aspectRatio = `${cw} / ${ch}`;
+      // ── canvas sizing ──
+      // The display size is CSS-driven (width:100% + aspect-ratio); the backing store
+      // is sized to display × devicePixelRatio in prepCanvas() so text/lines stay crisp.
+      function setCanvasSize(w, h) {
+        canvasEl.style.aspectRatio = `${w} / ${h}`;          // display shape only
         if (node.graph) node.graph.setDirtyCanvas(true, true);
       }
       function syncCanvasToDims() {
         const w = wWidget ? wWidget.value : 1024, h = hWidget ? hWidget.value : 1024;
-        const [cw, ch] = clampToMaxCanvas(Math.max(1, w), Math.max(1, h));
-        if (cw !== canvasEl.width || ch !== canvasEl.height) setCanvasSize(cw, ch);
+        setCanvasSize(Math.max(1, w), Math.max(1, h));
+        drawCanvas();
       }
 
       // Content height = panel's bottom edge in the wrapper (includes toolbar/canvas/gaps).
       function recalcWidgetHeight() {
-        if (canvasEl.width <= 0) return;
         const contentH = panel.offsetTop + panel.offsetHeight;
         if (contentH > 0) {
           node._widgetHeight = contentH + 10;                  // margin pad
-        } else {                                               // not laid out yet
-          const ch = Math.round(Math.max(100, node.size[0] - 30) * (canvasEl.height / canvasEl.width));
-          node._widgetHeight = ch + TOOLBAR_H + 70;
+        } else {                                               // not laid out yet — estimate
+          const ratio = (hWidget?.value || 1) / (wWidget?.value || 1);
+          node._widgetHeight = Math.round(Math.max(100, node.size[0] - 30) * ratio) + TOOLBAR_H + 70;
         }
       }
       function fitNode() {
@@ -158,10 +160,12 @@ app.registerExtension({
         if (node.size[1] < minH) node.setSize([node.size[0], minH]);
       }
 
-      // ── geometry helpers ──
+      // ── geometry helpers ── (logical CSS px = the displayed canvas size)
+      function logW() { return canvasEl.offsetWidth || 1; }
+      function logH() { return canvasEl.offsetHeight || 1; }
       function toPx(b) {
-        return { x1: b.x * canvasEl.width, y1: b.y * canvasEl.height,
-          x2: (b.x + b.w) * canvasEl.width, y2: (b.y + b.h) * canvasEl.height };
+        const W = logW(), H = logH();
+        return { x1: b.x * W, y1: b.y * H, x2: (b.x + b.w) * W, y2: (b.y + b.h) * H };
       }
       function mouseN(e) {
         const r = canvasEl.getBoundingClientRect();
@@ -196,7 +200,7 @@ app.registerExtension({
       // All boxes under the point, top-first to match draw order: the active box is
       // drawn last (on top), then the rest by index high→low.
       function boxesAt(mN) {
-        const rx = HANDLE / canvasEl.width, ry = HANDLE / canvasEl.height;
+        const rx = HANDLE / logW(), ry = HANDLE / logH();
         const res = [];
         for (let i = node._boxes.length - 1; i >= 0; i--) {
           const b = node._boxes[i];
@@ -216,14 +220,14 @@ app.registerExtension({
       // Tag-chip rects (canvas px), placed to avoid overlapping each other: each
       // box's tag tries top-left, top-right, bottom-right, bottom-left in turn.
       function tagRects() {
-        ctx.font = "bold 10px sans-serif";
-        const W = canvasEl.width, H = canvasEl.height, h = 14;
+        ctx.font = "bold 11px monospace";
+        const W = logW(), H = logH(), h = 14;
         const placed = [], rects = [];
         const hits = (a, b) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
         for (let i = 0; i < node._boxes.length; i++) {
           const b = node._boxes[i];
           const x1 = b.x * W, y1 = b.y * H, x2 = (b.x + b.w) * W, y2 = (b.y + b.h) * H;
-          const tag = (b.type === "text" ? "T" : "O") + (i + 1);
+          const tag = String(i + 1).padStart(2, "0");
           const w = ctx.measureText(tag).width + 8;
           let pick = [x1, y1];
           for (const [cx, cy] of [[x1, y1], [x2 - w, y1], [x2 - w, y2 - h], [x1, y2 - h]]) {
@@ -235,7 +239,7 @@ app.registerExtension({
         return rects;
       }
       function titleAt(mN) {
-        const px = mN.x * canvasEl.width, py = mN.y * canvasEl.height;
+        const px = mN.x * logW(), py = mN.y * logH();
         const rects = tagRects();
         for (let i = node._boxes.length - 1; i >= 0; i--) {
           const r = rects[i];
@@ -303,65 +307,72 @@ app.registerExtension({
         });
       }
       function _draw() {
-        const W = canvasEl.width, H = canvasEl.height;
+        // Size the backing store to display × DPR and draw in logical px (crisp text/lines).
+        const W = logW(), H = logH(), d = window.devicePixelRatio || 1;
+        const bw = Math.round(W * d), bh = Math.round(H * d);
+        if (canvasEl.width !== bw || canvasEl.height !== bh) { canvasEl.width = bw; canvasEl.height = bh; }
+        ctx.setTransform(d, 0, 0, d, 0, 0);
         ctx.clearRect(0, 0, W, H);
         ctx.fillStyle = "#1a1a1a"; ctx.fillRect(0, 0, W, H);
-        // draw the active box last so it sits in front (kept by array index for color/tag)
-        const order = node._boxes.map((_, i) => i).filter((i) => i !== node._activeIdx);
-        if (node._activeIdx >= 0 && node._activeIdx < node._boxes.length) order.push(node._activeIdx);
+        // active box only when the editor is focused or the node is selected
+        const aIdx = (node._focused || node._selected) ? node._activeIdx : -1;
+        const order = node._boxes.map((_, i) => i).filter((i) => i !== aIdx);
+        if (aIdx >= 0 && aIdx < node._boxes.length) order.push(aIdx);  // active drawn last (on top)
         const tagR = tagRects();                              // collision-avoided tag positions
         for (const i of order) {
-          const b = node._boxes[i], col = boxColor(i), active = i === node._activeIdx;
+          const b = node._boxes[i], active = i === aIdx;
+          const pal = (b.palette || []).filter(Boolean);
+          const col = pal.length ? pal[0] : "#8c8c8c";       // box color = first palette color, else neutral grey
           const { x1, y1, x2, y2 } = toPx(b);
           const w = x2 - x1, h = y2 - y1;
-          ctx.fillStyle = col + "22";
+          const hovered = i === node._hoverBox || active;    // active box stays highlighted (on top)
+          if (active) {                                      // opaque backing so contents read clearly over boxes behind
+            ctx.fillStyle = "rgba(26,26,26,0.88)";
+            ctx.fillRect(x1, y1, w, h);
+          }
+          ctx.fillStyle = col + (hovered ? "3a" : "22");     // tint of the box color
           ctx.fillRect(x1, y1, w, h);
           if (b.nobbox) ctx.setLineDash([6, 4]);             // unplaced (no bbox in source)
-          ctx.strokeStyle = col; ctx.lineWidth = active ? 2 : 1;
-          ctx.strokeRect(x1, y1, w, h);
+          const lw = active ? 2 : (hovered ? 1.5 : 1);
+          ctx.strokeStyle = col; ctx.lineWidth = lw;
+          ctx.strokeRect(x1 + lw / 2, y1 + lw / 2, w - lw, h - lw);  // inside the box so strip/badge align at y1
           ctx.setLineDash([]);
-          if (active) {
-            ctx.fillStyle = col;
-            for (const [hx, hy] of [[x1, y1], [x2, y1], [x1, y2], [x2, y2]])
-              ctx.fillRect(hx - 4, hy - 4, 8, 8);
+          if (pal.length) {                                  // palette shown as a strip along the top edge
+            const sw = w / pal.length, n = pal.length, sh = 7;
+            for (let p = 0; p < n; p++) {
+              const sx = x1 + Math.round(p * sw);
+              ctx.fillStyle = pal[p];
+              ctx.fillRect(sx, y1, x1 + Math.round((p + 1) * sw) - sx, sh);
+            }
           }
-          // in-box content (clipped to the box): prompt text, palette dots, tag chip on top
+          // in-box content (clipped to the box): prompt text, tag chip on top
           ctx.save();
           ctx.beginPath(); ctx.rect(x1, y1, w, h); ctx.clip();
 
           let body = b.desc || "";
           if (b.type === "text" && b.text) body = `"${b.text}"` + (body ? " — " + body : "");
           if (body) {
-            ctx.font = "11px sans-serif";
-            ctx.fillStyle = "#fff";
-            ctx.shadowColor = "#000"; ctx.shadowBlur = 2;
-            const pad = 4, lh = 13;
-            let ty = y1 + 14 + 11;                        // first line below the tag chip
+            ctx.font = "12px monospace";
+            ctx.fillStyle = "#d4d4d4";                      // neutral prompt text
+            const pad = 4, lh = 14;
+            let ty = y1 + 15 + 12;                        // first line below the tag chip
             for (const line of wrapLines(body, w - pad * 2)) {
               if (ty > y1 + h) break;                      // clip overflow vertically
               ctx.fillText(line, x1 + pad, ty);
               ty += lh;
             }
-            ctx.shadowBlur = 0;
-          }
-          if (b.palette?.length) {
-            for (let p = 0; p < b.palette.length; p++) {
-              ctx.fillStyle = b.palette[p];
-              ctx.fillRect(x1 + 2 + p * 9, y2 - 9, 7, 7);
-              ctx.strokeStyle = "#000"; ctx.lineWidth = 1;
-              ctx.strokeRect(x1 + 2 + p * 9, y2 - 9, 7, 7);
-            }
           }
           // tag chip on top, at its collision-avoided position
           const tr = tagR[i];
-          ctx.font = "bold 10px sans-serif";
-          ctx.fillStyle = col;
+          const tagBg = col;                                  // neutral tag chip
+          ctx.font = "bold 11px monospace";
+          ctx.fillStyle = tagBg;
           ctx.fillRect(tr.x, tr.y, tr.w, 14);
           if (i === node._hoverTitle) {                       // hover highlight
             ctx.fillStyle = "rgba(255,255,255,0.25)"; ctx.fillRect(tr.x, tr.y, tr.w, 14);
             ctx.strokeStyle = "#fff"; ctx.lineWidth = 1; ctx.strokeRect(tr.x + 0.5, tr.y + 0.5, tr.w - 1, 13);
           }
-          ctx.fillStyle = "#000";
+          ctx.fillStyle = textOn(tagBg);
           ctx.fillText(tr.tag, tr.x + 4, tr.y + 11);
           ctx.restore();
         }
@@ -393,7 +404,7 @@ app.registerExtension({
         }
         if (e.button !== 0) return;
         canvasEl.focus();                // so Delete/Backspace targets this editor
-        node._hoverTitle = null;         // clear hover highlight while interacting
+        node._hoverTitle = null; node._hoverBox = null;  // clear hover highlight while interacting
         const mN = mouseN(e);
         const hit = pickForSelection(mN, e.altKey);
         if (hit) {
@@ -419,13 +430,17 @@ app.registerExtension({
         if (node._drawing) return;
         const mN = mouseN(e);
         const ti = titleAt(mN);
-        if (ti !== node._hoverTitle) { node._hoverTitle = ti; drawCanvas(); }
-        if (ti !== null) { canvasEl.style.cursor = "pointer"; return; }
         const hit = hitTest(mN);
-        canvasEl.style.cursor = hit ? (cursorForBboxMode(hit.mode) || "crosshair") : "crosshair";
+        const hb = ti != null ? ti : (hit ? hit.index : null);
+        if (ti !== node._hoverTitle || hb !== node._hoverBox) {
+          node._hoverTitle = ti; node._hoverBox = hb; drawCanvas();
+        }
+        canvasEl.style.cursor = ti != null ? "pointer" : (hit ? (cursorForBboxMode(hit.mode) || "crosshair") : "crosshair");
       });
       canvasEl.addEventListener("mouseleave", () => {
-        if (node._hoverTitle !== null) { node._hoverTitle = null; drawCanvas(); }
+        if (node._hoverTitle !== null || node._hoverBox !== null) {
+          node._hoverTitle = null; node._hoverBox = null; drawCanvas();
+        }
       });
 
       // ── inline description editing (double-click a region) ──
@@ -452,7 +467,7 @@ app.registerExtension({
         ta.style.top = top + "px";
         ta.style.width = w + "px";
         ta.style.height = h + "px";
-        ta.style.borderColor = boxColor(idx);
+        ta.style.borderColor = (b.palette || []).find(Boolean) || "#46b4e6";  // first palette color, else accent
         stopProp(ta);
         wrap.appendChild(ta);
         inlineTa = ta;
@@ -478,13 +493,35 @@ app.registerExtension({
         if (target) openInlineEditor(target.index);
       });
 
-      // Delete/Backspace removes the active region (canvas must be focused; stop the
-      // event so LiteGraph doesn't delete the whole node).
+      // Paste a clone of the clipboard box, offset slightly and clamped into the canvas.
+      function pasteBox() {
+        if (!copiedBox) return;
+        const nb = JSON.parse(JSON.stringify(copiedBox));
+        nb.x = Math.max(0, Math.min(clamp01(nb.x + 0.03), 1 - nb.w));
+        nb.y = Math.max(0, Math.min(clamp01(nb.y + 0.03), 1 - nb.h));
+        delete nb.nobbox;                              // a pasted box is placed
+        node._boxes.push(nb);
+        node._activeIdx = node._boxes.length - 1;
+        commit(); fitNode();
+      }
+      // Keyboard: Delete removes; Ctrl/Cmd C/V/D copy/paste/duplicate the active region.
+      // Canvas must be focused; stop the event so LiteGraph doesn't act on the node.
       canvasEl.addEventListener("keydown", (e) => {
-        if ((e.key === "Delete" || e.key === "Backspace") && !node._drawing && node._activeIdx >= 0) {
+        if (node._drawing) return;
+        const ctrl = e.ctrlKey || e.metaKey;
+        if ((e.key === "Delete" || e.key === "Backspace") && node._activeIdx >= 0) {
           e.preventDefault(); e.stopPropagation();
-          removeBox(node._activeIdx);
-          commit(); fitNode();
+          removeBox(node._activeIdx); commit(); fitNode();
+        } else if (ctrl && e.key === "c" && node._activeIdx >= 0) {
+          e.preventDefault(); e.stopPropagation();
+          copiedBox = JSON.parse(JSON.stringify(node._boxes[node._activeIdx]));
+        } else if (ctrl && e.key === "v" && copiedBox) {
+          e.preventDefault(); e.stopPropagation();
+          pasteBox();
+        } else if (ctrl && e.key === "d" && node._activeIdx >= 0) {
+          e.preventDefault(); e.stopPropagation();
+          copiedBox = JSON.parse(JSON.stringify(node._boxes[node._activeIdx]));
+          pasteBox();
         }
       });
 
@@ -723,7 +760,7 @@ app.registerExtension({
           requestAnimationFrame(fitNode);
           return;
         }
-        const col = boxColor(node._activeIdx);
+        const col = (b.palette || []).find(Boolean) || "#bbb";   // accent = first palette color of this region
         hint.innerHTML = `Editing <b style="color:${col}">region ${node._activeIdx + 1}</b> · dbl-click to edit · alt-click overlap · right-click/del to remove`;
 
         // type toggle
@@ -785,6 +822,14 @@ app.registerExtension({
         drawCanvas();
         _resizing = false;
       });
+
+      // Active-box highlight only while the editor is focused or the node is selected.
+      wrap.addEventListener("focusin", () => { if (!node._focused) { node._focused = true; drawCanvas(); } });
+      wrap.addEventListener("focusout", (e) => {
+        if (!wrap.contains(e.relatedTarget)) { node._focused = false; drawCanvas(); }
+      });
+      chainCallback(node, "onSelected", function () { node._selected = true; drawCanvas(); });
+      chainCallback(node, "onDeselected", function () { node._selected = false; drawCanvas(); });
 
       chainCallback(node, "onRemoved", function () {
         closeInlineEditor();
