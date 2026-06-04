@@ -73,6 +73,7 @@ app.registerExtension({
       node._dragStartN = null; // mouse-down point, normalized
       node._boxAtStart = null; // active box snapshot at drag start
       node._hoverTitle = null; // index of the title chip under the cursor
+      node._lastImported = ""; // last import_json applied to the editor (avoid re-apply)
       node._areaH = node._areaH || {};      // remembered textarea heights (per field)
       node._areaObservers = [];             // live ResizeObservers to disconnect on rebuild
 
@@ -639,6 +640,21 @@ app.registerExtension({
       }
       importBtn.addEventListener("mousedown", (e) => e.stopPropagation());
       importBtn.addEventListener("click", doImport);
+
+      // Populate the editor from a caption pushed back by execute() when import_json
+      // is connected (a connected socket can't be read in the frontend directly).
+      function applyImported(capStr) {
+        if (!capStr || capStr === node._lastImported) return;
+        const cap = tryParseCaption(capStr);
+        if (!cap) return;
+        node._lastImported = capStr;
+        closeInlineEditor();
+        applyCaption(cap);
+        syncCanvasToDims(); commit(); rebuildStylePalette(); fitNode();
+      }
+      chainCallback(node, "onExecuted", function (message) {
+        if (message?.caption) applyImported(message.caption[0]);
+      });
 
       // ── property panel ──
       function stopProp(el) {

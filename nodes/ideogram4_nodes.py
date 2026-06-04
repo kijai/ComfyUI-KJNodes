@@ -222,8 +222,8 @@ the canvas aspect ratio.""",
                 io.String.Input("lighting", default="", tooltip="Style descriptor (blank = omitted)."),
                 io.String.Input("medium", default="", tooltip="Style descriptor (blank = omitted)."),
                 io.String.Input("import_json", default="", optional=True, force_input=True,
-                                tooltip="Optional: a full caption JSON. When connected, it overrides the "
-                                        "editor and the node emits this caption (and its preview) directly."),
+                                tooltip="Optional: a full caption JSON. When connected, it populates the "
+                                        "editor and overrides the output (and preview) on each run."),
                 io.String.Input("style_palette_data", default="", socketless=True, advanced=True,
                                 tooltip="Serialized style color palette from the editor (managed by the node UI)."),
                 io.String.Input("elements_data", default="", socketless=True, advanced=True,
@@ -239,13 +239,15 @@ the canvas aspect ratio.""",
     def execute(cls, width, height, background, style,
                 high_level_description="", aesthetics="", lighting="", medium="",
                 style_palette_data="", elements_data="", import_json="") -> io.NodeOutput:
-        # Override: a full caption JSON wired in is emitted (and previewed) as-is.
+        # Override: a full caption JSON wired in is emitted (and previewed) as-is,
+        # and sent back via ui so the editor can populate itself (like Paste).
         if import_json and import_json.strip():
             try:
                 cap = json.loads(import_json)
                 if isinstance(cap, dict):
+                    out = _dumps(cap)
                     preview = _render_preview(_caption_to_boxes(cap), width, height)
-                    return io.NodeOutput(_dumps(cap), preview)
+                    return io.NodeOutput(out, preview, ui={"caption": [out]})
             except json.JSONDecodeError:
                 pass
 
