@@ -73,8 +73,7 @@ from .nodes.model_optimization_nodes import (
     SkipLayerGuidanceWanVideo, CFGZeroStarAndInit, GGUFLoaderKJ, NABLA_AttentionKJ,
     StartRecordCUDAMemoryHistory, EndRecordCUDAMemoryHistory, VisualizeCUDAMemoryHistory,
     ModelMemoryUseReportPatch, ModelMemoryUsageFactorOverride, WanChunkFeedForward,
-    SamplerSelfRefineVideo,
-    SamplerSelfRefineVideo, PiDColorBiasCorrection,
+    SamplerSelfRefineVideo, PiDColorBiasCorrection, Ideogram4OptimizationsKJ,
 )
 from .nodes.lora_nodes import LoraExtractKJ, LoraReduceRank
 from .nodes.image_transform_node import ImageTransformKJ
