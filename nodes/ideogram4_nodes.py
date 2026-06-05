@@ -1,9 +1,7 @@
 """Ideogram 4 prompt builder.
 
 A single self-contained node with a visual bbox editor: draw regions on a blank
-canvas, set each region's type/desc/text/color palette, and assemble the
-Ideogram 4 JSON caption prompt. Output is byte-compatible with the core
-Ideogram4Caption node (key order matters for the model).
+canvas, set each region's type/desc/text/color palette, and assemble the Ideogram 4 JSON caption prompt.
 """
 
 import json
@@ -11,9 +9,10 @@ import os
 
 import numpy as np
 import torch
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageEnhance
 
 from comfy_api.latest import io
+
 
 # Region colors — must match BBOX_PALETTE in web/js/ideogram4_prompt_builder.js.
 PREVIEW_PALETTE = ["#46b4e6", "#e68246", "#82e646", "#e646b4", "#e6e646", "#46e6c8"]
@@ -23,6 +22,16 @@ _FONT_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "fonts", "
 def _hex_rgb(h):
     h = h.lstrip("#")
     return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)) if len(h) == 6 else (255, 255, 255)
+
+
+def _readable(rgb):
+    # Lighten toward white if too dark, so box-colored text stays legible on the dark canvas.
+    r, g, b = rgb
+    lum = 0.299 * r + 0.587 * g + 0.114 * b
+    if lum < 130:
+        t = (130 - lum) / (255 - lum)
+        r, g, b = round(r + (255 - r) * t), round(g + (255 - g) * t), round(b + (255 - b) * t)
+    return (r, g, b)
 
 
 def _font(size):
@@ -50,20 +59,24 @@ def _wrap(draw, text, font, max_w):
     return lines
 
 
-def _render_preview(boxes, width, height, bg=None):
+def _render_preview(boxes, width, height, bg=None, brightness=50):
     # Render the regions + prompts over the reference image (or a black canvas).
     if bg is not None:
         iw, ih = bg.size
         long_edge = max(iw, ih)
         scale = min(1.0, 1024 / long_edge) if long_edge > 0 else 1.0
         rw, rh = max(1, round(iw * scale)), max(1, round(ih * scale))
-        img = bg.convert("RGBA").resize((rw, rh), Image.LANCZOS)
+        base = bg.convert("RGB").resize((rw, rh), Image.LANCZOS)
+        if brightness < 100:                                # dim to match the editor's brightness slider
+            base = ImageEnhance.Brightness(base).enhance(max(0.0, brightness / 100.0))
+        img = base.convert("RGBA")
     else:
         long_edge = max(width, height)
         scale = min(1.0, 1024 / long_edge) if long_edge > 0 else 1.0
         rw = max(1, round(width * scale))
         rh = max(1, round(height * scale))
-        img = Image.new("RGBA", (rw, rh), (0, 0, 0, 255))
+        g = round(max(0, min(100, brightness)) / 100 * 128)  # blank canvas grey from the brightness slider
+        img = Image.new("RGBA", (rw, rh), (g, g, g, 255))
     overlay = Image.new("RGBA", (rw, rh), (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
     fs = max(10, round(rh / 64))
@@ -110,7 +123,7 @@ def _render_preview(boxes, width, height, bg=None):
             for line in _wrap(draw, body, font, x2 - x1 - 8):
                 if ty > y2:
                     break
-                draw.text((x1 + 4, ty), line, fill=(212, 212, 212, 255), font=font)
+                draw.text((x1 + 4, ty), line, fill=_readable((r, g, b)) + (255,), font=font)
                 ty += lh
 
     img = Image.alpha_composite(img, overlay).convert("RGB")
@@ -216,6 +229,8 @@ the canvas aspect ratio.""",
                                 tooltip="Serialized style color palette from the editor (managed by the node UI)."),
                 io.String.Input("elements_data", default="", socketless=True, advanced=True,
                                 tooltip="Serialized regions from the editor (managed by the node UI)."),
+                io.Int.Input("bg_brightness", default=25, min=0, max=100, socketless=True, advanced=True,
+                             tooltip="Background image brightness % (managed by the node UI slider)."),
             ],
             outputs=[
                 io.String.Output(display_name="prompt"),
@@ -227,7 +242,7 @@ the canvas aspect ratio.""",
     @classmethod
     def execute(cls, width, height, background, style,
                 high_level_description="", aesthetics="", lighting="", medium="",
-                style_palette_data="", elements_data="", import_json="", image=None) -> io.NodeOutput:
+                style_palette_data="", elements_data="", import_json="", image=None, bg_brightness=25) -> io.NodeOutput:
         boxes = _parse_json_list(elements_data)
 
         caption = {}
@@ -277,7 +292,7 @@ the canvas aspect ratio.""",
                 bg = Image.fromarray((image[0].detach().cpu().numpy() * 255).clip(0, 255).astype(np.uint8))
             except Exception:
                 bg = None
-        preview = _render_preview(boxes, width, height, bg)
+        preview = _render_preview(boxes, width, height, bg, bg_brightness)
 
         # Pixel-space bboxes ({x, y, width, height}) for SAM3 / BoundingBox consumers.
         bbox_dicts = []

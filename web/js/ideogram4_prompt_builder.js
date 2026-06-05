@@ -6,6 +6,19 @@ const MAX_ELEM_COLORS = 5;   // Ideogram 4 per-element palette cap
 const MAX_STYLE_COLORS = 16; // Ideogram 4 style palette cap
 let copiedBox = null;        // internal clipboard for copy/paste of regions (shared across nodes)
 
+// The hex color lightened toward white if too dark, so it stays readable on the dark canvas.
+function readableText(hex) {
+  const h = (hex || "").replace("#", "");
+  if (h.length < 6) return "#d4d4d4";
+  let r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
+  const lum = 0.299 * r + 0.587 * g + 0.114 * b, MIN = 130;
+  if (lum < MIN) {
+    const t = (MIN - lum) / (255 - lum);
+    r = Math.round(r + (255 - r) * t); g = Math.round(g + (255 - g) * t); b = Math.round(b + (255 - b) * t);
+  }
+  return `rgb(${r},${g},${b})`;
+}
+
 // Black or white, whichever contrasts better with the given hex background.
 function textOn(hex) {
   const h = (hex || "").replace("#", "");
@@ -47,15 +60,17 @@ app.registerExtension({
       const findW = (n) => node.widgets?.find((w) => w.name === n);
       const elementsWidget = findW("elements_data");
       const stylePaletteWidget = findW("style_palette_data");
+      const bgBrightnessWidget = findW("bg_brightness");
+      if (bgBrightnessWidget && typeof bgBrightnessWidget.value !== "number") bgBrightnessWidget.value = 25;
       const wWidget = findW("width"), hWidget = findW("height");
       // Hide the data widgets while keeping them serializable.
       function hideDataWidgets() {
-        for (const w of [elementsWidget, stylePaletteWidget]) {
+        for (const w of [elementsWidget, stylePaletteWidget, bgBrightnessWidget]) {
           if (!w) continue;
           w.hidden = true;
           w.computeSize = () => [0, -4];
         }
-        for (const name of ["elements_data", "style_palette_data"]) {
+        for (const name of ["elements_data", "style_palette_data", "bg_brightness"]) {
           const i = node.inputs?.findIndex((inp) => inp.name === name);
           if (i != null && i !== -1) node.removeInput(i);
         }
@@ -99,7 +114,14 @@ app.registerExtension({
       const tokenSpan = document.createElement("span");
       tokenSpan.style.cssText = "color:#888; white-space:nowrap;";
       tokenSpan.title = "Rough token estimate (~chars/4). Grey <256, green healthy, orange nearing, red ≥2048 (model cap — will error)";
-      bar.appendChild(hint); bar.appendChild(tokenSpan); bar.appendChild(copyBtn); bar.appendChild(importBtn); bar.appendChild(clearBtn);
+      const bgSlider = document.createElement("input");
+      bgSlider.type = "range"; bgSlider.min = "0"; bgSlider.max = "100"; bgSlider.step = "1";
+      bgSlider.value = bgBrightnessWidget ? bgBrightnessWidget.value : 25;
+      bgSlider.title = "Background brightness (image or blank canvas)";
+      bgSlider.style.cssText = "width:64px;flex:0 0 auto;";
+      bgSlider.addEventListener("mousedown", (e) => e.stopPropagation());
+      bgSlider.addEventListener("input", () => { if (bgBrightnessWidget) bgBrightnessWidget.value = parseInt(bgSlider.value); drawCanvas(); });
+      bar.appendChild(hint); bar.appendChild(bgSlider); bar.appendChild(tokenSpan); bar.appendChild(copyBtn); bar.appendChild(importBtn); bar.appendChild(clearBtn);
 
       // Persistent global style-palette row
       const styleBar = document.createElement("div");
@@ -314,8 +336,16 @@ app.registerExtension({
         if (canvasEl.width !== bw || canvasEl.height !== bh) { canvasEl.width = bw; canvasEl.height = bh; }
         ctx.setTransform(d, 0, 0, d, 0, 0);
         ctx.clearRect(0, 0, W, H);
-        if (node._bgImg) ctx.drawImage(node._bgImg, 0, 0, W, H);   // reference image background
-        else { ctx.fillStyle = "#1a1a1a"; ctx.fillRect(0, 0, W, H); }
+        let bri = bgBrightnessWidget ? bgBrightnessWidget.value : 25;
+        if (typeof bri !== "number" || isNaN(bri)) bri = 25;       // guard against unset widget value
+        if (node._bgImg) {                                         // reference image, dimmed by brightness
+          ctx.drawImage(node._bgImg, 0, 0, W, H);
+          const dim = 1 - bri / 100;
+          if (dim > 0) { ctx.fillStyle = `rgba(0,0,0,${dim})`; ctx.fillRect(0, 0, W, H); }
+        } else {                                                   // blank canvas grey from brightness
+          const g = Math.round(bri / 100 * 128);
+          ctx.fillStyle = `rgb(${g},${g},${g})`; ctx.fillRect(0, 0, W, H);
+        }
         // active box only when the editor is focused or the node is selected
         const aIdx = (node._focused || node._selected) ? node._activeIdx : -1;
         const order = node._boxes.map((_, i) => i).filter((i) => i !== aIdx);
@@ -355,7 +385,7 @@ app.registerExtension({
           if (b.type === "text" && b.text) body = `"${b.text}"` + (body ? " — " + body : "");
           if (body) {
             ctx.font = "12px monospace";
-            ctx.fillStyle = "#d4d4d4";                      // neutral prompt text
+            ctx.fillStyle = readableText(col);              // box color, lightened if too dark
             const pad = 4, lh = 14;
             let ty = y1 + 15 + 12;                        // first line below the tag chip
             for (const line of wrapLines(body, w - pad * 2)) {
@@ -765,8 +795,8 @@ app.registerExtension({
           requestAnimationFrame(fitNode);
           return;
         }
-        const col = (b.palette || []).find(Boolean) || "#bbb";   // accent = first palette color of this region
-        hint.innerHTML = `Editing <b style="color:${col}">region ${node._activeIdx + 1}</b> · dbl-click to edit · alt-click overlap · right-click/del to remove`;
+        const col = (b.palette || []).find(Boolean) || "#bbb";
+        hint.innerHTML = `<b style="color:${col}">region ${node._activeIdx + 1}</b> · dbl-click edit · alt-click overlap · del/right-click remove`;
 
         // type toggle
         const typeRow = document.createElement("div");
@@ -862,23 +892,36 @@ app.registerExtension({
       });
 
       // ── restore on load ──
-      chainCallback(node, "onConfigure", function () {
-        if (elementsWidget?.value) {
-          try {
-            const parsed = JSON.parse(elementsWidget.value);
-            if (Array.isArray(parsed)) {
-              node._boxes = parsed.filter((b) => b && typeof b.x === "number");
-              node._activeIdx = node._boxes.length ? 0 : -1;
-            }
-          } catch (e) {}
+      function _parseBoxes(s) {
+        try {
+          const p = JSON.parse(s);
+          if (Array.isArray(p) && p.some((b) => b && typeof b.x === "number" && typeof b.w === "number")) return p;
+        } catch (e) {}
+        return null;
+      }
+      // Persist editor data by name (robust to widget-order changes across versions).
+      chainCallback(node, "onSerialize", function (o) {
+        if (o) o.ideo = { boxes: node._boxes, palette: node._stylePalette };
+      });
+      chainCallback(node, "onConfigure", function (o) {
+        const raw = o && Array.isArray(o.widgets_values) ? o.widgets_values : [];
+        // Recover regions: name-keyed blob → named widget → raw saved values (survives
+        // any widget reorder/remap across versions) → live widgets.
+        let boxes = (o && o.ideo && Array.isArray(o.ideo.boxes)) ? o.ideo.boxes : _parseBoxes(elementsWidget?.value || "");
+        if (!boxes) { for (const v of raw) { const b = _parseBoxes(v); if (b) { boxes = b; break; } } }
+        if (!boxes) { for (const w of node.widgets || []) { const b = _parseBoxes(w?.value); if (b) { boxes = b; break; } } }
+        if (boxes) {
+          node._boxes = boxes.filter((b) => b && typeof b.x === "number");
+          node._activeIdx = node._boxes.length ? 0 : -1;
         }
-        if (stylePaletteWidget?.value) {
-          try {
-            const sp = JSON.parse(stylePaletteWidget.value);
-            if (Array.isArray(sp)) node._stylePalette = sp.filter((c) => typeof c === "string");
-          } catch (e) {}
-        }
+        const isPal = (p) => Array.isArray(p) && p.length && p.every((c) => typeof c === "string" && c[0] === "#");
+        let pal = (o && o.ideo && isPal(o.ideo.palette)) ? o.ideo.palette : null;
+        if (!pal) { try { const p = JSON.parse(stylePaletteWidget?.value || ""); if (isPal(p)) pal = p; } catch (e) {} }
+        if (!pal) { for (const v of raw) { try { const p = JSON.parse(v); if (isPal(p)) { pal = p; break; } } catch (e) {} } }
+        if (pal) node._stylePalette = pal.slice();
         hideDataWidgets();
+        serialize();                                         // realign widget values for Python + future saves
+        if (bgBrightnessWidget) bgSlider.value = bgBrightnessWidget.value;
         syncCanvasToDims();
         rebuildStylePalette();
         renderPanel();
