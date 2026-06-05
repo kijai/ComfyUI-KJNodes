@@ -1,4 +1,4 @@
-import { chainCallback, addMiddleClickPan, addWheelPassthrough, rectHitTest, cursorForBboxMode, watchImageInputs, captureVideoFrame } from './utility.js';
+import { chainCallback, addMiddleClickPan, addWheelPassthrough, cursorForBboxMode, watchImageInputs, captureVideoFrame } from './utility.js';
 const { app } = window.comfyAPI.app;
 
 const HANDLE = 8;            // hit radius (canvas px) for corners/edges
@@ -6,12 +6,21 @@ const MAX_ELEM_COLORS = 5;   // Ideogram 4 per-element palette cap
 const MAX_STYLE_COLORS = 16; // Ideogram 4 style palette cap
 let copiedBox = null;        // internal clipboard for copy/paste of regions (shared across nodes)
 
+// Parse a #rrggbb hex into {r,g,b}, or null if malformed.
+function hexRgb(hex) {
+  const h = (hex || "").replace("#", "");
+  if (h.length < 6) return null;
+  return { r: parseInt(h.slice(0, 2), 16), g: parseInt(h.slice(2, 4), 16), b: parseInt(h.slice(4, 6), 16) };
+}
+// Perceived luminance (0-255) of an {r,g,b}.
+function luminance({ r, g, b }) { return 0.299 * r + 0.587 * g + 0.114 * b; }
+
 // The hex color lightened toward white if too dark, so it stays readable on the dark canvas.
 function readableText(hex) {
-  const h = (hex || "").replace("#", "");
-  if (h.length < 6) return "#d4d4d4";
-  let r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
-  const lum = 0.299 * r + 0.587 * g + 0.114 * b, MIN = 130;
+  const c = hexRgb(hex);
+  if (!c) return "#d4d4d4";
+  let { r, g, b } = c;
+  const lum = luminance(c), MIN = 130;
   if (lum < MIN) {
     const t = (MIN - lum) / (255 - lum);
     r = Math.round(r + (255 - r) * t); g = Math.round(g + (255 - g) * t); b = Math.round(b + (255 - b) * t);
@@ -21,10 +30,9 @@ function readableText(hex) {
 
 // Black or white, whichever contrasts better with the given hex background.
 function textOn(hex) {
-  const h = (hex || "").replace("#", "");
-  if (h.length < 6) return "#000";
-  const r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
-  return (0.299 * r + 0.587 * g + 0.114 * b) > 140 ? "#000" : "#fff";
+  const c = hexRgb(hex);
+  if (!c) return "#000";
+  return luminance(c) > 140 ? "#000" : "#fff";
 }
 
 function injectStyle() {
@@ -119,8 +127,8 @@ app.registerExtension({
       bgSlider.value = bgBrightnessWidget ? bgBrightnessWidget.value : 25;
       bgSlider.title = "Background brightness (image or blank canvas)";
       bgSlider.style.cssText = "width:64px;flex:0 0 auto;";
-      bgSlider.addEventListener("mousedown", (e) => e.stopPropagation());
-      bgSlider.addEventListener("input", () => { if (bgBrightnessWidget) bgBrightnessWidget.value = parseInt(bgSlider.value); drawCanvas(); });
+      stopProp(bgSlider);
+      bgSlider.addEventListener("input", () => { if (bgBrightnessWidget) bgBrightnessWidget.value = parseInt(bgSlider.value, 10); drawCanvas(); });
       bar.appendChild(hint); bar.appendChild(bgSlider); bar.appendChild(tokenSpan); bar.appendChild(copyBtn); bar.appendChild(importBtn); bar.appendChild(clearBtn);
 
       // Persistent global style-palette row
@@ -396,15 +404,14 @@ app.registerExtension({
           }
           // tag chip on top, at its collision-avoided position
           const tr = tagR[i];
-          const tagBg = col;                                  // neutral tag chip
           ctx.font = "bold 11px monospace";
-          ctx.fillStyle = tagBg;
+          ctx.fillStyle = col;                                // tag chip = box color
           ctx.fillRect(tr.x, tr.y, tr.w, 14);
           if (i === node._hoverTitle) {                       // hover highlight
             ctx.fillStyle = "rgba(255,255,255,0.25)"; ctx.fillRect(tr.x, tr.y, tr.w, 14);
             ctx.strokeStyle = "#fff"; ctx.lineWidth = 1; ctx.strokeRect(tr.x + 0.5, tr.y + 0.5, tr.w - 1, 13);
           }
-          ctx.fillStyle = textOn(tagBg);
+          ctx.fillStyle = textOn(col);
           ctx.fillText(tr.tag, tr.x + 4, tr.y + 11);
           ctx.restore();
         }
@@ -417,6 +424,8 @@ app.registerExtension({
       }
 
       function commit() { serialize(); renderPanel(); drawCanvas(); updateTokens(); }
+      // Live text edit: persist + repaint + token count, without rebuilding the panel.
+      function touch() { serialize(); drawCanvas(); updateTokens(); }
 
       function removeBox(i) {
         node._boxes.splice(i, 1);
@@ -580,7 +589,7 @@ app.registerExtension({
       }
 
       canvasEl.addEventListener("contextmenu", (e) => e.preventDefault());
-      clearBtn.addEventListener("mousedown", (e) => e.stopPropagation());
+      stopProp(clearBtn);
       clearBtn.addEventListener("click", () => {
         closeInlineEditor();
         node._boxes = []; node._activeIdx = -1; node._stylePalette = [];
@@ -651,7 +660,7 @@ app.registerExtension({
         try { await navigator.clipboard.writeText(txt); copyBtn.textContent = "Copied"; setTimeout(() => (copyBtn.textContent = "Copy"), 900); }
         catch (e) { window.prompt("Copy the caption JSON:", txt); }
       }
-      copyBtn.addEventListener("mousedown", (e) => e.stopPropagation());
+      stopProp(copyBtn);
       copyBtn.addEventListener("click", doCopy);
 
       // ── import a caption JSON and populate the node ──
@@ -701,16 +710,20 @@ app.registerExtension({
         try { const o = JSON.parse(t); return (o && typeof o === "object" && o.compositional_deconstruction) ? o : null; }
         catch (e) { return null; }
       }
+      // Apply a parsed caption to the editor and refresh everything.
+      function loadCaption(cap) {
+        closeInlineEditor();
+        applyCaption(cap);
+        syncCanvasToDims(); commit(); rebuildStylePalette(); fitNode();
+      }
       async function doImport() {
         let cap = null, txt = "";
         try { txt = (await navigator.clipboard.readText() || "").trim(); cap = tryParseCaption(txt); } catch (e) {}
         if (!cap) { txt = (window.prompt("Paste Ideogram 4 caption JSON:", "") || "").trim(); cap = tryParseCaption(txt); }
         if (!cap) { if (txt) alert("Not a valid Ideogram 4 caption JSON (needs 'compositional_deconstruction')."); return; }
-        closeInlineEditor();
-        applyCaption(cap);
-        syncCanvasToDims(); commit(); rebuildStylePalette(); fitNode();
+        loadCaption(cap);
       }
-      importBtn.addEventListener("mousedown", (e) => e.stopPropagation());
+      stopProp(importBtn);
       importBtn.addEventListener("click", doImport);
 
       // Populate the editor from a caption pushed back by execute() when import_json
@@ -720,12 +733,18 @@ app.registerExtension({
         const cap = tryParseCaption(capStr);
         if (!cap) return;
         node._lastImported = capStr;
-        closeInlineEditor();
-        applyCaption(cap);
-        syncCanvasToDims(); commit(); rebuildStylePalette(); fitNode();
+        loadCaption(cap);
       }
       chainCallback(node, "onExecuted", function (message) {
         if (message?.caption) applyImported(message.caption[0]);
+        // Reflect resolved width/height (e.g. from connected inputs) in the canvas aspect.
+        // A connected background image governs the aspect itself, so skip then.
+        if (message?.dims && !node._bgImg) {
+          const [w, h] = message.dims;
+          if (wWidget && w) wWidget.value = w;
+          if (hWidget && h) hWidget.value = h;
+          syncCanvasToDims(); fitNode();
+        }
       });
 
       // ── property panel ──
@@ -757,11 +776,14 @@ app.registerExtension({
         }
       }
 
+      // Swatch color changed (no add/remove): persist + repaint.
+      function swatchEdit() { serialize(); drawCanvas(); }
+
       function rebuildStylePalette() {
         while (styleBar.children.length > 1) styleBar.removeChild(styleBar.lastChild);
         buildSwatchRow(styleBar, node._stylePalette, MAX_STYLE_COLORS,
-          () => { serialize(); drawCanvas(); },
-          () => { serialize(); drawCanvas(); rebuildStylePalette(); fitNode(); });
+          swatchEdit,
+          () => { swatchEdit(); rebuildStylePalette(); fitNode(); });
       }
 
       // Textarea whose user-dragged height persists across panel rebuilds / box switches.
@@ -815,20 +837,19 @@ app.registerExtension({
         // text (only for text type)
         if (b.type === "text") {
           panel.appendChild(makeArea("text", b.text, "text to render (verbatim)",
-            function () { b.text = this.value; serialize(); drawCanvas(); updateTokens(); }));
+            function () { b.text = this.value; touch(); }));
         }
 
         // desc — default ~3x the single-line min height
         panel.appendChild(makeArea("desc", b.desc, "description of this region",
-          function () { b.desc = this.value; serialize(); drawCanvas(); updateTokens(); }, 110));
+          function () { b.desc = this.value; touch(); }, 110));
 
         // palette
         const palRow = document.createElement("div");
         palRow.className = "kjideo-row";
         const pl = document.createElement("span"); pl.textContent = "colors:"; palRow.appendChild(pl);
         b.palette = b.palette || [];
-        buildSwatchRow(palRow, b.palette, MAX_ELEM_COLORS,
-          () => { serialize(); drawCanvas(); }, commit);
+        buildSwatchRow(palRow, b.palette, MAX_ELEM_COLORS, swatchEdit, commit);
         panel.appendChild(palRow);
 
         requestAnimationFrame(fitNode);
@@ -864,8 +885,9 @@ app.registerExtension({
         img.crossOrigin = "anonymous";
         img.onload = () => {
           node._bgImg = img;
-          if (wWidget) wWidget.value = img.naturalWidth;     // match canvas aspect to the image
-          if (hWidget) hWidget.value = img.naturalHeight;
+          const r16 = (v) => Math.max(16, Math.round(v / 16) * 16);   // model needs multiples of 16
+          if (wWidget) wWidget.value = r16(img.naturalWidth);          // match canvas aspect to the image
+          if (hWidget) hWidget.value = r16(img.naturalHeight);
           syncCanvasToDims(); drawCanvas(); fitNode();
         };
         img.src = src;
