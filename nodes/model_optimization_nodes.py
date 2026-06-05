@@ -131,13 +131,13 @@ class PathchSageAttentionKJ():
         return model_clone,
 
 
-def get_flash_func(deterministic=False, allow_compile=False, cast_dtype=torch.float16):
+def get_flash_func(allow_compile=False, cast_dtype=torch.float16):
     from flash_attn import flash_attn_func
-    logging.info(f"Using flash attention: deterministic={deterministic}, cast_dtype={cast_dtype}")
+    logging.info(f"Using flash attention: cast_dtype={cast_dtype}")
 
     # q, k, v in NHD layout (b, seq, heads, dim_head)
     def flash_func(q, k, v):
-        return flash_attn_func(q, k, v, dropout_p=0.0, causal=False, deterministic=deterministic)
+        return flash_attn_func(q, k, v, dropout_p=0.0, causal=False)
 
     if not allow_compile:
         flash_func = torch.compiler.disable()(flash_func)
@@ -175,17 +175,16 @@ class PatchFlashAttentionKJ():
             "model": ("MODEL",),
         },
         "optional": {
-            "deterministic": ("BOOLEAN", {"default": False, "tooltip": "Use deterministic kernels for reproducible results. Slightly slower."}),
             "allow_compile": ("BOOLEAN", {"default": False, "tooltip": "Allow torch.compile to trace into the flash attention function. If disabled (default), the function is wrapped with torch.compiler.disable() for compatibility, matching the sage attention node."}),
         }}
 
     RETURN_TYPES = ("MODEL", )
     FUNCTION = "patch"
-    DESCRIPTION = "Experimental node for patching attention to use flash attention, exposing options the ComfyUI default doesn't (deterministic, compile control, no silent fallback). Patches the attention of the model passing through this node; to disable, bypass or disconnect this node. Requires the flash_attn library to be installed."
+    DESCRIPTION = "Experimental node for patching attention to use flash attention, without the silent SDPA fallback the ComfyUI default does. Patches the attention of the model passing through this node; to disable, bypass or disconnect this node. Requires the flash_attn library to be installed."
     EXPERIMENTAL = True
     CATEGORY = "KJNodes/experimental"
 
-    def patch(self, model, deterministic=False, allow_compile=False):
+    def patch(self, model, allow_compile=False, deterministic=False):
         model_clone = model.clone()
 
         # match the model's compute dtype for the fp32 downcast, fall back to fp16
@@ -193,7 +192,6 @@ class PatchFlashAttentionKJ():
         cast_dtype = inference_dtype if inference_dtype in (torch.float16, torch.bfloat16) else torch.float16
 
         new_attention = get_flash_func(
-            deterministic=deterministic,
             allow_compile=allow_compile,
             cast_dtype=cast_dtype,
         )
