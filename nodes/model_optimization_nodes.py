@@ -184,7 +184,7 @@ class PatchFlashAttentionKJ():
     EXPERIMENTAL = True
     CATEGORY = "KJNodes/experimental"
 
-    def patch(self, model, allow_compile=False, deterministic=False):
+    def patch(self, model, allow_compile=False):
         model_clone = model.clone()
 
         # match the model's compute dtype for the fp32 downcast, fall back to fp16
