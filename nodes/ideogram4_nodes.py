@@ -220,6 +220,7 @@ the canvas aspect ratio.""",
             outputs=[
                 io.String.Output(display_name="prompt"),
                 io.Image.Output(display_name="preview"),
+                io.BoundingBox.Output(display_name="bboxes"),
             ],
         )
 
@@ -277,6 +278,26 @@ the canvas aspect ratio.""",
             except Exception:
                 bg = None
         preview = _render_preview(boxes, width, height, bg)
+
+        # Pixel-space bboxes ({x, y, width, height}) for SAM3 / BoundingBox consumers.
+        bbox_dicts = []
+        for box in boxes:
+            if not isinstance(box, dict) or box.get("nobbox"):
+                continue
+            x, y = box.get("x", 0.0), box.get("y", 0.0)
+            bw, bh = box.get("w", 0.0), box.get("h", 0.0)
+            if bw < 0:
+                x += bw
+                bw = -bw
+            if bh < 0:
+                y += bh
+                bh = -bh
+            bbox_dicts.append({"x": round(x * width), "y": round(y * height),
+                               "width": round(bw * width), "height": round(bh * height)})
+        # Per-frame nesting (list[list[dict]]) — the canonical BoundingBox shape that
+        # SAM3 / crop nodes expect (bboxes[frame] -> list of boxes).
+        bboxes_out = [bbox_dicts] if bbox_dicts else []
+
         # import_json (if wired) only loads into the editor via ui — the output and
         # preview always reflect the editor state, never the raw input.
         ui = {}
@@ -288,5 +309,5 @@ the canvas aspect ratio.""",
             except json.JSONDecodeError:
                 pass
         if ui:
-            return io.NodeOutput(_dumps(caption), preview, ui=ui)
-        return io.NodeOutput(_dumps(caption), preview)
+            return io.NodeOutput(_dumps(caption), preview, bboxes_out, ui=ui)
+        return io.NodeOutput(_dumps(caption), preview, bboxes_out)
