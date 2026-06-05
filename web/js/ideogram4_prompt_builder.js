@@ -11,13 +11,31 @@ let lastResultImage = null;
 try {
   app.api?.addEventListener?.("executed", (e) => {
     const imgs = e?.detail?.output?.images;
-    if (Array.isArray(imgs) && imgs.length) lastResultImage = imgs[imgs.length - 1];
+    if (Array.isArray(imgs) && imgs.length) {
+      lastResultImage = imgs[imgs.length - 1];
+      // Live nodes swap their preview for the full-res final result automatically.
+      for (const n of livePreviewNodes) n._ideoGrabFinal?.();
+    }
   });
 } catch (e) {}
 function resultViewUrl(img) {
   const p = new URLSearchParams({ filename: img.filename || "", subfolder: img.subfolder || "", type: img.type || "output" });
   return "/view?" + p.toString();
 }
+
+// Nodes opted into "live background": feed them the sampling preview frames as they arrive.
+const livePreviewNodes = new Set();
+try {
+  app.api?.addEventListener?.("b_preview", (e) => {
+    const blob = e?.detail;
+    if (!blob || !livePreviewNodes.size) return;
+    createImageBitmap(blob).then((bmp) => {
+      let used = false;
+      for (const n of livePreviewNodes) { n._ideoSetLiveBg?.(bmp); used = true; }
+      if (!used && bmp.close) bmp.close();
+    }).catch(() => {});
+  });
+} catch (e) {}
 
 // Parse a #rrggbb hex into {r,g,b}, or null if malformed.
 function hexRgb(hex) {
@@ -149,6 +167,19 @@ app.registerExtension({
         grabBtn.title = clear ? "Remove the grabbed background"
           : "Use the last generated image as the background";
       }
+      const liveLabel = document.createElement("label");
+      liveLabel.style.cssText = "display:flex;align-items:center;gap:3px;flex:0 0 auto;cursor:pointer;";
+      liveLabel.title = "Use the live sampling preview as the background while generating";
+      const liveChk = document.createElement("input");
+      liveChk.type = "checkbox";
+      liveChk.checked = !!node.properties.liveBg;
+      liveChk.addEventListener("mousedown", (e) => e.stopPropagation());
+      liveChk.addEventListener("change", () => {
+        node.properties.liveBg = liveChk.checked;
+        if (liveChk.checked) livePreviewNodes.add(node); else livePreviewNodes.delete(node);
+      });
+      liveLabel.appendChild(liveChk); liveLabel.appendChild(document.createTextNode("Live"));
+      if (liveChk.checked) livePreviewNodes.add(node);
       const bgSlider = document.createElement("input");
       bgSlider.type = "range"; bgSlider.min = "0"; bgSlider.max = "100"; bgSlider.step = "1";
       bgSlider.value = bgBrightnessWidget ? bgBrightnessWidget.value : 25;
@@ -156,7 +187,7 @@ app.registerExtension({
       bgSlider.style.cssText = "width:64px;flex:0 0 auto;";
       stopProp(bgSlider);
       bgSlider.addEventListener("input", () => { if (bgBrightnessWidget) bgBrightnessWidget.value = parseInt(bgSlider.value, 10); drawCanvas(); });
-      bar.appendChild(hint); bar.appendChild(grabBtn); bar.appendChild(bgSlider); bar.appendChild(tokenSpan); bar.appendChild(copyBtn); bar.appendChild(importBtn); bar.appendChild(clearBtn);
+      bar.appendChild(hint); bar.appendChild(liveLabel); bar.appendChild(grabBtn); bar.appendChild(bgSlider); bar.appendChild(tokenSpan); bar.appendChild(copyBtn); bar.appendChild(importBtn); bar.appendChild(clearBtn);
       updateGrabBtn();
 
       // Persistent global style-palette row
@@ -973,7 +1004,24 @@ app.registerExtension({
         node._bgManual = true;
         loadBg(resultViewUrl(lastResultImage));
       };
-      node._clearBg = () => { node._bgManual = false; node._bgImg = null; drawCanvas(); updateGrabBtn(); };
+      node._clearBg = () => {
+        node._bgManual = false; node._bgImg = null;
+        if (node._liveBmp?.close) { try { node._liveBmp.close(); } catch (e) {} node._liveBmp = null; }
+        drawCanvas(); updateGrabBtn();
+      };
+      // Feed a live sampling-preview frame as the background (no width/height change).
+      node._ideoSetLiveBg = (bmp) => {
+        if (node._liveBmp?.close && node._liveBmp !== bmp) { try { node._liveBmp.close(); } catch (e) {} }
+        node._liveBmp = bmp; node._bgImg = bmp; node._bgManual = true;
+        drawCanvas(); updateGrabBtn();
+      };
+      // After generation, replace the live preview with the full-res final result.
+      node._ideoGrabFinal = () => {
+        if (!lastResultImage) return;
+        if (node._liveBmp?.close) { try { node._liveBmp.close(); } catch (e) {} node._liveBmp = null; }
+        node._bgManual = true;
+        loadBg(resultViewUrl(lastResultImage));
+      };
 
       // Active-box highlight only while the editor is focused or the node is selected.
       wrap.addEventListener("focusin", () => { if (!node._focused) { node._focused = true; drawCanvas(); } });
@@ -984,6 +1032,7 @@ app.registerExtension({
       chainCallback(node, "onDeselected", function () { node._selected = false; drawCanvas(); });
 
       chainCallback(node, "onRemoved", function () {
+        livePreviewNodes.delete(node);
         closeInlineEditor();
         for (const ro of node._areaObservers) ro.disconnect();
         node._areaObservers = [];
