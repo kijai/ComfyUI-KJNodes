@@ -86,7 +86,7 @@ function injectStyle() {
     body.kjideo-dragging, body.kjideo-dragging * { cursor:move !important; }
     .kjideo-sw input { position:absolute; opacity:0; width:0; height:0; pointer-events:none; }
     .kjideo-inline { position:absolute; box-sizing:border-box; background:rgba(18,18,18,0.92); border:2px solid #46b4e6; border-radius:3px; color:#fff; font:13px monospace; padding:3px 4px; resize:none; outline:none; z-index:10; }
-    .kjideo-menu { position:fixed; z-index:10000; background:#262626; border:1px solid #555; border-radius:6px; padding:4px; box-shadow:0 6px 20px rgba(0,0,0,0.55); font:12px sans-serif; color:#ddd; max-height:60vh; overflow-y:auto; min-width:210px; }
+    .kjideo-menu { position:fixed; z-index:10000; background:#262626; border:1px solid #555; border-radius:6px; padding:4px; box-shadow:0 6px 20px rgba(0,0,0,0.55); font:12px sans-serif; color:#ddd; max-height:60vh; overflow-y:auto; min-width:210px; max-width:340px; }
     .kjideo-mhdr { font:11px sans-serif; color:#888; padding:2px 6px 4px; user-select:none; }
     .kjideo-lrow { display:flex; align-items:center; gap:6px; padding:3px 5px; border-radius:4px; cursor:move; user-select:none; transition:transform .18s ease, box-shadow .12s ease, opacity .12s ease, background .12s; }
     .kjideo-lrow:hover { background:#333; }
@@ -94,7 +94,7 @@ function injectStyle() {
     .kjideo-lrow.dragging { opacity:.4; box-shadow:0 0 0 2px #46b4e6; background:#333; }
     .kjideo-lsw { width:16px; height:16px; border-radius:3px; border:1px solid #666; flex:0 0 auto; }
     .kjideo-lnum { font:bold 11px monospace; color:#888; flex:0 0 auto; width:18px; }
-    .kjideo-ltext { flex:1 1 auto; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .kjideo-ltext { flex:1 1 auto; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
     .kjideo-ltext.empty { color:#777; font-style:italic; }
     .kjideo-lbtn { background:none; border:none; color:#999; cursor:pointer; font:13px sans-serif; line-height:1; padding:2px 5px; border-radius:3px; flex:0 0 auto; }
     .kjideo-lbtn:hover { color:#fff; background:#444; }
