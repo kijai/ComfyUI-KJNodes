@@ -6,6 +6,19 @@ const MAX_ELEM_COLORS = 5;   // Ideogram 4 per-element palette cap
 const MAX_STYLE_COLORS = 16; // Ideogram 4 style palette cap
 let copiedBox = null;        // internal clipboard for copy/paste of regions (shared across nodes)
 
+// Track the most recent generated image so it can be grabbed as a background.
+let lastResultImage = null;
+try {
+  app.api?.addEventListener?.("executed", (e) => {
+    const imgs = e?.detail?.output?.images;
+    if (Array.isArray(imgs) && imgs.length) lastResultImage = imgs[imgs.length - 1];
+  });
+} catch (e) {}
+function resultViewUrl(img) {
+  const p = new URLSearchParams({ filename: img.filename || "", subfolder: img.subfolder || "", type: img.type || "output" });
+  return "/view?" + p.toString();
+}
+
 // Parse a #rrggbb hex into {r,g,b}, or null if malformed.
 function hexRgb(hex) {
   const h = (hex || "").replace("#", "");
@@ -49,7 +62,10 @@ function injectStyle() {
     .kjideo-btn:hover { border-color:#46b4e6; color:#fff; }
     .kjideo-btn.active { border-color:#46b4e6; color:#46b4e6; background:#2a3a42; }
     .kjideo-area { width:100%; box-sizing:border-box; background:#1d1d1d; border:1px solid #444; border-radius:4px; color:#ddd; font:13px monospace; padding:4px 6px; resize:vertical; min-height:36px; }
-    .kjideo-sw { width:20px; height:20px; border:1px solid #666; border-radius:3px; cursor:pointer; flex-shrink:0; position:relative; }
+    .kjideo-sw { width:20px; height:20px; border:1px solid #666; border-radius:3px; cursor:pointer; flex-shrink:0; position:relative; transition:transform .18s ease, box-shadow .12s ease, opacity .12s ease; }
+    .kjideo-sw:hover { transform:scale(1.2); box-shadow:0 0 0 2px #46b4e6; z-index:3; }
+    .kjideo-sw.dragging { opacity:.4; box-shadow:0 0 0 2px #46b4e6; }
+    body.kjideo-dragging, body.kjideo-dragging * { cursor:move !important; }
     .kjideo-sw input { position:absolute; opacity:0; width:0; height:0; pointer-events:none; }
     .kjideo-inline { position:absolute; box-sizing:border-box; background:rgba(18,18,18,0.92); border:2px solid #46b4e6; border-radius:3px; color:#fff; font:13px monospace; padding:3px 4px; resize:none; outline:none; z-index:10; }
   `;
@@ -97,6 +113,7 @@ app.registerExtension({
       node._focused = false;   // editor (DOM) focused — gates the active-box highlight
       node._selected = false;  // node selected in the graph
       node._bgImg = null;      // optional reference image shown as the canvas background
+      node._bgManual = false;  // bg set via "use last result" (not the image input)
       node._lastImported = ""; // last import_json applied to the editor (avoid re-apply)
       node._areaH = node._areaH || {};      // remembered textarea heights (per field)
       node._areaObservers = [];             // live ResizeObservers to disconnect on rebuild
@@ -122,6 +139,16 @@ app.registerExtension({
       const tokenSpan = document.createElement("span");
       tokenSpan.style.cssText = "color:#888; white-space:nowrap;";
       tokenSpan.title = "Rough token estimate (~chars/4). Grey <256, green healthy, orange nearing, red ≥2048 (model cap — will error)";
+      const grabBtn = document.createElement("button");
+      grabBtn.className = "kjideo-btn";
+      grabBtn.addEventListener("mousedown", (e) => e.stopPropagation());
+      grabBtn.addEventListener("click", () => { (node._bgManual && node._bgImg) ? node._clearBg() : node._grabResultBg(); });
+      function updateGrabBtn() {
+        const clear = node._bgManual && node._bgImg;
+        grabBtn.textContent = clear ? "Clear BG" : "Grab BG";
+        grabBtn.title = clear ? "Remove the grabbed background"
+          : "Use the last generated image as the background";
+      }
       const bgSlider = document.createElement("input");
       bgSlider.type = "range"; bgSlider.min = "0"; bgSlider.max = "100"; bgSlider.step = "1";
       bgSlider.value = bgBrightnessWidget ? bgBrightnessWidget.value : 25;
@@ -129,7 +156,8 @@ app.registerExtension({
       bgSlider.style.cssText = "width:64px;flex:0 0 auto;";
       stopProp(bgSlider);
       bgSlider.addEventListener("input", () => { if (bgBrightnessWidget) bgBrightnessWidget.value = parseInt(bgSlider.value, 10); drawCanvas(); });
-      bar.appendChild(hint); bar.appendChild(bgSlider); bar.appendChild(tokenSpan); bar.appendChild(copyBtn); bar.appendChild(importBtn); bar.appendChild(clearBtn);
+      bar.appendChild(hint); bar.appendChild(grabBtn); bar.appendChild(bgSlider); bar.appendChild(tokenSpan); bar.appendChild(copyBtn); bar.appendChild(importBtn); bar.appendChild(clearBtn);
+      updateGrabBtn();
 
       // Persistent global style-palette row
       const styleBar = document.createElement("div");
@@ -435,14 +463,6 @@ app.registerExtension({
 
       // ── pointer interaction ──
       canvasEl.addEventListener("mousedown", (e) => {
-        if (e.button === 2) {            // right-click delete
-          e.preventDefault();
-          const hit = hitTest(mouseN(e));
-          if (hit) removeBox(hit.index);
-          else if (node._activeIdx >= 0) removeBox(node._activeIdx);
-          commit(); fitNode();
-          return;
-        }
         if (e.button !== 0) return;
         canvasEl.focus();                // so Delete/Backspace targets this editor
         node._hoverTitle = null; node._hoverBox = null;  // clear hover highlight while interacting
@@ -751,21 +771,69 @@ app.registerExtension({
       function stopProp(el) {
         for (const ev of ["mousedown", "pointerdown", "wheel"]) el.addEventListener(ev, (e) => e.stopPropagation());
       }
-      // Color swatches: onEdit on change, onStruct on add/remove. Shared by both palettes.
+      // Color swatches: onEdit on change, onStruct on add/remove/reorder. Shared by both palettes.
+      // Pointer-based drag (HTML5 DnD is unreliable inside LiteGraph DOM widgets) with live reorder.
       function buildSwatchRow(container, arr, max, onEdit, onStruct) {
         arr.forEach((hex, i) => {
           const sw = document.createElement("div");
           sw.className = "kjideo-sw";
           sw.style.background = hex;
-          sw.title = "Click to edit · right-click to remove";
+          sw.dataset.hex = hex;
+          sw.title = "Click edit · drag reorder · right-click remove";
           const inp = document.createElement("input");
           inp.type = "color"; inp.value = hex;
-          stopProp(sw);
-          sw.addEventListener("click", () => inp.click());
-          sw.addEventListener("contextmenu", (e) => { e.preventDefault(); e.stopPropagation(); arr.splice(i, 1); onStruct(); });
-          inp.addEventListener("input", () => { arr[i] = inp.value; sw.style.background = inp.value; onEdit(); });
           sw.appendChild(inp);
           container.appendChild(sw);
+          inp.addEventListener("input", () => { arr[i] = inp.value; sw.style.background = inp.value; sw.dataset.hex = inp.value; onEdit(); });
+          sw.addEventListener("wheel", (e) => e.stopPropagation());
+          sw.addEventListener("contextmenu", (e) => { e.preventDefault(); e.stopPropagation(); arr.splice(i, 1); onStruct(); });
+          sw.addEventListener("mousedown", (e) => {
+            if (e.button !== 0) return;
+            e.preventDefault(); e.stopPropagation();
+            const sx = e.clientX, sy = e.clientY;
+            let dragging = false;
+            const move = (me) => {
+              if (!dragging) {
+                if (Math.abs(me.clientX - sx) + Math.abs(me.clientY - sy) < 4) return;
+                dragging = true; sw.classList.add("dragging"); document.body.classList.add("kjideo-dragging");
+              }
+              for (const other of container.querySelectorAll(".kjideo-sw")) {
+                if (other === sw) continue;
+                const r = other.getBoundingClientRect();
+                if (me.clientX >= r.left && me.clientX <= r.right && me.clientY >= r.top - 6 && me.clientY <= r.bottom + 6) {
+                  const ref = me.clientX > r.left + r.width / 2 ? other.nextSibling : other;
+                  if (ref === sw || ref === sw.nextSibling) break;   // already there
+                  const els = Array.from(container.querySelectorAll(".kjideo-sw"));
+                  const prev = els.map((el) => el.getBoundingClientRect().left);
+                  container.insertBefore(sw, ref);
+                  els.forEach((el, k) => {                            // FLIP: slide to new positions
+                    const dx = prev[k] - el.getBoundingClientRect().left;
+                    if (!dx) return;
+                    el.style.transition = "none";
+                    el.style.transform = `translateX(${dx}px)`;
+                    el.getBoundingClientRect();                       // flush
+                    el.style.transition = ""; el.style.transform = "";
+                  });
+                  break;
+                }
+              }
+            };
+            const up = () => {
+              document.removeEventListener("mousemove", move);
+              document.removeEventListener("mouseup", up);
+              document.body.classList.remove("kjideo-dragging");
+              if (dragging) {
+                sw.classList.remove("dragging");
+                const order = Array.from(container.querySelectorAll(".kjideo-sw")).map((el) => el.dataset.hex);
+                if (order.length === arr.length) { arr.length = 0; arr.push(...order); }
+                onStruct();
+              } else {
+                inp.click();                                 // no drag → treat as click, open the picker
+              }
+            };
+            document.addEventListener("mousemove", move);
+            document.addEventListener("mouseup", up);
+          });
         });
         if (arr.length < max) {
           const add = document.createElement("button");
@@ -818,7 +886,7 @@ app.registerExtension({
           return;
         }
         const col = (b.palette || []).find(Boolean) || "#bbb";
-        hint.innerHTML = `<b style="color:${col}">region ${node._activeIdx + 1}</b> · dbl-click edit · alt-click overlap · del/right-click remove`;
+        hint.innerHTML = `<b style="color:${col}">region ${node._activeIdx + 1}</b> · dbl-click edit · alt-click overlap · del remove`;
 
         // type toggle
         const typeRow = document.createElement("div");
@@ -888,16 +956,24 @@ app.registerExtension({
           const r16 = (v) => Math.max(16, Math.round(v / 16) * 16);   // model needs multiples of 16
           if (wWidget) wWidget.value = r16(img.naturalWidth);          // match canvas aspect to the image
           if (hWidget) hWidget.value = r16(img.naturalHeight);
-          syncCanvasToDims(); drawCanvas(); fitNode();
+          syncCanvasToDims(); drawCanvas(); fitNode(); updateGrabBtn();
         };
         img.src = src;
       }
       watchImageInputs(node, "image", (sources) => {
-        if (!sources.length) { node._bgImg = null; drawCanvas(); return; }
+        if (!sources.length) { if (!node._bgManual) { node._bgImg = null; drawCanvas(); updateGrabBtn(); } return; }
+        node._bgManual = false;                              // a connected image takes over
         const s = sources[0];
         if (s.isVideo && s.videoEl) captureVideoFrame(s.videoEl, (cv) => loadBg(cv.toDataURL("image/webp", 0.9)));
         else if (s.url) loadBg(s.url);
       });
+      // "Grab BG" button: use the last generated image as the background, or clear it.
+      node._grabResultBg = () => {
+        if (!lastResultImage) { alert("No sampling result yet — run a generation first."); return; }
+        node._bgManual = true;
+        loadBg(resultViewUrl(lastResultImage));
+      };
+      node._clearBg = () => { node._bgManual = false; node._bgImg = null; drawCanvas(); updateGrabBtn(); };
 
       // Active-box highlight only while the editor is focused or the node is selected.
       wrap.addEventListener("focusin", () => { if (!node._focused) { node._focused = true; drawCanvas(); } });
