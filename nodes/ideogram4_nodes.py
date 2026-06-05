@@ -50,14 +50,20 @@ def _wrap(draw, text, font, max_w):
     return lines
 
 
-def _render_preview(boxes, width, height):
-    # Render the regions + prompts on a black canvas, mirroring the JS editor.
-    long_edge = max(width, height)
-    scale = min(1.0, 1024 / long_edge) if long_edge > 0 else 1.0
-    rw = max(1, round(width * scale))
-    rh = max(1, round(height * scale))
-
-    img = Image.new("RGBA", (rw, rh), (0, 0, 0, 255))
+def _render_preview(boxes, width, height, bg=None):
+    # Render the regions + prompts over the reference image (or a black canvas).
+    if bg is not None:
+        iw, ih = bg.size
+        long_edge = max(iw, ih)
+        scale = min(1.0, 1024 / long_edge) if long_edge > 0 else 1.0
+        rw, rh = max(1, round(iw * scale)), max(1, round(ih * scale))
+        img = bg.convert("RGBA").resize((rw, rh), Image.LANCZOS)
+    else:
+        long_edge = max(width, height)
+        scale = min(1.0, 1024 / long_edge) if long_edge > 0 else 1.0
+        rw = max(1, round(width * scale))
+        rh = max(1, round(height * scale))
+        img = Image.new("RGBA", (rw, rh), (0, 0, 0, 255))
     overlay = Image.new("RGBA", (rw, rh), (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
     fs = max(10, round(rh / 64))
@@ -201,6 +207,8 @@ the canvas aspect ratio.""",
                 io.String.Input("aesthetics", default="", tooltip="Style descriptor (blank = omitted)."),
                 io.String.Input("lighting", default="", tooltip="Style descriptor (blank = omitted)."),
                 io.String.Input("medium", default="", tooltip="Style descriptor (blank = omitted)."),
+                io.Image.Input("image", optional=True,
+                               tooltip="Optional reference image shown as the editor background (and behind the preview)."),
                 io.String.Input("import_json", default="", optional=True, force_input=True,
                                 tooltip="Optional: a full caption JSON. When connected, it loads into the "
                                         "editor on run; the output always reflects the editor, never the raw input."),
@@ -218,7 +226,7 @@ the canvas aspect ratio.""",
     @classmethod
     def execute(cls, width, height, background, style,
                 high_level_description="", aesthetics="", lighting="", medium="",
-                style_palette_data="", elements_data="", import_json="") -> io.NodeOutput:
+                style_palette_data="", elements_data="", import_json="", image=None) -> io.NodeOutput:
         boxes = _parse_json_list(elements_data)
 
         caption = {}
@@ -262,7 +270,13 @@ the canvas aspect ratio.""",
             "background": background,
             "elements": elements,
         }
-        preview = _render_preview(boxes, width, height)
+        bg = None
+        if image is not None:
+            try:
+                bg = Image.fromarray((image[0].detach().cpu().numpy() * 255).clip(0, 255).astype(np.uint8))
+            except Exception:
+                bg = None
+        preview = _render_preview(boxes, width, height, bg)
         # import_json (if wired) only loads into the editor via ui — the output and
         # preview always reflect the editor state, never the raw input.
         ui = {}

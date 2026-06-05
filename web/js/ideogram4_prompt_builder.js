@@ -1,4 +1,4 @@
-import { chainCallback, addMiddleClickPan, addWheelPassthrough, rectHitTest, cursorForBboxMode } from './utility.js';
+import { chainCallback, addMiddleClickPan, addWheelPassthrough, rectHitTest, cursorForBboxMode, watchImageInputs, captureVideoFrame } from './utility.js';
 const { app } = window.comfyAPI.app;
 
 const HANDLE = 8;            // hit radius (canvas px) for corners/edges
@@ -73,6 +73,7 @@ app.registerExtension({
       node._hoverBox = null;   // index of the box under the cursor
       node._focused = false;   // editor (DOM) focused — gates the active-box highlight
       node._selected = false;  // node selected in the graph
+      node._bgImg = null;      // optional reference image shown as the canvas background
       node._lastImported = ""; // last import_json applied to the editor (avoid re-apply)
       node._areaH = node._areaH || {};      // remembered textarea heights (per field)
       node._areaObservers = [];             // live ResizeObservers to disconnect on rebuild
@@ -313,7 +314,8 @@ app.registerExtension({
         if (canvasEl.width !== bw || canvasEl.height !== bh) { canvasEl.width = bw; canvasEl.height = bh; }
         ctx.setTransform(d, 0, 0, d, 0, 0);
         ctx.clearRect(0, 0, W, H);
-        ctx.fillStyle = "#1a1a1a"; ctx.fillRect(0, 0, W, H);
+        if (node._bgImg) ctx.drawImage(node._bgImg, 0, 0, W, H);   // reference image background
+        else { ctx.fillStyle = "#1a1a1a"; ctx.fillRect(0, 0, W, H); }
         // active box only when the editor is focused or the node is selected
         const aIdx = (node._focused || node._selected) ? node._activeIdx : -1;
         const order = node._boxes.map((_, i) => i).filter((i) => i !== aIdx);
@@ -821,6 +823,25 @@ app.registerExtension({
         if (node.size[1] < minH) node.size[1] = minH;
         drawCanvas();
         _resizing = false;
+      });
+
+      // Optional reference image as the canvas background (matches ImageTransformKJ).
+      function loadBg(src) {
+        const img = new Image();
+        img.crossOrigin = "anonymous";
+        img.onload = () => {
+          node._bgImg = img;
+          if (wWidget) wWidget.value = img.naturalWidth;     // match canvas aspect to the image
+          if (hWidget) hWidget.value = img.naturalHeight;
+          syncCanvasToDims(); drawCanvas(); fitNode();
+        };
+        img.src = src;
+      }
+      watchImageInputs(node, "image", (sources) => {
+        if (!sources.length) { node._bgImg = null; drawCanvas(); return; }
+        const s = sources[0];
+        if (s.isVideo && s.videoEl) captureVideoFrame(s.videoEl, (cv) => loadBg(cv.toDataURL("image/webp", 0.9)));
+        else if (s.url) loadBg(s.url);
       });
 
       // Active-box highlight only while the editor is focused or the node is selected.
