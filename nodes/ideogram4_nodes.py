@@ -200,10 +200,10 @@ as widgets. Outputs the assembled caption JSON string.
 bbox is normalized to a 0-1000 grid as [ymin, xmin, ymax, xmax]; width/height set
 the canvas aspect ratio.""",
             inputs=[
-                io.Int.Input("width", default=1024, min=64, max=16384, step=8,
-                             tooltip="Canvas aspect width (also the pixel grid the bbox is measured in)."),
-                io.Int.Input("height", default=1024, min=64, max=16384, step=8,
-                             tooltip="Canvas aspect height (also the pixel grid the bbox is measured in)."),
+                io.Int.Input("width", default=1024, min=64, max=16384, step=16,
+                             tooltip="Canvas aspect width (also the pixel grid the bbox is measured in). Ideogram 4 needs multiples of 16."),
+                io.Int.Input("height", default=1024, min=64, max=16384, step=16,
+                             tooltip="Canvas aspect height (also the pixel grid the bbox is measured in). Ideogram 4 needs multiples of 16."),
                 io.String.Input("high_level_description", multiline=True, default="",
                                 tooltip="Optional one-line overview of the whole image (blank = omitted)."),
                 io.String.Input("background", multiline=True, default="",
@@ -236,6 +236,8 @@ the canvas aspect ratio.""",
                 io.String.Output(display_name="prompt"),
                 io.Image.Output(display_name="preview"),
                 io.BoundingBox.Output(display_name="bboxes"),
+                io.Int.Output(display_name="width"),
+                io.Int.Output(display_name="height"),
             ],
         )
 
@@ -313,9 +315,9 @@ the canvas aspect ratio.""",
         # SAM3 / crop nodes expect (bboxes[frame] -> list of boxes).
         bboxes_out = [bbox_dicts] if bbox_dicts else []
 
-        # import_json (if wired) only loads into the editor via ui — the output and
-        # preview always reflect the editor state, never the raw input.
-        ui = {}
+        # ui: send the resolved width/height so the editor canvas can follow connected
+        # inputs; import_json (if wired) loads into the editor (output reflects editor only).
+        ui = {"dims": [width, height]}
         if import_json and import_json.strip():
             try:
                 cap = json.loads(import_json)
@@ -323,6 +325,4 @@ the canvas aspect ratio.""",
                     ui["caption"] = [_dumps(cap)]
             except json.JSONDecodeError:
                 pass
-        if ui:
-            return io.NodeOutput(_dumps(caption), preview, bboxes_out, ui=ui)
-        return io.NodeOutput(_dumps(caption), preview, bboxes_out)
+        return io.NodeOutput(_dumps(caption), preview, bboxes_out, width, height, ui=ui)
