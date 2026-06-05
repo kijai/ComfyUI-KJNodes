@@ -86,6 +86,19 @@ function injectStyle() {
     body.kjideo-dragging, body.kjideo-dragging * { cursor:move !important; }
     .kjideo-sw input { position:absolute; opacity:0; width:0; height:0; pointer-events:none; }
     .kjideo-inline { position:absolute; box-sizing:border-box; background:rgba(18,18,18,0.92); border:2px solid #46b4e6; border-radius:3px; color:#fff; font:13px monospace; padding:3px 4px; resize:none; outline:none; z-index:10; }
+    .kjideo-menu { position:fixed; z-index:10000; background:#262626; border:1px solid #555; border-radius:6px; padding:4px; box-shadow:0 6px 20px rgba(0,0,0,0.55); font:12px sans-serif; color:#ddd; max-height:60vh; overflow-y:auto; min-width:210px; }
+    .kjideo-mhdr { font:11px sans-serif; color:#888; padding:2px 6px 4px; user-select:none; }
+    .kjideo-lrow { display:flex; align-items:center; gap:6px; padding:3px 5px; border-radius:4px; cursor:move; user-select:none; transition:transform .18s ease, box-shadow .12s ease, opacity .12s ease, background .12s; }
+    .kjideo-lrow:hover { background:#333; }
+    .kjideo-lrow.active { background:#2a3a42; box-shadow:inset 0 0 0 1px #46b4e6; }
+    .kjideo-lrow.dragging { opacity:.4; box-shadow:0 0 0 2px #46b4e6; background:#333; }
+    .kjideo-lsw { width:16px; height:16px; border-radius:3px; border:1px solid #666; flex:0 0 auto; }
+    .kjideo-lnum { font:bold 11px monospace; color:#888; flex:0 0 auto; width:18px; }
+    .kjideo-ltext { flex:1 1 auto; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .kjideo-ltext.empty { color:#777; font-style:italic; }
+    .kjideo-lbtn { background:none; border:none; color:#999; cursor:pointer; font:13px sans-serif; line-height:1; padding:2px 5px; border-radius:3px; flex:0 0 auto; }
+    .kjideo-lbtn:hover { color:#fff; background:#444; }
+    .kjideo-lbtn.del:hover { color:#fff; background:#a33; }
   `;
   document.head.appendChild(s);
 }
@@ -123,6 +136,7 @@ app.registerExtension({
       node._stylePalette = []; // global style color palette (hex[])
       node._activeIdx = -1;
       node._drawing = false;
+      node._placing = false;   // duplicate-placement mode: active box follows the cursor until clicked
       node._dragMode = null;
       node._dragStartN = null; // mouse-down point, normalized
       node._boxAtStart = null; // active box snapshot at drag start
@@ -201,7 +215,7 @@ app.registerExtension({
       canvasEl.className = "kjideo-canvas";
       canvasEl.tabIndex = 0;                                  // focusable, so it can receive key events
       canvasEl.title = "Drag to draw · click to select · alt-click overlap · dbl-click edit · " +
-        "Del remove · Ctrl/Cmd+C/V/D copy/paste/duplicate";
+        "right-click region list · Del remove · Ctrl/Cmd+C/V/D copy/paste/duplicate";
       const ctx = canvasEl.getContext("2d");
       addWheelPassthrough(wrap);
       addMiddleClickPan(canvasEl);
@@ -494,6 +508,12 @@ app.registerExtension({
 
       // ── pointer interaction ──
       canvasEl.addEventListener("mousedown", (e) => {
+        if (node._placing) {             // drop the duplicate being placed
+          if (e.button === 0) { placeFollower(mouseN(e)); finishPlacing(); }
+          else cancelPlacing();
+          e.preventDefault(); e.stopPropagation();
+          return;
+        }
         if (e.button !== 0) return;
         canvasEl.focus();                // so Delete/Backspace targets this editor
         node._hoverTitle = null; node._hoverBox = null;  // clear hover highlight while interacting
@@ -519,6 +539,7 @@ app.registerExtension({
       });
 
       canvasEl.addEventListener("mousemove", (e) => {
+        if (node._placing) { placeFollower(mouseN(e)); return; }
         if (node._drawing) return;
         const mN = mouseN(e);
         const ti = titleAt(mN);
@@ -599,6 +620,10 @@ app.registerExtension({
       // Keyboard: Delete removes; Ctrl/Cmd C/V/D copy/paste/duplicate the active region.
       // Canvas must be focused; stop the event so LiteGraph doesn't act on the node.
       canvasEl.addEventListener("keydown", (e) => {
+        if (node._placing) {
+          if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); cancelPlacing(); }
+          return;
+        }
         if (node._drawing) return;
         const ctrl = e.ctrlKey || e.metaKey;
         if ((e.key === "Delete" || e.key === "Backspace") && node._activeIdx >= 0) {
@@ -639,7 +664,194 @@ app.registerExtension({
         commit();
       }
 
-      canvasEl.addEventListener("contextmenu", (e) => e.preventDefault());
+      // ── duplicate placement: the new box follows the cursor until clicked ──
+      function placeFollower(mN) {
+        const b = node._boxes[node._activeIdx];
+        if (!b) return;
+        b.x = clamp01(Math.min(mN.x - b.w / 2, 1 - b.w));
+        b.y = clamp01(Math.min(mN.y - b.h / 2, 1 - b.h));
+        delete b.nobbox;
+        drawCanvas();
+      }
+      function startPlacing(srcIdx) {
+        const src = node._boxes[srcIdx];
+        if (!src) return;
+        const nb = JSON.parse(JSON.stringify(src));
+        delete nb.nobbox;
+        node._boxes.push(nb);
+        node._activeIdx = node._boxes.length - 1;
+        node._placing = true;
+        canvasEl.focus();
+        canvasEl.style.cursor = "move";
+        serialize(); renderPanel(); drawCanvas(); updateTokens();
+      }
+      function finishPlacing() {
+        if (!node._placing) return;
+        node._placing = false;
+        canvasEl.style.cursor = "crosshair";
+        commit(); fitNode();
+      }
+      function cancelPlacing() {
+        if (!node._placing) return;
+        node._placing = false;
+        canvasEl.style.cursor = "crosshair";
+        removeBox(node._activeIdx);
+        commit(); fitNode();
+      }
+
+      // ── right-click "layers" menu: list / select / delete / duplicate / reorder regions ──
+      function closeLayersMenu() {
+        if (node._layerMenu) { node._layerMenu.remove(); node._layerMenu = null; }
+        if (node._layerMenuDismiss) {
+          document.removeEventListener("mousedown", node._layerMenuDismiss, true);
+          node._layerMenuDismiss = null;
+        }
+      }
+      function rowLabel(b) {
+        if (b.type === "text") {
+          const t = b.text ? `"${b.text}"` : "";
+          return b.desc ? (t ? t + " — " + b.desc : b.desc) : t;
+        }
+        return b.desc || "";
+      }
+      function openLayersMenu(clientX, clientY) {
+        closeLayersMenu();
+        const menu = document.createElement("div");
+        menu.className = "kjideo-menu";
+        const hdr = document.createElement("div");
+        hdr.className = "kjideo-mhdr";
+        hdr.textContent = "Regions — click select · drag reorder";
+        menu.appendChild(hdr);
+        const list = document.createElement("div");
+        menu.appendChild(list);
+        node._layerMenu = menu;
+
+        const renumber = () => Array.from(list.querySelectorAll(".kjideo-lrow")).forEach((row, k) => {
+          row.querySelector(".kjideo-lnum").textContent = String(k + 1).padStart(2, "0");
+        });
+        function buildRows() {
+          list.innerHTML = "";
+          if (!node._boxes.length) {
+            const empty = document.createElement("div");
+            empty.className = "kjideo-mhdr"; empty.textContent = "No regions yet.";
+            list.appendChild(empty);
+            return;
+          }
+          node._boxes.forEach((b, i) => {
+            const row = document.createElement("div");
+            row.className = "kjideo-lrow" + (i === node._activeIdx ? " active" : "");
+            row._box = b;
+            const sw = document.createElement("div");
+            sw.className = "kjideo-lsw";
+            sw.style.background = (b.palette || []).find(Boolean) || "#8c8c8c";
+            const num = document.createElement("span");
+            num.className = "kjideo-lnum"; num.textContent = String(i + 1).padStart(2, "0");
+            const txt = document.createElement("span");
+            const label = rowLabel(b);
+            txt.className = "kjideo-ltext" + (label ? "" : " empty");
+            txt.textContent = label || (b.type === "text" ? "(text)" : "(empty)");
+            txt.title = label;
+            const dup = document.createElement("button");
+            dup.className = "kjideo-lbtn"; dup.textContent = "⧉";
+            dup.title = "Duplicate, then click on the canvas to place";
+            const del = document.createElement("button");
+            del.className = "kjideo-lbtn del"; del.textContent = "✕";
+            del.title = "Delete region";
+            row.append(sw, num, txt, dup, del);
+            list.appendChild(row);
+
+            row.addEventListener("click", () => {
+              if (row._dragged) { row._dragged = false; return; }
+              node._activeIdx = node._boxes.indexOf(b);
+              commit();
+              for (const r of list.querySelectorAll(".kjideo-lrow")) r.classList.toggle("active", r._box === b);
+            });
+            dup.addEventListener("click", (e) => {
+              e.stopPropagation();
+              const idx = node._boxes.indexOf(b);
+              closeLayersMenu();
+              startPlacing(idx);
+            });
+            del.addEventListener("click", (e) => {
+              e.stopPropagation();
+              const idx = node._boxes.indexOf(b);
+              if (idx < 0) return;
+              removeBox(idx); commit(); fitNode();
+              if (!node._boxes.length) { closeLayersMenu(); return; }
+              buildRows();
+            });
+            // drag-reorder (vertical FLIP, mirrors the palette swatch reorder)
+            row.addEventListener("mousedown", (e) => {
+              if (e.button !== 0 || e.target === dup || e.target === del) return;
+              e.preventDefault(); e.stopPropagation();
+              const sx = e.clientX, sy = e.clientY;
+              let dragging = false;
+              const move = (me) => {
+                if (!dragging) {
+                  if (Math.abs(me.clientX - sx) + Math.abs(me.clientY - sy) < 4) return;
+                  dragging = true; row.classList.add("dragging"); document.body.classList.add("kjideo-dragging");
+                }
+                for (const other of list.querySelectorAll(".kjideo-lrow")) {
+                  if (other === row) continue;
+                  const r = other.getBoundingClientRect();
+                  if (me.clientY >= r.top && me.clientY <= r.bottom) {
+                    const ref = me.clientY > r.top + r.height / 2 ? other.nextSibling : other;
+                    if (ref === row || ref === row.nextSibling) break;
+                    const els = Array.from(list.querySelectorAll(".kjideo-lrow"));
+                    const prev = els.map((el) => el.getBoundingClientRect().top);
+                    list.insertBefore(row, ref);
+                    els.forEach((el, k) => {                        // FLIP: slide to new positions
+                      const dy = prev[k] - el.getBoundingClientRect().top;
+                      if (!dy) return;
+                      el.style.transition = "none";
+                      el.style.transform = `translateY(${dy}px)`;
+                      el.getBoundingClientRect();                   // flush
+                      el.style.transition = ""; el.style.transform = "";
+                    });
+                    break;
+                  }
+                }
+              };
+              const up = () => {
+                document.removeEventListener("mousemove", move);
+                document.removeEventListener("mouseup", up);
+                document.body.classList.remove("kjideo-dragging");
+                if (dragging) {
+                  row.classList.remove("dragging");
+                  row._dragged = true;                             // suppress the trailing click
+                  const active = node._boxes[node._activeIdx];
+                  const order = Array.from(list.querySelectorAll(".kjideo-lrow")).map((el) => el._box);
+                  if (order.length === node._boxes.length) node._boxes = order;
+                  node._activeIdx = active ? node._boxes.indexOf(active) : -1;
+                  renumber();
+                  commit();
+                }
+              };
+              document.addEventListener("mousemove", move);
+              document.addEventListener("mouseup", up);
+            });
+          });
+        }
+        buildRows();
+
+        document.body.appendChild(menu);
+        const r = menu.getBoundingClientRect();                    // clamp into the viewport
+        let left = clientX, top = clientY;
+        if (left + r.width > window.innerWidth) left = window.innerWidth - r.width - 4;
+        if (top + r.height > window.innerHeight) top = window.innerHeight - r.height - 4;
+        menu.style.left = Math.max(4, left) + "px";
+        menu.style.top = Math.max(4, top) + "px";
+
+        node._layerMenuDismiss = (e) => { if (!menu.contains(e.target)) closeLayersMenu(); };
+        setTimeout(() => document.addEventListener("mousedown", node._layerMenuDismiss, true), 0);
+      }
+
+      canvasEl.addEventListener("contextmenu", (e) => {
+        e.preventDefault(); e.stopPropagation();
+        if (node._placing) return;
+        closeInlineEditor();
+        openLayersMenu(e.clientX, e.clientY);
+      });
       stopProp(clearBtn);
       clearBtn.addEventListener("click", () => {
         closeInlineEditor();
@@ -1034,6 +1246,7 @@ app.registerExtension({
       chainCallback(node, "onRemoved", function () {
         livePreviewNodes.delete(node);
         closeInlineEditor();
+        closeLayersMenu();
         for (const ro of node._areaObservers) ro.disconnect();
         node._areaObservers = [];
       });
