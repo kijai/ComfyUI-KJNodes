@@ -704,6 +704,7 @@ app.registerExtension({
         if (node._layerMenu) { node._layerMenu.remove(); node._layerMenu = null; }
         if (node._layerMenuDismiss) {
           document.removeEventListener("mousedown", node._layerMenuDismiss, true);
+          document.removeEventListener("pointerdown", node._layerMenuDismiss, true);
           node._layerMenuDismiss = null;
         }
       }
@@ -843,7 +844,10 @@ app.registerExtension({
         menu.style.top = Math.max(4, top) + "px";
 
         node._layerMenuDismiss = (e) => { if (!menu.contains(e.target)) closeLayersMenu(); };
-        setTimeout(() => document.addEventListener("mousedown", node._layerMenuDismiss, true), 0);
+        setTimeout(() => {
+          document.addEventListener("mousedown", node._layerMenuDismiss, true);
+          document.addEventListener("pointerdown", node._layerMenuDismiss, true);
+        }, 0);
       }
 
       canvasEl.addEventListener("contextmenu", (e) => {
@@ -1241,7 +1245,7 @@ app.registerExtension({
         if (!wrap.contains(e.relatedTarget)) { node._focused = false; drawCanvas(); }
       });
       chainCallback(node, "onSelected", function () { node._selected = true; drawCanvas(); });
-      chainCallback(node, "onDeselected", function () { node._selected = false; drawCanvas(); });
+      chainCallback(node, "onDeselected", function () { node._selected = false; closeLayersMenu(); drawCanvas(); });
 
       chainCallback(node, "onRemoved", function () {
         livePreviewNodes.delete(node);
