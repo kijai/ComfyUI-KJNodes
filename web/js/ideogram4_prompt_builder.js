@@ -98,7 +98,7 @@ app.registerExtension({
       clearBtn.textContent = "Clear all";
       const tokenSpan = document.createElement("span");
       tokenSpan.style.cssText = "color:#888; white-space:nowrap;";
-      tokenSpan.title = "Rough token estimate (~chars/4) of the caption prompt — not exact";
+      tokenSpan.title = "Rough token estimate (~chars/4). Grey <256, green healthy, orange nearing, red ≥2048 (model cap — will error)";
       bar.appendChild(hint); bar.appendChild(tokenSpan); bar.appendChild(copyBtn); bar.appendChild(importBtn); bar.appendChild(clearBtn);
 
       // Persistent global style-palette row
@@ -611,7 +611,10 @@ app.registerExtension({
       }
       // Rough token estimate (~chars/4); exact count needs the Qwen tokenizer.
       function updateTokens() {
-        tokenSpan.textContent = "~" + Math.ceil(buildCaption().length / 4) + " tok";
+        const n = Math.ceil(buildCaption().length / 4);
+        tokenSpan.textContent = "~" + n + " tok";
+        // grey <256 (sparse) · green healthy · orange nearing · red ≥2048 (model hard cap)
+        tokenSpan.style.color = n >= 2048 ? "#e05555" : n >= 1792 ? "#e6a23c" : n >= 256 ? "#6cc06c" : "#888";
       }
       async function doCopy() {
         const txt = buildCaption();
