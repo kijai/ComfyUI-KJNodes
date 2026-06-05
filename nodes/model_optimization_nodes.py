@@ -102,7 +102,7 @@ class PathchSageAttentionKJ():
     def INPUT_TYPES(s):
         return {"required": {
             "model": ("MODEL",),
-            "sage_attention": (sageattn_modes, {"default": False, "tooltip": "Global patch comfy attention to use sageattn, once patched to revert back to normal you would need to run this node again with disabled option."}),
+            "sage_attention": (sageattn_modes, {"default": False, "tooltip": "Patch the attention of the model passing through this node to use sageattn. To revert, run this node again with the disabled option. Requires the sageattention library to be installed."}),
         },
         "optional": {
             "allow_compile": ("BOOLEAN", {"default": False, "tooltip": "Allow the use of torch.compile for the sage attention function, requires latest sageattn 2.2.0 or higher."})
@@ -127,6 +127,81 @@ class PathchSageAttentionKJ():
 
         # attention override
         model_clone.model_options["transformer_options"]["optimized_attention_override"] = attention_override_sage
+
+        return model_clone,
+
+
+def get_flash_func(deterministic=False, allow_compile=False, cast_dtype=torch.float16):
+    from flash_attn import flash_attn_func
+    logging.info(f"Using flash attention: deterministic={deterministic}, cast_dtype={cast_dtype}")
+
+    # q, k, v in NHD layout (b, seq, heads, dim_head)
+    def flash_func(q, k, v):
+        return flash_attn_func(q, k, v, dropout_p=0.0, causal=False, deterministic=deterministic)
+
+    if not allow_compile:
+        flash_func = torch.compiler.disable()(flash_func)
+
+    @wrap_attn
+    def attention_flash(q, k, v, heads, mask=None, attn_precision=None, skip_reshape=False, skip_output_reshape=False, **kwargs):
+        if mask is not None:
+            raise RuntimeError("Flash attention does not support attention masks")
+        in_dtype = v.dtype
+        # flash_attn only supports fp16/bf16
+        if q.dtype == torch.float32 or k.dtype == torch.float32 or v.dtype == torch.float32:
+            q, k, v = q.to(cast_dtype), k.to(cast_dtype), v.to(cast_dtype)
+        # flash_attn wants NHD layout (b, seq, heads, dim_head)
+        if skip_reshape:
+            # input is HND (b, heads, seq, dim_head)
+            b, _, _, dim_head = q.shape
+            q, k, v = map(lambda t: t.transpose(1, 2), (q, k, v))
+        else:
+            b, _, dim_head = q.shape
+            dim_head //= heads
+            q, k, v = map(lambda t: t.view(b, -1, heads, dim_head), (q, k, v))
+        out = flash_func(q, k, v).to(in_dtype)
+        if skip_output_reshape:
+            out = out.transpose(1, 2)  # NHD -> HND
+        else:
+            out = out.reshape(b, -1, heads * dim_head)
+        return out
+    return attention_flash
+
+
+class PatchFlashAttentionKJ():
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": {
+            "model": ("MODEL",),
+        },
+        "optional": {
+            "deterministic": ("BOOLEAN", {"default": False, "tooltip": "Use deterministic kernels for reproducible results. Slightly slower."}),
+            "allow_compile": ("BOOLEAN", {"default": False, "tooltip": "Allow torch.compile to trace into the flash attention function. If disabled (default), the function is wrapped with torch.compiler.disable() for compatibility, matching the sage attention node."}),
+        }}
+
+    RETURN_TYPES = ("MODEL", )
+    FUNCTION = "patch"
+    DESCRIPTION = "Experimental node for patching attention to use flash attention, exposing options the ComfyUI default doesn't (deterministic, compile control, no silent fallback). Patches the attention of the model passing through this node; to disable, bypass or disconnect this node. Requires the flash_attn library to be installed."
+    EXPERIMENTAL = True
+    CATEGORY = "KJNodes/experimental"
+
+    def patch(self, model, deterministic=False, allow_compile=False):
+        model_clone = model.clone()
+
+        # match the model's compute dtype for the fp32 downcast, fall back to fp16
+        inference_dtype = model.model.get_dtype_inference() if hasattr(model.model, "get_dtype_inference") else torch.float16
+        cast_dtype = inference_dtype if inference_dtype in (torch.float16, torch.bfloat16) else torch.float16
+
+        new_attention = get_flash_func(
+            deterministic=deterministic,
+            allow_compile=allow_compile,
+            cast_dtype=cast_dtype,
+        )
+        def attention_override_flash(func, *args, **kwargs):
+            return new_attention.__wrapped__(*args, **kwargs)
+
+        # attention override
+        model_clone.model_options["transformer_options"]["optimized_attention_override"] = attention_override_flash
 
         return model_clone,
 

@@ -65,7 +65,7 @@ from .nodes.mask_nodes import (
     SeparateMasks, ConsolidateMasksKJ, DrawMaskOnImage, BlockifyMask,
 )
 from .nodes.model_optimization_nodes import (
-    PathchSageAttentionKJ, CheckpointLoaderKJ, DiffusionModelSelector,
+    PathchSageAttentionKJ, PatchFlashAttentionKJ, CheckpointLoaderKJ, DiffusionModelSelector,
     DiffusionModelLoaderKJ, ModelPatchTorchSettings, PatchModelPatcherOrder,
     TorchCompileModelFluxAdvancedV2, TorchCompileModelWanVideoV2,
     TorchCompileModelAdvanced, TorchCompileVAE, TorchCompileControlNet,
@@ -279,6 +279,7 @@ NODE_CONFIG = {
     "TorchCompileControlNet": {"class": TorchCompileControlNet, "name": "TorchCompileControlNet"},
     "TorchCompileModelWanVideoV2": {"class": TorchCompileModelWanVideoV2, "name": "TorchCompileModelWanVideoV2"},
     "PathchSageAttentionKJ": {"class": PathchSageAttentionKJ, "name": "Patch Sage Attention KJ"},
+    "PatchFlashAttentionKJ": {"class": PatchFlashAttentionKJ, "name": "Patch Flash Attention KJ"},
     "LeapfusionHunyuanI2VPatcher": {"class": LeapfusionHunyuanI2V, "name": "Leapfusion Hunyuan I2V Patcher"},
     "VAELoaderKJ": {"class": VAELoaderKJ, "name": "VAELoader KJ"},
     "VAEDecodeLoopKJ": {"class": VAEDecodeLoopKJ, "name": "VAE Decode Loop KJ"},
