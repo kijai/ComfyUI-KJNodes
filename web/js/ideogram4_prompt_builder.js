@@ -302,11 +302,11 @@ app.registerExtension({
       }
 
       // All boxes under the point, top-first to match draw order: the active box is
-      // drawn last (on top), then the rest by index high→low.
+      // drawn last (on top), then the rest by index low→high (index 0 = front).
       function boxesAt(mN) {
         const rx = HANDLE / logW(), ry = HANDLE / logH();
         const res = [];
-        for (let i = node._boxes.length - 1; i >= 0; i--) {
+        for (let i = 0; i < node._boxes.length; i++) {
           const b = node._boxes[i];
           const mode = rectHitTestN(mN.x, mN.y, b.x, b.y, b.x + b.w, b.y + b.h, rx, ry);
           if (mode) res.push({ index: i, mode });
@@ -429,7 +429,8 @@ app.registerExtension({
         }
         // active box only when the editor is focused or the node is selected
         const aIdx = (node._focused || node._selected) ? node._activeIdx : -1;
-        const order = node._boxes.map((_, i) => i).filter((i) => i !== aIdx);
+        // index 0 = front (drawn last among non-active) so it matches the layers list (01 on top)
+        const order = node._boxes.map((_, i) => i).filter((i) => i !== aIdx).reverse();
         if (aIdx >= 0 && aIdx < node._boxes.length) order.push(aIdx);  // active drawn last (on top)
         const tagR = tagRects();                              // collision-avoided tag positions
         for (const i of order) {
@@ -721,7 +722,8 @@ app.registerExtension({
         menu.className = "kjideo-menu";
         const hdr = document.createElement("div");
         hdr.className = "kjideo-mhdr";
-        hdr.textContent = "Regions — click select · drag reorder";
+        hdr.textContent = "Regions — top = front · click select · drag reorder";
+        // 01 at the top of the list = front-most (drawn on top); see _draw / boxesAt.
         menu.appendChild(hdr);
         const list = document.createElement("div");
         menu.appendChild(list);
@@ -1245,7 +1247,7 @@ app.registerExtension({
         if (!wrap.contains(e.relatedTarget)) { node._focused = false; drawCanvas(); }
       });
       chainCallback(node, "onSelected", function () { node._selected = true; drawCanvas(); });
-      chainCallback(node, "onDeselected", function () { node._selected = false; closeLayersMenu(); drawCanvas(); });
+      chainCallback(node, "onDeselected", function () { node._selected = false; finishPlacing(); closeLayersMenu(); drawCanvas(); });
 
       chainCallback(node, "onRemoved", function () {
         livePreviewNodes.delete(node);
