@@ -14,8 +14,6 @@ from PIL import Image, ImageDraw, ImageFont, ImageEnhance
 from comfy_api.latest import io
 
 
-# Region colors — must match BBOX_PALETTE in web/js/ideogram4_prompt_builder.js.
-PREVIEW_PALETTE = ["#46b4e6", "#e68246", "#82e646", "#e646b4", "#e6e646", "#46e6c8"]
 _FONT_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "fonts", "FreeMono.ttf")
 
 
