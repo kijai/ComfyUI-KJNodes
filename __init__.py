@@ -81,6 +81,7 @@ from .nodes.sharpen_nodes import ImageSharpenKJ
 from .nodes.hdr_preview_node import HDRPreviewKJ
 from .nodes.preview_override_node import ModelPreviewOverrideKJ, GetPreviewOverrideFramesKJ
 from .nodes.ideogram4_nodes import Ideogram4PromptBuilderKJ
+from .nodes.ideogram4_nodes import Ideogram4PromptBuilderKJ, Ideogram4NAG
 
 import logging
 
@@ -295,6 +296,7 @@ NODE_CONFIG = {
     "PiDColorBiasCorrection": {"class": PiDColorBiasCorrection, "name": "PiD Color Bias Correction"},
     "ModelPatchTorchSettings": {"class": ModelPatchTorchSettings, "name": "Model Patch Torch Settings"},
     "WanVideoNAG": {"class": WanVideoNAG, "name": "WanVideoNAG"},
+    "Ideogram4NAG": {"class": Ideogram4NAG, "name": "Ideogram4 NAG"},
     "GGUFLoaderKJ": {"class": GGUFLoaderKJ, "name": "GGUF Loader KJ"},
     "LatentInpaintTTM": {"class": LatentInpaintTTM, "name": "Latent Inpaint TTM"},
     "NABLA_AttentionKJ": {"class": NABLA_AttentionKJ, "name": "NABLA Attention KJ"},

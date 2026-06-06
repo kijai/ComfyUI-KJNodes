@@ -6,12 +6,15 @@ canvas, set each region's type/desc/text/color palette, and assemble the Ideogra
 
 import json
 import os
+import types
 
 import numpy as np
 import torch
 from PIL import Image, ImageDraw, ImageFont, ImageEnhance
 
 from comfy_api.latest import io
+
+from .model_optimization_nodes import normalized_attention_guidance
 
 
 _FONT_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "fonts", "FreeMono.ttf")
@@ -324,3 +327,134 @@ the canvas aspect ratio.""",
             except json.JSONDecodeError:
                 pass
         return io.NodeOutput(_dumps(caption), preview, bboxes_out, width, height, ui=ui)
+
+
+def ideogram4_attn_forward_nag(self, x, attn_mask, freqs_cis, transformer_options={}):
+    import comfy.ldm.ideogram4.model as ig4
+    B, L, _ = x.shape
+    qkv = self.qkv(x).view(B, L, 3, self.num_heads, self.head_dim)
+    q, k, v = qkv.unbind(dim=2)
+    q = self.norm_q(q)
+    k = self.norm_k(k)
+    q = q.transpose(1, 2)
+    k = k.transpose(1, 2)
+    v = v.transpose(1, 2)
+    q, k = ig4.apply_rope(q, k, freqs_cis)
+    out = ig4.optimized_attention_masked(q, k, v, self.num_heads, attn_mask, skip_reshape=True, transformer_options=transformer_options)
+
+    nag = transformer_options.get("ideogram4_nag")
+    if nag is not None and "neg_normed" in nag:
+        Lt = nag["l_text"]                                   # image rows start after the positive text
+        neg_normed = nag["neg_normed"]                       # per-block normed static negative text
+        nkv = self.qkv(neg_normed).view(neg_normed.shape[0], neg_normed.shape[1], 3, self.num_heads, self.head_dim)
+        _, nk, nv = nkv.unbind(dim=2)
+        nk = self.norm_k(nk).transpose(1, 2)
+        nv = nv.transpose(1, 2)
+        _, nk = ig4.apply_rope(nk, nk, nag["neg_freqs"])     # rope keys at the negative text positions
+        # image queries attend to [negative text, image] -- shared q/image-kv, only text kv swapped
+        neg_k = torch.cat([nk, k[:, :, Lt:]], dim=2)
+        neg_v = torch.cat([nv, v[:, :, Lt:]], dim=2)
+        x_negative = ig4.optimized_attention_masked(q[:, :, Lt:], neg_k, neg_v, self.num_heads, None, skip_reshape=True, transformer_options=transformer_options)
+        guided = normalized_attention_guidance(self, out[:, Lt:], x_negative)
+        out = out.clone()
+        out[:, Lt:] = guided
+    return self.o(out)
+
+
+class Ideogram4AttnNAGPatch:
+    def __init__(self, nag_scale, nag_alpha, nag_tau, inplace=False):
+        self.nag_scale = nag_scale
+        self.nag_alpha = nag_alpha
+        self.nag_tau = nag_tau
+        self.inplace = inplace
+    def __get__(self, obj, objtype=None):
+        def wrapped(self_module, *args, **kwargs):
+            self_module.nag_scale = self.nag_scale
+            self_module.nag_alpha = self.nag_alpha
+            self_module.nag_tau = self.nag_tau
+            self_module.inplace = self.inplace
+            return ideogram4_attn_forward_nag(self_module, *args, **kwargs)
+        return types.MethodType(wrapped, obj)
+
+
+class Ideogram4BlockNAGPatch:
+    def __get__(self, obj, objtype=None):
+        def wrapped(self_module, x, attn_mask, freqs_cis, adaln_input, transformer_options={}):
+            import comfy.ldm.ideogram4.model as ig4
+            nag = transformer_options.get("ideogram4_nag")
+            if nag is not None:
+                scale_msa = 1.0 + self_module.adaln_modulation(adaln_input).chunk(4, dim=-1)[0]
+                nag["neg_normed"] = self_module.attention_norm1(nag["neg_hidden"]) * scale_msa
+            return ig4.Ideogram4TransformerBlock.forward(self_module, x, attn_mask, freqs_cis, adaln_input, transformer_options=transformer_options)
+        return types.MethodType(wrapped, obj)
+
+
+def make_ideogram4_run_conditional_nag(neg_ctx):
+    import comfy.ldm.ideogram4.model as ig4
+    def _run(self, x_chunk, context_chunk, attn_mask_chunk, t_chunk, gh, gw, transformer_options):
+        B = x_chunk.shape[0]
+        dev = x_chunk.device
+        dtype = self.llm_cond_proj.weight.dtype
+
+        nf = neg_ctx.to(dev, dtype)
+        if nf.dim() == 2:
+            nf = nf.unsqueeze(0)
+        neg_hidden = self.llm_cond_proj(self.llm_cond_norm(nf))   # static text input embedding (B, Ln, emb)
+        if neg_hidden.shape[0] != B:
+            neg_hidden = neg_hidden.expand(B, -1, -1)
+        Ln = neg_hidden.shape[1]
+
+        neg_pos = torch.arange(Ln, device=dev).view(-1, 1).expand(Ln, 3)
+        neg_freqs = ig4.precompute_freqs_cis(self.head_dim, neg_pos.transpose(0, 1), self.rope_theta,
+                                             rope_dims=self.mrope_section, interleaved_mrope=True, device=dev)
+
+        to = dict(transformer_options)
+        to["ideogram4_nag"] = {"l_text": context_chunk.shape[1], "neg_hidden": neg_hidden, "neg_freqs": neg_freqs}
+        # single pass: delegate to the stock conditional path with the nag dict in transformer_options
+        return ig4.Ideogram4Transformer2DModel._run_conditional(self, x_chunk, context_chunk, attn_mask_chunk, t_chunk, gh, gw, to)
+    return _run
+
+
+class Ideogram4NAG:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "model": ("MODEL",),
+                "conditioning": ("CONDITIONING", {"tooltip": "Negative prompt. Ideogram 4 has no native negative prompt; NAG adds one at the attention level."}),
+                "nag_scale": ("FLOAT", {"default": 5.0, "min": 0.0, "max": 100.0, "step": 0.001, "tooltip": "Strength of negative guidance effect"}),
+                "nag_alpha": ("FLOAT", {"default": 0.25, "min": 0.0, "max": 1.0, "step": 0.001, "tooltip": "Blend between the guided and original positive representation"}),
+                "nag_tau": ("FLOAT", {"default": 2.5, "min": 0.0, "max": 10.0, "step": 0.001, "tooltip": "Clipping threshold for how far guided attention may deviate from positive"}),
+            },
+            "optional": {
+                "inplace": ("BOOLEAN", {"default": False, "tooltip": "Modify tensors in place to save memory. Slightly changes numerical results."}),
+            },
+        }
+
+    RETURN_TYPES = ("MODEL",)
+    RETURN_NAMES = ("model",)
+    FUNCTION = "patch"
+    CATEGORY = "KJNodes/experimental"
+    DESCRIPTION = "Normalized Attention Guidance for Ideogram 4. Supplies a negative text prompt the base model lacks. https://github.com/ChenDarYen/Normalized-Attention-Guidance"
+    EXPERIMENTAL = True
+
+    def patch(self, model, conditioning, nag_scale, nag_alpha, nag_tau, inplace=False):
+        if nag_scale == 0:
+            return (model,)
+
+        model_clone = model.clone()
+        diffusion_model = model_clone.get_model_object("diffusion_model")
+
+        neg_ctx = conditioning[0][0]
+
+        run = make_ideogram4_run_conditional_nag(neg_ctx)
+        model_clone.add_object_patch("diffusion_model._run_conditional", types.MethodType(run, diffusion_model))
+
+        for idx, block in enumerate(diffusion_model.layers):
+            patched_block = Ideogram4BlockNAGPatch().__get__(block, block.__class__)
+            model_clone.add_object_patch(f"diffusion_model.layers.{idx}.forward", patched_block)
+            patched_attn = Ideogram4AttnNAGPatch(nag_scale, nag_alpha, nag_tau, inplace).__get__(block.attention, block.attention.__class__)
+            model_clone.add_object_patch(f"diffusion_model.layers.{idx}.attention.forward", patched_attn)
+
+        return (model_clone,)
+#endregion
