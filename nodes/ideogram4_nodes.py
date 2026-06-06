@@ -330,7 +330,7 @@ the canvas aspect ratio.""",
         # ui: send the resolved width/height so the editor canvas can follow connected
         # inputs; import_json (if wired) loads into the editor (output reflects editor only).
         ui = {"dims": [width, height]}
-        if boxes_seeded:                                    # push the seeded regions into the editor
+        if boxes_seeded:
             ui["boxes"] = [json.dumps(boxes)]
         if import_json and import_json.strip():
             try:
