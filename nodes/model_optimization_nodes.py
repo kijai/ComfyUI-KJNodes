@@ -160,6 +160,10 @@ def get_flash_func(allow_compile=False, cast_dtype=torch.float16):
     if not allow_compile:
         flash_func = torch.compiler.disable()(flash_func)
 
+    if torch.cuda.is_available():
+        probe = torch.zeros(1, 8, 2, 64, dtype=cast_dtype, device="cuda")
+        flash_func(probe, probe, probe)
+
     @wrap_attn
     def attention_flash(q, k, v, heads, mask=None, attn_precision=None, skip_reshape=False, skip_output_reshape=False, **kwargs):
         if mask is not None:
@@ -203,8 +207,6 @@ class PatchFlashAttentionKJ():
     CATEGORY = "KJNodes/experimental"
 
     def patch(self, model, allow_compile=False):
-        model_clone = model.clone()
-
         # match the model's compute dtype for the fp32 downcast, fall back to fp16
         inference_dtype = model.model.get_dtype_inference() if hasattr(model.model, "get_dtype_inference") else torch.float16
         cast_dtype = inference_dtype if inference_dtype in (torch.float16, torch.bfloat16) else torch.float16
@@ -213,6 +215,8 @@ class PatchFlashAttentionKJ():
             allow_compile=allow_compile,
             cast_dtype=cast_dtype,
         )
+
+        model_clone = model.clone()
         def attention_override_flash(func, *args, **kwargs):
             return new_attention.__wrapped__(*args, **kwargs)
 
