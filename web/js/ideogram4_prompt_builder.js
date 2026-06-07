@@ -125,6 +125,8 @@ function injectStyle() {
     body.kjideo-dragging, body.kjideo-dragging * { cursor:move !important; }
     .kjideo-sw input { position:absolute; opacity:0; width:0; height:0; pointer-events:none; }
     .kjideo-inline { position:absolute; box-sizing:border-box; background:rgba(18,18,18,0.92); border:2px solid #46b4e6; border-radius:3px; color:#fff; font:13px monospace; padding:3px 4px; resize:none; outline:none; z-index:10; }
+    .kjideo-bbox { width:128px; box-sizing:border-box; background:#1d1d1d; border:1px solid #444; border-radius:4px; color:#bbb; font:11px monospace; padding:2px 5px; }
+    .kjideo-bbox:focus { border-color:#46b4e6; outline:none; color:#fff; }
     .kjideo-menu { position:fixed; z-index:10000; background:#262626; border:1px solid #555; border-radius:6px; padding:4px; box-shadow:0 6px 20px rgba(0,0,0,0.55); font:12px sans-serif; color:#ddd; max-height:60vh; overflow-y:auto; min-width:210px; max-width:340px; }
     .kjideo-mhdr { font:11px sans-serif; color:#888; padding:2px 6px 4px; user-select:none; }
     .kjideo-lrow { display:flex; align-items:center; gap:6px; padding:3px 5px; border-radius:4px; cursor:move; user-select:none; transition:transform .18s ease, box-shadow .12s ease, opacity .12s ease, background .12s; }
@@ -689,7 +691,7 @@ app.registerExtension({
         const nb = applyDrag(node._dragMode, node._boxAtStart, dN);
         delete nb.nobbox;            // moving/resizing places the element (gives it a bbox)
         node._boxes[node._activeIdx] = nb;
-        drawCanvas();
+        drawCanvas(); updateBboxLabel();
       }
       function onUp() {
         if (!node._drawing) return;
@@ -711,7 +713,7 @@ app.registerExtension({
         b.x = clamp01(Math.min(mN.x - b.w / 2, 1 - b.w));
         b.y = clamp01(Math.min(mN.y - b.h / 2, 1 - b.h));
         delete b.nobbox;
-        drawCanvas();
+        drawCanvas(); updateBboxLabel();
       }
       function startPlacing(srcIdx) {
         const src = node._boxes[srcIdx];
@@ -1177,6 +1179,59 @@ app.registerExtension({
         node._areaObservers.push(ro);
         return ta;
       }
+      let bboxPx = null, bboxGrid = null;   // editable bbox fields: pixels and 0–1000 grid
+      function dims() { return [wWidget ? wWidget.value : 1024, hWidget ? hWidget.value : 1024]; }
+      function boxToPx(b) {                                   // same order as the grid: ymin, xmin, ymax, xmax
+        const [W, H] = dims();
+        return [Math.round(b.y * H), Math.round(b.x * W), Math.round((b.y + b.h) * H), Math.round((b.x + b.w) * W)];
+      }
+      function setField(inp, b, fn) {                          // skip while the field is being edited
+        if (!inp || document.activeElement === inp) return;
+        inp.value = (!b || b.nobbox) ? "" : fn(b).join(", ");
+      }
+      function updateBboxLabel() {
+        const b = node._boxes[node._activeIdx];
+        setField(bboxPx, b, boxToPx);
+        setField(bboxGrid, b, normBboxJS);
+      }
+      function parse4(inp) {
+        const nums = inp.value.split(/[,\s]+/).map(Number).filter((n) => !isNaN(n));
+        return nums.length === 4 ? nums : null;
+      }
+      function commitPxEdit() {
+        const b = node._boxes[node._activeIdx]; if (!b || !bboxPx) return;
+        const nums = parse4(bboxPx); if (!nums) { updateBboxLabel(); return; }
+        const [W, H] = dims();
+        let [ymin, xmin, ymax, xmax] = nums;                  // ymin, xmin, ymax, xmax (matches grid)
+        ymin = Math.max(0, Math.min(H, ymin)); ymax = Math.max(0, Math.min(H, ymax));
+        xmin = Math.max(0, Math.min(W, xmin)); xmax = Math.max(0, Math.min(W, xmax));
+        if (ymin > ymax) [ymin, ymax] = [ymax, ymin];
+        if (xmin > xmax) [xmin, xmax] = [xmax, xmin];
+        b.y = ymin / H; b.x = xmin / W; b.h = (ymax - ymin) / H; b.w = (xmax - xmin) / W;
+        delete b.nobbox; commit(); fitNode();
+      }
+      function commitGridEdit() {
+        const b = node._boxes[node._activeIdx]; if (!b || !bboxGrid) return;
+        const nums = parse4(bboxGrid); if (!nums) { updateBboxLabel(); return; }
+        let [ymin, xmin, ymax, xmax] = nums.map((n) => Math.max(0, Math.min(1000, n)));
+        if (ymin > ymax) [ymin, ymax] = [ymax, ymin];
+        if (xmin > xmax) [xmin, xmax] = [xmax, xmin];
+        b.y = ymin / 1000; b.x = xmin / 1000; b.h = (ymax - ymin) / 1000; b.w = (xmax - xmin) / 1000;
+        delete b.nobbox; commit(); fitNode();
+      }
+      function makeBboxField(placeholder, title, onCommit) {
+        const inp = document.createElement("input");
+        inp.type = "text"; inp.className = "kjideo-bbox";
+        inp.placeholder = placeholder; inp.title = title;
+        stopProp(inp);
+        inp.addEventListener("keydown", (e) => {
+          e.stopPropagation();
+          if (e.key === "Enter") inp.blur();
+          else if (e.key === "Escape") { updateBboxLabel(); inp.blur(); }
+        });
+        inp.addEventListener("change", onCommit);
+        return inp;
+      }
       function renderPanel() {
         for (const ro of node._areaObservers) ro.disconnect();
         node._areaObservers = [];
@@ -1206,6 +1261,17 @@ app.registerExtension({
           btn.addEventListener("click", () => { b.type = t; commit(); });
           typeRow.appendChild(btn);
         }
+        const pxLbl = document.createElement("span");
+        pxLbl.textContent = "px:"; pxLbl.style.cssText = "margin-left:auto; color:#888;";
+        typeRow.appendChild(pxLbl);
+        bboxPx = makeBboxField("ymin, xmin, ymax, xmax", "Pixel bbox (of the node's width/height): ymin, xmin, ymax, xmax — editable", commitPxEdit);
+        typeRow.appendChild(bboxPx);
+        const gl = document.createElement("span");
+        gl.textContent = "out:"; gl.style.color = "#888";
+        typeRow.appendChild(gl);
+        bboxGrid = makeBboxField("ymin, xmin, ymax, xmax", "Exported bbox on the 0–1000 grid: ymin, xmin, ymax, xmax — editable", commitGridEdit);
+        typeRow.appendChild(bboxGrid);
+        updateBboxLabel();
         panel.appendChild(typeRow);
 
         // text (only for text type)
