@@ -250,7 +250,12 @@ the canvas aspect ratio.""",
         boxes = _parse_json_list(elements_data)
         boxes_seeded = False
         if not boxes and bboxes:
-            frame = bboxes[0] if isinstance(bboxes[0], (list, tuple)) else bboxes  # accept per-frame nesting or flat
+            if isinstance(bboxes, dict):                     # a single BoundingBox is a bare {x,y,width,height} dict
+                frame = [bboxes]
+            elif bboxes and isinstance(bboxes[0], (list, tuple)):
+                frame = bboxes[0]                            # per-frame nesting: [[box, ...], ...]
+            else:
+                frame = bboxes                               # flat list of boxes
             for bb in frame:
                 if not isinstance(bb, dict):
                     continue
