@@ -223,15 +223,15 @@ the canvas aspect ratio.""",
                 io.String.Input("import_json", default="", optional=True, force_input=True,
                                 tooltip="Optional: a full caption JSON. When connected, it loads into the "
                                         "editor on run; the output always reflects the editor, never the raw input."),
-                io.BoundingBox.Input("bboxes", optional=True,
-                                     tooltip="Optional pixel-space boxes ({x, y, width, height}) used to seed the "
-                                             "editor's regions when it has none. Ignored once regions exist."),
                 io.String.Input("style_palette_data", default="", socketless=True, advanced=True,
                                 tooltip="Serialized style color palette from the editor (managed by the node UI)."),
                 io.String.Input("elements_data", default="", socketless=True, advanced=True,
                                 tooltip="Serialized regions from the editor (managed by the node UI)."),
                 io.Int.Input("bg_brightness", default=25, min=0, max=100, socketless=True, advanced=True,
                              tooltip="Background image brightness % (managed by the node UI slider)."),
+                io.BoundingBox.Input("bboxes", optional=True, force_input=True,
+                                     tooltip="Optional pixel-space boxes ({x, y, width, height}) used to seed the "
+                                             "editor's regions when it has none. Ignored once regions exist."),
             ],
             outputs=[
                 io.String.Output(display_name="prompt"),
