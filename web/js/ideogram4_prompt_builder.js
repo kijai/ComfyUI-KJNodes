@@ -255,8 +255,8 @@ app.registerExtension({
       const canvasEl = document.createElement("canvas");
       canvasEl.className = "kjideo-canvas";
       canvasEl.tabIndex = 0;                                  // focusable, so it can receive key events
-      canvasEl.title = "Drag to draw · click to select · alt-click overlap · dbl-click edit · " +
-        "right-click region list · Del remove · Ctrl/Cmd+C/V/D copy/paste/duplicate";
+      canvasEl.title = "Drag to draw · Ctrl-drag force-draw over a box · click to select · alt-click overlap · " +
+        "dbl-click edit · right-click region list · Del remove · Ctrl/Cmd+C/V/D copy/paste/duplicate";
       const ctx = canvasEl.getContext("2d");
       addWheelPassthrough(wrap);
       addMiddleClickPan(canvasEl);
@@ -560,7 +560,8 @@ app.registerExtension({
         canvasEl.focus();                // so Delete/Backspace targets this editor
         node._hoverTitle = null; node._hoverBox = null;  // clear hover highlight while interacting
         const mN = mouseN(e);
-        const hit = pickForSelection(mN, e.altKey);
+        // Ctrl/Cmd forces drawing a new box even when starting over an existing one.
+        const hit = (e.ctrlKey || e.metaKey) ? null : pickForSelection(mN, e.altKey);
         if (hit) {
           node._activeIdx = hit.index;
           node._dragMode = hit.mode;
@@ -584,8 +585,9 @@ app.registerExtension({
         if (node._placing) { placeFollower(mouseN(e)); return; }
         if (node._drawing) return;
         const mN = mouseN(e);
-        const ti = titleAt(mN);
-        const hit = hitTest(mN);
+        const force = e.ctrlKey || e.metaKey;               // Ctrl/Cmd = force-draw
+        const ti = force ? null : titleAt(mN);
+        const hit = force ? null : hitTest(mN);
         const hb = ti != null ? ti : (hit ? hit.index : null);
         if (ti !== node._hoverTitle || hb !== node._hoverBox) {
           node._hoverTitle = ti; node._hoverBox = hb; drawCanvas();
