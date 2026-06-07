@@ -73,8 +73,7 @@ def _render_preview(boxes, width, height, bg=None, brightness=50):
         scale = min(1.0, 1024 / long_edge) if long_edge > 0 else 1.0
         rw = max(1, round(width * scale))
         rh = max(1, round(height * scale))
-        g = round(max(0, min(100, brightness)) / 100 * 128)  # blank canvas grey from the brightness slider
-        img = Image.new("RGBA", (rw, rh), (g, g, g, 255))
+        img = Image.new("RGBA", (rw, rh), (0, 0, 0, 255))    # black so the overlay composites cleanly
     overlay = Image.new("RGBA", (rw, rh), (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
     fs = max(10, round(rh / 64))
@@ -326,7 +325,7 @@ Toolbar:
             "elements": elements,
         }
         bg = None
-        if image is not None:
+        if image is not None:                                # composite over the input image, else black
             try:
                 bg = Image.fromarray((image[0].detach().cpu().numpy() * 255).clip(0, 255).astype(np.uint8))
             except Exception:
