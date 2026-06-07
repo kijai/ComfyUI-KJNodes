@@ -191,12 +191,32 @@ class Ideogram4PromptBuilderKJ(io.ComfyNode):
             description="""
 Visual prompt builder for Ideogram 4's structured JSON caption format.
 
-Drag on the canvas to draw regions; select a region to set its type (obj/text),
-description, text, and color palette. Set the background and optional style fields
-as widgets. Outputs the assembled caption JSON string.
+Drag on the canvas to draw regions; select a region to set its type (obj/text),  
+description, text, and color palette. Set the background and optional style fields  
+as widgets. Outputs the assembled caption JSON string.  
 
 bbox is normalized to a 0-1000 grid as [ymin, xmin, ymax, xmax]; width/height set
-the canvas aspect ratio.""",
+the canvas aspect ratio.
+
+Canvas controls:
+- Drag: draw a new region
+- Ctrl/Cmd-drag: force-draw a new region even on top of an existing one
+- Click: select a region · Alt-click: cycle overlapping regions
+- Double-click: edit the description inline
+- Right-click: region list (select / delete / duplicate / reorder, top = front)
+- Del / Backspace: remove the selected region
+- Ctrl/Cmd + C / V / D: copy / paste / duplicate the selected region
+- bbox fields (px / out) next to obj/text are editable
+
+Color swatches:
+- Click: edit · Drag: reorder · Right-click: remove
+- Hover + Ctrl/Cmd + C / V: copy / paste the hex
+- "+": add a color (uses the clipboard color if it is one)
+
+Toolbar:
+- Live: use the live sampling preview as the background (and grab the final result)
+- Grab BG / Clear BG: use the last generated image as the background
+- brightness slider, token estimate, and Copy / Paste / Clear all""",
             inputs=[
                 io.Int.Input("width", default=1024, min=64, max=16384, step=16,
                              tooltip="Canvas aspect width (also the pixel grid the bbox is measured in). Ideogram 4 needs multiples of 16."),

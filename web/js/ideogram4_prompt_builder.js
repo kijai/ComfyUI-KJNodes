@@ -275,6 +275,19 @@ app.registerExtension({
       });
       node.resizable = true;
 
+      // DOM widgets are HTML layered over the canvas; ComfyUI only repositions/clips them
+      // during a foreground draw. When the node returns from off-screen the element can
+      // briefly float over the canvas until the next draw — force one when it re-enters view.
+      try {
+        node._visObserver = new IntersectionObserver((entries) => {
+          if (entries.some((en) => en.isIntersecting)) {
+            app.canvas?.setDirtyCanvas?.(true, true);
+            drawCanvas();
+          }
+        });
+        node._visObserver.observe(wrap);
+      } catch (e) {}
+
       // ── canvas sizing ──
       // The display size is CSS-driven (width:100% + aspect-ratio); the backing store
       // is sized to display × devicePixelRatio in prepCanvas() so text/lines stay crisp.
@@ -1376,6 +1389,7 @@ app.registerExtension({
 
       chainCallback(node, "onRemoved", function () {
         livePreviewNodes.delete(node);
+        node._visObserver?.disconnect();
         closeInlineEditor();
         closeLayersMenu();
         for (const ro of node._areaObservers) ro.disconnect();
