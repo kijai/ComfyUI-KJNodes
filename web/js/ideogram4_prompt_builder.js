@@ -631,7 +631,7 @@ app.registerExtension({
           node._activeIdx = hit.index;
           node._dragMode = hit.mode;
           node._boxAtStart = { ...node._boxes[hit.index] };
-          if (hit.mode === "move" && node._selection.size > 1) {                          // snapshot the whole group
+          if (node._selection.size > 1) {                  // snapshot the whole group for group move/resize
             node._groupStart = {};
             for (const i of node._selection) node._groupStart[i] = { ...node._boxes[i] };
           }
@@ -771,6 +771,25 @@ app.registerExtension({
           for (const i in node._groupStart) {
             const s = node._groupStart[i];
             node._boxes[i] = { ...s, x: s.x + dx, y: s.y + dy };
+            delete node._boxes[i].nobbox;
+          }
+          drawCanvas(); updateBboxLabel();
+          return;
+        }
+        if (node._groupStart && node._dragMode.startsWith("resize")) {
+          // Scale every selected box by the primary's resize, about the handle's fixed edge.
+          const a = node._boxAtStart, na = applyDrag(node._dragMode, a, dN);
+          const suf = node._dragMode.slice(7);       // "tl"|"tr"|"bl"|"br"|"t"|"b"|"l"|"r"
+          const scaleX = (suf.includes("l") || suf.includes("r")) && a.w > 0 ? Math.max(0.02, na.w / a.w) : 1;
+          const scaleY = (suf.includes("t") || suf.includes("b")) && a.h > 0 ? Math.max(0.02, na.h / a.h) : 1;
+          const ax = suf.includes("l") ? a.x + a.w : a.x;   // fixed (anchor) edges
+          const ay = suf.includes("t") ? a.y + a.h : a.y;
+          for (const i in node._groupStart) {
+            const s = node._groupStart[i];
+            node._boxes[i] = normalizeBox({
+              ...s, x: ax + (s.x - ax) * scaleX, y: ay + (s.y - ay) * scaleY,
+              w: s.w * scaleX, h: s.h * scaleY,
+            });
             delete node._boxes[i].nobbox;
           }
           drawCanvas(); updateBboxLabel();
