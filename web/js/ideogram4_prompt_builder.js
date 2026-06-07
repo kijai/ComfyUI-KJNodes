@@ -519,7 +519,7 @@ app.registerExtension({
 
           let body = b.desc || "";
           if (b.type === "text" && b.text) body = `"${b.text}"` + (body ? " — " + body : "");
-          if (body) {
+          if (body && node.properties.showBoxText !== false) {  // toggle: show text in boxes
             ctx.font = "12px monospace";
             ctx.fillStyle = readableText(col);              // box color, lightened if too dark
             const pad = 4, lh = 14;
@@ -1276,6 +1276,15 @@ app.registerExtension({
           btn.addEventListener("click", () => { b.type = t; commit(); });
           typeRow.appendChild(btn);
         }
+        const txtChk = document.createElement("label");
+        txtChk.style.cssText = "display:flex; align-items:center; gap:3px; cursor:pointer;";
+        txtChk.title = "Show each region's text inside its box on the canvas";
+        const cb = document.createElement("input");
+        cb.type = "checkbox"; cb.checked = node.properties.showBoxText !== false;
+        stopProp(cb);
+        cb.addEventListener("change", () => { node.properties.showBoxText = cb.checked; drawCanvas(); });
+        txtChk.appendChild(cb); txtChk.appendChild(document.createTextNode("show text"));
+        typeRow.appendChild(txtChk);
         const pxLbl = document.createElement("span");
         pxLbl.textContent = "px:"; pxLbl.style.cssText = "margin-left:auto; color:#888;";
         typeRow.appendChild(pxLbl);
