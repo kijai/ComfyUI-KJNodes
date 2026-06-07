@@ -66,6 +66,45 @@ function textOn(hex) {
   return luminance(c) > 140 ? "#000" : "#fff";
 }
 
+// Parse a clipboard string into a normalized #rrggbb, or null if it isn't a color.
+function parseColorString(s) {
+  if (!s) return null;
+  s = s.trim();
+  let m = s.match(/^#?([0-9a-fA-F]{6})$/);
+  if (m) return "#" + m[1].toLowerCase();
+  m = s.match(/^#?([0-9a-fA-F]{3})$/);
+  if (m) { const h = m[1]; return ("#" + h[0] + h[0] + h[1] + h[1] + h[2] + h[2]).toLowerCase(); }
+  m = s.match(/^rgba?\(\s*(\d+)\s*[, ]\s*(\d+)\s*[, ]\s*(\d+)/i);
+  if (m) {
+    const h2 = (n) => Math.max(0, Math.min(255, parseInt(n, 10))).toString(16).padStart(2, "0");
+    return "#" + h2(m[1]) + h2(m[2]) + h2(m[3]);
+  }
+  return null;
+}
+// The palette swatch under the cursor + a setter, so Ctrl+V pastes a color onto it
+// and Ctrl+C copies its hex.
+let hoveredSwatch = null;
+document.addEventListener("keydown", (e) => {
+  if (!hoveredSwatch) return;
+  const ctrl = e.ctrlKey || e.metaKey;
+  if (!ctrl) return;
+  const key = e.key.toLowerCase();
+  if (key !== "v" && key !== "c") return;
+  const ae = document.activeElement;          // don't steal copy/paste from a focused text field
+  if (ae && (ae.tagName === "TEXTAREA" || ae.tagName === "INPUT" || ae.isContentEditable)) return;
+  const target = hoveredSwatch;
+  if (!target.sw || !target.sw.isConnected) return;
+  e.preventDefault(); e.stopPropagation();
+  if (key === "c") {
+    navigator.clipboard?.writeText?.(target.sw.dataset.hex || "").catch(() => {});
+  } else {
+    navigator.clipboard?.readText?.().then((txt) => {
+      const c = parseColorString(txt);
+      if (c && target.sw && target.sw.isConnected) target.setColor(c);
+    }).catch(() => {});
+  }
+}, true);
+
 function injectStyle() {
   if (document.getElementById("kjideo-style")) return;
   const s = document.createElement("style");
@@ -1038,12 +1077,15 @@ app.registerExtension({
           sw.className = "kjideo-sw";
           sw.style.background = hex;
           sw.dataset.hex = hex;
-          sw.title = "Click edit · drag reorder · right-click remove";
+          sw.title = "Click edit · drag reorder · Ctrl+C/V copy/paste hex · right-click remove";
           const inp = document.createElement("input");
           inp.type = "color"; inp.value = hex;
           sw.appendChild(inp);
           container.appendChild(sw);
-          inp.addEventListener("input", () => { arr[i] = inp.value; sw.style.background = inp.value; sw.dataset.hex = inp.value; onEdit(); });
+          const setColor = (hex2) => { arr[i] = hex2; inp.value = hex2; sw.style.background = hex2; sw.dataset.hex = hex2; onEdit(); };
+          inp.addEventListener("input", () => setColor(inp.value));
+          sw.addEventListener("mouseenter", () => { hoveredSwatch = { sw, setColor }; });
+          sw.addEventListener("mouseleave", () => { if (hoveredSwatch && hoveredSwatch.sw === sw) hoveredSwatch = null; });
           sw.addEventListener("wheel", (e) => e.stopPropagation());
           sw.addEventListener("contextmenu", (e) => { e.preventDefault(); e.stopPropagation(); arr.splice(i, 1); onStruct(); });
           sw.addEventListener("mousedown", (e) => {
@@ -1097,8 +1139,13 @@ app.registerExtension({
         if (arr.length < max) {
           const add = document.createElement("button");
           add.className = "kjideo-btn"; add.textContent = "+";
+          add.title = "Add a color (uses the clipboard color if it is one)";
           stopProp(add);
-          add.addEventListener("click", () => { arr.push("#ffffff"); onStruct(); });
+          add.addEventListener("click", async () => {
+            let col = "#ffffff";
+            try { const c = parseColorString(await navigator.clipboard.readText()); if (c) col = c; } catch (e) {}
+            arr.push(col); onStruct();
+          });
           container.appendChild(add);
         }
       }
