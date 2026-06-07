@@ -918,7 +918,13 @@ app.registerExtension({
       clearBtn.addEventListener("click", () => {
         closeInlineEditor();
         node._boxes = []; node._activeIdx = -1; node._stylePalette = [];
+        node._lastImported = "";
         commit(); rebuildStylePalette(); fitNode();
+        // Write a unique "empty" marker into elements_data so the next run isn't cache-skipped
+        // (ComfyUI caches on the input signature; an empty value would match the prior run and the
+        // node wouldn't re-execute). The server treats a non-list value as empty, then re-pulls the
+        // wired import per import_mode and repopulates the editor via ui.
+        if (elementsWidget) elementsWidget.value = JSON.stringify({ _cleared: (node._clearSeq = (node._clearSeq || 0) + 1) });
       });
 
       // ── build caption JSON (mirrors Python key order) ──
@@ -1054,7 +1060,11 @@ app.registerExtension({
       // Populate the editor from a caption pushed back by execute() when import_json
       // is connected (a connected socket can't be read in the frontend directly).
       function applyImported(capStr) {
-        if (!capStr || capStr === node._lastImported) return;
+        if (!capStr) return;
+        // "always" mode re-applies even an unchanged import so the editor snaps back to the
+        // authoritative JSON after edits; "when empty" keeps the guard so edits stick.
+        const always = findW("import_mode")?.value === "always";
+        if (capStr === node._lastImported && !always) return;
         const cap = tryParseCaption(capStr);
         if (!cap) return;
         node._lastImported = capStr;
