@@ -4,7 +4,7 @@ const { app } = window.comfyAPI.app;
 const HANDLE = 8;            // hit radius (canvas px) for corners/edges
 const MAX_ELEM_COLORS = 5;   // Ideogram 4 per-element palette cap
 const MAX_STYLE_COLORS = 16; // Ideogram 4 style palette cap
-let copiedBox = null;        // internal clipboard for copy/paste of regions (shared across nodes)
+let copiedBoxes = null;      // internal clipboard for copy/paste of regions (array; shared across nodes)
 
 // Track the most recent generated image so it can be grabbed as a background.
 let lastResultImage = null;
@@ -652,7 +652,8 @@ app.registerExtension({
       });
 
       canvasEl.addEventListener("mousemove", (e) => {
-        if (node._placing) { placeFollower(mouseN(e)); return; }
+        node._lastMouseN = mouseN(e);                        // track cursor for paste-under-cursor
+        if (node._placing) { placeFollower(node._lastMouseN); return; }
         if (node._drawing || node._marquee) return;
         const mN = mouseN(e);
         const force = e.ctrlKey || e.metaKey;               // Ctrl/Cmd = force-draw
@@ -720,15 +721,37 @@ app.registerExtension({
         if (target) openInlineEditor(target.index);
       });
 
-      // Paste a clone of the clipboard box, offset slightly and clamped into the canvas.
-      function pasteBox() {
-        if (!copiedBox) return;
-        const nb = JSON.parse(JSON.stringify(copiedBox));
-        nb.x = Math.max(0, Math.min(clamp01(nb.x + 0.03), 1 - nb.w));
-        nb.y = Math.max(0, Math.min(clamp01(nb.y + 0.03), 1 - nb.h));
-        delete nb.nobbox;                              // a pasted box is placed
-        node._boxes.push(nb);
-        selectOnly(node._boxes.length - 1);
+      // Snapshot the current selection (or the active box) for the clipboard.
+      function copySelection() {
+        const idxs = node._selection.size ? [...node._selection].sort((a, b) => a - b)
+          : (node._activeIdx >= 0 ? [node._activeIdx] : []);
+        return idxs.map((i) => JSON.parse(JSON.stringify(node._boxes[i])));
+      }
+      // Paste the clipboard regions as a group, centered under the cursor, keeping their layout.
+      function pasteBoxes() {
+        if (!copiedBoxes || !copiedBoxes.length) return;
+        const clones = copiedBoxes.map((b) => JSON.parse(JSON.stringify(b)));
+        let minx = Infinity, miny = Infinity, maxx = -Infinity, maxy = -Infinity;
+        for (const b of clones) {
+          minx = Math.min(minx, b.x); miny = Math.min(miny, b.y);
+          maxx = Math.max(maxx, b.x + b.w); maxy = Math.max(maxy, b.y + b.h);
+        }
+        const gw = maxx - minx, gh = maxy - miny;
+        const m = node._lastMouseN;
+        let tx = m ? m.x - gw / 2 : minx + 0.03;       // target group top-left
+        let ty = m ? m.y - gh / 2 : miny + 0.03;
+        tx = Math.max(0, Math.min(tx, 1 - gw));         // clamp group into the canvas
+        ty = Math.max(0, Math.min(ty, 1 - gh));
+        const dx = tx - minx, dy = ty - miny;
+        const start = node._boxes.length;
+        for (const b of clones) {
+          b.x = clamp01(b.x + dx); b.y = clamp01(b.y + dy);
+          delete b.nobbox;                              // pasted boxes are placed
+          node._boxes.push(b);
+        }
+        node._selection = new Set();
+        for (let i = start; i < node._boxes.length; i++) node._selection.add(i);
+        node._activeIdx = node._boxes.length - 1;
         commit(); fitNode();
       }
       // Keyboard: Delete removes; Ctrl/Cmd C/V/D copy/paste/duplicate the active region.
@@ -745,14 +768,14 @@ app.registerExtension({
           removeSelected(); commit(); fitNode();      // removes all selected (or the active one)
         } else if (ctrl && e.key === "c" && node._activeIdx >= 0) {
           e.preventDefault(); e.stopPropagation();
-          copiedBox = JSON.parse(JSON.stringify(node._boxes[node._activeIdx]));
-        } else if (ctrl && e.key === "v" && copiedBox) {
+          copiedBoxes = copySelection();
+        } else if (ctrl && e.key === "v" && copiedBoxes) {
           e.preventDefault(); e.stopPropagation();
-          pasteBox();
+          pasteBoxes();
         } else if (ctrl && e.key === "d" && node._activeIdx >= 0) {
           e.preventDefault(); e.stopPropagation();
-          copiedBox = JSON.parse(JSON.stringify(node._boxes[node._activeIdx]));
-          pasteBox();
+          copiedBoxes = copySelection();
+          pasteBoxes();
         }
       });
 
@@ -805,10 +828,11 @@ app.registerExtension({
         node._drawing = false;
         document.removeEventListener("mousemove", onMove);
         document.removeEventListener("mouseup", onUp);
-        // drop zero-size boxes created by an accidental click
+        // a click (no drag) on empty space drops the placeholder box and deselects everything
         const b = node._boxes[node._activeIdx];
         if (b && (b.w < 0.005 || b.h < 0.005) && node._dragMode === "draw") {
-          removeBox(node._activeIdx);
+          node._boxes.splice(node._activeIdx, 1);
+          selectOnly(-1);
         } else if (node._pendingCollapse >= 0) {     // click (no drag) on a group member → keep only it
           selectOnly(node._pendingCollapse);
         }
@@ -1415,9 +1439,11 @@ app.registerExtension({
           p.style.color = "#888";
           p.textContent = node._boxes.length ? "Click a region to edit it." : "No regions yet.";
           panel.appendChild(p);
+          if (node._panelH) panel.style.minHeight = node._panelH + "px";  // reserve height so it doesn't pop
           requestAnimationFrame(fitNode);
           return;
         }
+        panel.style.minHeight = "";
         const col = (b.palette || []).find(Boolean) || "#bbb";
         const selN = node._selection.size;
         hint.innerHTML = `<b style="color:${col}">region ${node._activeIdx + 1}</b>` +
@@ -1475,7 +1501,7 @@ app.registerExtension({
         buildSwatchRow(palRow, b.palette, MAX_ELEM_COLORS, swatchEdit, commit);
         panel.appendChild(palRow);
 
-        requestAnimationFrame(fitNode);
+        requestAnimationFrame(() => { node._panelH = panel.offsetHeight; fitNode(); });  // remember height for the deselected placeholder
       }
 
       // ── width/height widget callbacks ──
