@@ -229,6 +229,9 @@ the canvas aspect ratio.""",
                                 tooltip="Serialized regions from the editor (managed by the node UI)."),
                 io.Int.Input("bg_brightness", default=25, min=0, max=100, socketless=True, advanced=True,
                              tooltip="Background image brightness % (managed by the node UI slider)."),
+                io.BoundingBox.Input("bboxes", optional=True, force_input=True,
+                                     tooltip="Optional pixel-space boxes ({x, y, width, height}) used to seed the "
+                                             "editor's regions when it has none. Ignored once regions exist."),
             ],
             outputs=[
                 io.String.Output(display_name="prompt"),
@@ -242,8 +245,24 @@ the canvas aspect ratio.""",
     @classmethod
     def execute(cls, width, height, background, style,
                 high_level_description="", aesthetics="", lighting="", medium="",
-                style_palette_data="", elements_data="", import_json="", image=None, bg_brightness=25) -> io.NodeOutput:
+                style_palette_data="", elements_data="", import_json="", bboxes=None,
+                image=None, bg_brightness=25) -> io.NodeOutput:
         boxes = _parse_json_list(elements_data)
+        boxes_seeded = False
+        if not boxes and bboxes:
+            if isinstance(bboxes, dict):                     # a single BoundingBox is a bare {x,y,width,height} dict
+                frame = [bboxes]
+            elif bboxes and isinstance(bboxes[0], (list, tuple)):
+                frame = bboxes[0]                            # per-frame nesting: [[box, ...], ...]
+            else:
+                frame = bboxes                               # flat list of boxes
+            for bb in frame:
+                if not isinstance(bb, dict):
+                    continue
+                boxes.append({"x": bb.get("x", 0) / width, "y": bb.get("y", 0) / height,
+                              "w": bb.get("width", 0) / width, "h": bb.get("height", 0) / height,
+                              "type": "obj", "text": "", "desc": "", "palette": []})
+            boxes_seeded = bool(boxes)
 
         caption = {}
         if high_level_description.strip():
@@ -316,6 +335,8 @@ the canvas aspect ratio.""",
         # ui: send the resolved width/height so the editor canvas can follow connected
         # inputs; import_json (if wired) loads into the editor (output reflects editor only).
         ui = {"dims": [width, height]}
+        if boxes_seeded:
+            ui["boxes"] = [json.dumps(boxes)]
         if import_json and import_json.strip():
             try:
                 cap = json.loads(import_json)

@@ -1006,6 +1006,16 @@ app.registerExtension({
       }
       chainCallback(node, "onExecuted", function (message) {
         if (message?.caption) applyImported(message.caption[0]);
+        // Seed regions from the bboxes input only when the editor is empty, so user-drawn/edited
+        // regions are never overwritten.
+        if (message?.boxes && !node._boxes.length) {
+          const seeded = JSON.parse(message.boxes[0]);
+          if (Array.isArray(seeded) && seeded.length) {
+            node._boxes = seeded.filter((b) => b && typeof b.x === "number" && typeof b.w === "number");
+            node._activeIdx = node._boxes.length ? 0 : -1;
+            commit(); fitNode();
+          }
+        }
         // Reflect resolved width/height (e.g. from connected inputs) in the canvas aspect.
         // A connected background image governs the aspect itself, so skip then.
         if (message?.dims && !node._bgImg) {
