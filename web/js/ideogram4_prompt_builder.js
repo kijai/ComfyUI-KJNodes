@@ -1247,7 +1247,7 @@ app.registerExtension({
           return;
         }
         const col = (b.palette || []).find(Boolean) || "#bbb";
-        hint.innerHTML = `<b style="color:${col}">region ${node._activeIdx + 1}</b> · dbl-click edit · alt-click overlap · del remove`;
+        hint.innerHTML = `<b style="color:${col}">region ${node._activeIdx + 1}</b>`;
 
         // type toggle
         const typeRow = document.createElement("div");
