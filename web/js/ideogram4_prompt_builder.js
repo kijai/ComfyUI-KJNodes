@@ -1686,7 +1686,7 @@ app.registerExtension({
       }
       // Persist editor data by name (robust to widget-order changes across versions).
       chainCallback(node, "onSerialize", function (o) {
-        if (o) o.ideo = { boxes: node._boxes, palette: node._stylePalette };
+        if (o) o.ideo = { boxes: node._boxes, palette: node._stylePalette, importMode: findW("import_mode")?.value };
       });
       chainCallback(node, "onConfigure", function (o) {
         const raw = o && Array.isArray(o.widgets_values) ? o.widgets_values : [];
@@ -1704,6 +1704,8 @@ app.registerExtension({
         if (!pal) { try { const p = JSON.parse(stylePaletteWidget?.value || ""); if (isPal(p)) pal = p; } catch (e) {} }
         if (!pal) { for (const v of raw) { try { const p = JSON.parse(v); if (isPal(p)) { pal = p; break; } } catch (e) {} } }
         if (pal) node._stylePalette = pal.slice();
+        const im = o && o.ideo && o.ideo.importMode, imW = findW("import_mode");
+        if (im && imW) imW.value = im;                        // restore import_mode (index-based restore is unreliable here)
         hideDataWidgets();
         serialize();                                         // realign widget values for Python + future saves
         if (bgBrightnessWidget) bgSlider.value = bgBrightnessWidget.value;
