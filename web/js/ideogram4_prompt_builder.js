@@ -154,6 +154,9 @@ function injectStyle() {
     .kjideo-fs { position:fixed; inset:0; z-index:9000; background:rgba(0,0,0,0.72); display:flex; align-items:center; justify-content:center; }
     .kjideo-fs-inner { position:relative; width:88vw; height:90vh; background:#1a1a1a; border:1px solid #444; border-radius:8px; box-shadow:0 12px 48px rgba(0,0,0,0.6); padding:12px; box-sizing:border-box; }
     .kjideo-fs-inner .kjideo-wrap { height:100%; }
+    .kjideo-bgmenu { padding:7px; display:flex; flex-direction:column; gap:7px; min-width:170px; }
+    .kjideo-bgrow { display:flex; align-items:center; gap:8px; }
+    .kjideo-bglbl { color:#888; font:11px sans-serif; flex:0 0 auto; min-width:62px; }
   `;
   document.head.appendChild(s);
 }
@@ -260,12 +263,85 @@ app.registerExtension({
       bgSlider.style.cssText = "width:64px;flex:0 0 auto;";
       stopProp(bgSlider);
       bgSlider.addEventListener("input", () => { if (bgBrightnessWidget) bgBrightnessWidget.value = parseInt(bgSlider.value, 10); drawCanvas(); });
+      const guideSel = document.createElement("select");
+      guideSel.className = "kjideo-btn"; guideSel.style.cssText = "flex:0 0 auto;";
+      guideSel.title = "Composition guide overlay (editor view only)";
+      for (const [val, label] of [["none", "no guide"], ["thirds", "thirds"], ["grid", "grid"], ["golden", "golden ratio"], ["spiral", "golden spiral"]]) {
+        const o = document.createElement("option"); o.value = val; o.textContent = label; guideSel.appendChild(o);
+      }
+      guideSel.value = node.properties.guide || "none";
+      stopProp(guideSel);
+      guideSel.addEventListener("change", () => { node.properties.guide = guideSel.value; drawCanvas(); });
       const fsBtn = document.createElement("button");
       fsBtn.className = "kjideo-btn"; fsBtn.textContent = "⛶";
       fsBtn.title = "Open in a larger window (Esc to close)";
       stopProp(fsBtn);
       fsBtn.addEventListener("click", () => node._fullscreen ? exitFs() : enterFs());
-      bar.appendChild(hint); bar.appendChild(liveLabel); bar.appendChild(grabBtn); bar.appendChild(bgSlider); bar.appendChild(tokenSpan); bar.appendChild(copyBtn); bar.appendChild(importBtn); bar.appendChild(fsBtn); bar.appendChild(clearBtn);
+      // Group the background/guide controls into one popup to keep the toolbar tidy.
+      const bgBtn = document.createElement("button");
+      bgBtn.className = "kjideo-btn"; bgBtn.textContent = "Background ▾";
+      bgBtn.title = "Background & guides: live preview, grab/clear, brightness, composition guide";
+      stopProp(bgBtn);
+      const GRID_INV = 130;       // slider shows cell SIZE: position = GRID_INV - divisions (right = larger cells)
+      const gridSlider = document.createElement("input");
+      gridSlider.type = "range"; gridSlider.min = "2"; gridSlider.max = "128"; gridSlider.step = "1";
+      gridSlider.value = GRID_INV - (node.properties.gridSize || 10);
+      gridSlider.style.cssText = "width:90px;flex:0 0 auto;";
+      gridSlider.title = "Grid cell size (drag right for larger cells); also the snap step";
+      stopProp(gridSlider);
+      gridSlider.addEventListener("input", () => { node.properties.gridSize = GRID_INV - parseInt(gridSlider.value, 10); drawCanvas(); });
+      const snapLabel = document.createElement("label");
+      snapLabel.style.cssText = "display:flex;align-items:center;gap:4px;cursor:pointer;";
+      const snapChk = document.createElement("input");
+      snapChk.type = "checkbox"; snapChk.checked = !!node.properties.snap;
+      snapChk.addEventListener("change", () => { node.properties.snap = snapChk.checked; });
+      snapLabel.appendChild(snapChk); snapLabel.appendChild(document.createTextNode("snap to grid"));
+      const guideColor = document.createElement("input");
+      guideColor.type = "color"; guideColor.value = node.properties.guideColor || "#ffffff";
+      guideColor.style.cssText = "width:32px;height:20px;flex:0 0 auto;padding:0;border:1px solid #555;background:none;";
+      stopProp(guideColor);
+      guideColor.addEventListener("input", () => { node.properties.guideColor = guideColor.value; drawCanvas(); });
+      const opacitySlider = document.createElement("input");
+      opacitySlider.type = "range"; opacitySlider.min = "0"; opacitySlider.max = "100"; opacitySlider.step = "1";
+      opacitySlider.value = node.properties.guideOpacity == null ? 100 : node.properties.guideOpacity;
+      opacitySlider.style.cssText = "width:90px;flex:0 0 auto;";
+      opacitySlider.title = "Guide/grid line opacity";
+      stopProp(opacitySlider);
+      opacitySlider.addEventListener("input", () => { node.properties.guideOpacity = parseInt(opacitySlider.value, 10); drawCanvas(); });
+      const bgMenu = document.createElement("div");
+      bgMenu.className = "kjideo-menu kjideo-bgmenu";
+      bgMenu.style.display = "none";
+      const bgRow = (labelText, el) => {
+        const r = document.createElement("div"); r.className = "kjideo-bgrow";
+        if (labelText) { const l = document.createElement("span"); l.className = "kjideo-bglbl"; l.textContent = labelText; r.appendChild(l); }
+        r.appendChild(el); bgMenu.appendChild(r);
+      };
+      bgRow("", liveLabel); bgRow("", grabBtn); bgRow("Brightness", bgSlider);
+      bgRow("Guide", guideSel); bgRow("Grid size", gridSlider); bgRow("", snapLabel);
+      bgRow("Line color", guideColor); bgRow("Line opacity", opacitySlider);
+      document.body.appendChild(bgMenu);
+      node._bgMenu = bgMenu;
+      function closeBgMenu() {
+        bgMenu.style.display = "none";
+        if (node._bgMenuDismiss) {
+          document.removeEventListener("pointerdown", node._bgMenuDismiss, true);
+          document.removeEventListener("mousedown", node._bgMenuDismiss, true);
+          node._bgMenuDismiss = null;
+        }
+      }
+      bgBtn.addEventListener("click", () => {
+        if (bgMenu.style.display !== "none") { closeBgMenu(); return; }
+        bgMenu.style.display = "";
+        const r = bgBtn.getBoundingClientRect();
+        bgMenu.style.left = Math.max(4, Math.min(r.left, window.innerWidth - bgMenu.offsetWidth - 4)) + "px";
+        bgMenu.style.top = Math.min(r.bottom + 4, window.innerHeight - bgMenu.offsetHeight - 4) + "px";
+        node._bgMenuDismiss = (e) => { if (!bgMenu.contains(e.target) && e.target !== bgBtn) closeBgMenu(); };
+        setTimeout(() => {
+          document.addEventListener("pointerdown", node._bgMenuDismiss, true);
+          document.addEventListener("mousedown", node._bgMenuDismiss, true);
+        }, 0);
+      });
+      bar.appendChild(hint); bar.appendChild(bgBtn); bar.appendChild(tokenSpan); bar.appendChild(copyBtn); bar.appendChild(importBtn); bar.appendChild(fsBtn); bar.appendChild(clearBtn);
       updateGrabBtn();
 
       // Persistent global style-palette row
@@ -523,7 +599,70 @@ app.registerExtension({
         return mode === "move" ? { ...start, x, y } : normalizeBox({ ...start, x, y, w, h });
       }
 
+      // ── grid / guides ──
+      function gridN() { return Math.max(2, Math.min(128, node.properties.gridSize || 10)); }
+      function guideStroke(a) {
+        const c = hexRgb(node.properties.guideColor || "#ffffff") || { r: 255, g: 255, b: 255 };
+        const op = (node.properties.guideOpacity == null ? 100 : node.properties.guideOpacity) / 100;
+        return `rgba(${c.r},${c.g},${c.b},${(a * op).toFixed(3)})`;
+      }
+      // Snap a box's free edges to the (square) grid when snap-to-grid is on.
+      function snapBox(b, mode) {
+        if (!node.properties.snap) return b;
+        const W = logW(), H = logH(), cell = Math.min(W, H) / gridN();
+        const sx = cell / W, sy = cell / H, sn = (v, s) => Math.round(v / s) * s;
+        let { x, y, w, h } = b;
+        if (mode === "move") { x = sn(x, sx); y = sn(y, sy); }
+        else { const x2 = sn(x + w, sx), y2 = sn(y + h, sy); x = sn(x, sx); y = sn(y, sy); w = x2 - x; h = y2 - y; }
+        return normalizeBox({ ...b, x, y, w, h });
+      }
+
       // ── drawing ──
+      // Golden spiral: largest φ-rectangle fitting the canvas, subdivided into squares with quarter arcs.
+      function goldenSpiral(W, H) {
+        const phi = 1.6180339887;
+        let w, h;
+        if (W >= H) { if (W / H >= phi) { h = H; w = H * phi; } else { w = W; h = W / phi; } }
+        else { if (H / W >= phi) { w = W; h = W * phi; } else { h = H; w = H / phi; } }
+        let x = (W - w) / 2, y = (H - h) / 2;
+        ctx.save();
+        ctx.strokeStyle = guideStroke(0.25); ctx.lineWidth = 1;
+        ctx.strokeRect(x + 0.5, y + 0.5, w, h);
+        ctx.strokeStyle = guideStroke(0.6); ctx.lineWidth = 1.5;
+        let phase = w >= h ? 0 : 1;
+        for (let i = 0; i < 12 && w > 1 && h > 1; i++, phase = (phase + 1) % 4) {
+          const s = Math.min(w, h);
+          let cx, cy, a0, a1;
+          if (phase === 0)      { cx = x + s;     cy = y + s;     a0 = Math.PI;       a1 = Math.PI * 1.5; x += s; w -= s; }
+          else if (phase === 1) { cx = x;         cy = y + s;     a0 = Math.PI * 1.5; a1 = Math.PI * 2;   y += s; h -= s; }
+          else if (phase === 2) { cx = x + w - s; cy = y;         a0 = 0;             a1 = Math.PI * 0.5; w -= s; }
+          else                  { cx = x + w;     cy = y + h - s; a0 = Math.PI * 0.5; a1 = Math.PI;       h -= s; }
+          ctx.beginPath(); ctx.arc(cx, cy, s, a0, a1); ctx.stroke();
+        }
+        ctx.restore();
+      }
+      // Composition guide overlay (rule of thirds / grid / golden ratio / spiral), drawn on the bg.
+      function drawGuide(W, H) {
+        const kind = node.properties.guide;
+        if (!kind || kind === "none") return;
+        if (kind === "spiral") { goldenSpiral(W, H); return; }
+        ctx.save();
+        ctx.lineWidth = 1;
+        if (kind === "grid") {                          // square cells (gridSize across the short edge), any aspect
+          ctx.strokeStyle = guideStroke(0.24);
+          const cell = Math.min(W, H) / gridN();
+          for (let px = cell; px < W - 0.5; px += cell) { const X = Math.round(px) + 0.5; ctx.beginPath(); ctx.moveTo(X, 0); ctx.lineTo(X, H); ctx.stroke(); }
+          for (let py = cell; py < H - 0.5; py += cell) { const Y = Math.round(py) + 0.5; ctx.beginPath(); ctx.moveTo(0, Y); ctx.lineTo(W, Y); ctx.stroke(); }
+          ctx.restore(); return;
+        }
+        const v = [], h = [];                           // thirds / golden: per-axis fractions (correct at any aspect)
+        if (kind === "thirds") { v.push(1 / 3, 2 / 3); h.push(1 / 3, 2 / 3); }
+        else if (kind === "golden") { const g = 1 / 1.6180339887; v.push(1 - g, g); h.push(1 - g, g); }
+        ctx.strokeStyle = guideStroke(kind === "golden" ? 0.45 : 0.28);
+        for (const fx of v) { const px = Math.round(fx * W) + 0.5; ctx.beginPath(); ctx.moveTo(px, 0); ctx.lineTo(px, H); ctx.stroke(); }
+        for (const fy of h) { const py = Math.round(fy * H) + 0.5; ctx.beginPath(); ctx.moveTo(0, py); ctx.lineTo(W, py); ctx.stroke(); }
+        ctx.restore();
+      }
       let _rafPending = false;
       function drawCanvas() {
         if (_rafPending) return;
@@ -550,6 +689,7 @@ app.registerExtension({
           const g = Math.round(bri / 100 * 128);
           ctx.fillStyle = `rgb(${g},${g},${g})`; ctx.fillRect(0, 0, W, H);
         }
+        drawGuide(W, H);                                          // composition guide overlay
         if (node._hideBoxes) return;                              // H: temporary background-only view
         // selection highlight only when the editor is focused or the node is selected
         const showSel = node._focused || node._selected;
@@ -580,13 +720,6 @@ app.registerExtension({
           ctx.strokeStyle = col; ctx.lineWidth = lw;
           ctx.strokeRect(x1 + lw / 2, y1 + lw / 2, w - lw, h - lw);  // inside the box so strip/badge align at y1
           ctx.setLineDash([]);
-          if (selected) {                                    // orange selection ring outside the box: solid = primary, dashed = others
-            const off = 3;
-            ctx.strokeStyle = "#ff8c00"; ctx.lineWidth = active ? 3 : 2;
-            if (!active) ctx.setLineDash([5, 3]);
-            ctx.strokeRect(x1 - off, y1 - off, w + off * 2, h + off * 2);
-            ctx.setLineDash([]);
-          }
           if (pal.length) {                                  // palette shown as a strip along the top edge
             const sw = w / pal.length, n = pal.length, sh = 7;
             for (let p = 0; p < n; p++) {
@@ -624,6 +757,13 @@ app.registerExtension({
           ctx.fillStyle = textOn(col);
           ctx.fillText(tr.tag, tr.x + 4, tr.y + 11);
           ctx.restore();
+          if (selected) {                                    // orange selection ring on top (above strip/tag): solid = primary, dashed = others
+            const olw = active ? 2 : 1;
+            ctx.strokeStyle = "#ff8c00"; ctx.lineWidth = olw;
+            if (!active) ctx.setLineDash([5, 3]);
+            ctx.strokeRect(x1 + olw / 2, y1 + olw / 2, w - olw, h - olw);
+            ctx.setLineDash([]);
+          }
         }
         if (node._marquee && node._marqueeActive) {           // rubber-band selection rectangle
           const r = marqueeRect();
@@ -871,6 +1011,11 @@ app.registerExtension({
             dx = Math.min(Math.max(dx, -s.x), 1 - s.w - s.x);
             dy = Math.min(Math.max(dy, -s.y), 1 - s.h - s.y);
           }
+          if (node.properties.snap) {                 // snap the group's movement to whole grid cells
+            const cell = Math.min(logW(), logH()) / gridN();
+            dx = Math.round(dx / (cell / logW())) * (cell / logW());
+            dy = Math.round(dy / (cell / logH())) * (cell / logH());
+          }
           for (const i in node._groupStart) {
             const s = node._groupStart[i];
             node._boxes[i] = { ...s, x: s.x + dx, y: s.y + dy };
@@ -898,7 +1043,7 @@ app.registerExtension({
           drawCanvas(); updateBboxLabel();
           return;
         }
-        const nb = applyDrag(node._dragMode, node._boxAtStart, dN);
+        const nb = snapBox(applyDrag(node._dragMode, node._boxAtStart, dN), node._dragMode);
         delete nb.nobbox;            // moving/resizing places the element (gives it a bbox)
         node._boxes[node._activeIdx] = nb;
         drawCanvas(); updateBboxLabel();
@@ -1670,6 +1815,7 @@ app.registerExtension({
           node._fsOverlay?.remove();
         }
         node._visObserver?.disconnect();
+        closeBgMenu(); node._bgMenu?.remove();
         closeInlineEditor();
         closeLayersMenu();
         for (const ro of node._areaObservers) ro.disconnect();
@@ -1709,6 +1855,14 @@ app.registerExtension({
         hideDataWidgets();
         serialize();                                         // realign widget values for Python + future saves
         if (bgBrightnessWidget) bgSlider.value = bgBrightnessWidget.value;
+        // node.properties is restored after onNodeCreated, so resync the toolbar controls to it.
+        liveChk.checked = !!node.properties.liveBg;
+        if (liveChk.checked) livePreviewNodes.add(node); else livePreviewNodes.delete(node);
+        guideSel.value = node.properties.guide || "none";
+        gridSlider.value = GRID_INV - (node.properties.gridSize || 10);
+        snapChk.checked = !!node.properties.snap;
+        guideColor.value = node.properties.guideColor || "#ffffff";
+        opacitySlider.value = node.properties.guideOpacity == null ? 100 : node.properties.guideOpacity;
         syncCanvasToDims();
         rebuildStylePalette();
         renderPanel();
