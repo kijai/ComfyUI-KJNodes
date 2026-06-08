@@ -151,6 +151,9 @@ function injectStyle() {
     .kjideo-lbtn { background:none; border:none; color:#999; cursor:pointer; font:13px sans-serif; line-height:1; padding:2px 5px; border-radius:3px; flex:0 0 auto; }
     .kjideo-lbtn:hover { color:#fff; background:#444; }
     .kjideo-lbtn.del:hover { color:#fff; background:#a33; }
+    .kjideo-fs { position:fixed; inset:0; z-index:9000; background:rgba(0,0,0,0.72); display:flex; align-items:center; justify-content:center; }
+    .kjideo-fs-inner { position:relative; width:88vw; height:90vh; background:#1a1a1a; border:1px solid #444; border-radius:8px; box-shadow:0 12px 48px rgba(0,0,0,0.6); padding:12px; box-sizing:border-box; }
+    .kjideo-fs-inner .kjideo-wrap { height:100%; }
   `;
   document.head.appendChild(s);
 }
@@ -257,7 +260,12 @@ app.registerExtension({
       bgSlider.style.cssText = "width:64px;flex:0 0 auto;";
       stopProp(bgSlider);
       bgSlider.addEventListener("input", () => { if (bgBrightnessWidget) bgBrightnessWidget.value = parseInt(bgSlider.value, 10); drawCanvas(); });
-      bar.appendChild(hint); bar.appendChild(liveLabel); bar.appendChild(grabBtn); bar.appendChild(bgSlider); bar.appendChild(tokenSpan); bar.appendChild(copyBtn); bar.appendChild(importBtn); bar.appendChild(clearBtn);
+      const fsBtn = document.createElement("button");
+      fsBtn.className = "kjideo-btn"; fsBtn.textContent = "⛶";
+      fsBtn.title = "Open in a larger window (Esc to close)";
+      stopProp(fsBtn);
+      fsBtn.addEventListener("click", () => node._fullscreen ? exitFs() : enterFs());
+      bar.appendChild(hint); bar.appendChild(liveLabel); bar.appendChild(grabBtn); bar.appendChild(bgSlider); bar.appendChild(tokenSpan); bar.appendChild(copyBtn); bar.appendChild(importBtn); bar.appendChild(fsBtn); bar.appendChild(clearBtn);
       updateGrabBtn();
 
       // Persistent global style-palette row
@@ -328,10 +336,55 @@ app.registerExtension({
         }
       }
       function fitNode() {
+        if (node._fullscreen) { fitFsCanvas(); return; }     // in the popup, size the canvas, not the node
         recalcWidgetHeight();
         // computeSize (stable min-heights), not last_y which creeps with growable widgets above.
         const minH = node.computeSize()[1];
         if (node.size[1] < minH) node.setSize([node.size[0], minH]);
+      }
+
+      // ── larger popup window (relocates the editor into a centered overlay) ──
+      function fitFsCanvas() {                                // fit the fixed-aspect canvas into the popup
+        if (!node._fullscreen || !node._fsInner) return;
+        const availW = node._fsInner.clientWidth - 24;
+        const availH = node._fsInner.clientHeight - 24 - 16 - bar.offsetHeight - styleBar.offsetHeight - panel.offsetHeight;
+        const aspect = (wWidget?.value || 1) / (hWidget?.value || 1);
+        let cw = availW, ch = cw / aspect;
+        if (ch > availH) { ch = Math.max(60, availH); cw = ch * aspect; }
+        if (cw > availW) { cw = availW; ch = cw / aspect; }
+        canvasEl.style.width = Math.round(cw) + "px";
+        canvasEl.style.height = Math.round(ch) + "px";
+        canvasEl.style.alignSelf = "center";
+        drawCanvas();
+      }
+      function onFsEsc(e) { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); exitFs(); } }
+      function enterFs() {
+        if (node._fullscreen) return;
+        node._fullscreen = true;
+        node._wrapHome = wrap.parentNode;                    // where to return the editor on close
+        const ov = document.createElement("div"); ov.className = "kjideo-fs";
+        const inner = document.createElement("div"); inner.className = "kjideo-fs-inner";
+        inner.appendChild(wrap);                             // move the SAME editor element in (keeps all state)
+        ov.appendChild(inner);
+        ov.addEventListener("mousedown", (e) => { if (e.target === ov) exitFs(); });  // backdrop closes
+        document.body.appendChild(ov);
+        node._fsOverlay = ov; node._fsInner = inner;
+        if (node.ideoEditor) node.ideoEditor.hidden = true;  // stop ComfyUI from reclaiming the element
+        document.addEventListener("keydown", onFsEsc, true);
+        window.addEventListener("resize", fitFsCanvas);
+        requestAnimationFrame(fitFsCanvas);
+      }
+      function exitFs() {
+        if (!node._fullscreen) return;
+        node._fullscreen = false;
+        document.removeEventListener("keydown", onFsEsc, true);
+        window.removeEventListener("resize", fitFsCanvas);
+        canvasEl.style.width = ""; canvasEl.style.height = ""; canvasEl.style.alignSelf = "";  // restore CSS sizing
+        if (node._wrapHome) node._wrapHome.appendChild(wrap);
+        node._fsOverlay?.remove(); node._fsOverlay = null; node._fsInner = null;
+        if (node.ideoEditor) node.ideoEditor.hidden = false;
+        if (node.graph) node.graph.setDirtyCanvas(true, true);
+        requestAnimationFrame(() => { fitNode(); drawCanvas(); });
       }
 
       // ── geometry helpers ── (logical CSS px = the displayed canvas size)
@@ -1536,7 +1589,7 @@ app.registerExtension({
       // ── keep canvas + getMinHeight in sync while the node is resized ──
       let _resizing = false;
       chainCallback(node, "onResize", function () {
-        if (_resizing) return;
+        if (_resizing || node._fullscreen) return;
         _resizing = true;
         recalcWidgetHeight();
         // Resize clamp reads computeSize() before getMinHeight refreshes; re-grow with fresh min.
@@ -1602,6 +1655,11 @@ app.registerExtension({
       chainCallback(node, "onRemoved", function () {
         livePreviewNodes.delete(node);
         if (hoveredCanvasNode === node) hoveredCanvasNode = null;
+        if (node._fullscreen) {                       // tear down the popup if open
+          document.removeEventListener("keydown", onFsEsc, true);
+          window.removeEventListener("resize", fitFsCanvas);
+          node._fsOverlay?.remove();
+        }
         node._visObserver?.disconnect();
         closeInlineEditor();
         closeLayersMenu();
