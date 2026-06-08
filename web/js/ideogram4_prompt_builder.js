@@ -122,7 +122,7 @@ function injectStyle() {
   s.id = "kjideo-style";
   s.textContent = `
     .kjideo-wrap { display:flex; flex-direction:column; overflow:hidden; position:relative; pointer-events:auto; gap:4px; }
-    .kjideo-canvas { cursor:crosshair; display:block; width:100%; height:auto; flex:0 0 auto; background:#1a1a1a; border-radius:4px; outline:none; }
+    .kjideo-canvas { cursor:crosshair; display:block; width:100%; height:auto; flex:0 0 auto; background:#1a1a1a; border-radius:4px; outline:none; touch-action:none; }
     .kjideo-bar { display:flex; align-items:center; gap:6px; font:11px sans-serif; color:#aaa; user-select:none; padding:0 2px; flex:0 0 auto; }
     .kjideo-panel { display:flex; flex-direction:column; gap:5px; padding:6px; background:#262626; border-radius:4px; font:11px sans-serif; color:#bbb; flex:0 0 auto; }
     .kjideo-row { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
@@ -130,7 +130,7 @@ function injectStyle() {
     .kjideo-btn:hover { border-color:#46b4e6; color:#fff; }
     .kjideo-btn.active { border-color:#46b4e6; color:#46b4e6; background:#2a3a42; }
     .kjideo-area { width:100%; box-sizing:border-box; background:#1d1d1d; border:1px solid #444; border-radius:4px; color:#ddd; font:13px monospace; padding:4px 6px; resize:vertical; min-height:36px; }
-    .kjideo-sw { width:20px; height:20px; border:1px solid #666; border-radius:3px; cursor:pointer; flex-shrink:0; position:relative; transition:transform .18s ease, box-shadow .12s ease, opacity .12s ease; }
+    .kjideo-sw { width:20px; height:20px; border:1px solid #666; border-radius:3px; cursor:pointer; flex-shrink:0; position:relative; touch-action:none; transition:transform .18s ease, box-shadow .12s ease, opacity .12s ease; }
     .kjideo-sw:hover { transform:scale(1.2); box-shadow:0 0 0 2px #46b4e6; z-index:3; }
     .kjideo-sw.dragging { opacity:.4; box-shadow:0 0 0 2px #46b4e6; }
     body.kjideo-dragging, body.kjideo-dragging * { cursor:move !important; }
@@ -140,7 +140,7 @@ function injectStyle() {
     .kjideo-bbox:focus { border-color:#46b4e6; outline:none; color:#fff; }
     .kjideo-menu { position:fixed; z-index:10000; background:#262626; border:1px solid #555; border-radius:6px; padding:4px; box-shadow:0 6px 20px rgba(0,0,0,0.55); font:12px sans-serif; color:#ddd; max-height:60vh; overflow-y:auto; min-width:210px; max-width:340px; }
     .kjideo-mhdr { font:11px sans-serif; color:#888; padding:2px 6px 4px; user-select:none; }
-    .kjideo-lrow { display:flex; align-items:center; gap:6px; padding:3px 5px; border-radius:4px; cursor:move; user-select:none; transition:transform .18s ease, box-shadow .12s ease, opacity .12s ease, background .12s; }
+    .kjideo-lrow { display:flex; align-items:center; gap:6px; padding:3px 5px; border-radius:4px; cursor:move; user-select:none; touch-action:none; transition:transform .18s ease, box-shadow .12s ease, opacity .12s ease, background .12s; }
     .kjideo-lrow:hover { background:#333; }
     .kjideo-lrow.active { background:#2a3a42; box-shadow:inset 0 0 0 1px #46b4e6; }
     .kjideo-lrow.dragging { opacity:.4; box-shadow:0 0 0 2px #46b4e6; background:#333; }
@@ -670,7 +670,7 @@ app.registerExtension({
       }
 
       // ── pointer interaction ──
-      canvasEl.addEventListener("mousedown", (e) => {
+      canvasEl.addEventListener("pointerdown", (e) => {
         if (node._placing) {             // drop the duplicate being placed
           if (e.button === 0) { placeFollower(mouseN(e)); finishPlacing(); }
           else cancelPlacing();
@@ -684,6 +684,15 @@ app.registerExtension({
         const mN = mouseN(e);
         // Ctrl/Cmd forces drawing a new box even when starting over an existing one.
         const hit = (e.ctrlKey || e.metaKey) ? null : pickForSelection(mN, e.altKey);
+        // Touch double-tap opens the inline editor (dblclick may not fire on touch).
+        if (e.pointerType && e.pointerType !== "mouse") {
+          const last = node._lastTap, now = e.timeStamp;
+          if (hit && last && now - last.t < 350 && Math.abs(mN.x - last.x) < 0.03 && Math.abs(mN.y - last.y) < 0.03) {
+            node._lastTap = null; openInlineEditor(hit.index);
+            e.preventDefault(); e.stopPropagation(); return;
+          }
+          node._lastTap = { t: now, x: mN.x, y: mN.y };
+        }
         node._pendingCollapse = -1;
         node._groupStart = null;
         if (e.shiftKey) {                              // shift-drag = marquee select; shift-click = toggle
@@ -711,13 +720,13 @@ app.registerExtension({
         }
         node._drawing = true;
         node._dragStartN = mN;
-        document.addEventListener("mousemove", onMove);
-        document.addEventListener("mouseup", onUp);
+        document.addEventListener("pointermove", onMove);
+        document.addEventListener("pointerup", onUp);
         e.preventDefault(); e.stopPropagation();
         drawCanvas();   // panel rebuild/resize deferred to onUp so the canvas doesn't shift mid-drag
       });
 
-      canvasEl.addEventListener("mousemove", (e) => {
+      canvasEl.addEventListener("pointermove", (e) => {
         node._lastMouseN = mouseN(e);                        // track cursor for paste-under-cursor
         if (node._placing) { placeFollower(node._lastMouseN); return; }
         if (node._drawing || node._marquee || node._hideBoxes) return;
@@ -731,13 +740,13 @@ app.registerExtension({
         }
         canvasEl.style.cursor = ti != null ? "pointer" : (hit ? (cursorForBboxMode(hit.mode) || "crosshair") : "crosshair");
       });
-      canvasEl.addEventListener("mouseleave", () => {
+      canvasEl.addEventListener("pointerleave", () => {
         if (hoveredCanvasNode === node) hoveredCanvasNode = null;
         if (node._hoverTitle !== null || node._hoverBox !== null) {
           node._hoverTitle = null; node._hoverBox = null; drawCanvas();
         }
       });
-      canvasEl.addEventListener("mouseenter", () => { hoveredCanvasNode = node; });
+      canvasEl.addEventListener("pointerenter", () => { hoveredCanvasNode = node; });
       // H (while hovering the canvas): temporary background-only view (not serialized).
       node._toggleHideBoxes = () => { node._hideBoxes = !node._hideBoxes; drawCanvas(); };
 
@@ -897,8 +906,8 @@ app.registerExtension({
       function onUp() {
         if (!node._drawing) return;
         node._drawing = false;
-        document.removeEventListener("mousemove", onMove);
-        document.removeEventListener("mouseup", onUp);
+        document.removeEventListener("pointermove", onMove);
+        document.removeEventListener("pointerup", onUp);
         // a click (no drag) on empty space drops the placeholder box and deselects everything
         const b = node._boxes[node._activeIdx];
         if (b && (b.w < 0.005 || b.h < 0.005) && node._dragMode === "draw") {
@@ -926,8 +935,8 @@ app.registerExtension({
         node._marqueeStartHit = startHit;               // for the shift-click (no drag) toggle fallback
         node._marqueeActive = false;
         canvasEl.focus();
-        document.addEventListener("mousemove", onMarqueeMove);
-        document.addEventListener("mouseup", onMarqueeUp);
+        document.addEventListener("pointermove", onMarqueeMove);
+        document.addEventListener("pointerup", onMarqueeUp);
         drawCanvas();
       }
       function onMarqueeMove(e) {
@@ -945,8 +954,8 @@ app.registerExtension({
         drawCanvas();
       }
       function onMarqueeUp() {
-        document.removeEventListener("mousemove", onMarqueeMove);
-        document.removeEventListener("mouseup", onMarqueeUp);
+        document.removeEventListener("pointermove", onMarqueeMove);
+        document.removeEventListener("pointerup", onMarqueeUp);
         if (!node._marqueeActive && node._marqueeStartHit >= 0) {   // shift-click on a box → toggle it
           const idx = node._marqueeStartHit;
           if (node._selection.has(idx) && node._selection.size > 1) {
@@ -1082,7 +1091,7 @@ app.registerExtension({
               buildRows();
             });
             // drag-reorder (vertical FLIP, mirrors the palette swatch reorder)
-            row.addEventListener("mousedown", (e) => {
+            row.addEventListener("pointerdown", (e) => {
               if (e.button !== 0 || e.target === dup || e.target === del) return;
               e.preventDefault(); e.stopPropagation();
               const sx = e.clientX, sy = e.clientY;
@@ -1114,8 +1123,8 @@ app.registerExtension({
                 }
               };
               const up = () => {
-                document.removeEventListener("mousemove", move);
-                document.removeEventListener("mouseup", up);
+                document.removeEventListener("pointermove", move);
+                document.removeEventListener("pointerup", up);
                 document.body.classList.remove("kjideo-dragging");
                 if (dragging) {
                   row.classList.remove("dragging");
@@ -1128,8 +1137,8 @@ app.registerExtension({
                   commit();
                 }
               };
-              document.addEventListener("mousemove", move);
-              document.addEventListener("mouseup", up);
+              document.addEventListener("pointermove", move);
+              document.addEventListener("pointerup", up);
             });
           });
         }
@@ -1353,11 +1362,11 @@ app.registerExtension({
           container.appendChild(sw);
           const setColor = (hex2) => { arr[i] = hex2; inp.value = hex2; sw.style.background = hex2; sw.dataset.hex = hex2; onEdit(); };
           inp.addEventListener("input", () => setColor(inp.value));
-          sw.addEventListener("mouseenter", () => { hoveredSwatch = { sw, setColor }; });
-          sw.addEventListener("mouseleave", () => { if (hoveredSwatch && hoveredSwatch.sw === sw) hoveredSwatch = null; });
+          sw.addEventListener("pointerenter", () => { hoveredSwatch = { sw, setColor }; });
+          sw.addEventListener("pointerleave", () => { if (hoveredSwatch && hoveredSwatch.sw === sw) hoveredSwatch = null; });
           sw.addEventListener("wheel", (e) => e.stopPropagation());
           sw.addEventListener("contextmenu", (e) => { e.preventDefault(); e.stopPropagation(); arr.splice(i, 1); onStruct(); });
-          sw.addEventListener("mousedown", (e) => {
+          sw.addEventListener("pointerdown", (e) => {
             if (e.button !== 0) return;
             e.preventDefault(); e.stopPropagation();
             const sx = e.clientX, sy = e.clientY;
@@ -1389,8 +1398,8 @@ app.registerExtension({
               }
             };
             const up = () => {
-              document.removeEventListener("mousemove", move);
-              document.removeEventListener("mouseup", up);
+              document.removeEventListener("pointermove", move);
+              document.removeEventListener("pointerup", up);
               document.body.classList.remove("kjideo-dragging");
               if (dragging) {
                 sw.classList.remove("dragging");
@@ -1401,8 +1410,8 @@ app.registerExtension({
                 inp.click();                                 // no drag → treat as click, open the picker
               }
             };
-            document.addEventListener("mousemove", move);
-            document.addEventListener("mouseup", up);
+            document.addEventListener("pointermove", move);
+            document.addEventListener("pointerup", up);
           });
         });
         if (arr.length < max) {
