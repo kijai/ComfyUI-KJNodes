@@ -3686,22 +3686,23 @@ class SaveImageKJ:
         return file, 
 
 class SaveStringKJ:
+    ALLOWED_EXTENSIONS = [".txt", ".caption", ".json", ".yaml", ".yml", ".md", ".csv", ".tsv", ".xml", ".log", ".ini", ".toml"]
+
     def __init__(self):
         self.output_dir = folder_paths.get_output_directory()
         self.type = "output"
         self.prefix_append = ""
-        self.compress_level = 4
 
     @classmethod
     def INPUT_TYPES(s):
         return {
             "required": {
-                "string": ("STRING", {"forceInput": True, "tooltip": "string to save as .txt file"}), 
+                "string": ("STRING", {"forceInput": True, "tooltip": "string to save as .txt file"}),
                 "filename_prefix": ("STRING", {"default": "text", "tooltip": "The prefix for the file to save. This may include formatting information such as %date:yyyy-MM-dd% or %Empty Latent Image.width% to include values from nodes."}),
-                "output_folder": ("STRING", {"default": "output", "tooltip": "The folder to save the images to."}),
+                "output_folder": ("STRING", {"default": "output", "tooltip": "Subfolder within the ComfyUI output directory to save to. Paths resolving outside the output directory are rejected."}),
             },
             "optional": {
-                "file_extension": ("STRING", {"default": ".txt", "tooltip": "The extension for the caption file."}),
+                "file_extension": (s.ALLOWED_EXTENSIONS, {"default": ".txt", "tooltip": "The extension for the saved file. Limited to plain-text/data formats."}),
             },
         }
 
@@ -3717,18 +3718,31 @@ class SaveStringKJ:
     def save_string(self, string, output_folder, filename_prefix="text", file_extension=".txt"):
         filename_prefix += self.prefix_append
 
-        if output_folder and not os.path.isabs(output_folder) and args.base_directory:
-            output_folder = os.path.join(args.base_directory, output_folder)
+        output_dir = os.path.abspath(self.output_dir)
         if output_folder and output_folder != "output":
-            target_dir = os.path.abspath(output_folder)
-            os.makedirs(target_dir, exist_ok=True)
+            sub = os.path.splitdrive(output_folder)[1].replace("\\", "/").lstrip("/")
+            target_dir = os.path.abspath(os.path.join(output_dir, sub))
         else:
-            target_dir = self.output_dir
+            target_dir = output_dir
+
+        try:
+            inside = os.path.commonpath((output_dir, target_dir)) == output_dir
+        except ValueError:
+            inside = False
+        if not inside:
+            raise ValueError(f"output_folder must resolve within the ComfyUI output directory: {target_dir}")
+        os.makedirs(target_dir, exist_ok=True)
 
         full_output_folder, filename, counter, subfolder, filename_prefix = folder_paths.get_save_image_path(filename_prefix, target_dir)
 
+        file_extension = os.path.basename(file_extension)
+        if file_extension and not file_extension.startswith("."):
+            file_extension = "." + file_extension
+
+        if file_extension.lower() not in self.ALLOWED_EXTENSIONS:
+            raise ValueError(f"Disallowed file extension '{file_extension}'. Allowed: {', '.join(self.ALLOWED_EXTENSIONS)}")
+
         base_file_name = f"{filename_prefix}_{counter:05}_"
-        results = list()
 
         txt_file = base_file_name + file_extension
         file_path = os.path.join(full_output_folder, txt_file)
@@ -3737,10 +3751,13 @@ class SaveStringKJ:
             base_file_name = f"{filename_prefix}_{counter:05}_"
             txt_file = base_file_name + file_extension
             file_path = os.path.join(full_output_folder, txt_file)
+
+        if os.path.commonpath((os.path.abspath(full_output_folder), os.path.abspath(file_path))) != os.path.abspath(full_output_folder):
+            raise ValueError(f"Refusing to write outside the target folder: {file_path}")
         with open(file_path, 'w', encoding="utf-8") as f:
             f.write(string)
 
-        return results,
+        return file_path,
 
 class FastPreview:
     @classmethod
