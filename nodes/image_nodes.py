@@ -3624,8 +3624,8 @@ class SaveImageKJ:
                 "output_folder": ("STRING", {"default": "output", "tooltip": "The folder to save the images to."}),
             },
             "optional": {
-                "caption_file_extension": ("STRING", {"default": ".txt", "tooltip": "The extension for the caption file."}),
-                "caption": ("STRING", {"forceInput": True, "tooltip": "string to save as .txt file"}), 
+                "caption_file_extension": ("STRING", {"default": ".txt", "tooltip": "The extension for the caption file. Limited to plain-text/data formats."}),
+                "caption": ("STRING", {"forceInput": True, "tooltip": "string to save as .txt file"}),
             },
             "hidden": {
                 "prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO"
@@ -3653,6 +3653,14 @@ class SaveImageKJ:
             self.output_dir = folder_paths.get_output_directory()
             full_output_folder, filename, counter, subfolder, filename_prefix = folder_paths.get_save_image_path(filename_prefix, self.output_dir, images[0].shape[1], images[0].shape[0])
 
+        # sanitize caption extension: strip path components so it can't traverse out of the chosen folder, and allowlist to text/data formats
+        if caption is not None:
+            caption_file_extension = os.path.basename(caption_file_extension)
+            if caption_file_extension and not caption_file_extension.startswith("."):
+                caption_file_extension = "." + caption_file_extension
+            if caption_file_extension.lower() not in SaveStringKJ.ALLOWED_EXTENSIONS:
+                raise ValueError(f"Disallowed caption extension '{caption_file_extension}'. Allowed: {', '.join(SaveStringKJ.ALLOWED_EXTENSIONS)}")
+
         results = list()
         for (batch_number, image) in enumerate(images):
             i = 255. * image.cpu().numpy()
@@ -3678,6 +3686,9 @@ class SaveImageKJ:
             if caption is not None:
                 txt_file = base_file_name + caption_file_extension
                 file_path = os.path.join(full_output_folder, txt_file)
+
+                if os.path.commonpath((os.path.abspath(full_output_folder), os.path.abspath(file_path))) != os.path.abspath(full_output_folder):
+                    raise ValueError(f"Refusing to write caption outside the target folder: {file_path}")
                 with open(file_path, "w", encoding="utf-8") as f:
                     f.write(caption)
 
@@ -3702,7 +3713,7 @@ class SaveStringKJ:
                 "output_folder": ("STRING", {"default": "output", "tooltip": "Subfolder within the ComfyUI output directory to save to. Paths resolving outside the output directory are rejected."}),
             },
             "optional": {
-                "file_extension": (s.ALLOWED_EXTENSIONS, {"default": ".txt", "tooltip": "The extension for the saved file. Limited to plain-text/data formats."}),
+                "file_extension": ("STRING", {"default": ".txt", "tooltip": "The extension for the saved file. Limited to plain-text/data formats."}),
             },
         }
 
