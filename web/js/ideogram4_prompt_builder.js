@@ -574,7 +574,7 @@ app.registerExtension({
         // once we take over the gesture; mouse still uses the native dblclick handler below).
         if (e.pointerType !== "mouse") {
           const now = performance.now();
-          if (node._lastTapT && (now - node._lastTapT) < 320 &&
+          if (node._lastTapT && (now - node._lastTapT) < 160 &&
               Math.hypot(e.clientX - node._lastTapX, e.clientY - node._lastTapY) < 24) {
             node._lastTapT = 0;
             const mN2 = mouseN(e);
