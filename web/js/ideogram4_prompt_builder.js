@@ -105,6 +105,17 @@ document.addEventListener("keydown", (e) => {
   }
 }, true);
 
+// The node whose canvas is under the cursor — lets H toggle box visibility on hover (no click needed).
+let hoveredCanvasNode = null;
+document.addEventListener("keydown", (e) => {
+  if (!hoveredCanvasNode) return;
+  if (e.ctrlKey || e.metaKey || e.altKey || (e.key !== "h" && e.key !== "H")) return;
+  const ae = document.activeElement;
+  if (ae && (ae.tagName === "TEXTAREA" || ae.tagName === "INPUT" || ae.isContentEditable)) return;
+  e.preventDefault(); e.stopPropagation();
+  hoveredCanvasNode._toggleHideBoxes?.();
+}, true);
+
 function injectStyle() {
   if (document.getElementById("kjideo-style")) return;
   const s = document.createElement("style");
@@ -261,7 +272,7 @@ app.registerExtension({
       canvasEl.tabIndex = 0;                                  // focusable, so it can receive key events
       canvasEl.title = "Drag to draw · Ctrl-drag force-draw over a box · click to select · shift-drag marquee-select · " +
         "shift-click toggle · drag a group to move all · alt-click overlap · dbl-click edit · right-click region list · " +
-        "Del remove (all selected) · Ctrl/Cmd+C/V/D copy/paste/duplicate";
+        "Del remove (all selected) · Ctrl/Cmd+C/V/D copy/paste/duplicate · H hide boxes (view)";
       const ctx = canvasEl.getContext("2d");
       addWheelPassthrough(wrap);
       addMiddleClickPan(canvasEl);
@@ -295,7 +306,7 @@ app.registerExtension({
 
       // ── canvas sizing ──
       // The display size is CSS-driven (width:100% + aspect-ratio); the backing store
-      // is sized to display × devicePixelRatio in prepCanvas() so text/lines stay crisp.
+      // is sized to display × devicePixelRatio in _draw() so text/lines stay crisp.
       function setCanvasSize(w, h) {
         canvasEl.style.aspectRatio = `${w} / ${h}`;          // display shape only
         if (node.graph) node.graph.setDirtyCanvas(true, true);
@@ -486,6 +497,7 @@ app.registerExtension({
           const g = Math.round(bri / 100 * 128);
           ctx.fillStyle = `rgb(${g},${g},${g})`; ctx.fillRect(0, 0, W, H);
         }
+        if (node._hideBoxes) return;                              // H: temporary background-only view
         // selection highlight only when the editor is focused or the node is selected
         const showSel = node._focused || node._selected;
         const aIdx = showSel ? node._activeIdx : -1;
@@ -613,6 +625,7 @@ app.registerExtension({
           return;
         }
         if (e.button !== 0) return;
+        if (node._hideBoxes) return;     // view-only while boxes are hidden (H)
         canvasEl.focus();                // so Delete/Backspace targets this editor
         node._hoverTitle = null; node._hoverBox = null;  // clear hover highlight while interacting
         const mN = mouseN(e);
@@ -654,7 +667,7 @@ app.registerExtension({
       canvasEl.addEventListener("mousemove", (e) => {
         node._lastMouseN = mouseN(e);                        // track cursor for paste-under-cursor
         if (node._placing) { placeFollower(node._lastMouseN); return; }
-        if (node._drawing || node._marquee) return;
+        if (node._drawing || node._marquee || node._hideBoxes) return;
         const mN = mouseN(e);
         const force = e.ctrlKey || e.metaKey;               // Ctrl/Cmd = force-draw
         const ti = force ? null : titleAt(mN);
@@ -666,10 +679,14 @@ app.registerExtension({
         canvasEl.style.cursor = ti != null ? "pointer" : (hit ? (cursorForBboxMode(hit.mode) || "crosshair") : "crosshair");
       });
       canvasEl.addEventListener("mouseleave", () => {
+        if (hoveredCanvasNode === node) hoveredCanvasNode = null;
         if (node._hoverTitle !== null || node._hoverBox !== null) {
           node._hoverTitle = null; node._hoverBox = null; drawCanvas();
         }
       });
+      canvasEl.addEventListener("mouseenter", () => { hoveredCanvasNode = node; });
+      // H (while hovering the canvas): temporary background-only view (not serialized).
+      node._toggleHideBoxes = () => { node._hideBoxes = !node._hideBoxes; drawCanvas(); };
 
       // ── inline description editing (double-click a region) ──
       let inlineTa = null;
@@ -715,6 +732,7 @@ app.registerExtension({
         });
       }
       canvasEl.addEventListener("dblclick", (e) => {
+        if (node._hideBoxes) return;
         e.preventDefault(); e.stopPropagation();
         const cands = boxesAt(mouseN(e));     // edit the active box if it's under the cursor, else topmost
         const target = cands.find((c) => c.index === node._activeIdx) || cands[0];
@@ -761,7 +779,7 @@ app.registerExtension({
           if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); cancelPlacing(); }
           return;
         }
-        if (node._drawing) return;
+        if (node._drawing || node._hideBoxes) return;   // view-only while boxes are hidden (H)
         const ctrl = e.ctrlKey || e.metaKey;
         if ((e.key === "Delete" || e.key === "Backspace") && node._activeIdx >= 0) {
           e.preventDefault(); e.stopPropagation();
@@ -1081,7 +1099,7 @@ app.registerExtension({
 
       canvasEl.addEventListener("contextmenu", (e) => {
         e.preventDefault(); e.stopPropagation();
-        if (node._placing) return;
+        if (node._placing || node._hideBoxes) return;
         closeInlineEditor();
         openLayersMenu(e.clientX, e.clientY);
       });
@@ -1583,6 +1601,7 @@ app.registerExtension({
 
       chainCallback(node, "onRemoved", function () {
         livePreviewNodes.delete(node);
+        if (hoveredCanvasNode === node) hoveredCanvasNode = null;
         node._visObserver?.disconnect();
         closeInlineEditor();
         closeLayersMenu();
