@@ -609,6 +609,38 @@ def build_compile_kwargs(backend, mode, fullgraph, dynamic, use_guard_filter=Tru
         kw["options"] = {"guard_filter_fn": skip_torch_compile_dict}
     return kw
 
+import weakref as _kj_weakref
+
+_KJ_COMPILE_KEY = "torch.compile"
+_KJ_COMPILED_BY_MODEL = _kj_weakref.WeakKeyDictionary()  # BaseModel instance -> {key: compiled_module}
+
+# resolve compiled modules by the BaseModel actually executing
+def _kj_apply_torch_compile_wrapper(executor, *args, **kwargs):
+    compiled = _KJ_COMPILED_BY_MODEL.get(executor.class_obj)
+    if not compiled:
+        return executor(*args, **kwargs)  # this BaseModel wasn't compiled -> run eager, no swap
+    orig = {}
+    try:
+        for key, value in compiled.items():
+            orig[key] = comfy.utils.get_attr(executor.class_obj, key)
+            comfy.utils.set_attr(executor.class_obj, key, value)
+        return executor(*args, **kwargs)
+    finally:
+        for key, value in orig.items():
+            comfy.utils.set_attr(executor.class_obj, key, value)
+
+
+def kj_set_torch_compile_wrapper(model, backend, options=None, mode=None, fullgraph=False, dynamic=None, keys=("diffusion_model",)):
+    WrappersMP = comfy.patcher_extension.WrappersMP
+    model.remove_wrappers_with_key(WrappersMP.APPLY_MODEL, _KJ_COMPILE_KEY)
+    if not keys:
+        keys = ["diffusion_model"]
+    compile_kwargs = {"backend": backend, "options": options, "mode": mode, "fullgraph": fullgraph, "dynamic": dynamic}
+    compiled_modules = {key: torch.compile(model=model.get_model_object(key), **compile_kwargs) for key in keys}
+    _KJ_COMPILED_BY_MODEL[model.model] = compiled_modules           # register by the BaseModel that will execute
+    model.add_wrapper_with_key(WrappersMP.APPLY_MODEL, _KJ_COMPILE_KEY, _kj_apply_torch_compile_wrapper)
+    model.model_options["torch_compile_kwargs"] = compile_kwargs
+
 
 class TorchCompileModelAdvanced:
     @classmethod
@@ -638,7 +670,6 @@ class TorchCompileModelAdvanced:
     EXPERIMENTAL = True
 
     def patch(self, model, backend, fullgraph, mode, dynamic, dynamo_cache_size_limit, compile_transformer_blocks_only, debug_compile_keys, disable_dynamic_vram=False):
-        from comfy_api.torch_helpers import set_torch_compile_wrapper
         if disable_dynamic_vram:
             try:
                 m = model.clone(disable_dynamic=True)
@@ -677,7 +708,7 @@ class TorchCompileModelAdvanced:
 
             if not disable_dynamic_vram and getattr(m, "is_dynamic", lambda: False)():
                 patch_aimdo_for_compile() # reduce recompiles with dynamic VRAM, will break the graph still but better than nothing
-            set_torch_compile_wrapper(model=m, keys=compile_key_list, **build_compile_kwargs(backend, mode, fullgraph, dynamic))
+            kj_set_torch_compile_wrapper(model=m, keys=compile_key_list, **build_compile_kwargs(backend, mode, fullgraph, dynamic))
         except Exception as e:
             raise RuntimeError("Failed to compile model") from e
 
