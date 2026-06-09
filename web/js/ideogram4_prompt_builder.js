@@ -780,9 +780,24 @@ app.registerExtension({
       }
 
       // ── serialization ──
-      function serialize() {
+      const importConnected = () => !!node.inputs?.some((i) => i.name === "import_json" && i.link != null);
+      function serialize() {                              // saved/restored value: clean boxes
         if (elementsWidget) elementsWidget.value = node._boxes.length ? JSON.stringify(node._boxes) : "";
         if (stylePaletteWidget) stylePaletteWidget.value = node._stylePalette.length ? JSON.stringify(node._stylePalette) : "";
+      }
+      // Queue-time value (not the saved value): when a wired import should drive the output — "always"
+      // mode, or empty in "when empty" mode — return a unique marker so ComfyUI can't cache-skip the
+      // node. It then re-executes and pushes the import back via ui, refreshing the editor. The server
+      // treats a non-list elements_data as empty (and ignores it entirely in "always" mode), so the
+      // nonce never affects the output.
+      if (elementsWidget) {
+        elementsWidget.serializeValue = () => {
+          const always = findW("import_mode")?.value === "always";
+          if (importConnected() && (always || !node._boxes.length)) {
+            return JSON.stringify({ _refresh: (node._serialSeq = (node._serialSeq || 0) + 1) });
+          }
+          return node._boxes.length ? JSON.stringify(node._boxes) : "";
+        };
       }
 
       function commit() { serialize(); renderPanel(); drawCanvas(); updateTokens(); }
@@ -1320,12 +1335,7 @@ app.registerExtension({
         closeInlineEditor();
         node._boxes = []; node._activeIdx = -1; node._selection = new Set(); node._stylePalette = [];
         node._lastImported = "";
-        commit(); rebuildStylePalette(); fitNode();
-        // Write a unique "empty" marker into elements_data so the next run isn't cache-skipped
-        // (ComfyUI caches on the input signature; an empty value would match the prior run and the
-        // node wouldn't re-execute). The server treats a non-list value as empty, then re-pulls the
-        // wired import per import_mode and repopulates the editor via ui.
-        if (elementsWidget) elementsWidget.value = JSON.stringify({ _cleared: (node._clearSeq = (node._clearSeq || 0) + 1) });
+        commit(); rebuildStylePalette(); fitNode();   // a wired import re-seeds on the next run (serializeValue cache-busts)
       });
 
       // ── build caption JSON (mirrors Python key order) ──
