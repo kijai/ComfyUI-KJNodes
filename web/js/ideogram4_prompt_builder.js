@@ -582,21 +582,24 @@ app.registerExtension({
       }
 
       function applyDrag(mode, start, dN) {
-        let { x, y, w, h } = start;
+        const { x, y, w, h } = start;
         const dx = dN.x, dy = dN.y;
-        switch (mode) {
-          case "move": x += dx; y += dy; x = clamp01(Math.min(x, 1 - w)); y = clamp01(Math.min(y, 1 - h)); break;
-          case "draw":
-          case "resize-br": w += dx; h += dy; break;
-          case "resize-tl": x += dx; y += dy; w -= dx; h -= dy; break;
-          case "resize-tr": y += dy; w += dx; h -= dy; break;
-          case "resize-bl": x += dx; w -= dx; h += dy; break;
-          case "resize-t": y += dy; h -= dy; break;
-          case "resize-b": h += dy; break;
-          case "resize-l": x += dx; w -= dx; break;
-          case "resize-r": w += dx; break;
+        if (mode === "move") {
+          return { ...start, x: clamp01(Math.min(x + dx, 1 - w)), y: clamp01(Math.min(y + dy, 1 - h)) };
         }
-        return mode === "move" ? { ...start, x, y } : normalizeBox({ ...start, x, y, w, h });
+        if (mode === "draw") {
+          return normalizeBox({ ...start, w: w + dx, h: h + dy });
+        }
+        // resize: move only the dragged edges (clamped to the canvas); the others stay anchored.
+        const suf = mode.slice(7);                 // "tl"|"tr"|"bl"|"br"|"t"|"b"|"l"|"r"
+        let l = x, t = y, r = x + w, b = y + h;
+        if (suf.includes("l")) l = clamp01(l + dx);
+        if (suf.includes("r")) r = clamp01(r + dx);
+        if (suf.includes("t")) t = clamp01(t + dy);
+        if (suf.includes("b")) b = clamp01(b + dy);
+        if (r < l) [l, r] = [r, l];                // crossing the opposite edge flips, no anchor drift
+        if (b < t) [t, b] = [b, t];
+        return { ...start, x: l, y: t, w: r - l, h: b - t };
       }
 
       // ── grid / guides ──
