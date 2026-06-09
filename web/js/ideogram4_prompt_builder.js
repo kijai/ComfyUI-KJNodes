@@ -374,7 +374,7 @@ app.registerExtension({
       // ── Templates popup: save/load named caption JSONs (server-side userdata) ──
       const tplBtn = document.createElement("button");
       tplBtn.className = "kjideo-btn"; tplBtn.textContent = "Templates ▾";
-      tplBtn.title = "Save / load the caption JSON as named templates (stored in this browser)";
+      tplBtn.title = "Save / load the caption JSON as templates (stored on the server ComfyUI\\user\\default\\kjnodes\\ideogram4)";
       stopProp(tplBtn);
       const tplMenu = document.createElement("div");
       tplMenu.className = "kjideo-menu kjideo-bgmenu";
