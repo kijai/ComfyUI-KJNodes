@@ -614,10 +614,12 @@ app.registerExtension({
         if (!node.properties.snap) return b;
         const W = logW(), H = logH(), cell = Math.min(W, H) / gridN();
         const sx = cell / W, sy = cell / H, sn = (v, s) => Math.round(v / s) * s;
-        let { x, y, w, h } = b;
-        if (mode === "move") { x = sn(x, sx); y = sn(y, sy); }
-        else { const x2 = sn(x + w, sx), y2 = sn(y + h, sy); x = sn(x, sx); y = sn(y, sy); w = x2 - x; h = y2 - y; }
-        return normalizeBox({ ...b, x, y, w, h });
+        const { x, y, w, h } = b;
+        if (mode === "move") {                          // snap position, preserve size
+          return { ...b, x: clamp01(Math.min(sn(x, sx), 1 - w)), y: clamp01(Math.min(sn(y, sy), 1 - h)) };
+        }
+        const x2 = sn(x + w, sx), y2 = sn(y + h, sy);   // draw/resize: snap the edges
+        return normalizeBox({ ...b, x: sn(x, sx), y: sn(y, sy), w: x2 - sn(x, sx), h: y2 - sn(y, sy) });
       }
 
       // ── drawing ──
