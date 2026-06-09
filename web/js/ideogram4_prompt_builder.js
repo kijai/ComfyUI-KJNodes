@@ -449,7 +449,7 @@ app.registerExtension({
           document.addEventListener("mousedown", node._tplDismiss, true);
         }, 0);
       });
-      bar.appendChild(hint); bar.appendChild(bgBtn); bar.appendChild(tokenSpan); bar.appendChild(copyBtn); bar.appendChild(importBtn); bar.appendChild(tplBtn); bar.appendChild(fsBtn); bar.appendChild(clearBtn);
+      bar.appendChild(hint); bar.appendChild(tokenSpan); bar.appendChild(bgBtn); bar.appendChild(copyBtn); bar.appendChild(importBtn); bar.appendChild(tplBtn); bar.appendChild(fsBtn); bar.appendChild(clearBtn);
       updateGrabBtn();
 
       // Persistent global style-palette row
@@ -2011,7 +2011,10 @@ app.registerExtension({
         if (im && imW) imW.value = im;                        // restore import_mode (index-based restore is unreliable here)
         hideDataWidgets();
         serialize();                                         // realign widget values for Python + future saves
-        if (bgBrightnessWidget) bgSlider.value = bgBrightnessWidget.value;
+        if (bgBrightnessWidget) {
+          if (typeof bgBrightnessWidget.value !== "number") bgBrightnessWidget.value = 25;  // old workflows may restore ""
+          bgSlider.value = bgBrightnessWidget.value;
+        }
         // node.properties is restored after onNodeCreated, so resync the toolbar controls to it.
         liveChk.checked = !!node.properties.liveBg;
         if (liveChk.checked) livePreviewNodes.add(node); else livePreviewNodes.delete(node);
