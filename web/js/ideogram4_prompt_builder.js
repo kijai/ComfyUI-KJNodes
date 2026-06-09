@@ -890,7 +890,11 @@ app.registerExtension({
       }
 
       // ── serialization ──
-      const importConnected = () => !!node.inputs?.some((i) => i.name === "import_json" && i.link != null);
+      // Wired AND the source node isn't muted(2)/bypassed(4) — those keep the link but emit nothing.
+      const importConnected = () => {
+        const link = node.graph?.links?.[node.inputs?.find((i) => i.name === "import_json")?.link];
+        return !!link && ![2, 4].includes(node.graph.getNodeById(link.origin_id)?.mode);
+      };
       function serialize() {                              // saved/restored value: clean boxes
         if (elementsWidget) elementsWidget.value = node._boxes.length ? JSON.stringify(node._boxes) : "";
         if (stylePaletteWidget) stylePaletteWidget.value = node._stylePalette.length ? JSON.stringify(node._stylePalette) : "";
