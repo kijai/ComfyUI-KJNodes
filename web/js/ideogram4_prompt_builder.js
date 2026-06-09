@@ -25,16 +25,21 @@ function resultViewUrl(img) {
 
 // Nodes opted into "live background": feed them the sampling preview frames as they arrive.
 const livePreviewNodes = new Set();
+let _lastPreviewBlob = null;
+function feedPreviewBlob(blob) {
+  // Newer ComfyUI dispatches "b_preview_with_metadata"; older ones only "b_preview" — and both can
+  // fire for the same frame (same Blob), so dedupe by identity to avoid decoding twice.
+  if (!blob || blob === _lastPreviewBlob || !livePreviewNodes.size) return;
+  _lastPreviewBlob = blob;
+  createImageBitmap(blob).then((bmp) => {
+    let used = false;
+    for (const n of livePreviewNodes) { n._ideoSetLiveBg?.(bmp); used = true; }
+    if (!used && bmp.close) bmp.close();
+  }).catch(() => {});
+}
 try {
-  app.api?.addEventListener?.("b_preview", (e) => {
-    const blob = e?.detail;
-    if (!blob || !livePreviewNodes.size) return;
-    createImageBitmap(blob).then((bmp) => {
-      let used = false;
-      for (const n of livePreviewNodes) { n._ideoSetLiveBg?.(bmp); used = true; }
-      if (!used && bmp.close) bmp.close();
-    }).catch(() => {});
-  });
+  app.api?.addEventListener?.("b_preview", (e) => feedPreviewBlob(e?.detail));
+  app.api?.addEventListener?.("b_preview_with_metadata", (e) => feedPreviewBlob(e?.detail?.blob));
 } catch (e) {}
 
 // Named caption-JSON templates, each stored as its own file server-side via ComfyUI's userdata
