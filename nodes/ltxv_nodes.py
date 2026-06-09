@@ -1728,6 +1728,10 @@ try:
     from comfy.ldm.flux.math import apply_rope as _wan_apply_rope
 except ImportError:
     _wan_apply_rope = None
+try:
+    from comfy.ldm.wan.model import WanT2VCrossAttention as _WanT2VCrossAttention, WanI2VCrossAttention as _WanI2VCrossAttention
+except ImportError:
+    _WanT2VCrossAttention = _WanI2VCrossAttention = None
 
 
 def _sageattn_int8_fp8_nhd(qkv, dtype):
@@ -1747,14 +1751,17 @@ def _sageattn_int8_fp8_nhd(qkv, dtype):
     quant_v_scale_max = 448.0
 
     if _cuda_archs[0] in {"sm80", "sm86"}:
-        q_int8, q_scale, k_int8, k_scale = per_thread_int8_triton(q, k, km=k.mean(dim=1, keepdim=True), tensor_layout=tensor_layout, BLKQ=128, WARPQ=32, BLKK=64, WARPK=64)
+        # mean-sub in-place: passing km= makes the triton quant materialize k - km as a full float copy
+        k.sub_(k.mean(dim=1, keepdim=True))
+        q_int8, q_scale, k_int8, k_scale = per_thread_int8_triton(q, k, tensor_layout=tensor_layout, BLKQ=128, WARPQ=32, BLKK=64, WARPK=64)
         del q, k
         o = torch.empty(q_int8.size(), dtype=dtype, device=q_int8.device)
         v_fp16 = v.to(torch.float16)
         del v
         _qattn_sm80.qk_int8_sv_f16_accum_f32_attn(q_int8, k_int8, v_fp16, o, q_scale, k_scale, _tensor_layout, _is_caual, _qk_quant_gran, sm_scale, _return_lse)
     elif _cuda_archs[0] == "sm75":
-        q_int8, q_scale, k_int8, k_scale = per_block_int8_triton(q, k, km=k.mean(dim=1, keepdim=True), sm_scale=sm_scale, tensor_layout=tensor_layout)
+        k.sub_(k.mean(dim=1, keepdim=True))
+        q_int8, q_scale, k_int8, k_scale = per_block_int8_triton(q, k, sm_scale=sm_scale, tensor_layout=tensor_layout)
         del q, k
         o, _ = attn_false(q_int8, k_int8, v, q_scale, k_scale, tensor_layout=tensor_layout, output_dtype=dtype, attn_mask=None, return_lse=False)
         del v
@@ -1764,7 +1771,8 @@ def _sageattn_int8_fp8_nhd(qkv, dtype):
         else:
             pv_accum_dtype = "fp32+fp16"
             quant_v_scale_max = 2.25
-        q_int8, q_scale, k_int8, k_scale = per_thread_int8_triton(q, k, km=k.mean(dim=1, keepdim=True), tensor_layout=tensor_layout, BLKQ=128, WARPQ=32, BLKK=64, WARPK=64)
+        k.sub_(k.mean(dim=1, keepdim=True))
+        q_int8, q_scale, k_int8, k_scale = per_thread_int8_triton(q, k, tensor_layout=tensor_layout, BLKQ=128, WARPQ=32, BLKK=64, WARPK=64)
         del q, k
         v_fp8, v_scale, _ = per_channel_fp8(v, tensor_layout=tensor_layout, scale_max=quant_v_scale_max, smooth_v=False)
         del v
@@ -1775,8 +1783,9 @@ def _sageattn_int8_fp8_nhd(qkv, dtype):
             _qattn_sm89.qk_int8_sv_f8_accum_f32_fuse_v_scale_attn_inst_buf(q_int8, k_int8, v_fp8, o, q_scale, k_scale, v_scale, _tensor_layout, _is_caual, _qk_quant_gran, sm_scale, _return_lse)
         del v_fp8, v_scale
     elif _cuda_archs[0] == "sm90":
-        q_int8, q_scale, k_int8, k_scale = per_thread_int8_triton(q, k, km=k.mean(dim=1, keepdim=True), tensor_layout=tensor_layout, BLKQ=64, WARPQ=16, BLKK=128, WARPK=128)
-        del q, k,
+        k.sub_(k.mean(dim=1, keepdim=True))
+        q_int8, q_scale, k_int8, k_scale = per_thread_int8_triton(q, k, tensor_layout=tensor_layout, BLKQ=64, WARPQ=16, BLKK=128, WARPK=128)
+        del q, k
         v_fp8, v_scale, _ = per_channel_fp8(v, tensor_layout=tensor_layout, smooth_v=False)
         del v
         o = torch.empty(q_int8.size(), dtype=dtype, device=q_int8.device)
@@ -1789,6 +1798,7 @@ def _sageattn_int8_fp8_nhd(qkv, dtype):
             pv_accum_dtype = "fp32+fp16"
             quant_v_scale_max = 2.25
         _qk_quant_gran = 2 # per warp
+        # km kept here: the CUDA quant fuses the mean-sub with no temp copy
         q_int8, q_scale, k_int8, k_scale = per_warp_int8_cuda(q, k, km=k.mean(dim=1, keepdim=True), tensor_layout=tensor_layout, BLKQ=128, WARPQ=32, BLKK=64)
         del q, k
         v_fp8, v_scale, _ = per_channel_fp8(v, tensor_layout=tensor_layout, scale_max=quant_v_scale_max, smooth_v=False)
@@ -1882,6 +1892,47 @@ def wan_sageattn_forward(self, x, freqs, transformer_options={}):
     return self.o(o.view(b, s, n * d))
 
 
+def wan_t2v_cross_sageattn_forward(self, x, context, transformer_options={}, **kwargs):
+    dtype = x.dtype
+    b, s, n, d = *x.shape[:2], self.num_heads, self.head_dim
+
+    q = self.norm_q(self.q(x)).view(b, s, n, d)
+    k = self.norm_k(self.k(context)).view(b, -1, n, d)
+    v = self.v(context).view(b, -1, n, d)
+
+    qkv = [q, k, v]
+    del q, k, v
+    o = _sageattn_int8_fp8_nhd(qkv, dtype)
+
+    return self.o(o.view(b, s, n * d))
+
+
+def wan_i2v_cross_sageattn_forward(self, x, context, context_img_len, transformer_options={}):
+    dtype = x.dtype
+    b, s, n, d = *x.shape[:2], self.num_heads, self.head_dim
+
+    context_img = context[:, :context_img_len]
+    context = context[:, context_img_len:]
+
+    q = self.norm_q(self.q(x)).view(b, s, n, d)
+    k_img = self.norm_k_img(self.k_img(context_img)).view(b, -1, n, d)
+    v_img = self.v_img(context_img).view(b, -1, n, d)
+    # local q reference survives the helper's consume — still needed for the text attention below
+    qkv_img = [q, k_img, v_img]
+    del k_img, v_img
+    img_o = _sageattn_int8_fp8_nhd(qkv_img, dtype)
+
+    k = self.norm_k(self.k(context)).view(b, -1, n, d)
+    v = self.v(context).view(b, -1, n, d)
+    qkv = [q, k, v]
+    del q, k, v
+    o = _sageattn_int8_fp8_nhd(qkv, dtype)
+
+    o.add_(img_o)
+    del img_o
+    return self.o(o.view(b, s, n * d))
+
+
 class WanVideoMemoryEfficientSageAttentionPatch(io.ComfyNode):
 
     @classmethod
@@ -1913,6 +1964,12 @@ class WanVideoMemoryEfficientSageAttentionPatch(io.ComfyNode):
 
         for idx, block in enumerate(diffusion_model.blocks):
             model_clone.add_object_patch(f"diffusion_model.blocks.{idx}.self_attn.forward", wan_sageattn_forward.__get__(block.self_attn, block.self_attn.__class__))
+            cross_attn = getattr(block, "cross_attn", None)
+            # exact type match on purpose: subclasses like WanT2VCrossAttentionGather have different semantics
+            if cross_attn is not None and type(cross_attn) is _WanI2VCrossAttention:
+                model_clone.add_object_patch(f"diffusion_model.blocks.{idx}.cross_attn.forward", wan_i2v_cross_sageattn_forward.__get__(cross_attn, cross_attn.__class__))
+            elif cross_attn is not None and type(cross_attn) is _WanT2VCrossAttention:
+                model_clone.add_object_patch(f"diffusion_model.blocks.{idx}.cross_attn.forward", wan_t2v_cross_sageattn_forward.__get__(cross_attn, cross_attn.__class__))
 
         return io.NodeOutput(model_clone)
 
