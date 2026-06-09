@@ -820,6 +820,8 @@ app.registerExtension({
         if (e.button !== 0) return;
         if (node._hideBoxes) return;     // view-only while boxes are hidden (H)
         canvasEl.focus();                // so Delete/Backspace targets this editor
+        // capture the pointer so move/up keep coming even when the cursor leaves the node
+        try { canvasEl.setPointerCapture(e.pointerId); } catch (e2) {}
         node._hoverTitle = null; node._hoverBox = null;  // clear hover highlight while interacting
         const mN = mouseN(e);
         // Ctrl/Cmd forces drawing a new box even when starting over an existing one.
