@@ -994,9 +994,9 @@ app.registerExtension({
         }
         node._drawing = true;
         node._dragStartN = mN;
-        document.addEventListener("pointermove", onMove);
-        document.addEventListener("pointerup", onUp);
-        document.addEventListener("pointercancel", onUp);   // touch can cancel instead of up
+        canvasEl.addEventListener("pointermove", onMove);
+        canvasEl.addEventListener("pointerup", onUp);
+        canvasEl.addEventListener("pointercancel", onUp);   // touch can cancel instead of up
         e.preventDefault(); e.stopPropagation();
         drawCanvas();   // panel rebuild/resize deferred to onUp so the canvas doesn't shift mid-drag
       });
@@ -1186,9 +1186,9 @@ app.registerExtension({
       function onUp() {
         if (!node._drawing) return;
         node._drawing = false;
-        document.removeEventListener("pointermove", onMove);
-        document.removeEventListener("pointerup", onUp);
-        document.removeEventListener("pointercancel", onUp);
+        canvasEl.removeEventListener("pointermove", onMove);
+        canvasEl.removeEventListener("pointerup", onUp);
+        canvasEl.removeEventListener("pointercancel", onUp);
         // a click (no drag) on empty space drops the placeholder box and deselects everything
         const b = node._boxes[node._activeIdx];
         if (b && (b.w < 0.005 || b.h < 0.005) && node._dragMode === "draw") {
@@ -1216,9 +1216,9 @@ app.registerExtension({
         node._marqueeStartHit = startHit;               // for the shift-click (no drag) toggle fallback
         node._marqueeActive = false;
         canvasEl.focus();
-        document.addEventListener("pointermove", onMarqueeMove);
-        document.addEventListener("pointerup", onMarqueeUp);
-        document.addEventListener("pointercancel", onMarqueeUp);
+        canvasEl.addEventListener("pointermove", onMarqueeMove);
+        canvasEl.addEventListener("pointerup", onMarqueeUp);
+        canvasEl.addEventListener("pointercancel", onMarqueeUp);
         drawCanvas();
       }
       function onMarqueeMove(e) {
@@ -1236,9 +1236,9 @@ app.registerExtension({
         drawCanvas();
       }
       function onMarqueeUp() {
-        document.removeEventListener("pointermove", onMarqueeMove);
-        document.removeEventListener("pointerup", onMarqueeUp);
-        document.removeEventListener("pointercancel", onMarqueeUp);
+        canvasEl.removeEventListener("pointermove", onMarqueeMove);
+        canvasEl.removeEventListener("pointerup", onMarqueeUp);
+        canvasEl.removeEventListener("pointercancel", onMarqueeUp);
         if (!node._marqueeActive && node._marqueeStartHit >= 0) {   // shift-click on a box → toggle it
           const idx = node._marqueeStartHit;
           if (node._selection.has(idx) && node._selection.size > 1) {
@@ -1663,6 +1663,7 @@ app.registerExtension({
           sw.addEventListener("pointerdown", (e) => {
             if (e.button !== 0) return;
             e.preventDefault(); e.stopPropagation();
+            try { sw.setPointerCapture(e.pointerId); } catch (e2) {}  // capture so Nodes 2.0's WidgetDOM .stop can't swallow the drag
             const sx = e.clientX, sy = e.clientY;
             let dragging = false;
             const move = (me) => {
@@ -1692,9 +1693,9 @@ app.registerExtension({
               }
             };
             const up = () => {
-              document.removeEventListener("pointermove", move);
-              document.removeEventListener("pointerup", up);
-              document.removeEventListener("pointercancel", up);
+              sw.removeEventListener("pointermove", move);
+              sw.removeEventListener("pointerup", up);
+              sw.removeEventListener("pointercancel", up);
               document.body.classList.remove("kjideo-dragging");
               if (dragging) {
                 sw.classList.remove("dragging");
@@ -1705,9 +1706,9 @@ app.registerExtension({
                 inp.click();                                 // no drag → treat as click, open the picker
               }
             };
-            document.addEventListener("pointermove", move);
-            document.addEventListener("pointerup", up);
-            document.addEventListener("pointercancel", up);
+            sw.addEventListener("pointermove", move);
+            sw.addEventListener("pointerup", up);
+            sw.addEventListener("pointercancel", up);
           });
         });
         if (arr.length < max) {
