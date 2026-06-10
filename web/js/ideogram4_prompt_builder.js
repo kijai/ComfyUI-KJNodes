@@ -302,6 +302,7 @@ function injectStyle() {
     .kjideo-fs { position:fixed; inset:0; z-index:9000; background:rgba(0,0,0,0.72); display:flex; align-items:center; justify-content:center; }
     .kjideo-fs-inner { position:relative; width:88vw; height:90vh; background:#1a1a1a; border:1px solid #444; border-radius:8px; box-shadow:0 12px 48px rgba(0,0,0,0.6); padding:12px; box-sizing:border-box; }
     .kjideo-fs-inner .kjideo-wrap { height:100%; }
+    .kjideo-fs-close { position:absolute; top:14px; right:18px; z-index:5; padding:4px 12px; font-size:14px; }
     .kjideo-dock { position:fixed; z-index:8500; pointer-events:auto; display:flex; flex-direction:column; background:#1a1a1a; border:1px solid #555; border-radius:8px; box-shadow:0 8px 30px rgba(0,0,0,0.55); min-width:300px; min-height:240px; overflow:hidden; }
     .kjideo-rsz { position:absolute; z-index:20; touch-action:none; }
     .kjideo-rsz.n { top:0; left:11px; right:11px; height:6px; cursor:ns-resize; }
@@ -438,11 +439,6 @@ app.registerExtension({
       guideSel.value = node.properties.guide || "none";
       stopProp(guideSel);
       guideSel.addEventListener("change", () => { node.properties.guide = guideSel.value; drawCanvas(); });
-      const fsBtn = document.createElement("button");
-      fsBtn.className = "kjideo-btn"; fsBtn.textContent = "⛶";
-      fsBtn.title = "Open in a larger window (Esc to close)";
-      stopProp(fsBtn);
-      fsBtn.addEventListener("click", () => node._fullscreen ? exitFs() : enterFs());
       // Group the background/guide controls into one popup to keep the toolbar tidy.
       const bgBtn = document.createElement("button");
       bgBtn.className = "kjideo-btn"; bgBtn.textContent = "Background ▾";
@@ -565,7 +561,7 @@ app.registerExtension({
         tplMenu.style.top = Math.min(r.bottom + 4, window.innerHeight - tplMenu.offsetHeight - 4) + "px";
         tplDismiss.arm();
       });
-      bar.appendChild(hint); bar.appendChild(tokenSpan); bar.appendChild(bgBtn); bar.appendChild(copyBtn); bar.appendChild(importBtn); bar.appendChild(tplBtn); bar.appendChild(fsBtn); bar.appendChild(clearBtn);
+      bar.appendChild(hint); bar.appendChild(tokenSpan); bar.appendChild(bgBtn); bar.appendChild(copyBtn); bar.appendChild(importBtn); bar.appendChild(tplBtn); bar.appendChild(clearBtn);
       updateGrabBtn();
 
       // Persistent global style-palette row
@@ -683,6 +679,10 @@ app.registerExtension({
         document.body.appendChild(ov);
         node._fsOverlay = ov;
         detachInto(inner);
+        const closeBtn = document.createElement("button");                            // visible exit (⛶ in the dock header is hidden here)
+        closeBtn.className = "kjideo-btn kjideo-fs-close"; closeBtn.textContent = "✕"; closeBtn.title = "Close (Esc)";
+        stopProp(closeBtn); closeBtn.addEventListener("click", exitFs);
+        ov.appendChild(closeBtn);                                                     // on the backdrop corner, clear of the editor
         document.addEventListener("keydown", onFsEsc, true);
         window.addEventListener("resize", fitFsCanvas);
         requestAnimationFrame(fitFsCanvas);
@@ -797,9 +797,12 @@ app.registerExtension({
           if (!on) requestAnimationFrame(fitFsCanvas);        // re-letterbox the canvas after it's visible again
         };
         minBtn.addEventListener("click", () => { applyMin(!node.properties.dockMin); flushDockChange(); });
+        const fsBtn = document.createElement("button"); fsBtn.className = "kjideo-btn"; fsBtn.textContent = "⛶";
+        fsBtn.title = "Open in a larger window (Esc to close)";
+        stopProp(fsBtn); fsBtn.addEventListener("click", () => node._fullscreen ? exitFs() : enterFs());
         const pinBtn = document.createElement("button"); pinBtn.className = "kjideo-btn"; pinBtn.textContent = "📌";
         stopProp(pinBtn); pinBtn.addEventListener("click", () => setPinned(!node.properties.dockPinned, pinBtn));
-        head.append(title, minBtn, pinBtn);
+        head.append(title, fsBtn, minBtn, pinBtn);
         const body = document.createElement("div"); body.className = "kjideo-dock-body";
         fl.append(head, body);
         addDockResizeHandles(fl);
@@ -824,7 +827,7 @@ app.registerExtension({
         applyMin(!!node.properties.dockMin);                  // restore minimized state
         // drag the panel by its header (graph-space when pinned, screen-space otherwise)
         head.addEventListener("pointerdown", (e) => {
-          if (e.target === pinBtn || e.target === minBtn || e.button !== 0) return;
+          if (e.target === pinBtn || e.target === minBtn || e.target === fsBtn || e.button !== 0) return;
           e.preventDefault();
           const sx0 = e.clientX, sy0 = e.clientY;
           const pinned = node.properties.dockPinned;
