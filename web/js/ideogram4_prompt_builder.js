@@ -299,6 +299,10 @@ function injectStyle() {
     .kjideo-lbtn { background:none; border:none; color:#999; cursor:pointer; font:13px sans-serif; line-height:1; padding:2px 5px; border-radius:3px; flex:0 0 auto; }
     .kjideo-lbtn:hover { color:#fff; background:#444; }
     .kjideo-lbtn.del:hover { color:#fff; background:#a33; }
+    .kjideo-lbtn.on { background:#3a3320; }
+    .kjideo-lock { filter:grayscale(1); opacity:0.4; }                 /* unlocked: faded grey */
+    .kjideo-lock.on, .kjideo-lock:hover { filter:none; opacity:1; }    /* locked / hover: full colour */
+    .kjideo-lbtn:disabled { opacity:0.25; cursor:default; background:none; }
     .kjideo-fs { position:fixed; inset:0; z-index:9000; background:rgba(0,0,0,0.72); display:flex; align-items:center; justify-content:center; }
     .kjideo-fs-inner { position:relative; width:88vw; height:90vh; background:#1a1a1a; border:1px solid #444; border-radius:8px; box-shadow:0 12px 48px rgba(0,0,0,0.6); padding:12px; box-sizing:border-box; }
     .kjideo-fs-inner .kjideo-wrap { height:100%; }
@@ -605,7 +609,7 @@ app.registerExtension({
           const h = Math.max(60, Math.min(h0 - dy, wrap.clientHeight - 110));   // up → bigger panel; keep room for the canvas
           node._panelH = Math.round(h); panel.style.height = node._panelH + "px";   // persisted via the onSerialize blob
           fitCanvas();
-        }, flushDockChange);
+        }, flushChange);
       });
 
       wrap.appendChild(bar); wrap.appendChild(styleBar); wrap.appendChild(cvBox); wrap.appendChild(splitter); wrap.appendChild(panel);
@@ -710,7 +714,7 @@ app.registerExtension({
         }
       }
       // Nudge ComfyUI's change tracker (it snapshots on mouseup, which our preventDefault'd drags suppress).
-      function flushDockChange() { try { window.dispatchEvent(new MouseEvent("mouseup")); } catch (e) {} }
+      function flushChange() { try { window.dispatchEvent(new MouseEvent("mouseup")); } catch (e) {} }
       function setPinned(on, pinBtn) {
         const fl = node._dockEl, c = app.canvas; if (!fl || !c) return;
         const rect = c.canvas.getBoundingClientRect(), ds = c.ds;
@@ -743,7 +747,7 @@ app.registerExtension({
         }
         if (pinBtn) { pinBtn.classList.toggle("active", on); pinBtn.title = on ? "Unpin from canvas (float in screen)" : "Pin to canvas (move/zoom with the graph)"; }
         c.setDirtyCanvas(true, true); requestAnimationFrame(fitFsCanvas);
-        flushDockChange();   // click's mouseup already fired before this handler — snapshot the new state
+        flushChange();   // click's mouseup already fired before this handler — snapshot the new state
       }
       // Resize from any edge/corner; N/W edges shift the anchor. Units: graph px pinned (÷scale), else screen px.
       function startDockResize(e, dir, fl) {
@@ -768,7 +772,7 @@ app.registerExtension({
           if (pinned) { node.properties.dockGraph.x = gx; node.properties.dockGraph.y = gy; node._dockSig = ""; applyDockTransform(node); }
           else { fl.style.left = Math.round(gx) + "px"; fl.style.top = Math.round(gy) + "px"; }
           fitFsCanvas();
-        }, () => { saveDockGeom(); flushDockChange(); });
+        }, () => { saveDockGeom(); flushChange(); });
       }
       function addDockResizeHandles(fl) {
         for (const dir of ["n", "s", "e", "w", "ne", "nw", "se", "sw"]) {
@@ -796,7 +800,7 @@ app.registerExtension({
           minBtn.title = on ? "Restore editor" : "Minimize editor";
           if (!on) requestAnimationFrame(fitFsCanvas);        // re-letterbox the canvas after it's visible again
         };
-        minBtn.addEventListener("click", () => { applyMin(!node.properties.dockMin); flushDockChange(); });
+        minBtn.addEventListener("click", () => { applyMin(!node.properties.dockMin); flushChange(); });
         const fsBtn = document.createElement("button"); fsBtn.className = "kjideo-btn"; fsBtn.textContent = "⛶";
         fsBtn.title = "Open in a larger window (Esc to close)";
         stopProp(fsBtn); fsBtn.addEventListener("click", () => node._fullscreen ? exitFs() : enterFs());
@@ -843,7 +847,7 @@ app.registerExtension({
               fl.style.left = Math.max(0, Math.min(ox + me.clientX - sx0, window.innerWidth - 60)) + "px";
               fl.style.top = Math.max(0, Math.min(oy + me.clientY - sy0, window.innerHeight - 30)) + "px";
             }
-          }, () => { saveDockGeom(); flushDockChange(); });
+          }, () => { saveDockGeom(); flushChange(); });
         });
         try { node._dockRO = new ResizeObserver(() => { fitFsCanvas(); saveDockGeom(); }); node._dockRO.observe(fl); } catch (e) {}
         // editor slot is collapsed (getMinHeight→0) — shrink the node to its widgets
@@ -908,10 +912,12 @@ app.registerExtension({
       // All boxes under the point, top-first to match draw order: the active box is
       // drawn last (on top), then the rest by index low→high (index 0 = front).
       function boxesAt(mN) {
-        const rx = HANDLE / logW(), ry = HANDLE / logH();
+        const baseRx = HANDLE / logW(), baseRy = HANDLE / logH();
         const res = [];
         for (let i = 0; i < node._boxes.length; i++) {
           const b = node._boxes[i];
+          if (b.locked) continue;                          // locked regions aren't grabbable on the canvas
+          const rx = Math.min(baseRx, b.w / 3), ry = Math.min(baseRy, b.h / 3);  // shrink handles on small boxes so a central move zone remains
           const mode = rectHitTestN(mN.x, mN.y, b.x, b.y, b.x + b.w, b.y + b.h, rx, ry);
           if (mode) res.push({ index: i, mode });
         }
@@ -937,8 +943,15 @@ app.registerExtension({
           const x1 = b.x * W, y1 = b.y * H, x2 = (b.x + b.w) * W, y2 = (b.y + b.h) * H;
           const tag = String(i + 1).padStart(2, "0");
           const w = ctx.measureText(tag).width + 8;
-          let pick = [x1, y1];
-          for (const [cx, cy] of [[x1, y1], [x2 - w, y1], [x2 - w, y2 - h], [x1, y2 - h]]) {
+          // Box too small to hold the badge → place it just outside (above/below/beside) so it doesn't
+          // cover the box and the box stays grabbable; otherwise tuck it into a free corner inside.
+          const small = (x2 - x1) < w || (y2 - y1) < h;
+          const cands = small
+            ? [[x1, y1 - h - 1], [x1, y2 + 1], [x2 + 1, y1], [x1 - w - 1, y1]]
+            : [[x1, y1], [x2 - w, y1], [x2 - w, y2 - h], [x1, y2 - h]];
+          let pick = cands[0];
+          for (const [cx, cy] of cands) {
+            if (cx < 0 || cy < 0 || cx + w > W || cy + h > H) continue;   // keep on-canvas
             if (!placed.some((p) => hits({ x: cx, y: cy, w, h }, p))) { pick = [cx, cy]; break; }
           }
           const r = { x: pick[0], y: pick[1], w, h, tag };
@@ -950,6 +963,7 @@ app.registerExtension({
         const px = mN.x * logW(), py = mN.y * logH();
         const rects = tagRects();
         for (let i = node._boxes.length - 1; i >= 0; i--) {
+          if (node._boxes[i].locked) continue;             // locked badges aren't interactive
           const r = rects[i];
           if (r && px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h) return i;
         }
@@ -966,8 +980,10 @@ app.registerExtension({
         const ti = titleAt(mN);
         if (ti !== null && !cycle) return { index: ti, mode: "move" };
         if (cycle && cands.length > 1) {
-          const pos = cands.findIndex((c) => c.index === node._activeIdx);
-          return cands[(pos + 1) % cands.length];
+          // cycle over a stable order (boxesAt moves the active box to the front, which would otherwise ping-pong 2)
+          const ordered = [...cands].sort((a, b) => a.index - b.index);
+          const pos = ordered.findIndex((c) => c.index === node._activeIdx);
+          return ordered[(pos + 1) % ordered.length];
         }
         return cands.find((c) => c.index === node._activeIdx && c.mode !== "move") || cands[0];
       }
@@ -1113,19 +1129,20 @@ app.registerExtension({
         if (aIdx >= 0 && aIdx < node._boxes.length) order.push(aIdx);
         const tagR = tagRects();                              // collision-avoided tag positions
         for (const i of order) {
-          const b = node._boxes[i], active = i === aIdx, selected = selSet.has(i);
+          const b = node._boxes[i], active = i === aIdx, selected = selSet.has(i) && !b.locked;  // locked never shows as selected
           const pal = (b.palette || []).filter(Boolean);
           const col = pal.length ? pal[0] : "#8c8c8c";       // box color = first palette color, else neutral grey
           const { x1, y1, x2, y2 } = toPx(b);
           const w = x2 - x1, h = y2 - y1;
-          const hovered = i === node._hoverBox || selected;  // selected boxes stay highlighted
+          const hovered = (i === node._hoverBox && !b.locked) || selected;  // locked boxes don't hover; selected stay highlighted
           if (selected) {                                    // opaque backing so contents read clearly over boxes behind
             ctx.fillStyle = "rgba(26,26,26,0.88)";
             ctx.fillRect(x1, y1, w, h);
           }
           ctx.fillStyle = col + (hovered ? "3a" : "22");     // tint of the box color
           ctx.fillRect(x1, y1, w, h);
-          if (b.nobbox) ctx.setLineDash([6, 4]);             // unplaced (no bbox in source)
+          if (b.locked) ctx.setLineDash([3, 3]);             // locked: frozen on the canvas
+          else if (b.nobbox) ctx.setLineDash([6, 4]);        // unplaced (no bbox in source)
           const lw = selected ? 2 : (hovered ? 1.5 : 1);
           ctx.strokeStyle = col; ctx.lineWidth = lw;
           ctx.strokeRect(x1 + lw / 2, y1 + lw / 2, w - lw, h - lw);  // inside the box so strip/badge align at y1
@@ -1138,10 +1155,9 @@ app.registerExtension({
               ctx.fillRect(sx, y1, x1 + Math.round((p + 1) * sw) - sx, sh);
             }
           }
-          // in-box content (clipped to the box): prompt text, tag chip on top
+          // in-box content (clipped to the box): prompt text + lock badge
           ctx.save();
           ctx.beginPath(); ctx.rect(x1, y1, w, h); ctx.clip();
-
           let body = b.desc || "";
           if (b.type === "text" && b.text) body = `"${b.text}"` + (body ? " — " + body : "");
           if (body && node.properties.showBoxText !== false) {  // toggle: show text in boxes
@@ -1155,18 +1171,19 @@ app.registerExtension({
               ty += lh;
             }
           }
-          // tag chip on top, at its collision-avoided position
+          ctx.restore();
+          // tag chip on top, unclipped (sits outside boxes too small to hold it — its collision-avoided position)
           const tr = tagR[i];
           ctx.font = "bold 11px monospace";
           ctx.fillStyle = col;                                // tag chip = box color
           ctx.fillRect(tr.x, tr.y, tr.w, 14);
-          if (i === node._hoverTitle) {                       // hover highlight
+          if (i === node._hoverTitle && !b.locked) {          // hover highlight (never on locked)
             ctx.fillStyle = "rgba(255,255,255,0.25)"; ctx.fillRect(tr.x, tr.y, tr.w, 14);
             ctx.strokeStyle = "#fff"; ctx.lineWidth = 1; ctx.strokeRect(tr.x + 0.5, tr.y + 0.5, tr.w - 1, 13);
           }
           ctx.fillStyle = textOn(col);
           ctx.fillText(tr.tag, tr.x + 4, tr.y + 11);
-          ctx.restore();
+          if (b.locked) { ctx.font = "11px sans-serif"; ctx.fillStyle = "#ddd"; ctx.fillText("🔒", tr.x + tr.w + 2, tr.y + 11); }  // lock symbol next to the badge
           if (selected) {                                    // orange selection ring on top (above strip/tag): solid = primary, dashed = others
             const olw = active ? 2 : 1;
             ctx.strokeStyle = "#ff8c00"; ctx.lineWidth = olw;
@@ -1211,7 +1228,7 @@ app.registerExtension({
         };
       }
 
-      function commit() { serialize(); renderPanel(); drawCanvas(); updateTokens(); }
+      function commit() { serialize(); renderPanel(); drawCanvas(); updateTokens(); flushChange(); }  // flush so canvas edits persist without a defocus
       // Live text edit: persist + repaint + token count, without rebuilding the panel.
       function touch() { serialize(); drawCanvas(); updateTokens(); }
 
@@ -1224,8 +1241,8 @@ app.registerExtension({
       }
       // Delete every selected box (or the active one) and reset the selection.
       function removeSelected() {
-        const idxs = [...node._selection].sort((a, b) => b - a);
-        if (!idxs.length && node._activeIdx >= 0) idxs.push(node._activeIdx);
+        const idxs = [...node._selection].sort((a, b) => b - a).filter((i) => !node._boxes[i]?.locked);  // keep locked
+        if (!idxs.length && node._activeIdx >= 0 && !node._boxes[node._activeIdx]?.locked) idxs.push(node._activeIdx);
         if (!idxs.length) return;
         for (const i of idxs) node._boxes.splice(i, 1);
         node._selection = new Set();
@@ -1382,7 +1399,7 @@ app.registerExtension({
       // Paste the clipboard regions as a group, centered under the cursor, keeping their layout.
       function pasteBoxes() {
         if (!copiedBoxes || !copiedBoxes.length) return;
-        const clones = copiedBoxes.map((b) => JSON.parse(JSON.stringify(b)));
+        const clones = copiedBoxes.map((b) => { const c = JSON.parse(JSON.stringify(b)); delete c.locked; return c; });  // pasted = editable
         let minx = Infinity, miny = Infinity, maxx = -Infinity, maxy = -Infinity;
         for (const b of clones) {
           minx = Math.min(minx, b.x); miny = Math.min(miny, b.y);
@@ -1526,7 +1543,7 @@ app.registerExtension({
         if (node._marqueeActive) {
           const r = marqueeRect();
           const sel = new Set(node._marqueeBase);
-          node._boxes.forEach((b, i) => { if (rectsOverlap(r, b)) sel.add(i); });
+          node._boxes.forEach((b, i) => { if (!b.locked && rectsOverlap(r, b)) sel.add(i); });   // marquee skips locked
           node._selection = sel;
           if (node._activeIdx < 0 || !sel.has(node._activeIdx)) node._activeIdx = sel.size ? [...sel][0] : node._activeIdx;
         }
@@ -1565,7 +1582,7 @@ app.registerExtension({
         const src = node._boxes[srcIdx];
         if (!src) return;
         const nb = JSON.parse(JSON.stringify(src));
-        delete nb.nobbox;
+        delete nb.nobbox; delete nb.locked;               // a duplicate is editable, not born locked
         node._boxes.push(nb);
         selectOnly(node._boxes.length - 1);
         node._placing = true;
@@ -1637,14 +1654,30 @@ app.registerExtension({
             txt.className = "kjideo-ltext" + (label ? "" : " empty");
             txt.textContent = label || (b.type === "text" ? "(text)" : "(empty)");
             txt.title = label;
+            const lock = document.createElement("button");
+            lock.className = "kjideo-lbtn kjideo-lock" + (b.locked ? " on" : "");
+            lock.textContent = b.locked ? "🔒" : "🔓";
+            lock.title = b.locked ? "Unlock (allow moving/resizing)" : "Lock (freeze on the canvas)";
             const dup = document.createElement("button");
             dup.className = "kjideo-lbtn"; dup.textContent = "⧉";
             dup.title = "Duplicate, then click on the canvas to place";
             const del = document.createElement("button");
             del.className = "kjideo-lbtn del"; del.textContent = "✕";
-            del.title = "Delete region";
-            row.append(sw, num, txt, dup, del);
+            del.title = b.locked ? "Unlock to delete" : "Delete region";
+            del.disabled = !!b.locked;
+            row.append(sw, num, txt, lock, dup, del);
             list.appendChild(row);
+
+            lock.addEventListener("click", (e) => {
+              e.stopPropagation();
+              b.locked = !b.locked;
+              if (b.locked) {                              // a locked box drops out of the selection
+                const idx = node._boxes.indexOf(b);
+                node._selection.delete(idx);
+                if (node._activeIdx === idx) node._activeIdx = node._selection.size ? [...node._selection][0] : -1;
+              }
+              commit(); buildRows();
+            });
 
             row.addEventListener("click", () => {
               if (row._dragged) { row._dragged = false; return; }
@@ -1668,7 +1701,7 @@ app.registerExtension({
             });
             // drag-reorder (vertical FLIP, mirrors the palette swatch reorder)
             row.addEventListener("pointerdown", (e) => {
-              if (e.button !== 0 || e.target === dup || e.target === del) return;
+              if (e.button !== 0 || e.target === lock || e.target === dup || e.target === del) return;
               e.preventDefault(); e.stopPropagation();
               const sx = e.clientX, sy = e.clientY;
               let dragging = false;
