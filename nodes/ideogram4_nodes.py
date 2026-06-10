@@ -292,6 +292,8 @@ Toolbar:
                 high_level_description="", aesthetics="", lighting="", medium="",
                 style_palette_data="", elements_data="", import_json="", import_mode="when empty",
                 bboxes=None, image=None, bg_brightness=25) -> io.NodeOutput:
+        if import_mode not in ("when empty", "always"):      # old workflows saved before this widget existed
+            import_mode = "when empty"
         boxes = _parse_json_list(elements_data)
         boxes_seeded = False
         if not boxes and bboxes:

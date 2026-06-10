@@ -2303,8 +2303,11 @@ app.registerExtension({
         if (!pal) { try { const p = JSON.parse(stylePaletteWidget?.value || ""); if (isPal(p)) pal = p; } catch (e) {} }
         if (!pal) { for (const v of raw) { try { const p = JSON.parse(v); if (isPal(p)) { pal = p; break; } } catch (e) {} } }
         if (pal) node._stylePalette = pal.slice();
-        const im = o && o.ideo && o.ideo.importMode, imW = findW("import_mode");
-        if (im && imW) imW.value = im;                        // restore import_mode (index-based restore is unreliable here)
+        const imW = findW("import_mode");                     // restore import_mode; coerce to a valid option so
+        if (imW) {                                            // old workflows (saved before this widget) don't fail Combo validation
+          const im = o && o.ideo && o.ideo.importMode, opts = ["when empty", "always"];
+          imW.value = opts.includes(im) ? im : (opts.includes(imW.value) ? imW.value : "when empty");
+        }
         node._configured = true;                              // mark as loaded so initial layout keeps the restored size
         hideDataWidgets();
         serialize();                                         // realign widget values for Python + future saves
