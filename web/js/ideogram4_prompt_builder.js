@@ -149,20 +149,135 @@ document.addEventListener("keydown", (e) => {
   hoveredCanvasNode._toggleHideBoxes?.();
 }, true);
 
+// Pinned dock follows the node: Nodes 2.0 hosts it inside the node element (inherits its transform); legacy is body-fixed.
+const pinnedDocks = new Set();
+let _dockRectNonce = 0;
+window.addEventListener("resize", () => { _dockRectNonce++; wakeDocks(); });   // canvas may shift without pan/zoom
+// gr.x/gr.y = offset (graph units) from the node's content top-left (node.pos).
+function applyDockTransform(n) {
+  const c = app.canvas, fl = n._dockEl, gr = n.properties.dockGraph;
+  if (!c || !fl || !gr) return;
+  let nodeEl = null;
+  if (window.LiteGraph?.vueNodesMode && n.id != null) {        // cache; re-query only if it's gone (virtualization)
+    nodeEl = n._dockNodeEl;
+    if (!nodeEl || !nodeEl.isConnected) nodeEl = n._dockNodeEl = document.querySelector(`[data-node-id="${n.id}"]`);
+  }
+  if (nodeEl) {                                                 // host inside the node element → inherits its transform
+    const title = window.LiteGraph?.NODE_TITLE_HEIGHT ?? 30;   // element top is the title bar; node.pos sits below it
+    const sig = "v|" + gr.x + "|" + gr.y;
+    if (fl.parentElement !== nodeEl) {
+      nodeEl.appendChild(fl);
+      fl.style.position = "absolute"; fl.style.transform = ""; fl.style.transformOrigin = ""; fl.style.zIndex = "";
+      n._dockSig = "";
+    }
+    if (n._dockSig !== sig) { fl.style.left = gr.x + "px"; fl.style.top = (title + gr.y) + "px"; n._dockSig = sig; }
+    return;
+  }
+  // Legacy / fallback (no Vue element, e.g. just after a mode switch): body-fixed from node.pos + transform.
+  if (fl.parentElement !== document.body) { document.body.appendChild(fl); fl.style.left = ""; fl.style.top = ""; n._dockSig = ""; }  // re-attach if orphaned
+  if (!n.pos) return;
+  const ds = c.ds, scale = ds.scale, rect = c.canvas.getBoundingClientRect();
+  const baseLeft = rect.left + (n.pos[0] + gr.x + ds.offset[0]) * scale;
+  const baseTop = rect.top + (n.pos[1] + gr.y + ds.offset[1]) * scale;
+  const tf = `translate(${baseLeft}px,${baseTop}px) scale(${scale})`;
+  if (n._dockSig !== tf) { fl.style.position = "fixed"; fl.style.transformOrigin = "top left"; fl.style.transform = tf; n._dockSig = tf; }
+  const order = n.graph?.nodes?.indexOf(n);            // sit at the node DOM-widget layer (not above everything)
+  if (order != null && order >= 0) fl.style.zIndex = String(order);
+}
+// Event-driven loop: woken by canvas redraws (dirty-gated) + resize, self-stops when settled.
+const DOCK_IDLE_STOP = 6;        // stop after this many frames with no further wake
+let _dockRAF = 0, _dockLoopSig = "", _dockLastMode = null, _dockIdle = 0, _dockWakesInstalled = false;
+function tickDocks() {
+  const c = app.canvas;
+  if (c && pinnedDocks.size) {
+    const vue = !!window.LiteGraph?.vueNodesMode;
+    if (vue !== _dockLastMode) {                  // legacy↔2.0 flip rebuilds the node DOM — force re-parent + re-place
+      _dockLastMode = vue; _dockLoopSig = "";
+      for (const n of pinnedDocks) { n._dockSig = ""; n._dockNodeEl = null; }
+    }
+    if (vue) {
+      for (const n of pinnedDocks) {
+        applyDockTransform(n);
+        const w = n._dockWrap;                     // Vue re-mounts the widget into the node body — pull it back
+        if (w && n._dockBody && !n._fullscreen && w.parentElement !== n._dockBody) { n._dockBody.appendChild(w); n._dockSig = ""; }
+      }
+    } else {                                       // legacy: skip rect reads when nothing moved
+      const ds = c.ds;
+      let sig = _dockRectNonce + "|" + ds.scale + "|" + ds.offset[0] + "|" + ds.offset[1];
+      for (const n of pinnedDocks) sig += n.pos ? "|" + n.pos[0] + "," + n.pos[1] : "|";
+      if (sig !== _dockLoopSig) { _dockLoopSig = sig; for (const n of pinnedDocks) applyDockTransform(n); }
+    }
+  }
+  if (pinnedDocks.size && ++_dockIdle < DOCK_IDLE_STOP) _dockRAF = requestAnimationFrame(tickDocks);
+  else { _dockRAF = 0; _dockLoopSig = ""; }       // settled — stop until the next wake
+}
+function wakeDocks() {            // a canvas change happened — run/continue the loop until it settles
+  _dockIdle = 0;
+  if (!_dockRAF && pinnedDocks.size) _dockRAF = requestAnimationFrame(tickDocks);
+}
+function installDockWakes() {     // onDrawForeground only fires when dirty_canvas is set
+  if (_dockWakesInstalled) return;
+  const c = app.canvas; if (!c) return;
+  _dockWakesInstalled = true;
+  chainCallback(c, "onDrawForeground", wakeDocks);
+}
+function startDockLoop() { installDockWakes(); wakeDocks(); }
+
+// Pointer-capture drag: filters moves by pointerId, auto-removes its listeners on release, calls onEnd.
+function dragPointer(e, target, onMove, onEnd) {
+  try { target.setPointerCapture(e.pointerId); } catch (er) {}
+  const move = (me) => { if (me.pointerId === e.pointerId) onMove(me); };
+  const end = (ue) => {
+    if (ue.pointerId !== e.pointerId) return;
+    target.removeEventListener("pointermove", move);
+    target.removeEventListener("pointerup", end);
+    target.removeEventListener("pointercancel", end);
+    if (onEnd) onEnd(ue);
+  };
+  target.addEventListener("pointermove", move);
+  target.addEventListener("pointerup", end);
+  target.addEventListener("pointercancel", end);
+}
+
+// Outside-click dismissal for a popup: arm() after showing, disarm() after hiding.
+function outsideDismiss(menu, onDismiss, anchor) {
+  let handler = null;
+  const disarm = () => {
+    if (!handler) return;
+    document.removeEventListener("pointerdown", handler, true);
+    document.removeEventListener("mousedown", handler, true);
+    handler = null;
+  };
+  const arm = () => {
+    disarm();
+    handler = (e) => { if (!menu.contains(e.target) && e.target !== anchor) onDismiss(); };
+    setTimeout(() => {                                  // defer so the opening click itself doesn't dismiss
+      if (!handler) return;
+      document.addEventListener("pointerdown", handler, true);
+      document.addEventListener("mousedown", handler, true);
+    }, 0);
+  };
+  return { arm, disarm };
+}
+
 function injectStyle() {
   if (document.getElementById("kjideo-style")) return;
   const s = document.createElement("style");
   s.id = "kjideo-style";
   s.textContent = `
     .kjideo-wrap { display:flex; flex-direction:column; overflow:hidden; position:relative; pointer-events:auto; gap:4px; }
-    .kjideo-canvas { cursor:crosshair; display:block; width:100%; height:auto; flex:0 0 auto; background:#1a1a1a; border-radius:4px; outline:none; touch-action:none; }
+    .kjideo-cv { flex:1 1 auto; min-height:60px; display:flex; align-items:center; justify-content:center; overflow:hidden; }
+    .kjideo-canvas { cursor:crosshair; display:block; flex:0 0 auto; background:#1a1a1a; border-radius:4px; outline:none; touch-action:none; }
     .kjideo-bar { display:flex; align-items:center; gap:6px; font:11px sans-serif; color:#aaa; user-select:none; padding:0 2px; flex:0 0 auto; }
-    .kjideo-panel { display:flex; flex-direction:column; gap:5px; padding:6px; background:#262626; border-radius:4px; font:11px sans-serif; color:#bbb; flex:0 0 auto; }
+    .kjideo-panel { display:flex; flex-direction:column; gap:5px; padding:6px; background:#262626; border-radius:4px; font:11px sans-serif; color:#bbb; flex:0 0 auto; overflow-y:auto; min-height:0; }
+    .kjideo-split { flex:0 0 auto; height:8px; cursor:ns-resize; position:relative; }
+    .kjideo-split::before { content:""; position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); width:34px; height:3px; background:#555; border-radius:2px; }
+    .kjideo-split:hover::before { background:#46b4e6; }
     .kjideo-row { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
     .kjideo-btn { background:#333; border:1px solid #555; border-radius:4px; color:#bbb; font:11px sans-serif; cursor:pointer; padding:2px 8px; line-height:16px; white-space:nowrap; flex-shrink:0; }
     .kjideo-btn:hover { border-color:#46b4e6; color:#fff; }
     .kjideo-btn.active { border-color:#46b4e6; color:#46b4e6; background:#2a3a42; }
-    .kjideo-area { width:100%; box-sizing:border-box; background:#1d1d1d; border:1px solid #444; border-radius:4px; color:#ddd; font:13px monospace; padding:4px 6px; resize:vertical; min-height:36px; }
+    .kjideo-area { width:100%; box-sizing:border-box; background:#1d1d1d; border:1px solid #444; border-radius:4px; color:#ddd; font:13px monospace; padding:4px 6px; resize:none; min-height:36px; flex:1 1 auto; }
     .kjideo-sw { width:20px; height:20px; border:1px solid #666; border-radius:3px; cursor:pointer; flex-shrink:0; position:relative; touch-action:none; transition:transform .18s ease, box-shadow .12s ease, opacity .12s ease; }
     .kjideo-sw:hover { transform:scale(1.2); box-shadow:0 0 0 2px #46b4e6; z-index:3; }
     .kjideo-sw.dragging { opacity:.4; box-shadow:0 0 0 2px #46b4e6; }
@@ -187,6 +302,23 @@ function injectStyle() {
     .kjideo-fs { position:fixed; inset:0; z-index:9000; background:rgba(0,0,0,0.72); display:flex; align-items:center; justify-content:center; }
     .kjideo-fs-inner { position:relative; width:88vw; height:90vh; background:#1a1a1a; border:1px solid #444; border-radius:8px; box-shadow:0 12px 48px rgba(0,0,0,0.6); padding:12px; box-sizing:border-box; }
     .kjideo-fs-inner .kjideo-wrap { height:100%; }
+    .kjideo-dock { position:fixed; z-index:8500; pointer-events:auto; display:flex; flex-direction:column; background:#1a1a1a; border:1px solid #555; border-radius:8px; box-shadow:0 8px 30px rgba(0,0,0,0.55); min-width:300px; min-height:240px; overflow:hidden; }
+    .kjideo-rsz { position:absolute; z-index:20; touch-action:none; }
+    .kjideo-rsz.n { top:0; left:11px; right:11px; height:6px; cursor:ns-resize; }
+    .kjideo-rsz.s { bottom:0; left:11px; right:11px; height:6px; cursor:ns-resize; }
+    .kjideo-rsz.e { right:0; top:11px; bottom:11px; width:6px; cursor:ew-resize; }
+    .kjideo-rsz.w { left:0; top:11px; bottom:11px; width:6px; cursor:ew-resize; }
+    .kjideo-rsz.ne { top:0; right:0; width:12px; height:12px; cursor:nesw-resize; }
+    .kjideo-rsz.nw { top:0; left:0; width:12px; height:12px; cursor:nwse-resize; }
+    .kjideo-rsz.se { bottom:0; right:0; width:12px; height:12px; cursor:nwse-resize; }
+    .kjideo-rsz.sw { bottom:0; left:0; width:12px; height:12px; cursor:nesw-resize; }
+    .kjideo-dock.minimized { min-height:0 !important; height:auto !important; }
+    .kjideo-dock.minimized .kjideo-dock-body { display:none; }
+    .kjideo-dock.minimized .kjideo-rsz { display:none; }
+    .kjideo-dock-head { display:flex; align-items:center; gap:6px; padding:4px 8px; background:#262626; cursor:move; font:12px sans-serif; color:#ccc; user-select:none; border-bottom:1px solid #444; flex:0 0 auto; }
+    .kjideo-dock-head .kjideo-btn { padding:1px 7px; }
+    .kjideo-dock-body { flex:1 1 auto; min-height:0; padding:8px; box-sizing:border-box; overflow:hidden; }
+    .kjideo-dock-body .kjideo-wrap { height:100%; }
     .kjideo-bgmenu { padding:7px; display:flex; flex-direction:column; gap:7px; min-width:170px; }
     .kjideo-bgrow { display:flex; align-items:center; gap:8px; }
     .kjideo-bglbl { color:#888; font:11px sans-serif; flex:0 0 auto; min-width:62px; }
@@ -244,8 +376,7 @@ app.registerExtension({
       node._bgImg = null;      // optional reference image shown as the canvas background
       node._bgManual = false;  // bg set via "use last result" (not the image input)
       node._lastImported = ""; // last import_json applied to the editor (avoid re-apply)
-      node._areaH = node._areaH || {};      // remembered textarea heights (per field)
-      node._areaObservers = [];             // live ResizeObservers to disconnect on rebuild
+      node._areaObservers = [];             // (reserved) live ResizeObservers to disconnect on rebuild
 
       // ── DOM ──
       const wrap = document.createElement("div");
@@ -356,25 +487,15 @@ app.registerExtension({
       bgRow("Line color", guideColor); bgRow("Line opacity", opacitySlider);
       document.body.appendChild(bgMenu);
       node._bgMenu = bgMenu;
-      function closeBgMenu() {
-        bgMenu.style.display = "none";
-        if (node._bgMenuDismiss) {
-          document.removeEventListener("pointerdown", node._bgMenuDismiss, true);
-          document.removeEventListener("mousedown", node._bgMenuDismiss, true);
-          node._bgMenuDismiss = null;
-        }
-      }
+      const bgDismiss = outsideDismiss(bgMenu, () => closeBgMenu(), bgBtn);
+      function closeBgMenu() { bgMenu.style.display = "none"; bgDismiss.disarm(); }
       bgBtn.addEventListener("click", () => {
         if (bgMenu.style.display !== "none") { closeBgMenu(); return; }
         bgMenu.style.display = "";
         const r = bgBtn.getBoundingClientRect();
         bgMenu.style.left = Math.max(4, Math.min(r.left, window.innerWidth - bgMenu.offsetWidth - 4)) + "px";
         bgMenu.style.top = Math.min(r.bottom + 4, window.innerHeight - bgMenu.offsetHeight - 4) + "px";
-        node._bgMenuDismiss = (e) => { if (!bgMenu.contains(e.target) && e.target !== bgBtn) closeBgMenu(); };
-        setTimeout(() => {
-          document.addEventListener("pointerdown", node._bgMenuDismiss, true);
-          document.addEventListener("mousedown", node._bgMenuDismiss, true);
-        }, 0);
+        bgDismiss.arm();
       });
       // ── Templates popup: save/load named caption JSONs (server-side userdata) ──
       const tplBtn = document.createElement("button");
@@ -386,14 +507,8 @@ app.registerExtension({
       tplMenu.style.display = "none";
       document.body.appendChild(tplMenu);
       node._tplMenu = tplMenu;
-      function closeTplMenu() {
-        tplMenu.style.display = "none";
-        if (node._tplDismiss) {
-          document.removeEventListener("pointerdown", node._tplDismiss, true);
-          document.removeEventListener("mousedown", node._tplDismiss, true);
-          node._tplDismiss = null;
-        }
-      }
+      const tplDismiss = outsideDismiss(tplMenu, () => closeTplMenu(), tplBtn);
+      function closeTplMenu() { tplMenu.style.display = "none"; tplDismiss.disarm(); }
       async function buildTplMenu() {
         tplMenu.innerHTML = "";
         const saveRow = document.createElement("div"); saveRow.className = "kjideo-bgrow";
@@ -448,11 +563,7 @@ app.registerExtension({
         const r = tplBtn.getBoundingClientRect();
         tplMenu.style.left = Math.max(4, Math.min(r.left, window.innerWidth - tplMenu.offsetWidth - 4)) + "px";
         tplMenu.style.top = Math.min(r.bottom + 4, window.innerHeight - tplMenu.offsetHeight - 4) + "px";
-        node._tplDismiss = (e) => { if (!tplMenu.contains(e.target) && e.target !== tplBtn) closeTplMenu(); };
-        setTimeout(() => {
-          document.addEventListener("pointerdown", node._tplDismiss, true);
-          document.addEventListener("mousedown", node._tplDismiss, true);
-        }, 0);
+        tplDismiss.arm();
       });
       bar.appendChild(hint); bar.appendChild(tokenSpan); bar.appendChild(bgBtn); bar.appendChild(copyBtn); bar.appendChild(importBtn); bar.appendChild(tplBtn); bar.appendChild(fsBtn); bar.appendChild(clearBtn);
       updateGrabBtn();
@@ -476,15 +587,37 @@ app.registerExtension({
 
       const panel = document.createElement("div");
       panel.className = "kjideo-panel";
+      node._panelH = node._panelH || 150;                    // height of the prompt panel (set by the splitter)
+      panel.style.height = node._panelH + "px";
 
-      // Canvas above panel so the panel grows downward without shifting the canvas.
-      wrap.appendChild(bar); wrap.appendChild(styleBar); wrap.appendChild(canvasEl); wrap.appendChild(panel);
+      // Canvas letterbox-fits into a flex container (cvBox), so node resize never aspect-locks the height.
+      const cvBox = document.createElement("div");
+      cvBox.className = "kjideo-cv";
+      cvBox.appendChild(canvasEl);
 
-      const TOOLBAR_H = 22;
-      node._widgetHeight = 360;
+      // Draggable separator between the canvas and the prompt panel — drag up for more prompt, down for more canvas.
+      const splitter = document.createElement("div");
+      splitter.className = "kjideo-split";
+      splitter.title = "Drag to resize the description area";
+      splitter.addEventListener("pointerdown", (e) => {
+        if (e.button !== 0) return;
+        e.preventDefault(); e.stopPropagation();
+        const scale = (node.properties.dockPinned && app.canvas) ? (app.canvas.ds.scale || 1) : 1;
+        const sy = e.clientY, h0 = panel.offsetHeight;
+        dragPointer(e, splitter, (me) => {
+          const dy = (me.clientY - sy) / scale;
+          const h = Math.max(60, Math.min(h0 - dy, wrap.clientHeight - 110));   // up → bigger panel; keep room for the canvas
+          node._panelH = Math.round(h); panel.style.height = node._panelH + "px";   // persisted via the onSerialize blob
+          fitCanvas();
+        }, flushDockChange);
+      });
+
+      wrap.appendChild(bar); wrap.appendChild(styleBar); wrap.appendChild(cvBox); wrap.appendChild(splitter); wrap.appendChild(panel);
+
+      const EDITOR_MIN = 220;                                  // fixed floor; the node fills the rest and resizes freely
       node.ideoEditor = node.addDOMWidget("ideo_editor", "Ideogram4Editor", wrap, {
         serialize: false, hideOnZoom: false,
-        getMinHeight: () => node._widgetHeight,
+        getMinHeight: () => (node._detached ? 0 : EDITOR_MIN),   // collapse when popped out
       });
       node.resizable = true;
 
@@ -501,64 +634,55 @@ app.registerExtension({
         node._visObserver.observe(wrap);
       } catch (e) {}
 
-      // ── canvas sizing ──
-      // The display size is CSS-driven (width:100% + aspect-ratio); the backing store
-      // is sized to display × devicePixelRatio in _draw() so text/lines stay crisp.
-      function setCanvasSize(w, h) {
-        canvasEl.style.aspectRatio = `${w} / ${h}`;          // display shape only
-        if (node.graph) node.graph.setDirtyCanvas(true, true);
-      }
-      function syncCanvasToDims() {
-        const w = wWidget ? wWidget.value : 1024, h = hWidget ? hWidget.value : 1024;
-        setCanvasSize(Math.max(1, w), Math.max(1, h));
-        drawCanvas();
-      }
-
-      // Content height = panel's bottom edge in the wrapper (includes toolbar/canvas/gaps).
-      function recalcWidgetHeight() {
-        const contentH = panel.offsetTop + panel.offsetHeight;
-        if (contentH > 0) {
-          node._widgetHeight = contentH + 10;                  // margin pad
-        } else {                                               // not laid out yet — estimate
-          const ratio = (hWidget?.value || 1) / (wWidget?.value || 1);
-          node._widgetHeight = Math.round(Math.max(100, node.size[0] - 30) * ratio) + TOOLBAR_H + 70;
-        }
-      }
-      function fitNode() {
-        if (node._fullscreen) { fitFsCanvas(); return; }     // in the popup, size the canvas, not the node
-        recalcWidgetHeight();
-        // computeSize (stable min-heights), not last_y which creeps with growable widgets above.
-        const minH = node.computeSize()[1];
-        if (node.size[1] < minH) node.setSize([node.size[0], minH]);
-      }
-
-      // ── larger popup window (relocates the editor into a centered overlay) ──
-      function fitFsCanvas() {                                // fit the fixed-aspect canvas into the popup
-        if (!node._fullscreen || !node._fsInner) return;
-        const availW = node._fsInner.clientWidth - 24;
-        const availH = node._fsInner.clientHeight - 24 - 16 - bar.offsetHeight - styleBar.offsetHeight - panel.offsetHeight;
+      // Letterbox-fit the canvas (keeping width/height aspect) into its flex container cvBox.
+      function fitCanvas() {
+        if (!node._detached && wrap.offsetParent === null) return;   // hidden tab — measurements are 0
+        const availW = cvBox.clientWidth, availH = cvBox.clientHeight;
+        if (availW < 4 || availH < 4) return;
         const aspect = (wWidget?.value || 1) / (hWidget?.value || 1);
         let cw = availW, ch = cw / aspect;
-        if (ch > availH) { ch = Math.max(60, availH); cw = ch * aspect; }
-        if (cw > availW) { cw = availW; ch = cw / aspect; }
+        if (ch > availH) { ch = availH; cw = ch * aspect; }
         canvasEl.style.width = Math.round(cw) + "px";
         canvasEl.style.height = Math.round(ch) + "px";
-        canvasEl.style.alignSelf = "center";
         drawCanvas();
       }
+      const fitFsCanvas = fitCanvas;                           // dock/fullscreen use the same fitter
+      function syncCanvasToDims() { fitCanvas(); }             // aspect changed (width/height widgets)
+      function fitNode() {
+        if (node._detached) { fitCanvas(); return; }
+        if (wrap.offsetParent === null) return;                // hidden tab / off-screen — skip
+        const minH = node.computeSize()[1];                    // never sit below the floor
+        if (node.size[1] < minH) node.setSize([node.size[0], minH]);
+        fitCanvas();
+      }
+      function detachInto(container) {                        // move the editor out of the node
+        node._wrapHome = wrap.parentNode;
+        container.appendChild(wrap);
+        if (node.ideoEditor) node.ideoEditor.hidden = true;
+        node._detached = true;
+        node._fsInner = container;
+        node._dockWrap = wrap;                               // so the dock can reclaim it if Vue re-mounts the widget
+      }
+      function reattach() {                                   // fullscreen exit → back into the floating dock
+        canvasEl.style.width = ""; canvasEl.style.height = "";
+        const home = node._dockBody || node._wrapHome;
+        if (home) home.appendChild(wrap);
+        node._fsInner = node._dockBody || null;               // stays detached, living in the dock
+        if (node.graph) node.graph.setDirtyCanvas(true, true);
+        requestAnimationFrame(fitCanvas);
+      }
+
       function onFsEsc(e) { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); exitFs(); } }
       function enterFs() {
         if (node._fullscreen) return;
         node._fullscreen = true;
-        node._wrapHome = wrap.parentNode;                    // where to return the editor on close
         const ov = document.createElement("div"); ov.className = "kjideo-fs";
         const inner = document.createElement("div"); inner.className = "kjideo-fs-inner";
-        inner.appendChild(wrap);                             // move the SAME editor element in (keeps all state)
         ov.appendChild(inner);
         ov.addEventListener("mousedown", (e) => { if (e.target === ov) exitFs(); });  // backdrop closes
         document.body.appendChild(ov);
-        node._fsOverlay = ov; node._fsInner = inner;
-        if (node.ideoEditor) node.ideoEditor.hidden = true;  // stop ComfyUI from reclaiming the element
+        node._fsOverlay = ov;
+        detachInto(inner);
         document.addEventListener("keydown", onFsEsc, true);
         window.addEventListener("resize", fitFsCanvas);
         requestAnimationFrame(fitFsCanvas);
@@ -568,12 +692,177 @@ app.registerExtension({
         node._fullscreen = false;
         document.removeEventListener("keydown", onFsEsc, true);
         window.removeEventListener("resize", fitFsCanvas);
-        canvasEl.style.width = ""; canvasEl.style.height = ""; canvasEl.style.alignSelf = "";  // restore CSS sizing
-        if (node._wrapHome) node._wrapHome.appendChild(wrap);
-        node._fsOverlay?.remove(); node._fsOverlay = null; node._fsInner = null;
-        if (node.ideoEditor) node.ideoEditor.hidden = false;
-        if (node.graph) node.graph.setDirtyCanvas(true, true);
-        requestAnimationFrame(() => { fitNode(); drawCanvas(); });
+        node._fsOverlay?.remove(); node._fsOverlay = null;
+        reattach();
+      }
+
+      // ── floating / dockable editor panel ──
+      // Persist the panel geometry — screen-space rect when unpinned, graph-space size when pinned.
+      function saveDockGeom() {
+        const fl = node._dockEl; if (!fl) return;
+        if (node.properties.dockMin) return;                  // collapsed: don't persist the header-only size
+        if (node.properties.dockPinned) {
+          node.properties.dockGraph = node.properties.dockGraph || { x: 0, y: 0 };
+          node.properties.dockGraph.w = fl.offsetWidth; node.properties.dockGraph.h = fl.offsetHeight;
+        } else {
+          const r = fl.getBoundingClientRect();
+          node.properties.dockRect = { x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) };
+        }
+      }
+      // Nudge ComfyUI's change tracker (it snapshots on mouseup, which our preventDefault'd drags suppress).
+      function flushDockChange() { try { window.dispatchEvent(new MouseEvent("mouseup")); } catch (e) {} }
+      function setPinned(on, pinBtn) {
+        const fl = node._dockEl, c = app.canvas; if (!fl || !c) return;
+        const rect = c.canvas.getBoundingClientRect(), ds = c.ds;
+        if (on) {                                          // return to where it was pinned (the saved dockGraph)
+          let g = node.properties.dockGraph;
+          if (!g) {                                        // never pinned before — derive from the current float position
+            const r = fl.getBoundingClientRect();
+            const gx = (r.left - rect.left) / ds.scale - ds.offset[0], gy = (r.top - rect.top) / ds.scale - ds.offset[1];
+            g = node.properties.dockGraph = {
+              x: gx - (node.pos?.[0] ?? 0), y: gy - (node.pos?.[1] ?? 0),
+              w: Math.round(fl.offsetWidth / ds.scale), h: Math.round(fl.offsetHeight / ds.scale),
+            };
+          }
+          node.properties.dockPinned = true;
+          fl.style.left = ""; fl.style.top = "";
+          fl.style.width = g.w + "px"; fl.style.height = g.h + "px";
+          node._dockSig = ""; node._dockNodeEl = null;     // force a fresh place + re-parent
+          pinnedDocks.add(node); startDockLoop();
+          applyDockTransform(node);                        // place this frame (avoid a flash at the old float spot)
+        } else {                                           // freeze current visual rect as a body-fixed screen panel
+          const r = fl.getBoundingClientRect();
+          node.properties.dockPinned = false;
+          pinnedDocks.delete(node);
+          node._dockSig = ""; node._dockNodeEl = null;
+          document.body.appendChild(fl);                   // back out of the node element
+          fl.style.position = "fixed"; fl.style.transform = ""; fl.style.transformOrigin = ""; fl.style.zIndex = "";
+          fl.style.left = Math.round(r.left) + "px"; fl.style.top = Math.round(r.top) + "px";
+          fl.style.width = Math.round(r.width) + "px"; fl.style.height = Math.round(r.height) + "px";
+          node.properties.dockRect = { x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) };
+        }
+        if (pinBtn) { pinBtn.classList.toggle("active", on); pinBtn.title = on ? "Unpin from canvas (float in screen)" : "Pin to canvas (move/zoom with the graph)"; }
+        c.setDirtyCanvas(true, true); requestAnimationFrame(fitFsCanvas);
+        flushDockChange();   // click's mouseup already fired before this handler — snapshot the new state
+      }
+      // Resize from any edge/corner; N/W edges shift the anchor. Units: graph px pinned (÷scale), else screen px.
+      function startDockResize(e, dir, fl) {
+        if (e.button !== 0) return;
+        e.preventDefault(); e.stopPropagation();
+        const pinned = !!node.properties.dockPinned;
+        const scale = (pinned && app.canvas) ? (app.canvas.ds.scale || 1) : 1;
+        const sx = e.clientX, sy = e.clientY, w0 = fl.offsetWidth, h0 = fl.offsetHeight;
+        const gx0 = pinned ? node.properties.dockGraph.x : (parseFloat(fl.style.left) || 0);
+        const gy0 = pinned ? node.properties.dockGraph.y : (parseFloat(fl.style.top) || 0);
+        const MINW = 300, MINH = 240;
+        dragPointer(e, e.currentTarget, (me) => {
+          const dx = (me.clientX - sx) / scale, dy = (me.clientY - sy) / scale;
+          let w = w0, h = h0, gx = gx0, gy = gy0;
+          if (dir.indexOf("e") >= 0) w = w0 + dx;
+          if (dir.indexOf("s") >= 0) h = h0 + dy;
+          if (dir.indexOf("w") >= 0) { w = w0 - dx; gx = gx0 + dx; }
+          if (dir.indexOf("n") >= 0) { h = h0 - dy; gy = gy0 + dy; }
+          if (w < MINW) { if (dir.indexOf("w") >= 0) gx -= (MINW - w); w = MINW; }
+          if (h < MINH) { if (dir.indexOf("n") >= 0) gy -= (MINH - h); h = MINH; }
+          fl.style.width = Math.round(w) + "px"; fl.style.height = Math.round(h) + "px";
+          if (pinned) { node.properties.dockGraph.x = gx; node.properties.dockGraph.y = gy; node._dockSig = ""; applyDockTransform(node); }
+          else { fl.style.left = Math.round(gx) + "px"; fl.style.top = Math.round(gy) + "px"; }
+          fitFsCanvas();
+        }, () => { saveDockGeom(); flushDockChange(); });
+      }
+      function addDockResizeHandles(fl) {
+        for (const dir of ["n", "s", "e", "w", "ne", "nw", "se", "sw"]) {
+          const h = document.createElement("div");
+          h.className = "kjideo-rsz " + dir;
+          h.addEventListener("pointerdown", (e) => startDockResize(e, dir, fl));
+          fl.appendChild(h);
+        }
+      }
+      function undock() {
+        if (node._docked) return;
+        if (node._fullscreen) exitFs();
+        node._docked = true; node.properties.docked = true;
+        const fl = document.createElement("div"); fl.className = "kjideo-dock";
+        fl.dataset.captureWheel = "true";   // 2.0: let focused inputs in the dock scroll instead of zooming the graph
+        stopProp(fl);   // hosted inside the node element — don't let dock interactions drag/zoom the node
+        const head = document.createElement("div"); head.className = "kjideo-dock-head";
+        const title = document.createElement("span"); title.textContent = "Ideogram 4 editor"; title.style.flex = "1";
+        const minBtn = document.createElement("button"); minBtn.className = "kjideo-btn";
+        stopProp(minBtn);
+        const applyMin = (on) => {                            // collapse the editor to just the header bar
+          node.properties.dockMin = !!on;
+          fl.classList.toggle("minimized", !!on);
+          minBtn.textContent = on ? "▢" : "—";
+          minBtn.title = on ? "Restore editor" : "Minimize editor";
+          if (!on) requestAnimationFrame(fitFsCanvas);        // re-letterbox the canvas after it's visible again
+        };
+        minBtn.addEventListener("click", () => { applyMin(!node.properties.dockMin); flushDockChange(); });
+        const pinBtn = document.createElement("button"); pinBtn.className = "kjideo-btn"; pinBtn.textContent = "📌";
+        stopProp(pinBtn); pinBtn.addEventListener("click", () => setPinned(!node.properties.dockPinned, pinBtn));
+        head.append(title, minBtn, pinBtn);
+        const body = document.createElement("div"); body.className = "kjideo-dock-body";
+        fl.append(head, body);
+        addDockResizeHandles(fl);
+        document.body.appendChild(fl);
+        node._dockEl = fl; node._dockBody = body; node._dockSig = ""; node._dockNodeEl = null;
+        detachInto(body);
+        // initial geometry / mode
+        const pinned = !!node.properties.dockPinned;
+        if (pinned) {
+          const g = node.properties.dockGraph || { x: 0, y: 0, w: 540, h: 470 };
+          fl.style.position = "absolute"; fl.style.width = g.w + "px"; fl.style.height = g.h + "px";
+          pinnedDocks.add(node); startDockLoop();
+          applyDockTransform(node);                          // parent + place this frame (avoid a flash at 0,0)
+          pinBtn.classList.add("active");
+        } else {
+          const rc = node.properties.dockRect || { x: 90, y: 90, w: 540, h: 470 };
+          fl.style.left = Math.max(0, Math.min(rc.x, window.innerWidth - 80)) + "px";
+          fl.style.top = Math.max(0, Math.min(rc.y, window.innerHeight - 40)) + "px";
+          fl.style.width = rc.w + "px"; fl.style.height = rc.h + "px";
+        }
+        pinBtn.title = pinned ? "Unpin from canvas (float in screen)" : "Pin to canvas (move/zoom with the graph)";
+        applyMin(!!node.properties.dockMin);                  // restore minimized state
+        // drag the panel by its header (graph-space when pinned, screen-space otherwise)
+        head.addEventListener("pointerdown", (e) => {
+          if (e.target === pinBtn || e.target === minBtn || e.button !== 0) return;
+          e.preventDefault();
+          const sx0 = e.clientX, sy0 = e.clientY;
+          const pinned = node.properties.dockPinned;
+          const scale = pinned ? (app.canvas.ds.scale || 1) : 1;
+          const gx0 = pinned ? node.properties.dockGraph.x : 0, gy0 = pinned ? node.properties.dockGraph.y : 0;
+          const ox = fl.offsetLeft, oy = fl.offsetTop;
+          dragPointer(e, head, (me) => {
+            if (pinned) {                                  // move the panel by writing its transform directly (no full redraw)
+              node.properties.dockGraph.x = gx0 + (me.clientX - sx0) / scale;
+              node.properties.dockGraph.y = gy0 + (me.clientY - sy0) / scale;
+              applyDockTransform(node);
+            } else {
+              fl.style.left = Math.max(0, Math.min(ox + me.clientX - sx0, window.innerWidth - 60)) + "px";
+              fl.style.top = Math.max(0, Math.min(oy + me.clientY - sy0, window.innerHeight - 30)) + "px";
+            }
+          }, () => { saveDockGeom(); flushDockChange(); });
+        });
+        try { node._dockRO = new ResizeObserver(() => { fitFsCanvas(); saveDockGeom(); }); node._dockRO.observe(fl); } catch (e) {}
+        // editor slot is collapsed (getMinHeight→0) — shrink the node to its widgets
+        requestAnimationFrame(() => { node.setSize([node.size[0], node.computeSize()[1]]); fitFsCanvas(); });
+      }
+      // Pin the editor under the node. `fresh` (new node only) matches the node width; reloads honor the blob.
+      function ensureDocked(fresh) {
+        if (node._docked) return;
+        if (node.properties.dockPinned == null) node.properties.dockPinned = true;
+        const honor = !!node.properties.dockGraph && node._dockGeomRestored;   // only trust blob-restored geometry
+        if (!honor) {
+          // old workflow: reuse its saved (aspect-locked) node height so the canvas isn't tiny
+          const sh = (!fresh && node._savedSize && node._savedSize[1] > 240) ? Math.round(node._savedSize[1]) : 470;
+          node.properties.dockGraph = { x: 0, y: 0, w: 560, h: sh };
+        }
+        undock();
+        if (!honor) requestAnimationFrame(() => {             // no reliable geometry — place a default under the node
+          const g = node.properties.dockGraph;
+          g.x = 0; g.y = node.size[1] + 12;
+          if (fresh) { g.w = Math.round(node.size[0]); if (node._dockEl) node._dockEl.style.width = g.w + "px"; }
+          node._dockSig = ""; applyDockTransform(node); saveDockGeom();
+        });
       }
 
       // ── geometry helpers ── (logical CSS px = the displayed canvas size)
@@ -1298,11 +1587,7 @@ app.registerExtension({
       // ── right-click "layers" menu: list / select / delete / duplicate / reorder regions ──
       function closeLayersMenu() {
         if (node._layerMenu) { node._layerMenu.remove(); node._layerMenu = null; }
-        if (node._layerMenuDismiss) {
-          document.removeEventListener("mousedown", node._layerMenuDismiss, true);
-          document.removeEventListener("pointerdown", node._layerMenuDismiss, true);
-          node._layerMenuDismiss = null;
-        }
+        node._layerDismiss?.disarm(); node._layerDismiss = null;
       }
       function rowLabel(b) {
         if (b.type === "text") {
@@ -1442,11 +1727,8 @@ app.registerExtension({
         menu.style.left = Math.max(4, left) + "px";
         menu.style.top = Math.max(4, top) + "px";
 
-        node._layerMenuDismiss = (e) => { if (!menu.contains(e.target)) closeLayersMenu(); };
-        setTimeout(() => {
-          document.addEventListener("mousedown", node._layerMenuDismiss, true);
-          document.addEventListener("pointerdown", node._layerMenuDismiss, true);
-        }, 0);
+        node._layerDismiss = outsideDismiss(menu, () => closeLayersMenu());
+        node._layerDismiss.arm();
       }
 
       canvasEl.addEventListener("contextmenu", (e) => {
@@ -1740,21 +2022,14 @@ app.registerExtension({
           () => { swatchEdit(); rebuildStylePalette(); fitNode(); });
       }
 
-      // Textarea whose user-dragged height persists across panel rebuilds / box switches.
-      function makeArea(field, value, placeholder, onInput, defaultH) {
+      // Textarea that flexes to fill the prompt panel (whose height is set by the splitter).
+      function makeArea(field, value, placeholder, onInput) {
         const ta = document.createElement("textarea");
         ta.className = "kjideo-area";
         ta.placeholder = placeholder;
         ta.value = value || "";
-        const h = node._areaH[field] || defaultH;
-        if (h) ta.style.height = h + "px";
         stopProp(ta);
         ta.addEventListener("input", onInput);
-        const ro = new ResizeObserver(() => {
-          if (ta.offsetHeight > 0) { node._areaH[field] = ta.offsetHeight; fitNode(); }
-        });
-        ro.observe(ta);
-        node._areaObservers.push(ro);
         return ta;
       }
       let bboxPx = null, bboxGrid = null;   // editable bbox fields: pixels and 0–1000 grid
@@ -1816,16 +2091,13 @@ app.registerExtension({
         panel.innerHTML = "";
         const b = node._boxes[node._activeIdx];
         if (!b) {
-          hint.textContent = "Drag on the canvas to add a region";
+          hint.textContent = "";
           const p = document.createElement("div");
           p.style.color = "#888";
           p.textContent = node._boxes.length ? "Click a region to edit it." : "No regions yet.";
           panel.appendChild(p);
-          if (node._panelH) panel.style.minHeight = node._panelH + "px";  // reserve height so it doesn't pop
-          requestAnimationFrame(fitNode);
           return;
         }
-        panel.style.minHeight = "";
         const col = (b.palette || []).find(Boolean) || "#bbb";
         const selN = node._selection.size;
         // Build with DOM + style.color (a CSS value) — never innerHTML — since col comes from
@@ -1880,9 +2152,8 @@ app.registerExtension({
             function () { b.text = this.value; touch(); }));
         }
 
-        // desc — default ~3x the single-line min height
         panel.appendChild(makeArea("desc", b.desc, "description of this region",
-          function () { b.desc = this.value; touch(); }, 110));
+          function () { b.desc = this.value; touch(); }));
 
         // palette
         const palRow = document.createElement("div");
@@ -1891,8 +2162,6 @@ app.registerExtension({
         b.palette = b.palette || [];
         buildSwatchRow(palRow, b.palette, MAX_ELEM_COLORS, swatchEdit, commit);
         panel.appendChild(palRow);
-
-        requestAnimationFrame(() => { node._panelH = panel.offsetHeight; fitNode(); });  // remember height for the deselected placeholder
       }
 
       // ── width/height widget callbacks ──
@@ -1906,16 +2175,13 @@ app.registerExtension({
         if (w) chainCallback(w, "callback", () => updateTokens());
       }
 
-      // ── keep canvas + getMinHeight in sync while the node is resized ──
+      // ── node resizes freely; the canvas just re-fits the space the widget is given ──
       let _resizing = false;
       chainCallback(node, "onResize", function () {
-        if (_resizing || node._fullscreen) return;
+        if (_resizing || node._detached || wrap.offsetParent === null) return;
         _resizing = true;
-        recalcWidgetHeight();
-        // Resize clamp reads computeSize() before getMinHeight refreshes; re-grow with fresh min.
-        const minH = node.computeSize()[1];
-        if (node.size[1] < minH) node.size[1] = minH;
-        drawCanvas();
+        fitCanvas();
+        requestAnimationFrame(fitCanvas);   // re-fit after LiteGraph re-arranges widgets on the next draw
         _resizing = false;
       });
 
@@ -1980,7 +2246,10 @@ app.registerExtension({
           window.removeEventListener("resize", fitFsCanvas);
           node._fsOverlay?.remove();
         }
+        pinnedDocks.delete(node);
+        node._dockRO?.disconnect(); node._dockEl?.remove();   // tear down the floating dock if open
         node._visObserver?.disconnect();
+        if (node._liveBmp?.close) { try { node._liveBmp.close(); } catch (e) {} node._liveBmp = null; }  // release GPU bitmap
         closeBgMenu(); node._bgMenu?.remove();
         closeTplMenu(); node._tplMenu?.remove();
         closeInlineEditor();
@@ -1999,10 +2268,24 @@ app.registerExtension({
       }
       // Persist editor data by name (robust to widget-order changes across versions).
       chainCallback(node, "onSerialize", function (o) {
-        if (o) o.ideo = { boxes: node._boxes, palette: node._stylePalette, importMode: findW("import_mode")?.value };
+        if (!o) return;
+        const p = node.properties;
+        o.ideo = { boxes: node._boxes, palette: node._stylePalette, importMode: findW("import_mode")?.value,
+          dock: { pinned: p.dockPinned, graph: p.dockGraph, rect: p.dockRect, panelH: node._panelH, min: p.dockMin } };
       });
       chainCallback(node, "onConfigure", function (o) {
         const raw = o && Array.isArray(o.widgets_values) ? o.widgets_values : [];
+        // Restore dock geometry from the blob into node.properties BEFORE ensureDocked runs.
+        node._savedSize = node.size ? [node.size[0], node.size[1]] : null;  // pre-collapse size (old aspect-locked height)
+        const d = o && o.ideo && o.ideo.dock;
+        if (d) {
+          node._dockGeomRestored = true;                     // honor it; old workflows w/o the blob get a default
+          if (d.graph) node.properties.dockGraph = d.graph;
+          if (d.rect) node.properties.dockRect = d.rect;
+          if (d.pinned != null) node.properties.dockPinned = d.pinned;
+          if (d.min != null) node.properties.dockMin = d.min;
+          if (typeof d.panelH === "number") { node._panelH = d.panelH; panel.style.height = d.panelH + "px"; }
+        }
         // Recover regions: name-keyed blob → named widget → raw saved values (survives
         // any widget reorder/remap across versions) → live widgets.
         let boxes = (o && o.ideo && Array.isArray(o.ideo.boxes)) ? o.ideo.boxes : _parseBoxes(elementsWidget?.value || "");
@@ -2019,6 +2302,7 @@ app.registerExtension({
         if (pal) node._stylePalette = pal.slice();
         const im = o && o.ideo && o.ideo.importMode, imW = findW("import_mode");
         if (im && imW) imW.value = im;                        // restore import_mode (index-based restore is unreliable here)
+        node._configured = true;                              // mark as loaded so initial layout keeps the restored size
         hideDataWidgets();
         serialize();                                         // realign widget values for Python + future saves
         if (bgBrightnessWidget) {
@@ -2039,17 +2323,20 @@ app.registerExtension({
         drawCanvas();
         updateTokens();
         requestAnimationFrame(fitNode);
+        requestAnimationFrame(() => ensureDocked(false));    // reload: honor the saved dock geometry, never match node width
       });
 
       // initial layout (deferred so size/last_y are settled)
       setTimeout(() => {
         hideDataWidgets();
-        if (node.size[0] < 380) node.setSize([380, node.size[1]]);
+        if (!node._configured) node.setSize([Math.max(480, node.size[0]), node.size[1]]);  // fresh node: a comfortable default width
+        else if (node.size[0] < 380) node.setSize([380, node.size[1]]);                     // loaded node: just enforce the min
         syncCanvasToDims();
         rebuildStylePalette();
         renderPanel();
         drawCanvas();
         updateTokens();
+        if (!node._configured) ensureDocked(true);           // fresh node: pop the dock under it, matching its width
         fitNode();
       }, 0);
     });
