@@ -360,6 +360,14 @@ try:
 except Exception as e:
     logging.warning(f"KJNodes: LTXV nodes could not be imported. LTXV nodes will be unavailable. Error: {e}", exc_info=True)
 
+try:
+    from .nodes.triton_vae import PatchTritonVAE
+    NODE_CONFIG.update({
+        "PatchTritonVAE": {"class": PatchTritonVAE, "name": "Patch Triton VAE"},
+    })
+except Exception:
+    logging.warning("KJNodes: PatchTritonVAE node could not be imported. PatchTritonVAE will be unavailable.", exc_info=True)
+
 def generate_node_mappings(node_config):
     node_class_mappings = {}
     node_display_name_mappings = {}
