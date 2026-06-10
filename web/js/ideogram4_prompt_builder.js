@@ -1025,6 +1025,13 @@ app.registerExtension({
 
       // ── grid / guides ──
       function gridN() { return Math.max(2, Math.min(128, node.properties.gridSize || 10)); }
+      // Whole number of cells per axis so they fill the canvas exactly (no split cells at the edges);
+      // near-square (the target size is rounded to fit). Shared by the grid guide and snap-to-grid.
+      function gridStep() {
+        const W = logW(), H = logH(), target = Math.min(W, H) / gridN();
+        const nx = Math.max(1, Math.round(W / target)), ny = Math.max(1, Math.round(H / target));
+        return { nx, ny, cw: W / nx, ch: H / ny, sx: 1 / nx, sy: 1 / ny };
+      }
       function guideStroke(a) {
         const c = hexRgb(node.properties.guideColor || "#ffffff") || { r: 255, g: 255, b: 255 };
         const op = (node.properties.guideOpacity == null ? 100 : node.properties.guideOpacity) / 100;
@@ -1033,8 +1040,8 @@ app.registerExtension({
       // Snap a box's free edges to the (square) grid when snap-to-grid is on.
       function snapBox(b, mode) {
         if (!node.properties.snap) return b;
-        const W = logW(), H = logH(), cell = Math.min(W, H) / gridN();
-        const sx = cell / W, sy = cell / H, sn = (v, s) => Math.round(v / s) * s;
+        const { sx, sy } = gridStep();
+        const sn = (v, s) => Math.round(v / s) * s;
         const { x, y, w, h } = b;
         if (mode === "move") {                          // snap position, preserve size
           return { ...b, x: clamp01(Math.min(sn(x, sx), 1 - w)), y: clamp01(Math.min(sn(y, sy), 1 - h)) };
@@ -1074,11 +1081,11 @@ app.registerExtension({
         if (kind === "spiral") { goldenSpiral(W, H); return; }
         ctx.save();
         ctx.lineWidth = 1;
-        if (kind === "grid") {                          // square cells (gridSize across the short edge), any aspect
+        if (kind === "grid") {                          // whole cells across both axes (no split cells at edges)
           ctx.strokeStyle = guideStroke(0.24);
-          const cell = Math.min(W, H) / gridN();
-          for (let px = cell; px < W - 0.5; px += cell) { const X = Math.round(px) + 0.5; ctx.beginPath(); ctx.moveTo(X, 0); ctx.lineTo(X, H); ctx.stroke(); }
-          for (let py = cell; py < H - 0.5; py += cell) { const Y = Math.round(py) + 0.5; ctx.beginPath(); ctx.moveTo(0, Y); ctx.lineTo(W, Y); ctx.stroke(); }
+          const { nx, ny, cw, ch } = gridStep();
+          for (let i = 1; i < nx; i++) { const X = Math.round(i * cw) + 0.5; ctx.beginPath(); ctx.moveTo(X, 0); ctx.lineTo(X, H); ctx.stroke(); }
+          for (let j = 1; j < ny; j++) { const Y = Math.round(j * ch) + 0.5; ctx.beginPath(); ctx.moveTo(0, Y); ctx.lineTo(W, Y); ctx.stroke(); }
           ctx.restore(); return;
         }
         const v = [], h = [];                           // thirds / golden: per-axis fractions (correct at any aspect)
@@ -1461,9 +1468,9 @@ app.registerExtension({
             dy = Math.min(Math.max(dy, -s.y), 1 - s.h - s.y);
           }
           if (node.properties.snap) {                 // snap the group's movement to whole grid cells
-            const cell = Math.min(logW(), logH()) / gridN();
-            dx = Math.round(dx / (cell / logW())) * (cell / logW());
-            dy = Math.round(dy / (cell / logH())) * (cell / logH());
+            const { sx, sy } = gridStep();
+            dx = Math.round(dx / sx) * sx;
+            dy = Math.round(dy / sy) * sy;
           }
           for (const i in node._groupStart) {
             const s = node._groupStart[i];
