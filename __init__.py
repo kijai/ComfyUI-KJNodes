@@ -81,6 +81,7 @@ from .nodes.sharpen_nodes import ImageSharpenKJ
 from .nodes.hdr_preview_node import HDRPreviewKJ
 from .nodes.preview_override_node import ModelPreviewOverrideKJ, GetPreviewOverrideFramesKJ
 from .nodes.ideogram4_nodes import Ideogram4PromptBuilderKJ
+from .nodes.ideogram4_v2_nodes import Ideogram4PromptBuilderKJV2
 
 import logging
 
@@ -188,6 +189,7 @@ NODE_CONFIG = {
     "DecodeAndSaveVideo": {"class": DecodeAndSaveVideo, "name": "Decode And Save Video"},
     "ImageTransformKJ": {"class": ImageTransformKJ, "name": "Image Transform KJ"},
     "Ideogram4PromptBuilderKJ": {"class": Ideogram4PromptBuilderKJ, "name": "Ideogram 4 Prompt Builder KJ"},
+    "Ideogram4PromptBuilderKJV2": {"class": Ideogram4PromptBuilderKJV2, "name": "Ideogram 4 Prompt Builder KJ V2"},
     "HDRPreviewKJ": {"class": HDRPreviewKJ, "name": "HDR Preview KJ"},
     "ModelPreviewOverrideKJ": {"class": ModelPreviewOverrideKJ, "name": "Model Preview Override KJ"},
     "GetPreviewOverrideFramesKJ": {"class": GetPreviewOverrideFramesKJ, "name": "Get Preview Override Frames KJ"},
