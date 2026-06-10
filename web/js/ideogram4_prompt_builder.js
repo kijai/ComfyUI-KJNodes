@@ -148,6 +148,9 @@ document.addEventListener("keydown", (e) => {
   e.preventDefault(); e.stopPropagation();
   hoveredCanvasNode._toggleHideBoxes?.();
 }, true);
+// Alt held over a canvas: preview the alt-click cycle target even without moving the mouse.
+document.addEventListener("keydown", (e) => { if (hoveredCanvasNode && e.key === "Alt") hoveredCanvasNode._altRefresh?.(true); }, true);
+document.addEventListener("keyup", (e) => { if (hoveredCanvasNode && e.key === "Alt") hoveredCanvasNode._altRefresh?.(false); }, true);
 
 // Pinned dock follows the node: Nodes 2.0 hosts it inside the node element (inherits its transform); legacy is body-fixed.
 const pinnedDocks = new Set();
@@ -497,6 +500,57 @@ app.registerExtension({
         bgMenu.style.top = Math.min(r.bottom + 4, window.innerHeight - bgMenu.offsetHeight - 4) + "px";
         bgDismiss.arm();
       });
+      // ── Text style popup: show/hide, outline, font size, auto-placement ──
+      const txtBtn = document.createElement("button");
+      txtBtn.className = "kjideo-btn"; txtBtn.textContent = "Text ▾";
+      txtBtn.title = "Region text: show/hide, outline, font size, overlap-avoiding placement";
+      stopProp(txtBtn);
+      const txtToggle = (prop, label, title) => {
+        const l = document.createElement("label");
+        l.style.cssText = "display:flex;align-items:center;gap:4px;cursor:pointer;"; l.title = title || "";
+        const cb = document.createElement("input"); cb.type = "checkbox"; cb.checked = node.properties[prop] !== false;
+        cb.addEventListener("change", () => { node.properties[prop] = cb.checked; drawCanvas(); });
+        l.appendChild(cb); l.appendChild(document.createTextNode(label));
+        l._cb = cb; return l;
+      };
+      const showLbl = txtToggle("showBoxText", "show text", "Draw each region's text inside its box");
+      const strokeLbl = txtToggle("textStroke", "outline", "Dark halo behind the text for legibility");
+      const autoLbl = txtToggle("textAutoPlace", "auto-place", "Stagger overlapping labels to reduce overlap");
+      const sizeSlider = document.createElement("input");
+      sizeSlider.type = "range"; sizeSlider.min = "8"; sizeSlider.max = "22"; sizeSlider.step = "1";
+      sizeSlider.value = node.properties.textSize || 12;
+      sizeSlider.style.cssText = "width:90px;flex:0 0 auto;";
+      sizeSlider.title = "Region text font size";
+      stopProp(sizeSlider);
+      sizeSlider.addEventListener("input", () => { node.properties.textSize = parseInt(sizeSlider.value, 10); drawCanvas(); });
+      const boxOpacSlider = document.createElement("input");
+      boxOpacSlider.type = "range"; boxOpacSlider.min = "0"; boxOpacSlider.max = "100"; boxOpacSlider.step = "1";
+      boxOpacSlider.value = node.properties.boxOpacity == null ? 14 : node.properties.boxOpacity;
+      boxOpacSlider.style.cssText = "width:90px;flex:0 0 auto;";
+      boxOpacSlider.title = "Box fill opacity";
+      stopProp(boxOpacSlider);
+      boxOpacSlider.addEventListener("input", () => { node.properties.boxOpacity = parseInt(boxOpacSlider.value, 10); drawCanvas(); });
+      const txtMenu = document.createElement("div");
+      txtMenu.className = "kjideo-menu kjideo-bgmenu";
+      txtMenu.style.display = "none";
+      const txtRow = (labelText, el) => {
+        const r = document.createElement("div"); r.className = "kjideo-bgrow";
+        if (labelText) { const l = document.createElement("span"); l.className = "kjideo-bglbl"; l.textContent = labelText; r.appendChild(l); }
+        r.appendChild(el); txtMenu.appendChild(r);
+      };
+      txtRow("", showLbl); txtRow("Font size", sizeSlider); txtRow("Box opacity", boxOpacSlider); txtRow("", strokeLbl); txtRow("", autoLbl);
+      document.body.appendChild(txtMenu);
+      node._txtMenu = txtMenu;
+      const txtDismiss = outsideDismiss(txtMenu, () => closeTxtMenu(), txtBtn);
+      function closeTxtMenu() { txtMenu.style.display = "none"; txtDismiss.disarm(); }
+      txtBtn.addEventListener("click", () => {
+        if (txtMenu.style.display !== "none") { closeTxtMenu(); return; }
+        txtMenu.style.display = "";
+        const r = txtBtn.getBoundingClientRect();
+        txtMenu.style.left = Math.max(4, Math.min(r.left, window.innerWidth - txtMenu.offsetWidth - 4)) + "px";
+        txtMenu.style.top = Math.min(r.bottom + 4, window.innerHeight - txtMenu.offsetHeight - 4) + "px";
+        txtDismiss.arm();
+      });
       // ── Templates popup: save/load named caption JSONs (server-side userdata) ──
       const tplBtn = document.createElement("button");
       tplBtn.className = "kjideo-btn"; tplBtn.textContent = "Templates ▾";
@@ -565,7 +619,7 @@ app.registerExtension({
         tplMenu.style.top = Math.min(r.bottom + 4, window.innerHeight - tplMenu.offsetHeight - 4) + "px";
         tplDismiss.arm();
       });
-      bar.appendChild(hint); bar.appendChild(tokenSpan); bar.appendChild(bgBtn); bar.appendChild(copyBtn); bar.appendChild(importBtn); bar.appendChild(tplBtn); bar.appendChild(clearBtn);
+      bar.appendChild(hint); bar.appendChild(tokenSpan); bar.appendChild(bgBtn); bar.appendChild(txtBtn); bar.appendChild(copyBtn); bar.appendChild(importBtn); bar.appendChild(tplBtn); bar.appendChild(clearBtn);
       updateGrabBtn();
 
       // Persistent global style-palette row
@@ -969,6 +1023,44 @@ app.registerExtension({
         }
         return null;
       }
+      // In-box text placement: when auto-place is on, put each box's text in whichever vertical slot overlaps
+      // least with the text already placed for other boxes (greedy), so overlapping labels don't stack.
+      function textBlocks() {
+        if (node.properties.showBoxText === false) return [];
+        const { fs, lh } = txtFont();
+        ctx.font = fs + "px monospace";
+        const W = logW(), H = logH(), pad = 4, tagH = 14, auto = node.properties.textAutoPlace !== false;
+        const placed = [], blocks = [];
+        const overlap = (a, b) => Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x)) *
+                                  Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y));
+        for (let i = 0; i < node._boxes.length; i++) {
+          const b = node._boxes[i];
+          let body = b.desc || "";
+          if (b.type === "text" && b.text) body = `"${b.text}"` + (body ? " — " + body : "");
+          if (!body) { blocks[i] = null; continue; }
+          const x1 = b.x * W, y1 = b.y * H, x2 = (b.x + b.w) * W, y2 = (b.y + b.h) * H;
+          const lines = wrapLines(body, (x2 - x1) - pad * 2);   // full width
+          let lw = 0; for (const ln of lines) lw = Math.max(lw, ctx.measureText(ln).width);
+          const bw = Math.min(x2 - x1, lw + pad * 2), bh = Math.min(y2 - y1, lines.length * lh + 4);
+          // candidates = several vertical slots (more when the box is taller); text spans the width, so only Y varies
+          const top = y1 + ((y2 - y1) > bh + tagH ? tagH : 0), bottom = y2 - bh;
+          const cands = [];
+          if (!auto || bottom <= top) cands.push([x1, top]);    // off, or fills the box → fixed top
+          else {
+            const n = Math.min(6, 2 + Math.floor((bottom - top) / (lh * 2)));
+            for (let k = 0; k < n; k++) cands.push([x1, top + ((bottom - top) * k) / (n - 1)]);
+          }
+          let best = cands[0], bestScore = Infinity;
+          for (const [cx, cy] of cands) {
+            const rect = { x: cx, y: cy, w: bw, h: bh };
+            let s = 0; for (const p of placed) s += overlap(rect, p);
+            if (s < bestScore) { bestScore = s; best = [cx, cy]; if (s === 0) break; }
+          }
+          const r = { x: best[0], y: best[1], w: bw, h: bh, lines, lh, fs, pad };
+          placed.push(r); blocks[i] = r;
+        }
+        return blocks;
+      }
       // Click selection: active box's resize handle wins (corner resize); then a
       // title-chip click selects that box (drawn to front); Alt-click cycles the
       // overlap stack; else the topmost box.
@@ -1025,6 +1117,7 @@ app.registerExtension({
 
       // ── grid / guides ──
       function gridN() { return Math.max(2, Math.min(128, node.properties.gridSize || 10)); }
+      function txtFont() { const fs = Math.max(6, Math.min(40, node.properties.textSize || 12)); return { fs, lh: Math.round(fs * 1.2) }; }
       // Whole number of cells per axis so they fill the canvas exactly (no split cells at the edges);
       // near-square (the target size is rounded to fit). Shared by the grid guide and snap-to-grid.
       function gridStep() {
@@ -1135,6 +1228,7 @@ app.registerExtension({
         const order = [...nonSel, ...selOthers];
         if (aIdx >= 0 && aIdx < node._boxes.length) order.push(aIdx);
         const tagR = tagRects();                              // collision-avoided tag positions
+        const textB = textBlocks();                           // collision-avoided in-box text positions
         for (const i of order) {
           const b = node._boxes[i], active = i === aIdx, selected = selSet.has(i) && !b.locked;  // locked never shows as selected
           const pal = (b.palette || []).filter(Boolean);
@@ -1146,7 +1240,9 @@ app.registerExtension({
             ctx.fillStyle = "rgba(26,26,26,0.88)";
             ctx.fillRect(x1, y1, w, h);
           }
-          ctx.fillStyle = col + (hovered ? "3a" : "22");     // tint of the box color
+          const baseA = (node.properties.boxOpacity == null ? 14 : node.properties.boxOpacity) / 100;
+          const fillA = Math.min(1, hovered ? baseA + 0.1 : baseA);   // box-color tint at the chosen opacity
+          ctx.fillStyle = col + Math.round(fillA * 255).toString(16).padStart(2, "0");
           ctx.fillRect(x1, y1, w, h);
           if (b.locked) ctx.setLineDash([3, 3]);             // locked: frozen on the canvas
           else if (b.nobbox) ctx.setLineDash([6, 4]);        // unplaced (no bbox in source)
@@ -1162,20 +1258,20 @@ app.registerExtension({
               ctx.fillRect(sx, y1, x1 + Math.round((p + 1) * sw) - sx, sh);
             }
           }
-          // in-box content (clipped to the box): prompt text + lock badge
+          // in-box content (clipped to the box): prompt text (at its de-conflicted corner) + lock badge
           ctx.save();
           ctx.beginPath(); ctx.rect(x1, y1, w, h); ctx.clip();
-          let body = b.desc || "";
-          if (b.type === "text" && b.text) body = `"${b.text}"` + (body ? " — " + body : "");
-          if (body && node.properties.showBoxText !== false) {  // toggle: show text in boxes
-            ctx.font = "12px monospace";
+          const tb = textB[i];
+          if (tb) {
+            const stroke = node.properties.textStroke !== false;
+            ctx.font = tb.fs + "px monospace";
+            if (stroke) { ctx.lineWidth = 3; ctx.lineJoin = "round"; ctx.strokeStyle = "rgba(0,0,0,0.85)"; }  // dark halo
             ctx.fillStyle = readableText(col);              // box color, lightened if too dark
-            const pad = 4, lh = 14;
-            let ty = y1 + 15 + 12;                        // first line below the tag chip
-            for (const line of wrapLines(body, w - pad * 2)) {
-              if (ty > y1 + h) break;                      // clip overflow vertically
-              ctx.fillText(line, x1 + pad, ty);
-              ty += lh;
+            let ty = tb.y + tb.fs;
+            for (const line of tb.lines) {
+              if (stroke) ctx.strokeText(line, tb.x + tb.pad, ty);
+              ctx.fillText(line, tb.x + tb.pad, ty);
+              ty += tb.lh;
             }
           }
           ctx.restore();
@@ -1198,6 +1294,13 @@ app.registerExtension({
             ctx.strokeRect(x1 + olw / 2, y1 + olw / 2, w - olw, h - olw);
             ctx.setLineDash([]);
           }
+        }
+        const apIdx = node._altPreview ?? -1;                 // Alt-held: ring the box an alt-click would select next
+        if (apIdx >= 0 && apIdx < node._boxes.length) {
+          const { x1, y1, x2, y2 } = toPx(node._boxes[apIdx]);
+          ctx.strokeStyle = "#46b4e6"; ctx.lineWidth = 2; ctx.setLineDash([5, 3]);
+          ctx.strokeRect(x1 + 1, y1 + 1, (x2 - x1) - 2, (y2 - y1) - 2);
+          ctx.setLineDash([]);
         }
         if (node._marquee && node._marqueeActive) {           // rubber-band selection rectangle
           const r = marqueeRect();
@@ -1322,24 +1425,38 @@ app.registerExtension({
         drawCanvas();   // panel rebuild/resize deferred to onUp so the canvas doesn't shift mid-drag
       });
 
+      // Hover targets: with Alt, preview what an alt-click would select next (the box under the current one).
+      function hoverTargets(mN, alt, force) {
+        if (alt && !force) { const pick = pickForSelection(mN, true); return { ti: null, hb: null, ap: pick ? pick.index : -1, hit: null }; }
+        const ti = force ? null : titleAt(mN);
+        const hit = force ? null : hitTest(mN);
+        return { ti, hb: ti != null ? ti : (hit ? hit.index : null), ap: -1, hit };
+      }
+      function applyHover(t) {
+        if (t.ti !== node._hoverTitle || t.hb !== node._hoverBox || t.ap !== (node._altPreview ?? -1)) {
+          node._hoverTitle = t.ti; node._hoverBox = t.hb; node._altPreview = t.ap; drawCanvas();
+        }
+      }
       canvasEl.addEventListener("pointermove", (e) => {
         node._lastMouseN = mouseN(e);                        // track cursor for paste-under-cursor
         if (node._placing) { placeFollower(node._lastMouseN); return; }
         if (node._drawing || node._marquee || node._hideBoxes) return;
-        const mN = mouseN(e);
-        const force = e.ctrlKey || e.metaKey;               // Ctrl/Cmd = force-draw
-        const ti = force ? null : titleAt(mN);
-        const hit = force ? null : hitTest(mN);
-        const hb = ti != null ? ti : (hit ? hit.index : null);
-        if (ti !== node._hoverTitle || hb !== node._hoverBox) {
-          node._hoverTitle = ti; node._hoverBox = hb; drawCanvas();
-        }
-        canvasEl.style.cursor = ti != null ? "pointer" : (hit ? (cursorForBboxMode(hit.mode) || "crosshair") : "crosshair");
+        const mN = node._lastMouseN;
+        const force = e.ctrlKey || e.metaKey, alt = e.altKey;   // Ctrl/Cmd = force-draw, Alt = cycle preview
+        const t = hoverTargets(mN, alt, force);
+        applyHover(t);
+        canvasEl.style.cursor = (alt && !force) ? (t.ap >= 0 ? "pointer" : "crosshair")
+          : (t.ti != null ? "pointer" : (t.hit ? (cursorForBboxMode(t.hit.mode) || "crosshair") : "crosshair"));
       });
+      // Alt pressed/released without moving the mouse — refresh the preview from the last cursor position.
+      node._altRefresh = (altDown) => {
+        if (node._drawing || node._marquee || node._placing || node._hideBoxes || !node._lastMouseN) return;
+        applyHover(hoverTargets(node._lastMouseN, altDown, false));
+      };
       canvasEl.addEventListener("pointerleave", () => {
         if (hoveredCanvasNode === node) hoveredCanvasNode = null;
-        if (node._hoverTitle !== null || node._hoverBox !== null) {
-          node._hoverTitle = null; node._hoverBox = null; drawCanvas();
+        if (node._hoverTitle !== null || node._hoverBox !== null || (node._altPreview ?? -1) >= 0) {
+          node._hoverTitle = null; node._hoverBox = null; node._altPreview = -1; drawCanvas();
         }
       });
       canvasEl.addEventListener("pointerenter", () => { hoveredCanvasNode = node; });
@@ -2167,15 +2284,6 @@ app.registerExtension({
           btn.addEventListener("click", () => { b.type = t; commit(); });
           typeRow.appendChild(btn);
         }
-        const txtChk = document.createElement("label");
-        txtChk.style.cssText = "display:flex; align-items:center; gap:3px; cursor:pointer;";
-        txtChk.title = "Show each region's text inside its box on the canvas";
-        const cb = document.createElement("input");
-        cb.type = "checkbox"; cb.checked = node.properties.showBoxText !== false;
-        stopProp(cb);
-        cb.addEventListener("change", () => { node.properties.showBoxText = cb.checked; drawCanvas(); });
-        txtChk.appendChild(cb); txtChk.appendChild(document.createTextNode("show text"));
-        typeRow.appendChild(txtChk);
         const pxLbl = document.createElement("span");
         pxLbl.textContent = "px:"; pxLbl.style.cssText = "margin-left:auto; color:#888;";
         typeRow.appendChild(pxLbl);
@@ -2294,6 +2402,7 @@ app.registerExtension({
         node._visObserver?.disconnect();
         if (node._liveBmp?.close) { try { node._liveBmp.close(); } catch (e) {} node._liveBmp = null; }  // release GPU bitmap
         closeBgMenu(); node._bgMenu?.remove();
+        closeTxtMenu(); node._txtMenu?.remove();
         closeTplMenu(); node._tplMenu?.remove();
         closeInlineEditor();
         closeLayersMenu();
@@ -2363,6 +2472,11 @@ app.registerExtension({
         snapChk.checked = !!node.properties.snap;
         guideColor.value = node.properties.guideColor || "#ffffff";
         opacitySlider.value = node.properties.guideOpacity == null ? 100 : node.properties.guideOpacity;
+        showLbl._cb.checked = node.properties.showBoxText !== false;
+        strokeLbl._cb.checked = node.properties.textStroke !== false;
+        autoLbl._cb.checked = node.properties.textAutoPlace !== false;
+        sizeSlider.value = node.properties.textSize || 12;
+        boxOpacSlider.value = node.properties.boxOpacity == null ? 14 : node.properties.boxOpacity;
         syncCanvasToDims();
         rebuildStylePalette();
         renderPanel();
