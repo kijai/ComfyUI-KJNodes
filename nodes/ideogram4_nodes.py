@@ -73,8 +73,7 @@ def _render_preview(boxes, width, height, bg=None, brightness=50):
         scale = min(1.0, 1024 / long_edge) if long_edge > 0 else 1.0
         rw = max(1, round(width * scale))
         rh = max(1, round(height * scale))
-        g = round(max(0, min(100, brightness)) / 100 * 128)  # blank canvas grey from the brightness slider
-        img = Image.new("RGBA", (rw, rh), (g, g, g, 255))
+        img = Image.new("RGBA", (rw, rh), (0, 0, 0, 255))    # black so the overlay composites cleanly
     overlay = Image.new("RGBA", (rw, rh), (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
     fs = max(10, round(rh / 64))
@@ -179,6 +178,28 @@ def _parse_json_list(s):
     return []
 
 
+def _caption_to_boxes(cap):
+    # Caption dict -> editor box list ({x,y,w,h, type, text, desc, palette}) for preview/bboxes.
+    cd = cap.get("compositional_deconstruction") or {}
+    boxes = []
+    for el in (cd.get("elements") or []):
+        if not isinstance(el, dict):
+            continue
+        box = {"type": "text" if el.get("type") == "text" else "obj",
+               "text": el.get("text", "") or "", "desc": el.get("desc", "") or "",
+               "palette": list(el.get("color_palette") or [])}
+        bb = el.get("bbox")
+        if isinstance(bb, (list, tuple)) and len(bb) == 4:
+            ymin, xmin, ymax, xmax = bb
+            box.update(x=xmin / 1000.0, y=ymin / 1000.0,
+                       w=(xmax - xmin) / 1000.0, h=(ymax - ymin) / 1000.0)
+        else:                                                # no bbox: unplaced placeholder
+            box.update(x=0.03, y=0.03, w=0.22, h=0.14, nobbox=True)
+        boxes.append(box)
+    return boxes
+
+
+
 class Ideogram4PromptBuilderKJ(io.ComfyNode):
     @classmethod
     def define_schema(cls):
@@ -191,12 +212,32 @@ class Ideogram4PromptBuilderKJ(io.ComfyNode):
             description="""
 Visual prompt builder for Ideogram 4's structured JSON caption format.
 
-Drag on the canvas to draw regions; select a region to set its type (obj/text),
-description, text, and color palette. Set the background and optional style fields
-as widgets. Outputs the assembled caption JSON string.
+Drag on the canvas to draw regions; select a region to set its type (obj/text),  
+description, text, and color palette. Set the background and optional style fields  
+as widgets. Outputs the assembled caption JSON string.  
 
 bbox is normalized to a 0-1000 grid as [ymin, xmin, ymax, xmax]; width/height set
-the canvas aspect ratio.""",
+the canvas aspect ratio.
+
+Canvas controls:
+- Drag: draw a new region
+- Ctrl/Cmd-drag: force-draw a new region even on top of an existing one
+- Click: select a region · Alt-click: cycle overlapping regions
+- Double-click: edit the description inline
+- Right-click: region list (select / delete / duplicate / reorder, top = front)
+- Del / Backspace: remove the selected region
+- Ctrl/Cmd + C / V / D: copy / paste / duplicate the selected region
+- bbox fields (px / out) next to obj/text are editable
+
+Color swatches:
+- Click: edit · Drag: reorder · Right-click: remove
+- Hover + Ctrl/Cmd + C / V: copy / paste the hex
+- "+": add a color (uses the clipboard color if it is one)
+
+Toolbar:
+- Live: use the live sampling preview as the background (and grab the final result)
+- Grab BG / Clear BG: use the last generated image as the background
+- brightness slider, token estimate, and Copy / Paste / Clear all""",
             inputs=[
                 io.Int.Input("width", default=1024, min=64, max=16384, step=16,
                              tooltip="Canvas aspect width (also the pixel grid the bbox is measured in). Ideogram 4 needs multiples of 16."),
@@ -221,14 +262,21 @@ the canvas aspect ratio.""",
                 io.Image.Input("image", optional=True,
                                tooltip="Optional reference image shown as the editor background (and behind the preview)."),
                 io.String.Input("import_json", default="", optional=True, force_input=True,
-                                tooltip="Optional: a full caption JSON. When connected, it loads into the "
-                                        "editor on run; the output always reflects the editor, never the raw input."),
+                                tooltip="Optional: a full caption JSON. When connected, it loads into the editor "
+                                        "and drives the output per 'import_mode'."),
                 io.String.Input("style_palette_data", default="", socketless=True, advanced=True,
                                 tooltip="Serialized style color palette from the editor (managed by the node UI)."),
                 io.String.Input("elements_data", default="", socketless=True, advanced=True,
                                 tooltip="Serialized regions from the editor (managed by the node UI)."),
                 io.Int.Input("bg_brightness", default=25, min=0, max=100, socketless=True, advanced=True,
                              tooltip="Background image brightness % (managed by the node UI slider)."),
+                io.Combo.Input("import_mode", options=["when empty", "always"], default="when empty",
+                               tooltip="How a wired import_json is used: 'when empty' only seeds the editor while "
+                                       "it has no regions (then the editor wins, so you can edit); 'always' makes "
+                                       "the wired JSON authoritative so its changes always propagate to the output."),
+                io.BoundingBox.Input("bboxes", optional=True, force_input=True,
+                                     tooltip="Optional pixel-space boxes ({x, y, width, height}) used to seed the "
+                                             "editor's regions when it has none. Ignored once regions exist."),
             ],
             outputs=[
                 io.String.Output(display_name="prompt"),
@@ -242,52 +290,89 @@ the canvas aspect ratio.""",
     @classmethod
     def execute(cls, width, height, background, style,
                 high_level_description="", aesthetics="", lighting="", medium="",
-                style_palette_data="", elements_data="", import_json="", image=None, bg_brightness=25) -> io.NodeOutput:
+                style_palette_data="", elements_data="", import_json="", import_mode="when empty",
+                bboxes=None, image=None, bg_brightness=25) -> io.NodeOutput:
+        if import_mode not in ("when empty", "always"):      # old workflows saved before this widget existed
+            import_mode = "when empty"
         boxes = _parse_json_list(elements_data)
+        boxes_seeded = False
+        if not boxes and bboxes:
+            if isinstance(bboxes, dict):                     # a single BoundingBox is a bare {x,y,width,height} dict
+                frame = [bboxes]
+            elif bboxes and isinstance(bboxes[0], (list, tuple)):
+                frame = bboxes[0]                            # per-frame nesting: [[box, ...], ...]
+            else:
+                frame = bboxes                               # flat list of boxes
+            for bb in frame:
+                if not isinstance(bb, dict):
+                    continue
+                boxes.append({"x": bb.get("x", 0) / width, "y": bb.get("y", 0) / height,
+                              "w": bb.get("width", 0) / width, "h": bb.get("height", 0) / height,
+                              "type": "obj", "text": "", "desc": "", "palette": []})
+            boxes_seeded = bool(boxes)
 
-        caption = {}
-        if high_level_description.strip():
-            caption["high_level_description"] = high_level_description
+        imported = None
+        if import_json and import_json.strip():
+            try:
+                c = json.loads(import_json)
+                if isinstance(c, dict):
+                    imported = c
+            except json.JSONDecodeError:
+                pass
 
         kind = style["style"]                               # "none" | "photo" | "art_style"
-        if kind != "none":
-            # The verifier requires every style key present (in order) once a style is
-            # chosen; only color_palette is conditional. Emit blanks rather than omit.
-            sd = {"aesthetics": aesthetics, "lighting": lighting}
-            # photo: ...photo, medium...  |  art_style: ...medium, art_style...  (key order)
-            if kind == "photo":
-                sd["photo"] = style.get("photo", "")
-                sd["medium"] = medium
-            else:
-                sd["medium"] = medium
-                sd["art_style"] = style.get("art_style", "")
-            palette = _palette(_parse_json_list(style_palette_data))
-            if palette:
-                sd["color_palette"] = palette
-            caption["style_description"] = sd
 
-        elements = []
-        for box in boxes:
-            if not isinstance(box, dict):
-                continue
-            etype = "text" if box.get("type") == "text" else "obj"
-            elem = {"type": etype}                          # key order matters
-            if not box.get("nobbox"):                       # unplaced elements omit bbox
-                elem["bbox"] = _norm_bbox(box)
-            if etype == "text":
-                elem["text"] = box.get("text", "")
-            elem["desc"] = box.get("desc", "")
-            palette = _palette(box.get("palette", []))
-            if palette:
-                elem["color_palette"] = palette[:5]
-            elements.append(elem)
+        # Use the wired import_json directly per import_mode: "always" -> authoritative (its changes
+        # always propagate); "when empty" -> only seed the editor while it has no regions, then the
+        # editor wins so manual edits stick. The editor mirrors it via ui when used.
+        used_import = imported is not None and (import_mode == "always" or not boxes)
 
-        caption["compositional_deconstruction"] = {
-            "background": background,
-            "elements": elements,
-        }
+        if used_import:
+            caption = imported
+            boxes = _caption_to_boxes(imported)
+        else:
+            caption = {}
+            if high_level_description.strip():
+                caption["high_level_description"] = high_level_description
+
+            if kind != "none":
+                # The verifier requires every style key present (in order) once a style is
+                # chosen; only color_palette is conditional. Emit blanks rather than omit.
+                sd = {"aesthetics": aesthetics, "lighting": lighting}
+                # photo: ...photo, medium...  |  art_style: ...medium, art_style...  (key order)
+                if kind == "photo":
+                    sd["photo"] = style.get("photo", "")
+                    sd["medium"] = medium
+                else:
+                    sd["medium"] = medium
+                    sd["art_style"] = style.get("art_style", "")
+                palette = _palette(_parse_json_list(style_palette_data))
+                if palette:
+                    sd["color_palette"] = palette
+                caption["style_description"] = sd
+
+            elements = []
+            for box in boxes:
+                if not isinstance(box, dict):
+                    continue
+                etype = "text" if box.get("type") == "text" else "obj"
+                elem = {"type": etype}                      # key order matters
+                if not box.get("nobbox"):                   # unplaced elements omit bbox
+                    elem["bbox"] = _norm_bbox(box)
+                if etype == "text":
+                    elem["text"] = box.get("text", "")
+                elem["desc"] = box.get("desc", "")
+                palette = _palette(box.get("palette", []))
+                if palette:
+                    elem["color_palette"] = palette[:5]
+                elements.append(elem)
+
+            caption["compositional_deconstruction"] = {
+                "background": background,
+                "elements": elements,
+            }
         bg = None
-        if image is not None:
+        if image is not None:                                # composite over the input image, else black
             try:
                 bg = Image.fromarray((image[0].detach().cpu().numpy() * 255).clip(0, 255).astype(np.uint8))
             except Exception:
@@ -316,11 +401,8 @@ the canvas aspect ratio.""",
         # ui: send the resolved width/height so the editor canvas can follow connected
         # inputs; import_json (if wired) loads into the editor (output reflects editor only).
         ui = {"dims": [width, height]}
-        if import_json and import_json.strip():
-            try:
-                cap = json.loads(import_json)
-                if isinstance(cap, dict):
-                    ui["caption"] = [_dumps(cap)]
-            except json.JSONDecodeError:
-                pass
+        if boxes_seeded:
+            ui["boxes"] = [json.dumps(boxes)]
+        if used_import:                                       # mirror the import in the editor (only when used)
+            ui["caption"] = [_dumps(imported)]
         return io.NodeOutput(_dumps(caption), preview, bboxes_out, width, height, ui=ui)
