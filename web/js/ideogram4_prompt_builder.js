@@ -154,8 +154,19 @@ document.addEventListener("keyup", (e) => { if (hoveredCanvasNode && e.key === "
 
 // Pinned dock follows the node: Nodes 2.0 hosts it inside the node element (inherits its transform); legacy is body-fixed.
 const pinnedDocks = new Set();
+const liveDocks = new Set();      // every node with a dock — swept so an orphaned dock can't linger
 let _dockRectNonce = 0;
 window.addEventListener("resize", () => { _dockRectNonce++; wakeDocks(); });   // canvas may shift without pan/zoom
+// Safety net: a dock whose node has left the graph (deleted, workflow cleared) is torn down even if onRemoved didn't fire.
+function sweepOrphanDocks() {
+  for (const n of liveDocks) {
+    if (n.graph?.getNodeById?.(n.id) === n) continue;   // still registered in its graph
+    try { n._dockRO?.disconnect(); } catch (e) {}
+    try { n._visObserver?.disconnect(); } catch (e) {}
+    n._dockEl?.remove();
+    pinnedDocks.delete(n); liveDocks.delete(n);
+  }
+}
 // gr.x/gr.y = offset (graph units) from the node's content top-left (node.pos).
 function applyDockTransform(n) {
   const c = app.canvas, fl = n._dockEl, gr = n.properties.dockGraph;
@@ -222,7 +233,7 @@ function installDockWakes() {     // onDrawForeground only fires when dirty_canv
   if (_dockWakesInstalled) return;
   const c = app.canvas; if (!c) return;
   _dockWakesInstalled = true;
-  chainCallback(c, "onDrawForeground", wakeDocks);
+  chainCallback(c, "onDrawForeground", () => { sweepOrphanDocks(); wakeDocks(); });
 }
 function startDockLoop() { installDockWakes(); wakeDocks(); }
 
@@ -865,7 +876,7 @@ app.registerExtension({
         fl.append(head, body);
         addDockResizeHandles(fl);
         document.body.appendChild(fl);
-        node._dockEl = fl; node._dockBody = body; node._dockSig = ""; node._dockNodeEl = null;
+        node._dockEl = fl; node._dockBody = body; node._dockSig = ""; node._dockNodeEl = null; liveDocks.add(node);
         detachInto(body);
         // initial geometry / mode
         const pinned = !!node.properties.dockPinned;
@@ -2397,7 +2408,7 @@ app.registerExtension({
           window.removeEventListener("resize", fitFsCanvas);
           node._fsOverlay?.remove();
         }
-        pinnedDocks.delete(node);
+        pinnedDocks.delete(node); liveDocks.delete(node);
         node._dockRO?.disconnect(); node._dockEl?.remove();   // tear down the floating dock if open
         node._visObserver?.disconnect();
         if (node._liveBmp?.close) { try { node._liveBmp.close(); } catch (e) {} node._liveBmp = null; }  // release GPU bitmap
