@@ -360,11 +360,12 @@ app.registerExtension({
       const elementsWidget = findW("elements_data");
       const stylePaletteWidget = findW("style_palette_data");
       const bgBrightnessWidget = findW("bg_brightness");
+      const formatWidget = findW("output_format");           // "pretty" | "compact" (set via the Text menu)
       if (bgBrightnessWidget && typeof bgBrightnessWidget.value !== "number") bgBrightnessWidget.value = 25;
       const wWidget = findW("width"), hWidget = findW("height");
       // Hide the data widgets while keeping them serializable.
       function hideDataWidgets() {
-        for (const w of [elementsWidget, stylePaletteWidget, bgBrightnessWidget]) {
+        for (const w of [elementsWidget, stylePaletteWidget, bgBrightnessWidget, formatWidget]) {
           if (!w) continue;
           w.hidden = true;
           w.computeSize = () => [0, -4];
@@ -418,6 +419,16 @@ app.registerExtension({
       const tokenSpan = document.createElement("span");
       tokenSpan.style.cssText = "color:#888; white-space:nowrap;";
       tokenSpan.title = "Rough token estimate (~chars/4). Grey <256, green healthy, orange nearing, red ≥2048 (model cap — will error)";
+      // Compact-output toggle next to the token count (compact is the format Ideogram 4 expects — default on).
+      const compactLbl = document.createElement("label");
+      compactLbl.style.cssText = "display:flex;align-items:center;gap:3px;cursor:pointer;flex:0 0 auto;color:#aaa;white-space:nowrap;";
+      compactLbl.title = "Compact JSON output (the format Ideogram 4 was trained on). Uncheck for pretty/indented. Copy reflects it.";
+      const compactCb = document.createElement("input"); compactCb.type = "checkbox";
+      compactCb.checked = (formatWidget?.value) !== "pretty";   // default: compact
+      stopProp(compactCb);
+      compactCb.addEventListener("change", () => { if (formatWidget) formatWidget.value = compactCb.checked ? "compact" : "pretty"; updateTokens(); });
+      compactLbl.appendChild(compactCb); compactLbl.appendChild(document.createTextNode("compact"));
+      compactLbl._cb = compactCb;
       const grabBtn = document.createElement("button");
       grabBtn.className = "kjideo-btn";
       grabBtn.addEventListener("mousedown", (e) => e.stopPropagation());
@@ -630,7 +641,7 @@ app.registerExtension({
         tplMenu.style.top = Math.min(r.bottom + 4, window.innerHeight - tplMenu.offsetHeight - 4) + "px";
         tplDismiss.arm();
       });
-      bar.appendChild(hint); bar.appendChild(tokenSpan); bar.appendChild(bgBtn); bar.appendChild(txtBtn); bar.appendChild(copyBtn); bar.appendChild(importBtn); bar.appendChild(tplBtn); bar.appendChild(clearBtn);
+      bar.appendChild(hint); bar.appendChild(tokenSpan); bar.appendChild(compactLbl); bar.appendChild(bgBtn); bar.appendChild(txtBtn); bar.appendChild(copyBtn); bar.appendChild(importBtn); bar.appendChild(tplBtn); bar.appendChild(clearBtn);
       updateGrabBtn();
 
       // Persistent global style-palette row
@@ -1966,7 +1977,7 @@ app.registerExtension({
           return el;
         });
         cap.compositional_deconstruction = { background: getW("background"), elements };
-        return pyJson(cap);
+        return (formatWidget?.value) === "pretty" ? pyJson(cap) : JSON.stringify(cap);   // compact by default; matches the node output
       }
       // Rough token estimate (~chars/4); exact count needs the Qwen tokenizer.
       function updateTokens() {
@@ -2434,6 +2445,7 @@ app.registerExtension({
         if (!o) return;
         const p = node.properties;
         o.ideo = { boxes: node._boxes, palette: node._stylePalette, importMode: findW("import_mode")?.value,
+          outputFormat: findW("output_format")?.value,
           dock: { pinned: p.dockPinned, graph: p.dockGraph, rect: p.dockRect, panelH: node._panelH, min: p.dockMin } };
       });
       chainCallback(node, "onConfigure", function (o) {
@@ -2467,6 +2479,10 @@ app.registerExtension({
         if (imW) {                                            // old workflows (saved before this widget) don't fail Combo validation
           const im = o && o.ideo && o.ideo.importMode, opts = ["when empty", "always"];
           imW.value = opts.includes(im) ? im : (opts.includes(imW.value) ? imW.value : "when empty");
+        }
+        if (formatWidget) {                                   // restore output format from the blob; default compact unless explicitly pretty
+          formatWidget.value = (o && o.ideo && o.ideo.outputFormat) === "pretty" ? "pretty" : "compact";
+          compactLbl._cb.checked = formatWidget.value === "compact";
         }
         node._configured = true;                              // mark as loaded so initial layout keeps the restored size
         hideDataWidgets();

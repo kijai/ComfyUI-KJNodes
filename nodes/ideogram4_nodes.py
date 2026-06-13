@@ -199,7 +199,6 @@ def _caption_to_boxes(cap):
     return boxes
 
 
-
 class Ideogram4PromptBuilderKJ(io.ComfyNode):
     @classmethod
     def define_schema(cls):
@@ -274,6 +273,9 @@ Toolbar:
                                tooltip="How a wired import_json is used: 'when empty' only seeds the editor while "
                                        "it has no regions (then the editor wins, so you can edit); 'always' makes "
                                        "the wired JSON authoritative so its changes always propagate to the output."),
+                io.String.Input("output_format", default="compact", socketless=True, advanced=True,
+                                tooltip="Output JSON formatting (set via the editor toolbar): 'compact' (default, what "
+                                        "Ideogram 4 expects) or 'pretty' (indented, for readability)."),
                 io.BoundingBox.Input("bboxes", optional=True, force_input=True,
                                      tooltip="Optional pixel-space boxes ({x, y, width, height}) used to seed the "
                                              "editor's regions when it has none. Ignored once regions exist."),
@@ -291,9 +293,10 @@ Toolbar:
     def execute(cls, width, height, background, style,
                 high_level_description="", aesthetics="", lighting="", medium="",
                 style_palette_data="", elements_data="", import_json="", import_mode="when empty",
-                bboxes=None, image=None, bg_brightness=25) -> io.NodeOutput:
+                output_format="pretty", bboxes=None, image=None, bg_brightness=25) -> io.NodeOutput:
         if import_mode not in ("when empty", "always"):      # old workflows saved before this widget existed
             import_mode = "when empty"
+        dump = _dumps if output_format == "pretty" else (lambda v: json.dumps(v, ensure_ascii=False, separators=(",", ":")))
         boxes = _parse_json_list(elements_data)
         boxes_seeded = False
         if not boxes and bboxes:
@@ -405,4 +408,4 @@ Toolbar:
             ui["boxes"] = [json.dumps(boxes)]
         if used_import:                                       # mirror the import in the editor (only when used)
             ui["caption"] = [_dumps(imported)]
-        return io.NodeOutput(_dumps(caption), preview, bboxes_out, width, height, ui=ui)
+        return io.NodeOutput(dump(caption), preview, bboxes_out, width, height, ui=ui)
