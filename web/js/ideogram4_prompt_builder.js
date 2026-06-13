@@ -198,12 +198,24 @@ function applyDockTransform(n) {
   const order = n.graph?.nodes?.indexOf(n);            // sit at the node DOM-widget layer (not above everything)
   if (order != null && order >= 0) fl.style.zIndex = String(order);
 }
+// Dock chrome follows the node's color theme (title → header, body → background); falls back to dark when uncolored.
+function applyDockTheme(n) {
+  const fl = n._dockEl; if (!fl) return;
+  const sig = (n.color || "") + "|" + (n.bgcolor || "");
+  if (n._dockTheme === sig) return;
+  n._dockTheme = sig;
+  const set = (k, v) => (v ? fl.style.setProperty(k, v) : fl.style.removeProperty(k));
+  set("--kj-dock-bg", n.bgcolor);
+  set("--kj-dock-head", n.color);
+  set("--kj-dock-border", n.color || n.bgcolor);
+}
 // Event-driven loop: woken by canvas redraws (dirty-gated) + resize, self-stops when settled.
 const DOCK_IDLE_STOP = 6;        // stop after this many frames with no further wake
 let _dockRAF = 0, _dockLoopSig = "", _dockLastMode = null, _dockIdle = 0, _dockWakesInstalled = false;
 function tickDocks() {
   const c = app.canvas;
   if (c && pinnedDocks.size) {
+    for (const n of pinnedDocks) applyDockTheme(n);   // cheap: cached, only writes on color change
     const vue = !!window.LiteGraph?.vueNodesMode;
     if (vue !== _dockLastMode) {                  // legacy↔2.0 flip rebuilds the node DOM — force re-parent + re-place
       _dockLastMode = vue; _dockLoopSig = "";
@@ -321,7 +333,7 @@ function injectStyle() {
     .kjideo-fs-inner { position:relative; width:88vw; height:90vh; background:#1a1a1a; border:1px solid #444; border-radius:8px; box-shadow:0 12px 48px rgba(0,0,0,0.6); padding:12px; box-sizing:border-box; }
     .kjideo-fs-inner .kjideo-wrap { height:100%; }
     .kjideo-fs-close { position:absolute; top:14px; right:18px; z-index:5; padding:4px 12px; font-size:14px; }
-    .kjideo-dock { position:fixed; z-index:8500; pointer-events:auto; display:flex; flex-direction:column; background:#1a1a1a; border:1px solid #555; border-radius:8px; box-shadow:0 8px 30px rgba(0,0,0,0.55); min-width:300px; min-height:240px; overflow:hidden; }
+    .kjideo-dock { position:fixed; z-index:8500; pointer-events:auto; display:flex; flex-direction:column; background:var(--kj-dock-bg,#1a1a1a); border:1px solid var(--kj-dock-border,#555); border-radius:8px; box-shadow:0 8px 30px rgba(0,0,0,0.55); min-width:300px; min-height:240px; overflow:hidden; }
     .kjideo-rsz { position:absolute; z-index:20; touch-action:none; }
     .kjideo-rsz.n { top:0; left:11px; right:11px; height:6px; cursor:ns-resize; }
     .kjideo-rsz.s { bottom:0; left:11px; right:11px; height:6px; cursor:ns-resize; }
@@ -334,7 +346,7 @@ function injectStyle() {
     .kjideo-dock.minimized { min-height:0 !important; height:auto !important; }
     .kjideo-dock.minimized .kjideo-dock-body { display:none; }
     .kjideo-dock.minimized .kjideo-rsz { display:none; }
-    .kjideo-dock-head { display:flex; align-items:center; gap:6px; padding:4px 8px; background:#262626; cursor:move; font:12px sans-serif; color:#ccc; user-select:none; border-bottom:1px solid #444; flex:0 0 auto; }
+    .kjideo-dock-head { display:flex; align-items:center; gap:6px; padding:4px 8px; background:var(--kj-dock-head,#262626); cursor:move; font:12px sans-serif; color:#ccc; user-select:none; border-bottom:1px solid rgba(0,0,0,0.25); flex:0 0 auto; }
     .kjideo-dock-head .kjideo-btn { padding:1px 7px; }
     .kjideo-dock-body { flex:1 1 auto; min-height:0; padding:8px; box-sizing:border-box; overflow:hidden; }
     .kjideo-dock-body .kjideo-wrap { height:100%; }
@@ -888,6 +900,7 @@ app.registerExtension({
         addDockResizeHandles(fl);
         document.body.appendChild(fl);
         node._dockEl = fl; node._dockBody = body; node._dockSig = ""; node._dockNodeEl = null; liveDocks.add(node);
+        applyDockTheme(node);                                 // match the node's color theme right away
         detachInto(body);
         // initial geometry / mode
         const pinned = !!node.properties.dockPinned;
