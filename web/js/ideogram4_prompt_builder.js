@@ -392,7 +392,7 @@ app.registerExtension({
           w.hidden = true;
           w.computeSize = () => [0, -4];
         }
-        for (const name of ["elements_data", "style_palette_data", "bg_brightness"]) {
+        for (const name of ["elements_data", "style_palette_data", "bg_brightness", "output_format"]) {
           const i = node.inputs?.findIndex((inp) => inp.name === name);
           if (i != null && i !== -1) node.removeInput(i);
         }
