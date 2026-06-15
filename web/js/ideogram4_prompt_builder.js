@@ -171,6 +171,7 @@ function sweepOrphanDocks() {
 function applyDockTransform(n) {
   const c = app.canvas, fl = n._dockEl, gr = n.properties.dockGraph;
   if (!c || !fl || !gr) return;
+  if (n.graph && c.graph && n.graph !== c.graph) return;   // off-screen (sub)graph; visibility handled in tickDocks
   let nodeEl = null;
   if (window.LiteGraph?.vueNodesMode && n.id != null) {        // cache; re-query only if it's gone (virtualization)
     nodeEl = n._dockNodeEl;
@@ -218,7 +219,10 @@ let _dockRAF = 0, _dockLoopSig = "", _dockLastMode = null, _dockIdle = 0, _dockW
 function tickDocks() {
   const c = app.canvas;
   if (c && pinnedDocks.size) {
-    for (const n of pinnedDocks) applyDockTheme(n);   // cheap: cached, only writes on color change
+    for (const n of pinnedDocks) {                    // cheap: cached theme, plus hide docks whose (sub)graph isn't on screen
+      applyDockTheme(n);
+      if (n._dockEl) n._dockEl.style.display = (n.graph && c.graph && n.graph !== c.graph) ? "none" : "";
+    }
     const vue = !!window.LiteGraph?.vueNodesMode;
     if (vue !== _dockLastMode) {                  // legacy↔2.0 flip rebuilds the node DOM — force re-parent + re-place
       _dockLastMode = vue; _dockLoopSig = "";
