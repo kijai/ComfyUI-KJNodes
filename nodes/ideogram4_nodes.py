@@ -6,6 +6,8 @@ canvas, set each region's type/desc/text/color palette, and assemble the Ideogra
 
 import json
 import os
+import re
+import logging
 
 import numpy as np
 import torch
@@ -178,6 +180,28 @@ def _parse_json_list(s):
     return []
 
 
+def _repair_json(s):
+    # Slice out the outermost {...} (drops ``` fences / prose), then strip trailing commas before
+    # } or ] — the leading "(...)" alt matches whole strings first, so quoted commas are untouched.
+    i, j = s.find("{"), s.rfind("}")
+    t = s[i:j + 1] if (i != -1 and j > i) else s
+    return re.sub(r'("(?:[^"\\]|\\.)*")|,(\s*[}\]])', lambda m: m.group(1) or m.group(2), t)
+
+
+def _loads_caption(s):
+    # Parse a caption dict; on failure retry once with the lenient repair. Returns dict or None.
+    for cand in ((s, _repair_json(s)) if s and s.strip() else ()):
+        try:
+            v = json.loads(cand)
+            if isinstance(v, dict):
+                if cand is not s:
+                    logging.warning("[Ideogram4PromptBuilderKJ] import_json had errors; recovered with lenient parse")
+                return v
+        except (json.JSONDecodeError, TypeError):
+            continue
+    return None
+
+
 def _caption_to_boxes(cap):
     # Caption dict -> editor box list ({x,y,w,h, type, text, desc, palette}) for preview/bboxes.
     cd = cap.get("compositional_deconstruction") or {}
@@ -314,14 +338,7 @@ Toolbar:
                               "type": "obj", "text": "", "desc": "", "palette": []})
             boxes_seeded = bool(boxes)
 
-        imported = None
-        if import_json and import_json.strip():
-            try:
-                c = json.loads(import_json)
-                if isinstance(c, dict):
-                    imported = c
-            except json.JSONDecodeError:
-                pass
+        imported = _loads_caption(import_json)               # strict parse, then a lenient repair fallback
 
         kind = style["style"]                               # "none" | "photo" | "art_style"
 

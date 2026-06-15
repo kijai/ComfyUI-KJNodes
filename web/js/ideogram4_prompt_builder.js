@@ -2073,10 +2073,20 @@ app.registerExtension({
         setWidgetVal("medium", sd.medium || "");
         node._stylePalette = Array.isArray(sd.color_palette) ? sd.color_palette.slice() : [];
       }
+      // Lenient fixer: slice the outermost {...} (drops ``` fences / prose), then strip trailing
+      // commas before } or ] — the string alt matches first so quoted commas are left untouched.
+      function repairJson(s) {
+        const i = s.indexOf("{"), j = s.lastIndexOf("}");
+        const t = (i !== -1 && j > i) ? s.slice(i, j + 1) : s;
+        return t.replace(/("(?:[^"\\]|\\.)*")|,(\s*[}\]])/g, (m, str, close) => str || close);
+      }
       function tryParseCaption(t) {
         if (!t) return null;
-        try { const o = JSON.parse(t); return (o && typeof o === "object" && o.compositional_deconstruction) ? o : null; }
-        catch (e) { return null; }
+        for (const cand of [t, repairJson(t)]) {
+          try { const o = JSON.parse(cand); if (o && typeof o === "object" && o.compositional_deconstruction) return o; }
+          catch (e) {}
+        }
+        return null;
       }
       // Apply a parsed caption to the editor and refresh everything.
       function loadCaption(cap) {
