@@ -355,6 +355,7 @@ function injectStyle() {
     .kjideo-dock.minimized .kjideo-rsz { display:none; }
     .kjideo-dock.pinned .kjideo-rsz { display:none; }          /* node pinned → locked, like the node */
     .kjideo-dock.pinned .kjideo-dock-head { cursor:default; }
+    .kjideo-dock.snap-ready { box-shadow:0 -3px 0 0 #46b4e6, 0 8px 30px rgba(0,0,0,0.55); }   /* upper border lit = release to snap */
     .kjideo-dock-head { display:flex; align-items:center; gap:6px; padding:4px 8px; background:var(--kj-dock-head,#262626); cursor:move; font:12px sans-serif; color:#ccc; user-select:none; border-bottom:1px solid rgba(0,0,0,0.25); flex:0 0 auto; }
     .kjideo-dock-head .kjideo-btn { padding:1px 7px; }
     .kjideo-dock-body { flex:1 1 auto; min-height:0; padding:8px; box-sizing:border-box; overflow:hidden; }
@@ -937,16 +938,29 @@ app.registerExtension({
           const scale = pinned ? (app.canvas.ds.scale || 1) : 1;
           const gx0 = pinned ? node.properties.dockGraph.x : 0, gy0 = pinned ? node.properties.dockGraph.y : 0;
           const ox = fl.offsetLeft, oy = fl.offsetTop;
+          let snapReady = false;
           dragPointer(e, head, (me) => {
             if (pinned) {                                  // move the panel by writing its transform directly (no full redraw)
-              node.properties.dockGraph.x = gx0 + (me.clientX - sx0) / scale;
-              node.properties.dockGraph.y = gy0 + (me.clientY - sy0) / scale;
+              const gx = gx0 + (me.clientX - sx0) / scale, gy = gy0 + (me.clientY - sy0) / scale;
+              const snap = 26 / scale, underY = node.size[1] + 2;   // "home" slot: flush under the node
+              snapReady = Math.abs(gx) < snap && Math.abs(gy - underY) < snap;   // just highlight; snap on release
+              fl.classList.toggle("snap-ready", snapReady);
+              node.properties.dockGraph.x = gx; node.properties.dockGraph.y = gy;  // follow the cursor freely
               applyDockTransform(node);
             } else {
               fl.style.left = Math.max(0, Math.min(ox + me.clientX - sx0, window.innerWidth - 60)) + "px";
               fl.style.top = Math.max(0, Math.min(oy + me.clientY - sy0, window.innerHeight - 30)) + "px";
             }
-          }, () => { saveDockGeom(); flushChange(); });
+          }, () => {
+            if (snapReady) {                               // commit the snap: flush under the node, matching its width
+              const w = Math.round(node.size[0]);
+              node.properties.dockGraph.x = 0; node.properties.dockGraph.y = node.size[1] + 2;
+              if (node.properties.dockGraph.w !== w) { node.properties.dockGraph.w = w; fl.style.width = w + "px"; }
+              node._dockSig = ""; applyDockTransform(node);
+            }
+            fl.classList.remove("snap-ready");
+            saveDockGeom(); flushChange();
+          });
         });
         try { node._dockRO = new ResizeObserver(() => { fitFsCanvas(); saveDockGeom(); }); node._dockRO.observe(fl); } catch (e) {}
         // editor slot is collapsed (getMinHeight→0) — shrink the node to its widgets
@@ -965,7 +979,7 @@ app.registerExtension({
         undock();
         if (!honor) requestAnimationFrame(() => {             // no reliable geometry — place a default under the node
           const g = node.properties.dockGraph;
-          g.x = 0; g.y = node.size[1] + 12;
+          g.x = 0; g.y = node.size[1] + 2;
           if (fresh) { g.w = Math.round(node.size[0]); if (node._dockEl) node._dockEl.style.width = g.w + "px"; }
           node._dockSig = ""; applyDockTransform(node); saveDockGeom();
         });
