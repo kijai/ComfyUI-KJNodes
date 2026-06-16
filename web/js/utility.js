@@ -95,8 +95,9 @@ export function addMiddleClickPan(element) {
     const startX = e.clientX, startY = e.clientY;
     const startOffsetX = ds.offset[0], startOffsetY = ds.offset[1];
     const onMove = (me) => {
-      ds.offset[0] = startOffsetX + (me.clientX - startX);
-      ds.offset[1] = startOffsetY + (me.clientY - startY);
+      const scale = ds.scale || 1;   // offset is graph-space; LiteGraph pans by (screen delta / scale)
+      ds.offset[0] = startOffsetX + (me.clientX - startX) / scale;
+      ds.offset[1] = startOffsetY + (me.clientY - startY) / scale;
       app.canvas.setDirty(true, true);
     };
     const onUp = () => {

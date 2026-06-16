@@ -719,8 +719,7 @@ app.registerExtension({
         "shift-click toggle · drag a group to move all · alt-click overlap · dbl-click edit · right-click region list · " +
         "Del remove (all selected) · Ctrl/Cmd+C/V/D copy/paste/duplicate · H hide boxes (view)";
       const ctx = canvasEl.getContext("2d");
-      addWheelPassthrough(wrap);
-      addMiddleClickPan(canvasEl);
+      addWheelPassthrough(wrap);   // middle-click pan is wired on the whole dock (fl) in undock()
 
       const panel = document.createElement("div");
       panel.className = "kjideo-panel";
@@ -918,6 +917,8 @@ app.registerExtension({
         const fl = document.createElement("div"); fl.className = "kjideo-dock";
         fl.dataset.captureWheel = "true";   // 2.0: let focused inputs in the dock scroll instead of zooming the graph
         stopProp(fl);   // hosted inside the node element — don't let dock interactions drag/zoom the node
+        addMiddleClickPan(fl);   // middle-click pans the graph from anywhere in the dock (bubbles up from inner elements)
+        fl.addEventListener("mousedown", (e) => { if (e.button === 1) e.stopPropagation(); });   // ...but don't let it reach the node behind
         const head = document.createElement("div"); head.className = "kjideo-dock-head";
         const title = document.createElement("span"); title.textContent = "Ideogram 4 editor"; title.style.flex = "1";
         const minBtn = document.createElement("button"); minBtn.className = "kjideo-btn";
@@ -2204,7 +2205,10 @@ app.registerExtension({
 
       // ── property panel ──
       function stopProp(el) {
-        for (const ev of ["mousedown", "pointerdown", "wheel"]) el.addEventListener(ev, (e) => e.stopPropagation());
+        el.addEventListener("wheel", (e) => e.stopPropagation());
+        // Let middle-click (button 1) bubble so it reaches the dock's pan handler; block left/right so
+        // dock controls don't drag/select the node behind them.
+        for (const ev of ["mousedown", "pointerdown"]) el.addEventListener(ev, (e) => { if (e.button !== 1) e.stopPropagation(); });
       }
       // Color swatches: onEdit on change, onStruct on add/remove/reorder. Shared by both palettes.
       // Pointer-based drag (HTML5 DnD is unreliable inside LiteGraph DOM widgets) with live reorder.
