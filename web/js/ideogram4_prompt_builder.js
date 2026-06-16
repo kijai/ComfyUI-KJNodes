@@ -4,6 +4,7 @@ const { app } = window.comfyAPI.app;
 const HANDLE = 8;            // hit radius (canvas px) for corners/edges
 const MAX_ELEM_COLORS = 5;   // Ideogram 4 per-element palette cap
 const MAX_STYLE_COLORS = 16; // Ideogram 4 style palette cap
+const DOCK_MINW = 300, DOCK_MINH = 240;   // dock min size — kept in sync with the .kjideo-dock CSS below
 let copiedBoxes = null;      // internal clipboard for copy/paste of regions (array; shared across nodes)
 
 // Track the most recent generated image so it can be grabbed as a background.
@@ -26,16 +27,38 @@ function resultViewUrl(img) {
 // Nodes opted into "live background": feed them the sampling preview frames as they arrive.
 const livePreviewNodes = new Set();
 let _lastPreviewBlob = null;
-function feedPreviewBlob(blob) {
-  // Newer ComfyUI dispatches "b_preview_with_metadata"; older ones only "b_preview" — and both can
-  // fire for the same frame (same Blob), so dedupe by identity to avoid decoding twice.
+let _previewOffset = 0;            // byte offset of the image inside the preview blob (0 = clean image)
+function pushPreview(img) { for (const n of livePreviewNodes) n._ideoSetLiveBg?.(img); }
+// Decode a blob to an <img> via object URL (same path the final result uses); resolves null on failure.
+function decodeToImg(blob) {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(blob);
+    const img = new Image();
+    img.onload = () => { resolve(img); URL.revokeObjectURL(url); };   // img retains its data after revoke
+    img.onerror = () => { resolve(null); URL.revokeObjectURL(url); };
+    img.src = url;
+  });
+}
+// Offset of an embedded JPEG (FF D8 FF) or PNG signature, or -1. Some servers frame the preview
+// payload with header bytes the bundled frontend doesn't strip, so the image isn't at byte 0.
+function imageStart(u) {
+  for (let i = 0; i + 3 < u.length; i++) {
+    if (u[i] === 0xff && u[i + 1] === 0xd8 && u[i + 2] === 0xff) return i;
+    if (u[i] === 0x89 && u[i + 1] === 0x50 && u[i + 2] === 0x4e && u[i + 3] === 0x47) return i;
+  }
+  return -1;
+}
+async function feedPreviewBlob(blob) {
+  // Both "b_preview" and "b_preview_with_metadata" can fire for the same frame (same Blob) — dedupe by identity.
   if (!blob || blob === _lastPreviewBlob || !livePreviewNodes.size) return;
   _lastPreviewBlob = blob;
-  createImageBitmap(blob).then((bmp) => {
-    let used = false;
-    for (const n of livePreviewNodes) { n._ideoSetLiveBg?.(bmp); used = true; }
-    if (!used && bmp.close) bmp.close();
-  }).catch(() => {});
+  let img = await decodeToImg(_previewOffset ? blob.slice(_previewOffset) : blob);
+  if (!img) {                       // wrong/stale offset — locate the embedded image and retry
+    const off = imageStart(new Uint8Array(await blob.arrayBuffer()));
+    _previewOffset = off > 0 ? off : 0;
+    if (off >= 0) img = await decodeToImg(off > 0 ? blob.slice(off) : blob);
+  }
+  if (img) pushPreview(img);
 }
 try {
   app.api?.addEventListener?.("b_preview", (e) => feedPreviewBlob(e?.detail));
@@ -155,8 +178,7 @@ document.addEventListener("keyup", (e) => { if (hoveredCanvasNode && e.key === "
 // Pinned dock follows the node: Nodes 2.0 hosts it inside the node element (inherits its transform); legacy is body-fixed.
 const pinnedDocks = new Set();
 const liveDocks = new Set();      // every node with a dock — swept so an orphaned dock can't linger
-let _dockRectNonce = 0;
-window.addEventListener("resize", () => { _dockRectNonce++; wakeDocks(); });   // canvas may shift without pan/zoom
+window.addEventListener("resize", () => wakeDocks());   // canvas may shift without pan/zoom
 // Safety net: a dock whose node has left the graph (deleted, workflow cleared) is torn down even if onRemoved didn't fire.
 function sweepOrphanDocks() {
   for (const n of liveDocks) {
@@ -167,36 +189,61 @@ function sweepOrphanDocks() {
     pinnedDocks.delete(n); liveDocks.delete(n);
   }
 }
-// gr.x/gr.y = offset (graph units) from the node's content top-left (node.pos).
-function applyDockTransform(n) {
-  const c = app.canvas, fl = n._dockEl, gr = n.properties.dockGraph;
-  if (!c || !fl || !gr) return;
-  if (n.graph && c.graph && n.graph !== c.graph) return;   // off-screen (sub)graph; visibility handled in tickDocks
-  let nodeEl = null;
-  if (window.LiteGraph?.vueNodesMode && n.id != null) {        // cache; re-query only if it's gone (virtualization)
-    nodeEl = n._dockNodeEl;
-    if (!nodeEl || !nodeEl.isConnected) nodeEl = n._dockNodeEl = document.querySelector(`[data-node-id="${n.id}"]`);
+// What the dock follows in the displayed graph, or null to hide: the node ("self", offset=dockGraph),
+// or — opt-in via exposeToParent — the SubgraphNode wrapping its subgraph ("parent", offset=dockParent; v1 direct parent only).
+function dockAnchor(n) {
+  const c = app.canvas;
+  if (!c || !c.graph) return null;
+  if (n.graph === c.graph) return { host: n, ctx: "self" };
+  if (n.properties.exposeToParent && n.graph) {
+    const nodes = c.graph._nodes || c.graph.nodes || [];
+    const sn = nodes.find((m) => m && m.subgraph === n.graph);   // SubgraphNode wrapping the node's subgraph
+    if (sn) return { host: sn, ctx: "parent" };
   }
-  if (nodeEl) {                                                 // host inside the node element → inherits its transform
-    const title = window.LiteGraph?.NODE_TITLE_HEIGHT ?? 30;   // element top is the title bar; node.pos sits below it
-    const sig = "v|" + gr.x + "|" + gr.y;
-    if (fl.parentElement !== nodeEl) {
-      nodeEl.appendChild(fl);
+  return null;
+}
+// gr.x/gr.y = offset (graph units) from host.pos (host = the node, or its SubgraphNode at parent level);
+// size (w/h) always lives in dockGraph. `rect` lets the tick loop share one canvas getBoundingClientRect.
+function applyDockTransform(n, anchor, rect) {
+  const c = app.canvas, fl = n._dockEl;
+  if (!c || !fl) return;
+  anchor = anchor || dockAnchor(n);
+  if (!anchor) return;                                          // off-screen; visibility handled in tickDocks
+  const host = anchor.host;
+  n._dockHost = host; n._dockCtx = anchor.ctx;                  // drag/snap handlers read these
+  const gr = anchor.ctx === "parent"
+    ? (n.properties.dockParent || (n.properties.dockParent = { x: 0, y: (host.size ? host.size[1] : 0) + 2 }))
+    : n.properties.dockGraph;
+  if (!gr) return;
+  let hostEl = null;
+  if (window.LiteGraph?.vueNodesMode && host.id != null) {      // cache; re-query if the host changed or it's gone
+    if (n._dockHostId !== host.id || !n._dockHostEl || !n._dockHostEl.isConnected) {
+      n._dockHostEl = document.querySelector(`[data-node-id="${host.id}"]`);
+      n._dockHostId = host.id; n._dockSig = "";
+    }
+    hostEl = n._dockHostEl;
+  }
+  if (hostEl) {                                                 // host inside the host element → inherits its transform
+    const title = window.LiteGraph?.NODE_TITLE_HEIGHT ?? 30;    // element top is the title bar; host.pos sits below it
+    const sig = "v|" + host.id + "|" + gr.x + "|" + gr.y;
+    if (fl.parentElement !== hostEl) {
+      hostEl.appendChild(fl);
       fl.style.position = "absolute"; fl.style.transform = ""; fl.style.transformOrigin = ""; fl.style.zIndex = "";
       n._dockSig = "";
     }
     if (n._dockSig !== sig) { fl.style.left = gr.x + "px"; fl.style.top = (title + gr.y) + "px"; n._dockSig = sig; }
     return;
   }
-  // Legacy / fallback (no Vue element, e.g. just after a mode switch): body-fixed from node.pos + transform.
+  // Legacy / fallback (no Vue element, e.g. just after a mode switch): body-fixed from host.pos + transform.
   if (fl.parentElement !== document.body) { document.body.appendChild(fl); fl.style.left = ""; fl.style.top = ""; n._dockSig = ""; }  // re-attach if orphaned
-  if (!n.pos) return;
-  const ds = c.ds, scale = ds.scale, rect = c.canvas.getBoundingClientRect();
-  const baseLeft = rect.left + (n.pos[0] + gr.x + ds.offset[0]) * scale;
-  const baseTop = rect.top + (n.pos[1] + gr.y + ds.offset[1]) * scale;
+  if (!host.pos) return;
+  const ds = c.ds, scale = ds.scale;
+  rect = rect || c.canvas.getBoundingClientRect();
+  const baseLeft = rect.left + (host.pos[0] + gr.x + ds.offset[0]) * scale;
+  const baseTop = rect.top + (host.pos[1] + gr.y + ds.offset[1]) * scale;
   const tf = `translate(${baseLeft}px,${baseTop}px) scale(${scale})`;
   if (n._dockSig !== tf) { fl.style.position = "fixed"; fl.style.transformOrigin = "top left"; fl.style.transform = tf; n._dockSig = tf; }
-  const order = n.graph?.nodes?.indexOf(n);            // sit at the node DOM-widget layer (not above everything)
+  const order = c.graph?.nodes?.indexOf(host);          // sit at the node DOM-widget layer (not above everything)
   if (order != null && order >= 0) fl.style.zIndex = String(order);
 }
 // Dock chrome follows the node: color theme (title → header, body → background; dark fallback when uncolored)
@@ -215,34 +262,26 @@ function applyDockTheme(n) {
 }
 // Event-driven loop: woken by canvas redraws (dirty-gated) + resize, self-stops when settled.
 const DOCK_IDLE_STOP = 6;        // stop after this many frames with no further wake
-let _dockRAF = 0, _dockLoopSig = "", _dockLastMode = null, _dockIdle = 0, _dockWakesInstalled = false;
+let _dockRAF = 0, _dockLastMode = null, _dockIdle = 0, _dockWakesInstalled = false;
 function tickDocks() {
   const c = app.canvas;
   if (c && pinnedDocks.size) {
-    for (const n of pinnedDocks) {                    // cheap: cached theme, plus hide docks whose (sub)graph isn't on screen
-      applyDockTheme(n);
-      if (n._dockEl) n._dockEl.style.display = (n.graph && c.graph && n.graph !== c.graph) ? "none" : "";
-    }
     const vue = !!window.LiteGraph?.vueNodesMode;
     if (vue !== _dockLastMode) {                  // legacy↔2.0 flip rebuilds the node DOM — force re-parent + re-place
-      _dockLastMode = vue; _dockLoopSig = "";
-      for (const n of pinnedDocks) { n._dockSig = ""; n._dockNodeEl = null; }
+      _dockLastMode = vue;
+      for (const n of pinnedDocks) { n._dockSig = ""; n._dockHostEl = null; n._dockHostId = null; }
     }
-    if (vue) {
-      for (const n of pinnedDocks) {
-        applyDockTransform(n);
-        const w = n._dockWrap;                     // Vue re-mounts the widget into the node body — pull it back
-        if (w && n._dockBody && !n._fullscreen && w.parentElement !== n._dockBody) { n._dockBody.appendChild(w); n._dockSig = ""; }
-      }
-    } else {                                       // legacy: skip rect reads when nothing moved
-      const ds = c.ds;
-      let sig = _dockRectNonce + "|" + ds.scale + "|" + ds.offset[0] + "|" + ds.offset[1];
-      for (const n of pinnedDocks) sig += n.pos ? "|" + n.pos[0] + "," + n.pos[1] : "|";
-      if (sig !== _dockLoopSig) { _dockLoopSig = sig; for (const n of pinnedDocks) applyDockTransform(n); }
+    const rect = vue ? null : c.canvas.getBoundingClientRect();   // legacy: share one rect across all docks
+    for (const n of pinnedDocks) {                // anchor = node (own graph on screen) or its SubgraphNode (exposed)
+      applyDockTheme(n);
+      if (n._exBtn) n._exBtn.style.display = (n.graph && !n.graph.isRootGraph) ? "" : "none";   // expose only matters inside a subgraph
+      const anchor = dockAnchor(n);
+      if (n._dockEl) n._dockEl.style.display = anchor ? "" : "none";
+      if (anchor) applyDockTransform(n, anchor, rect);
     }
   }
   if (pinnedDocks.size && ++_dockIdle < DOCK_IDLE_STOP) _dockRAF = requestAnimationFrame(tickDocks);
-  else { _dockRAF = 0; _dockLoopSig = ""; }       // settled — stop until the next wake
+  else _dockRAF = 0;                              // settled — stop until the next wake
 }
 function wakeDocks() {            // a canvas change happened — run/continue the loop until it settles
   _dockIdle = 0;
@@ -340,7 +379,7 @@ function injectStyle() {
     .kjideo-fs-inner { position:relative; width:88vw; height:90vh; background:#1a1a1a; border:1px solid #444; border-radius:8px; box-shadow:0 12px 48px rgba(0,0,0,0.6); padding:12px; box-sizing:border-box; }
     .kjideo-fs-inner .kjideo-wrap { height:100%; }
     .kjideo-fs-close { position:absolute; top:14px; right:18px; z-index:5; padding:4px 12px; font-size:14px; }
-    .kjideo-dock { position:fixed; z-index:8500; pointer-events:auto; display:flex; flex-direction:column; background:var(--kj-dock-bg,#1a1a1a); border:1px solid var(--kj-dock-border,#555); border-radius:8px; box-shadow:0 8px 30px rgba(0,0,0,0.55); min-width:300px; min-height:240px; overflow:hidden; }
+    .kjideo-dock { position:fixed; z-index:8500; pointer-events:auto; display:flex; flex-direction:column; background:var(--kj-dock-bg,#1a1a1a); border:1px solid var(--kj-dock-border,#555); border-radius:8px; box-shadow:0 8px 30px rgba(0,0,0,0.55); min-width:${DOCK_MINW}px; min-height:${DOCK_MINH}px; overflow:hidden; }
     .kjideo-rsz { position:absolute; z-index:20; touch-action:none; }
     .kjideo-rsz.n { top:0; left:11px; right:11px; height:6px; cursor:ns-resize; }
     .kjideo-rsz.s { bottom:0; left:11px; right:11px; height:6px; cursor:ns-resize; }
@@ -712,29 +751,21 @@ app.registerExtension({
 
       wrap.appendChild(bar); wrap.appendChild(styleBar); wrap.appendChild(cvBox); wrap.appendChild(splitter); wrap.appendChild(panel);
 
-      const EDITOR_MIN = 220;                                  // fixed floor; the node fills the rest and resizes freely
-      node.ideoEditor = node.addDOMWidget("ideo_editor", "Ideogram4Editor", wrap, {
-        serialize: false, hideOnZoom: false,
-        getMinHeight: () => (node._detached ? 0 : EDITOR_MIN),   // collapse when popped out
-      });
+      // The editor is NOT a node widget — it lives in the floating dock (built in undock()), so the node
+      // is an ordinary widgets-only node that ComfyUI sizes/persists with zero custom height handling.
       node.resizable = true;
 
-      // DOM widgets are HTML layered over the canvas; ComfyUI only repositions/clips them
-      // during a foreground draw. When the node returns from off-screen the element can
-      // briefly float over the canvas until the next draw — force one when it re-enters view.
+      // The dock canvas measures 0 while hidden; re-letterbox it when the editor element re-enters view.
       try {
         node._visObserver = new IntersectionObserver((entries) => {
-          if (entries.some((en) => en.isIntersecting)) {
-            app.canvas?.setDirtyCanvas?.(true, true);
-            drawCanvas();
-          }
+          if (entries.some((en) => en.isIntersecting)) fitCanvas();
         });
         node._visObserver.observe(wrap);
       } catch (e) {}
 
       // Letterbox-fit the canvas (keeping width/height aspect) into its flex container cvBox.
       function fitCanvas() {
-        if (!node._detached && wrap.offsetParent === null) return;   // hidden tab — measurements are 0
+        if (wrap.offsetParent === null) return;   // hidden (collapsed tab / minimized) — measurements are 0
         const availW = cvBox.clientWidth, availH = cvBox.clientHeight;
         if (availW < 4 || availH < 4) return;
         const aspect = (wWidget?.value || 1) / (hWidget?.value || 1);
@@ -746,20 +777,10 @@ app.registerExtension({
       }
       const fitFsCanvas = fitCanvas;                           // dock/fullscreen use the same fitter
       function syncCanvasToDims() { fitCanvas(); }             // aspect changed (width/height widgets)
-      function fitNode() {
-        if (node._detached) { fitCanvas(); return; }
-        if (wrap.offsetParent === null) return;                // hidden tab / off-screen — skip
-        const minH = node.computeSize()[1];                    // never sit below the floor
-        if (node.size[1] < minH) node.setSize([node.size[0], minH]);
-        fitCanvas();
-      }
-      function detachInto(container) {                        // move the editor out of the node
+      function detachInto(container) {                        // move the editor element into a container (dock body / fullscreen)
         node._wrapHome = wrap.parentNode;
         container.appendChild(wrap);
-        if (node.ideoEditor) node.ideoEditor.hidden = true;
-        node._detached = true;
         node._fsInner = container;
-        node._dockWrap = wrap;                               // so the dock can reclaim it if Vue re-mounts the widget
       }
       function reattach() {                                   // fullscreen exit → back into the floating dock
         canvasEl.style.width = ""; canvasEl.style.height = "";
@@ -799,10 +820,19 @@ app.registerExtension({
       }
 
       // ── floating / dockable editor panel ──
+      // Active-context position offset (set by applyDockTransform): dockParent (parent) or dockGraph (self).
+      // dockParent is created by applyDockTransform with the right default; fall back to dockGraph if absent.
+      function dockPos() {
+        return node._dockCtx === "parent" ? (node.properties.dockParent || node.properties.dockGraph) : node.properties.dockGraph;
+      }
+      // The node the dock is currently anchored to: the node itself, or the SubgraphNode at parent level.
+      function dockHostNode() { return node._dockHost || node; }
       // Persist the panel geometry — screen-space rect when unpinned, graph-space size when pinned.
       function saveDockGeom() {
         const fl = node._dockEl; if (!fl) return;
         if (node.properties.dockMin) return;                  // collapsed: don't persist the header-only size
+        // sub-min = transient (hidden / mid-reparent) → bogus, don't persist. (offsetParent is null for the fixed dock.)
+        if (fl.offsetWidth < DOCK_MINW || fl.offsetHeight < DOCK_MINH) return;
         if (node.properties.dockPinned) {
           node.properties.dockGraph = node.properties.dockGraph || { x: 0, y: 0 };
           node.properties.dockGraph.w = fl.offsetWidth; node.properties.dockGraph.h = fl.offsetHeight;
@@ -829,14 +859,14 @@ app.registerExtension({
           node.properties.dockPinned = true;
           fl.style.left = ""; fl.style.top = "";
           fl.style.width = g.w + "px"; fl.style.height = g.h + "px";
-          node._dockSig = ""; node._dockNodeEl = null;     // force a fresh place + re-parent
+          node._dockSig = ""; node._dockHostEl = null; node._dockHostId = null;     // force a fresh place + re-parent
           pinnedDocks.add(node); startDockLoop();
           applyDockTransform(node);                        // place this frame (avoid a flash at the old float spot)
         } else {                                           // freeze current visual rect as a body-fixed screen panel
           const r = fl.getBoundingClientRect();
           node.properties.dockPinned = false;
           pinnedDocks.delete(node);
-          node._dockSig = ""; node._dockNodeEl = null;
+          node._dockSig = ""; node._dockHostEl = null; node._dockHostId = null;
           document.body.appendChild(fl);                   // back out of the node element
           fl.style.position = "fixed"; fl.style.transform = ""; fl.style.transformOrigin = ""; fl.style.zIndex = "";
           fl.style.left = Math.round(r.left) + "px"; fl.style.top = Math.round(r.top) + "px";
@@ -854,9 +884,10 @@ app.registerExtension({
         const pinned = !!node.properties.dockPinned;
         const scale = (pinned && app.canvas) ? (app.canvas.ds.scale || 1) : 1;
         const sx = e.clientX, sy = e.clientY, w0 = fl.offsetWidth, h0 = fl.offsetHeight;
-        const gx0 = pinned ? node.properties.dockGraph.x : (parseFloat(fl.style.left) || 0);
-        const gy0 = pinned ? node.properties.dockGraph.y : (parseFloat(fl.style.top) || 0);
-        const MINW = 300, MINH = 240;
+        const startPos = dockPos();                          // active context: dockGraph (self) or dockParent
+        const gx0 = pinned ? startPos.x : (parseFloat(fl.style.left) || 0);
+        const gy0 = pinned ? startPos.y : (parseFloat(fl.style.top) || 0);
+        const MINW = DOCK_MINW, MINH = DOCK_MINH;
         dragPointer(e, e.currentTarget, (me) => {
           const dx = (me.clientX - sx) / scale, dy = (me.clientY - sy) / scale;
           let w = w0, h = h0, gx = gx0, gy = gy0;
@@ -867,7 +898,7 @@ app.registerExtension({
           if (w < MINW) { if (dir.indexOf("w") >= 0) gx -= (MINW - w); w = MINW; }
           if (h < MINH) { if (dir.indexOf("n") >= 0) gy -= (MINH - h); h = MINH; }
           fl.style.width = Math.round(w) + "px"; fl.style.height = Math.round(h) + "px";
-          if (pinned) { node.properties.dockGraph.x = gx; node.properties.dockGraph.y = gy; node._dockSig = ""; applyDockTransform(node); }
+          if (pinned) { const p = dockPos(); p.x = gx; p.y = gy; node._dockSig = ""; applyDockTransform(node); }
           else { fl.style.left = Math.round(gx) + "px"; fl.style.top = Math.round(gy) + "px"; }
           fitFsCanvas();
         }, () => { saveDockGeom(); flushChange(); });
@@ -904,12 +935,23 @@ app.registerExtension({
         stopProp(fsBtn); fsBtn.addEventListener("click", () => node._fullscreen ? exitFs() : enterFs());
         const pinBtn = document.createElement("button"); pinBtn.className = "kjideo-btn"; pinBtn.textContent = "📌";
         stopProp(pinBtn); pinBtn.addEventListener("click", () => setPinned(!node.properties.dockPinned, pinBtn));
-        head.append(title, fsBtn, minBtn, pinBtn);
+        // Opt-in: also show this canvas at the parent (subgraph) level (tickDocks hides this button at root).
+        const exBtn = document.createElement("button"); exBtn.className = "kjideo-btn"; exBtn.textContent = "⤴";
+        exBtn.style.display = (node.graph && !node.graph.isRootGraph) ? "" : "none";
+        const syncExBtn = () => {
+          exBtn.classList.toggle("active", !!node.properties.exposeToParent);
+          exBtn.title = (node.properties.exposeToParent ? "Hide" : "Show") + " this canvas at the parent (subgraph) level";
+        };
+        stopProp(exBtn);
+        exBtn.addEventListener("click", () => { node.properties.exposeToParent = !node.properties.exposeToParent; syncExBtn(); node._dockSig = ""; wakeDocks(); flushChange(); });
+        syncExBtn();
+        node._syncExBtn = syncExBtn; node._exBtn = exBtn;     // onConfigure refreshes state; tickDocks toggles visibility
+        head.append(title, fsBtn, minBtn, exBtn, pinBtn);
         const body = document.createElement("div"); body.className = "kjideo-dock-body";
         fl.append(head, body);
         addDockResizeHandles(fl);
         document.body.appendChild(fl);
-        node._dockEl = fl; node._dockBody = body; node._dockSig = ""; node._dockNodeEl = null; liveDocks.add(node);
+        node._dockEl = fl; node._dockBody = body; node._dockSig = ""; node._dockHostEl = null; node._dockHostId = null; liveDocks.add(node);
         applyDockTheme(node);                                 // match the node's color theme right away
         detachInto(body);
         // initial geometry / mode
@@ -936,25 +978,27 @@ app.registerExtension({
           const sx0 = e.clientX, sy0 = e.clientY;
           const pinned = node.properties.dockPinned;
           const scale = pinned ? (app.canvas.ds.scale || 1) : 1;
-          const gx0 = pinned ? node.properties.dockGraph.x : 0, gy0 = pinned ? node.properties.dockGraph.y : 0;
+          const dp0 = dockPos();                           // active context: dockGraph (self) or dockParent
+          const gx0 = pinned ? dp0.x : 0, gy0 = pinned ? dp0.y : 0;
           const ox = fl.offsetLeft, oy = fl.offsetTop;
           let snapReady = false;
           dragPointer(e, head, (me) => {
             if (pinned) {                                  // move the panel by writing its transform directly (no full redraw)
               const gx = gx0 + (me.clientX - sx0) / scale, gy = gy0 + (me.clientY - sy0) / scale;
-              const snap = 26 / scale, underY = node.size[1] + 2;   // "home" slot: flush under the node
+              const h = dockHostNode();                    // snap "home": flush under the anchor (node or SubgraphNode)
+              const snap = 26 / scale, underY = h.size[1] + 2;
               snapReady = Math.abs(gx) < snap && Math.abs(gy - underY) < snap;   // just highlight; snap on release
               fl.classList.toggle("snap-ready", snapReady);
-              node.properties.dockGraph.x = gx; node.properties.dockGraph.y = gy;  // follow the cursor freely
+              const p = dockPos(); p.x = gx; p.y = gy;     // follow the cursor freely
               applyDockTransform(node);
             } else {
               fl.style.left = Math.max(0, Math.min(ox + me.clientX - sx0, window.innerWidth - 60)) + "px";
               fl.style.top = Math.max(0, Math.min(oy + me.clientY - sy0, window.innerHeight - 30)) + "px";
             }
           }, () => {
-            if (snapReady) {                               // commit the snap: flush under the node, matching its width
-              const w = Math.round(node.size[0]);
-              node.properties.dockGraph.x = 0; node.properties.dockGraph.y = node.size[1] + 2;
+            if (snapReady) {                               // commit the snap: flush under the anchor, matching its width
+              const h = dockHostNode(), w = Math.round(h.size[0]), p = dockPos();
+              p.x = 0; p.y = h.size[1] + 2;
               if (node.properties.dockGraph.w !== w) { node.properties.dockGraph.w = w; fl.style.width = w + "px"; }
               node._dockSig = ""; applyDockTransform(node);
             }
@@ -962,9 +1006,10 @@ app.registerExtension({
             saveDockGeom(); flushChange();
           });
         });
+        // Re-letterbox the canvas and persist geometry on dock resize. The sub-min guard in
+        // saveDockGeom drops the bogus transient reads from Vue re-parenting.
         try { node._dockRO = new ResizeObserver(() => { fitFsCanvas(); saveDockGeom(); }); node._dockRO.observe(fl); } catch (e) {}
-        // editor slot is collapsed (getMinHeight→0) — shrink the node to its widgets
-        requestAnimationFrame(() => { node.setSize([node.size[0], node.computeSize()[1]]); fitFsCanvas(); });
+        requestAnimationFrame(fitFsCanvas);   // letterbox the canvas once the dock has its size
       }
       // Pin the editor under the node. `fresh` (new node only) matches the node width; reloads honor the blob.
       function ensureDocked(fresh) {
@@ -974,13 +1019,13 @@ app.registerExtension({
         if (!honor) {
           // old workflow: reuse its saved (aspect-locked) node height so the canvas isn't tiny
           const sh = (!fresh && node._savedSize && node._savedSize[1] > 240) ? Math.round(node._savedSize[1]) : 470;
-          node.properties.dockGraph = { x: 0, y: 0, w: 560, h: sh };
+          node.properties.dockGraph = { x: 0, y: 0, w: Math.round(node.size[0]), h: sh };   // match the node width
         }
         undock();
-        if (!honor) requestAnimationFrame(() => {             // no reliable geometry — place a default under the node
+        if (!honor) requestAnimationFrame(() => {             // no reliable geometry — place a default under the node, matching its width
           const g = node.properties.dockGraph;
-          g.x = 0; g.y = node.size[1] + 2;
-          if (fresh) { g.w = Math.round(node.size[0]); if (node._dockEl) node._dockEl.style.width = g.w + "px"; }
+          g.x = 0; g.y = node.size[1] + 2; g.w = Math.round(node.size[0]);
+          if (node._dockEl) node._dockEl.style.width = g.w + "px";
           node._dockSig = ""; applyDockTransform(node); saveDockGeom();
         });
       }
@@ -1604,7 +1649,7 @@ app.registerExtension({
         node._selection = new Set();
         for (let i = start; i < node._boxes.length; i++) node._selection.add(i);
         node._activeIdx = node._boxes.length - 1;
-        commit(); fitNode();
+        commit(); fitCanvas();
       }
       // Keyboard: Delete removes; Ctrl/Cmd C/V/D copy/paste/duplicate the active region.
       // Canvas must be focused; stop the event so LiteGraph doesn't act on the node.
@@ -1617,7 +1662,7 @@ app.registerExtension({
         const ctrl = e.ctrlKey || e.metaKey;
         if ((e.key === "Delete" || e.key === "Backspace") && node._activeIdx >= 0) {
           e.preventDefault(); e.stopPropagation();
-          removeSelected(); commit(); fitNode();      // removes all selected (or the active one)
+          removeSelected(); commit(); fitCanvas();      // removes all selected (or the active one)
         } else if (ctrl && e.key === "c" && node._activeIdx >= 0) {
           e.preventDefault(); e.stopPropagation();
           copiedBoxes = copySelection();
@@ -1777,14 +1822,14 @@ app.registerExtension({
         if (!node._placing) return;
         node._placing = false;
         canvasEl.style.cursor = "crosshair";
-        commit(); fitNode();
+        commit(); fitCanvas();
       }
       function cancelPlacing() {
         if (!node._placing) return;
         node._placing = false;
         canvasEl.style.cursor = "crosshair";
         removeBox(node._activeIdx);
-        commit(); fitNode();
+        commit(); fitCanvas();
       }
 
       // ── right-click "layers" menu: list / select / delete / duplicate / reorder regions ──
@@ -1878,7 +1923,7 @@ app.registerExtension({
               e.stopPropagation();
               const idx = node._boxes.indexOf(b);
               if (idx < 0) return;
-              removeBox(idx); commit(); fitNode();
+              removeBox(idx); commit(); fitCanvas();
               if (!node._boxes.length) { closeLayersMenu(); return; }
               buildRows();
             });
@@ -1961,7 +2006,7 @@ app.registerExtension({
         closeInlineEditor();
         node._boxes = []; node._activeIdx = -1; node._selection = new Set(); node._stylePalette = [];
         node._lastImported = "";
-        commit(); rebuildStylePalette(); fitNode();   // a wired import re-seeds on the next run (serializeValue cache-busts)
+        commit(); rebuildStylePalette(); fitCanvas();   // a wired import re-seeds on the next run (serializeValue cache-busts)
       });
 
       // ── build caption JSON (mirrors Python key order) ──
@@ -2091,8 +2136,12 @@ app.registerExtension({
       // Apply a parsed caption to the editor and refresh everything.
       function loadCaption(cap) {
         closeInlineEditor();
+        // Setting the multiline widgets + rebuilding the style sub-widget makes ComfyUI grow the node;
+        // an import shouldn't change its size, so restore it (now and after the deferred re-arrange).
+        const sz = node.size ? [node.size[0], node.size[1]] : null;
         applyCaption(cap);
-        syncCanvasToDims(); commit(); rebuildStylePalette(); fitNode();
+        if (sz) { node.setSize(sz); requestAnimationFrame(() => node.setSize(sz)); }
+        syncCanvasToDims(); commit(); rebuildStylePalette(); fitCanvas();
       }
       // Append a caption's regions to the current canvas (keeps existing boxes + caption fields).
       function insertCaptionBoxes(cap) {
@@ -2106,7 +2155,7 @@ app.registerExtension({
         node._selection = new Set();                      // select the inserted regions
         for (let i = start; i < node._boxes.length; i++) node._selection.add(i);
         node._activeIdx = node._boxes.length - 1;
-        commit(); fitNode();
+        commit(); fitCanvas();
       }
       async function doImport() {
         let cap = null, txt = "";
@@ -2140,7 +2189,7 @@ app.registerExtension({
           if (Array.isArray(seeded) && seeded.length) {
             node._boxes = seeded.filter((b) => b && typeof b.x === "number" && typeof b.w === "number");
             selectOnly(node._boxes.length ? 0 : -1);
-            commit(); fitNode();
+            commit(); fitCanvas();
           }
         }
         // Reflect resolved width/height (e.g. from connected inputs) in the canvas aspect.
@@ -2149,7 +2198,7 @@ app.registerExtension({
           const [w, h] = message.dims;
           if (wWidget && w) wWidget.value = w;
           if (hWidget && h) hWidget.value = h;
-          syncCanvasToDims(); fitNode();
+          syncCanvasToDims(); fitCanvas();
         }
       });
 
@@ -2248,7 +2297,7 @@ app.registerExtension({
         while (styleBar.children.length > 1) styleBar.removeChild(styleBar.lastChild);
         buildSwatchRow(styleBar, node._stylePalette, MAX_STYLE_COLORS,
           swatchEdit,
-          () => { swatchEdit(); rebuildStylePalette(); fitNode(); });
+          () => { swatchEdit(); rebuildStylePalette(); fitCanvas(); });
       }
 
       // Textarea that flexes to fill the prompt panel (whose height is set by the splitter).
@@ -2290,7 +2339,7 @@ app.registerExtension({
         if (ymin > ymax) [ymin, ymax] = [ymax, ymin];
         if (xmin > xmax) [xmin, xmax] = [xmax, xmin];
         b.y = ymin / H; b.x = xmin / W; b.h = (ymax - ymin) / H; b.w = (xmax - xmin) / W;
-        delete b.nobbox; commit(); fitNode();
+        delete b.nobbox; commit(); fitCanvas();
       }
       function commitGridEdit() {
         const b = node._boxes[node._activeIdx]; if (!b || !bboxGrid) return;
@@ -2299,7 +2348,7 @@ app.registerExtension({
         if (ymin > ymax) [ymin, ymax] = [ymax, ymin];
         if (xmin > xmax) [xmin, xmax] = [xmax, xmin];
         b.y = ymin / 1000; b.x = xmin / 1000; b.h = (ymax - ymin) / 1000; b.w = (xmax - xmin) / 1000;
-        delete b.nobbox; commit(); fitNode();
+        delete b.nobbox; commit(); fitCanvas();
       }
       function makeBboxField(placeholder, title, onCommit) {
         const inp = document.createElement("input");
@@ -2387,7 +2436,7 @@ app.registerExtension({
       // ── width/height widget callbacks ──
       for (const w of [wWidget, hWidget]) {
         if (!w) continue;
-        chainCallback(w, "callback", () => { syncCanvasToDims(); drawCanvas(); fitNode(); });
+        chainCallback(w, "callback", () => { syncCanvasToDims(); drawCanvas(); fitCanvas(); });
       }
       // Update the token estimate when the caption-level text widgets change.
       for (const name of ["background", "high_level_description", "aesthetics", "lighting", "medium", "style"]) {
@@ -2395,14 +2444,12 @@ app.registerExtension({
         if (w) chainCallback(w, "callback", () => updateTokens());
       }
 
-      // ── node resizes freely; the canvas just re-fits the space the widget is given ──
-      let _resizing = false;
+      // Persist node resizes: the 2.0 resize drag preventDefaults the compat mouseup, so the change
+      // tracker (snapshots on window 'mouseup') misses the new size — nudge it once the resize settles.
+      let _sizeFlush = 0;
       chainCallback(node, "onResize", function () {
-        if (_resizing || node._detached || wrap.offsetParent === null) return;
-        _resizing = true;
-        fitCanvas();
-        requestAnimationFrame(fitCanvas);   // re-fit after LiteGraph re-arranges widgets on the next draw
-        _resizing = false;
+        clearTimeout(_sizeFlush);
+        _sizeFlush = setTimeout(flushChange, 150);
       });
 
       // Optional reference image as the canvas background (matches ImageTransformKJ).
@@ -2414,7 +2461,7 @@ app.registerExtension({
           const r16 = (v) => Math.max(16, Math.round(v / 16) * 16);   // model needs multiples of 16
           if (wWidget) wWidget.value = r16(img.naturalWidth);          // match canvas aspect to the image
           if (hWidget) hWidget.value = r16(img.naturalHeight);
-          syncCanvasToDims(); drawCanvas(); fitNode(); updateGrabBtn();
+          syncCanvasToDims(); drawCanvas(); fitCanvas(); updateGrabBtn();
         };
         img.src = src;
       }
@@ -2493,12 +2540,15 @@ app.registerExtension({
         const p = node.properties;
         o.ideo = { boxes: node._boxes, palette: node._stylePalette, importMode: findW("import_mode")?.value,
           outputFormat: findW("output_format")?.value,
-          dock: { pinned: p.dockPinned, graph: p.dockGraph, rect: p.dockRect, panelH: node._panelH, min: p.dockMin } };
+          dock: { pinned: p.dockPinned, graph: p.dockGraph, rect: p.dockRect, panelH: node._panelH, min: p.dockMin,
+            exposeParent: p.exposeToParent, parent: p.dockParent } };
       });
       chainCallback(node, "onConfigure", function (o) {
         const raw = o && Array.isArray(o.widgets_values) ? o.widgets_values : [];
         // Restore dock geometry from the blob into node.properties BEFORE ensureDocked runs.
-        node._savedSize = node.size ? [node.size[0], node.size[1]] : null;  // pre-collapse size (old aspect-locked height)
+        // Use the SAVED size (o.size) — old workflows' tall embedded-editor height — so the dock gets a
+        // sensible height. node.size here is already shrunk to content by configure's widget application.
+        node._savedSize = (o && Array.isArray(o.size) && o.size.length === 2) ? [o.size[0], o.size[1]] : (node.size ? [node.size[0], node.size[1]] : null);
         const d = o && o.ideo && o.ideo.dock;
         if (d) {
           node._dockGeomRestored = true;                     // honor it; old workflows w/o the blob get a default
@@ -2506,8 +2556,11 @@ app.registerExtension({
           if (d.rect) node.properties.dockRect = d.rect;
           if (d.pinned != null) node.properties.dockPinned = d.pinned;
           if (d.min != null) node.properties.dockMin = d.min;
+          if (d.exposeParent != null) node.properties.exposeToParent = d.exposeParent;
+          if (d.parent) node.properties.dockParent = d.parent;
           if (typeof d.panelH === "number") { node._panelH = d.panelH; panel.style.height = d.panelH + "px"; }
         }
+        node._syncExBtn?.();                                  // refresh the expose-to-parent toggle after restore
         // Recover regions: name-keyed blob → named widget → raw saved values (survives
         // any widget reorder/remap across versions) → live widgets.
         let boxes = (o && o.ideo && Array.isArray(o.ideo.boxes)) ? o.ideo.boxes : _parseBoxes(elementsWidget?.value || "");
@@ -2556,22 +2609,26 @@ app.registerExtension({
         renderPanel();
         drawCanvas();
         updateTokens();
-        requestAnimationFrame(fitNode);
-        requestAnimationFrame(() => ensureDocked(false));    // reload: honor the saved dock geometry, never match node width
+        // configure() shrinks the node to content height (multiline widgets) before this runs — for a
+        // current-version save, re-assert the saved widgets-only size. Skip for old (pre-dock) workflows:
+        // their saved height included the embedded editor, so let those shrink to content instead.
+        if (node._dockGeomRestored && o && Array.isArray(o.size) && o.size.length === 2) node.setSize([o.size[0], o.size[1]]);
+        requestAnimationFrame(() => ensureDocked(false));    // reload: build the dock honoring saved geometry
       });
 
-      // initial layout (deferred so size/last_y are settled)
+      // Initial layout (deferred so size/last_y settle). NEVER set height here — it must stay whatever
+      // ComfyUI restored (touching it was the "height resets on reload/copy-paste" bug); only nudge a default width.
       setTimeout(() => {
         hideDataWidgets();
-        if (!node._configured) node.setSize([Math.max(480, node.size[0]), node.size[1]]);  // fresh node: a comfortable default width
-        else if (node.size[0] < 380) node.setSize([380, node.size[1]]);                     // loaded node: just enforce the min
+        if (!node._configured) node.setSize([Math.max(480, node.size[0]), node.size[1]]);                       // fresh: comfortable default width, keep natural height
+        else if (!node._dockGeomRestored) node.setSize([Math.max(380, node.size[0]), node.computeSize()[1]]);  // old workflow: drop the embedded-editor height, shrink to content
+        else if (node.size[0] < 380) node.setSize([380, node.size[1]]);                                          // current reload/paste: keep saved size, enforce min width
         syncCanvasToDims();
         rebuildStylePalette();
         renderPanel();
         drawCanvas();
         updateTokens();
         if (!node._configured) ensureDocked(true);           // fresh node: pop the dock under it, matching its width
-        fitNode();
       }, 0);
     });
   },
