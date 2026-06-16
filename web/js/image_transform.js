@@ -465,6 +465,22 @@ app.registerExtension({
       // Restore bboxes from widget
       restoreBboxesFromWidget();
 
+      // Boxes are serialized in the canvas frame they were authored in (previewWidth/Height).
+      // Bring them into the current canvas frame so the in-memory coords stay canvas-relative.
+      function normalizeLoadedBboxes(boxes) {
+        const cw = canvasEl.width, ch = canvasEl.height;
+        if (!cw || !ch) return boxes;
+        return boxes.map((b) => {
+          const pw = b.previewWidth, ph = b.previewHeight;
+          if (!pw || !ph || (pw === cw && ph === ch)) {
+            const { previewWidth, previewHeight, ...rest } = b;
+            return rest;
+          }
+          const sx = cw / pw, sy = ch / ph;
+          return { startX: b.startX * sx, startY: b.startY * sy, endX: b.endX * sx, endY: b.endY * sy };
+        });
+      }
+
       function restoreBboxesFromWidget() {
         if (bboxWidget.value) {
           try {
@@ -472,7 +488,7 @@ app.registerExtension({
             // New format: { bboxes: [...], rotation: N }
             if (parsed && !Array.isArray(parsed) && typeof parsed === "object") {
               if (parsed.bboxes && Array.isArray(parsed.bboxes)) {
-                node._bboxes = parsed.bboxes.filter((b) => b?.startX != null);
+                node._bboxes = normalizeLoadedBboxes(parsed.bboxes.filter((b) => b?.startX != null));
                 node._activeIdx = node._bboxes.length > 0 ? 0 : -1;
               }
               if (parsed.rotation !== undefined) {
@@ -487,7 +503,7 @@ app.registerExtension({
             }
             // Legacy format: [bbox, bbox, ...]
             else if (Array.isArray(parsed) && parsed.length > 0) {
-              node._bboxes = parsed.filter((b) => b?.startX != null);
+              node._bboxes = normalizeLoadedBboxes(parsed.filter((b) => b?.startX != null));
               node._activeIdx = node._bboxes.length > 0 ? 0 : -1;
             }
           } catch (e) {}
@@ -1306,6 +1322,7 @@ app.registerExtension({
           const imgAR = iw / ih;
           const newH = Math.round(canvasEl.width / imgAR);
           if (Math.abs(newH - canvasEl.height) > 2) {
+            rescaleBboxesTo(canvasEl.width, newH);
             canvasEl.height = newH;
             canvasEl.style.aspectRatio = `${canvasEl.width} / ${newH}`;
             _rotCacheKey = "";
@@ -1318,7 +1335,22 @@ app.registerExtension({
         node._widgetHeight = displayedH + GRID_BAR_HEIGHT;
       }
 
+      // Bbox coords are stored in current canvas-pixel space. Whenever the canvas
+      // buffer is resized (preview load, node resize, AR change) the boxes must be
+      // rescaled by the same ratio so they stay locked to the image content.
+      function rescaleBboxesTo(newW, newH) {
+        const oldW = canvasEl.width, oldH = canvasEl.height;
+        if (!oldW || !oldH || !newW || !newH || !node._bboxes.length) return;
+        if (oldW === newW && oldH === newH) return;
+        const sx = newW / oldW, sy = newH / oldH;
+        node._bboxes = node._bboxes.map((b) => ({
+          startX: b.startX * sx, startY: b.startY * sy,
+          endX: b.endX * sx, endY: b.endY * sy,
+        }));
+      }
+
       function setCanvasSize(cw, ch) {
+        rescaleBboxesTo(cw, ch);
         canvasEl.width = cw;
         canvasEl.height = ch;
         canvasEl.style.aspectRatio = `${cw} / ${ch}`;
@@ -1950,6 +1982,7 @@ app.registerExtension({
           const newW = Math.round(availW);
           const newH = Math.round(availW * ar);
           if (newW !== canvasEl.width || newH !== canvasEl.height) {
+            rescaleBboxesTo(newW, newH);
             canvasEl.width = newW;
             canvasEl.height = newH;
             canvasEl.style.aspectRatio = `${newW} / ${newH}`;
