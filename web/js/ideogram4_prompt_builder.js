@@ -1206,7 +1206,9 @@ app.registerExtension({
           return { ...start, x: clamp01(Math.min(x + dx, 1 - w)), y: clamp01(Math.min(y + dy, 1 - h)) };
         }
         if (mode === "draw") {
-          return normalizeBox({ ...start, w: w + dx, h: h + dy });
+          const ax = clamp01(x), ay = clamp01(y);            // fixed corner (mousedown point)
+          const cx = clamp01(x + dx), cy = clamp01(y + dy);  // moving corner (cursor), clamped to canvas
+          return { ...start, x: Math.min(ax, cx), y: Math.min(ay, cy), w: Math.abs(cx - ax), h: Math.abs(cy - ay) };
         }
         // resize: move only the dragged edges (clamped to the canvas); the others stay anchored.
         const suf = mode.slice(7);                 // "tl"|"tr"|"bl"|"br"|"t"|"b"|"l"|"r"
