@@ -80,6 +80,7 @@ from .nodes.image_transform_node import ImageTransformKJ
 from .nodes.sharpen_nodes import ImageSharpenKJ
 from .nodes.hdr_preview_node import HDRPreviewKJ
 from .nodes.preview_override_node import ModelPreviewOverrideKJ, GetPreviewOverrideFramesKJ
+from .nodes.context_windows_visualizer import ContextWindowsVisualizerKJ
 from .nodes.ideogram4_nodes import Ideogram4PromptBuilderKJ
 
 import logging
@@ -323,6 +324,8 @@ NODE_CONFIG = {
     "GetTrackRange": {"class": GetTrackRange, "name": "Get Track Range"},
     "AddNoiseToTrackPath": {"class": AddNoiseToTrackPath, "name": "Add Noise To Track"},
 
+    #context windows
+    "ContextWindowsVisualizerKJ": {"class": ContextWindowsVisualizerKJ, "name": "Context Windows Visualizer (KJ)"},
     # deprecated
     "PatchModelPatcherOrder": {"class": PatchModelPatcherOrder, "name": "Patch Model Patcher Order"},
     "TorchCompileModelFluxAdvanced": {"class": DeprecatedCompileNodeKJ, "name": "TorchCompileModelFluxAdvanced"},
