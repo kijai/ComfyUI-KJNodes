@@ -9,13 +9,16 @@ let copiedBoxes = null;      // internal clipboard for copy/paste of regions (ar
 
 // Track the most recent generated image so it can be grabbed as a background.
 let lastResultImage = null;
+let _liveSamplerRan = false;   // a sampler emitted previews this run (set in feedPreviewBlob)
 try {
+  app.api?.addEventListener?.("execution_start", () => { _liveSamplerRan = false; });
   app.api?.addEventListener?.("executed", (e) => {
     const imgs = e?.detail?.output?.images;
     if (Array.isArray(imgs) && imgs.length) {
       lastResultImage = imgs[imgs.length - 1];
-      // Live nodes swap their preview for the full-res final result automatically.
-      for (const n of livePreviewNodes) n._ideoGrabFinal?.();
+      // Only auto-swap to the full-res final AFTER a sampler ran this prompt — otherwise an image
+      // preview/output node that executes before (or instead of) the sampler would get grabbed.
+      if (_liveSamplerRan) for (const n of livePreviewNodes) n._ideoGrabFinal?.();
     }
   });
 } catch (e) {}
@@ -52,6 +55,7 @@ async function feedPreviewBlob(blob) {
   // Both "b_preview" and "b_preview_with_metadata" can fire for the same frame (same Blob) — dedupe by identity.
   if (!blob || blob === _lastPreviewBlob || !livePreviewNodes.size) return;
   _lastPreviewBlob = blob;
+  _liveSamplerRan = true;   // a sampler is producing previews this run → the final-grab is now allowed
   let img = await decodeToImg(_previewOffset ? blob.slice(_previewOffset) : blob);
   if (!img) {                       // wrong/stale offset — locate the embedded image and retry
     const off = imageStart(new Uint8Array(await blob.arrayBuffer()));
@@ -2459,14 +2463,16 @@ app.registerExtension({
       });
 
       // Optional reference image as the canvas background (matches ImageTransformKJ).
-      function loadBg(src) {
+      function loadBg(src, keepAspect) {
         const img = new Image();
         img.crossOrigin = "anonymous";
         img.onload = () => {
           node._bgImg = img;
-          const r16 = (v) => Math.max(16, Math.round(v / 16) * 16);   // model needs multiples of 16
-          if (wWidget) wWidget.value = r16(img.naturalWidth);          // match canvas aspect to the image
-          if (hWidget) hWidget.value = r16(img.naturalHeight);
+          if (!keepAspect) {                                          // live mode keeps the user's canvas aspect
+            const r16 = (v) => Math.max(16, Math.round(v / 16) * 16); // model needs multiples of 16
+            if (wWidget) wWidget.value = r16(img.naturalWidth);        // match canvas aspect to the image
+            if (hWidget) hWidget.value = r16(img.naturalHeight);
+          }
           syncCanvasToDims(); drawCanvas(); fitCanvas(); updateGrabBtn();
         };
         img.src = src;
@@ -2500,7 +2506,7 @@ app.registerExtension({
         if (!lastResultImage) return;
         if (node._liveBmp?.close) { try { node._liveBmp.close(); } catch (e) {} node._liveBmp = null; }
         node._bgManual = true;
-        loadBg(resultViewUrl(lastResultImage));
+        loadBg(resultViewUrl(lastResultImage), true);   // keep aspect — live mode must never resize the canvas
       };
 
       // Active-box highlight only while the editor is focused or the node is selected.
