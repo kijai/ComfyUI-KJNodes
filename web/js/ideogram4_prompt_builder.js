@@ -9,17 +9,17 @@ let copiedBoxes = null;      // internal clipboard for copy/paste of regions (ar
 
 // Track the most recent generated image so it can be grabbed as a background.
 let lastResultImage = null;
-let _liveSamplerRan = false;   // a sampler emitted previews this run (set in feedPreviewBlob)
 try {
-  app.api?.addEventListener?.("execution_start", () => { _liveSamplerRan = false; });
+  // Keep the latest image of the prompt; by the time the prompt finishes this is the real output
+  // (the output node runs after the sampler), so an early image-preview node never wins.
   app.api?.addEventListener?.("executed", (e) => {
     const imgs = e?.detail?.output?.images;
-    if (Array.isArray(imgs) && imgs.length) {
-      lastResultImage = imgs[imgs.length - 1];
-      // Only auto-swap to the full-res final AFTER a sampler ran this prompt — otherwise an image
-      // preview/output node that executes before (or instead of) the sampler would get grabbed.
-      if (_liveSamplerRan) for (const n of livePreviewNodes) n._ideoGrabFinal?.();
-    }
+    if (Array.isArray(imgs) && imgs.length) lastResultImage = imgs[imgs.length - 1];
+  });
+  // Grab the full-res final once the prompt completes — independent of sampler previews, so it works
+  // even when sampling preview is disabled.
+  app.api?.addEventListener?.("execution_success", () => {
+    for (const n of livePreviewNodes) n._ideoGrabFinal?.();
   });
 } catch (e) {}
 function resultViewUrl(img) {
@@ -55,7 +55,6 @@ async function feedPreviewBlob(blob) {
   // Both "b_preview" and "b_preview_with_metadata" can fire for the same frame (same Blob) — dedupe by identity.
   if (!blob || blob === _lastPreviewBlob || !livePreviewNodes.size) return;
   _lastPreviewBlob = blob;
-  _liveSamplerRan = true;   // a sampler is producing previews this run → the final-grab is now allowed
   let img = await decodeToImg(_previewOffset ? blob.slice(_previewOffset) : blob);
   if (!img) {                       // wrong/stale offset — locate the embedded image and retry
     const off = imageStart(new Uint8Array(await blob.arrayBuffer()));
