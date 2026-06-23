@@ -260,6 +260,9 @@ class BatchCropFromMaskAdvanced:
                 "masks": ("MASK",),
                 "crop_size_mult": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.01}),
                 "bbox_smooth_alpha": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.01}),
+                "preserve_aspect_ratio": ("BOOLEAN", {"default": False}),
+                "max_width": ("INT", {"default": 0, "min": 0, "max": 16384, "step": 1}),
+                "max_height": ("INT", {"default": 0, "min": 0, "max": 16384, "step": 1}),
             },
         }
 
@@ -289,139 +292,210 @@ class BatchCropFromMaskAdvanced:
     CATEGORY = "KJNodes/masking"
 
     def smooth_bbox_size(self, prev_bbox_size, curr_bbox_size, alpha):
-          return round(alpha * curr_bbox_size + (1 - alpha) * prev_bbox_size)
+        if prev_bbox_size <= 0:
+            return round(curr_bbox_size)
+        if alpha <= 0:
+            return round(prev_bbox_size)
+        if alpha >= 1:
+            return round(curr_bbox_size)
+        return round(alpha * curr_bbox_size + (1 - alpha) * prev_bbox_size)
 
     def smooth_center(self, prev_center, curr_center, alpha=0.5):
+        if prev_center is None:
+            return curr_center
+        if alpha <= 0:
+            return prev_center
+        if alpha >= 1:
+            return curr_center
         return (round(alpha * curr_center[0] + (1 - alpha) * prev_center[0]),
                 round(alpha * curr_center[1] + (1 - alpha) * prev_center[1]))
 
-    def crop(self, masks, original_images, crop_size_mult, bbox_smooth_alpha):
+    def crop(self, masks, original_images, crop_size_mult, bbox_smooth_alpha, preserve_aspect_ratio, max_width, max_height):
         bounding_boxes = []
         combined_bounding_box = []
         cropped_images = []
         cropped_masks = []
-        cropped_masks_out = []
-        combined_crop_out = []
         combined_cropped_images = []
         combined_cropped_masks = []
-        
+
+        image_h = int(original_images[0].shape[0])
+        image_w = int(original_images[0].shape[1])
+
         def calculate_bbox(mask):
             non_zero_indices = np.nonzero(np.array(mask))
 
-            # handle empty masks
-            min_x, max_x, min_y, max_y = 0, 0, 0, 0
-            if len(non_zero_indices[1]) > 0 and len(non_zero_indices[0]) > 0:
-                min_x, max_x = np.min(non_zero_indices[1]), np.max(non_zero_indices[1])
-                min_y, max_y = np.min(non_zero_indices[0]), np.max(non_zero_indices[0])
+            if len(non_zero_indices[1]) == 0 or len(non_zero_indices[0]) == 0:
+                return {
+                    "has_pixels": False,
+                    "min_x": 0,
+                    "max_x": 0,
+                    "min_y": 0,
+                    "max_y": 0,
+                    "center_x": image_w / 2.0,
+                    "center_y": image_h / 2.0,
+                    "width": 0,
+                    "height": 0,
+                    "size": 0,
+                }
 
-            width = max_x - min_x
-            height = max_y - min_y
-            bbox_size = max(width, height)
-            return min_x, max_x, min_y, max_y, bbox_size
+            min_x, max_x = np.min(non_zero_indices[1]), np.max(non_zero_indices[1])
+            min_y, max_y = np.min(non_zero_indices[0]), np.max(non_zero_indices[0])
+            width = max(1, int((max_x - min_x) + 1))
+            height = max(1, int((max_y - min_y) + 1))
+            return {
+                "has_pixels": True,
+                "min_x": int(min_x),
+                "max_x": int(max_x),
+                "min_y": int(min_y),
+                "max_y": int(max_y),
+                "center_x": float((min_x + max_x) / 2.0),
+                "center_y": float((min_y + max_y) / 2.0),
+                "width": width,
+                "height": height,
+                "size": max(width, height),
+            }
+
+        def build_bbox(center_x, center_y, box_w, box_h, img_w, img_h):
+            width = int(max(1, min(round(box_w), img_w)))
+            height = int(max(1, min(round(box_h), img_h)))
+            half_w = width / 2.0
+            half_h = height / 2.0
+
+            min_x = int(round(center_x - half_w))
+            min_y = int(round(center_y - half_h))
+
+            # Shift into frame bounds while preserving target dimensions.
+            min_x = max(0, min(min_x, img_w - width))
+            min_y = max(0, min(min_y, img_h - height))
+
+            max_x = min_x + width
+            max_y = min_y + height
+            return min_x, min_y, max_x, max_y
+
+        def clamp_dims_with_aspect(width, height, limit_w, limit_h):
+            width = max(1, int(round(width)))
+            height = max(1, int(round(height)))
+            scale = 1.0
+            if limit_w > 0:
+                scale = min(scale, limit_w / width)
+            if limit_h > 0:
+                scale = min(scale, limit_h / height)
+            if scale < 1.0:
+                width = max(1, int(round(width * scale)))
+                height = max(1, int(round(height * scale)))
+            return width, height
+
+        mask_infos = [calculate_bbox(tensor2pil(mask)[0]) for mask in masks]
+        non_empty_infos = [info for info in mask_infos if info["has_pixels"]]
+
+        if preserve_aspect_ratio:
+            if non_empty_infos:
+                curr_max_bbox_width = max(info["width"] for info in non_empty_infos)
+                curr_max_bbox_height = max(info["height"] for info in non_empty_infos)
+            else:
+                curr_max_bbox_width = image_w
+                curr_max_bbox_height = image_h
+
+            self.max_bbox_width = self.smooth_bbox_size(0, curr_max_bbox_width, bbox_smooth_alpha)
+            self.max_bbox_height = self.smooth_bbox_size(0, curr_max_bbox_height, bbox_smooth_alpha)
+            target_width = max(1, round(self.max_bbox_width * crop_size_mult))   # bbox width in source image space
+            target_height = max(1, round(self.max_bbox_height * crop_size_mult)) # bbox height in source image space
+            target_width, target_height = clamp_dims_with_aspect(target_width, target_height, image_w, image_h)
+
+            # Optional output cap while preserving AR. This does not shrink bbox coverage.
+            output_width, output_height = target_width, target_height
+            if max_width > 0 or max_height > 0:
+                output_width, output_height = clamp_dims_with_aspect(output_width, output_height, max_width, max_height)
+        else:
+            if non_empty_infos:
+                curr_max_bbox_size = max(info["size"] for info in non_empty_infos)
+            else:
+                curr_max_bbox_size = min(image_h, image_w)
+
+            max_bbox_size = self.smooth_bbox_size(0, curr_max_bbox_size, bbox_smooth_alpha)
+            max_bbox_size = max(1, round(max_bbox_size * crop_size_mult))
+            max_bbox_size = math.ceil(max_bbox_size / 16) * 16
+
+            min_image_dim = min(image_h, image_w)
+            if max_bbox_size > min_image_dim:
+                if min_image_dim >= 16:
+                    max_bbox_size = (min_image_dim // 16) * 16
+                else:
+                    max_bbox_size = min_image_dim
+
+            target_width = max_bbox_size
+            target_height = max_bbox_size
+            output_width = target_width
+            output_height = target_height
 
         combined_mask = torch.max(masks, dim=0)[0]
-        _mask = tensor2pil(combined_mask)[0]
-        new_min_x, new_max_x, new_min_y, new_max_y, combined_bbox_size = calculate_bbox(_mask)
-        center_x = (new_min_x + new_max_x) / 2
-        center_y = (new_min_y + new_max_y) / 2
-        half_box_size = round(combined_bbox_size // 2)
-        new_min_x = max(0, round(center_x - half_box_size))
-        new_max_x = min(original_images[0].shape[1], round(center_x + half_box_size))
-        new_min_y = max(0, round(center_y - half_box_size))
-        new_max_y = min(original_images[0].shape[0], round(center_y + half_box_size))
-        
-        combined_bounding_box.append((new_min_x, new_min_y, new_max_x - new_min_x, new_max_y - new_min_y))   
-        
-        self.max_bbox_size = 0
-        
-        # First, calculate the maximum bounding box size across all masks
-        curr_max_bbox_size = max(calculate_bbox(tensor2pil(mask)[0])[-1] for mask in masks)
-        # Smooth the changes in the bounding box size
-        self.max_bbox_size = self.smooth_bbox_size(self.max_bbox_size, curr_max_bbox_size, bbox_smooth_alpha)
-        # Apply the crop size multiplier
-        self.max_bbox_size = round(self.max_bbox_size * crop_size_mult)
-        # Make sure max_bbox_size is divisible by 16, if not, round it upwards so it is
-        self.max_bbox_size = math.ceil(self.max_bbox_size / 16) * 16
+        combined_info = calculate_bbox(tensor2pil(combined_mask)[0])
 
-        if self.max_bbox_size > original_images[0].shape[0] or self.max_bbox_size > original_images[0].shape[1]:
-            # max_bbox_size can only be as big as our input's width or height, and it has to be even
-            self.max_bbox_size = math.floor(min(original_images[0].shape[0], original_images[0].shape[1]) / 2) * 2
+        if combined_info["has_pixels"]:
+            combined_center_x = combined_info["center_x"]
+            combined_center_y = combined_info["center_y"]
+            combined_width = max(1, round(combined_info["width"] * crop_size_mult))
+            combined_height = max(1, round(combined_info["height"] * crop_size_mult))
+        else:
+            combined_center_x = image_w / 2.0
+            combined_center_y = image_h / 2.0
+            combined_width = target_width
+            combined_height = target_height
 
-        # Then, for each mask and corresponding image...
-        for i, (mask, img) in enumerate(zip(masks, original_images)):
-            _mask = tensor2pil(mask)[0]
-            non_zero_indices = np.nonzero(np.array(_mask))
+        if preserve_aspect_ratio:
+            combined_width, combined_height = clamp_dims_with_aspect(combined_width, combined_height, image_w, image_h)
+        else:
+            combined_size = max(combined_width, combined_height)
+            combined_size = max(1, int(round(combined_size)))
+            combined_size = min(combined_size, min(image_w, image_h))
+            combined_width = combined_height = combined_size
 
-            # check for empty masks
-            if len(non_zero_indices[0]) > 0 and len(non_zero_indices[1]) > 0:
-                min_x, max_x = np.min(non_zero_indices[1]), np.max(non_zero_indices[1])
-                min_y, max_y = np.min(non_zero_indices[0]), np.max(non_zero_indices[0])
+        new_min_x, new_min_y, new_max_x, new_max_y = build_bbox(combined_center_x, combined_center_y, combined_width, combined_height, image_w, image_h)
+        combined_bounding_box.append((new_min_x, new_min_y, new_max_x - new_min_x, new_max_y - new_min_y))
 
-                # Calculate center of bounding box
-                center_x = np.mean(non_zero_indices[1])
-                center_y = np.mean(non_zero_indices[0])
-                curr_center = (round(center_x), round(center_y))
+        self.prev_center = None
 
-                # If this is the first frame, initialize prev_center with curr_center
-                if not hasattr(self, 'prev_center'):
-                    self.prev_center = curr_center
-
-                # Smooth the changes in the center coordinates from the second frame onwards
-                if i > 0:
-                    center = self.smooth_center(self.prev_center, curr_center, bbox_smooth_alpha)
-                else:
-                    center = curr_center
-
-                # Update prev_center for the next frame
-                self.prev_center = center
-
-                # Create bounding box using max_bbox_size
-                half_box_size = self.max_bbox_size // 2
-                min_x = max(0, center[0] - half_box_size)
-                max_x = min(img.shape[1], center[0] + half_box_size)
-                min_y = max(0, center[1] - half_box_size)
-                max_y = min(img.shape[0], center[1] + half_box_size)
-
-                # Append bounding box coordinates
-                bounding_boxes.append((min_x, min_y, max_x - min_x, max_y - min_y))
-
-                # Crop the image from the bounding box
-                cropped_img = img[min_y:max_y, min_x:max_x, :]
-                cropped_mask = mask[min_y:max_y, min_x:max_x]
-
-                # Resize the cropped image to a fixed size
-                new_size = max(cropped_img.shape[0], cropped_img.shape[1])
-                resize_transform = Resize(new_size, interpolation=InterpolationMode.NEAREST, max_size=max(img.shape[0], img.shape[1]))
-                resized_mask = resize_transform(cropped_mask.unsqueeze(0).unsqueeze(0)).squeeze(0).squeeze(0)
-                resized_img = resize_transform(cropped_img.permute(2, 0, 1))
-                # Perform the center crop to the desired size
-                # Constrain the crop to the smaller of our bbox or our image so we don't expand past the image dimensions.
-                crop_transform = CenterCrop((min(self.max_bbox_size, resized_img.shape[1]), min(self.max_bbox_size, resized_img.shape[2])))
-
-                cropped_resized_img = crop_transform(resized_img)
-                cropped_images.append(cropped_resized_img.permute(1, 2, 0))
-
-                cropped_resized_mask = crop_transform(resized_mask)
-                cropped_masks.append(cropped_resized_mask)
-
-                combined_cropped_img = original_images[i][new_min_y:new_max_y, new_min_x:new_max_x, :]
-                combined_cropped_images.append(combined_cropped_img)
-
-                combined_cropped_mask = masks[i][new_min_y:new_max_y, new_min_x:new_max_x]
-                combined_cropped_masks.append(combined_cropped_mask)
+        for i, (mask, img, info) in enumerate(zip(masks, original_images, mask_infos)):
+            if info["has_pixels"]:
+                curr_center = (round(info["center_x"]), round(info["center_y"]))
+            elif self.prev_center is not None:
+                curr_center = self.prev_center
             else:
-                bounding_boxes.append((0, 0, img.shape[1], img.shape[0]))
-                cropped_images.append(img)
-                cropped_masks.append(mask)
-                combined_cropped_images.append(img)
-                combined_cropped_masks.append(mask)
+                curr_center = (image_w // 2, image_h // 2)
+
+            if i > 0:
+                center = self.smooth_center(self.prev_center, curr_center, bbox_smooth_alpha)
+            else:
+                center = curr_center
+            self.prev_center = center
+
+            min_x, min_y, max_x, max_y = build_bbox(center[0], center[1], target_width, target_height, int(img.shape[1]), int(img.shape[0]))
+            bounding_boxes.append((min_x, min_y, max_x - min_x, max_y - min_y))
+
+            cropped_img = img[min_y:max_y, min_x:max_x, :]
+            cropped_mask = mask[min_y:max_y, min_x:max_x]
+
+            if cropped_img.shape[0] != output_height or cropped_img.shape[1] != output_width:
+                image_resize = Resize((output_height, output_width))
+                mask_resize = Resize((output_height, output_width), interpolation=InterpolationMode.NEAREST)
+                cropped_img = image_resize(cropped_img.permute(2, 0, 1)).permute(1, 2, 0)
+                cropped_mask = mask_resize(cropped_mask.unsqueeze(0)).squeeze(0)
+
+            cropped_images.append(cropped_img)
+            cropped_masks.append(cropped_mask)
+
+            combined_cropped_img = original_images[i][new_min_y:new_max_y, new_min_x:new_max_x, :]
+            combined_cropped_images.append(combined_cropped_img)
+
+            combined_cropped_mask = masks[i][new_min_y:new_max_y, new_min_x:new_max_x]
+            combined_cropped_masks.append(combined_cropped_mask)
 
         cropped_out = torch.stack(cropped_images, dim=0)
         combined_crop_out = torch.stack(combined_cropped_images, dim=0)
         cropped_masks_out = torch.stack(cropped_masks, dim=0)
         combined_crop_mask_out = torch.stack(combined_cropped_masks, dim=0)
 
-        return (original_images, cropped_out, cropped_masks_out, combined_crop_out, combined_crop_mask_out, bounding_boxes, combined_bounding_box, self.max_bbox_size, self.max_bbox_size)
+        return (original_images, cropped_out, cropped_masks_out, combined_crop_out, combined_crop_mask_out, bounding_boxes, combined_bounding_box, output_width, output_height)
 
 class FilterZeroMasksAndCorrespondingImages:
 
@@ -568,6 +642,54 @@ class BatchUncropAdvanced:
             draw.rectangle((0, 0, width - 1, height - 1), outline=border_color, width=border_width)
             return bordered_image
 
+        def scale_region_around_center(region, scale, image_size):
+            x0, y0, x1, y1 = region
+            if scale == 1.0:
+                return (int(round(x0)), int(round(y0)), int(round(x1)), int(round(y1)))
+
+            width = x1 - x0
+            height = y1 - y0
+            center_x = x0 + (width / 2.0)
+            center_y = y0 + (height / 2.0)
+
+            scaled_w = max(1, int(round(width * scale)))
+            scaled_h = max(1, int(round(height * scale)))
+
+            new_x0 = int(round(center_x - (scaled_w / 2.0)))
+            new_y0 = int(round(center_y - (scaled_h / 2.0)))
+            new_x1 = new_x0 + scaled_w
+            new_y1 = new_y0 + scaled_h
+
+            img_w, img_h = image_size
+
+            # Clamp while preserving requested scaled size when possible.
+            if new_x0 < 0:
+                new_x1 -= new_x0
+                new_x0 = 0
+            if new_y0 < 0:
+                new_y1 -= new_y0
+                new_y0 = 0
+            if new_x1 > img_w:
+                shift = new_x1 - img_w
+                new_x0 -= shift
+                new_x1 = img_w
+            if new_y1 > img_h:
+                shift = new_y1 - img_h
+                new_y0 -= shift
+                new_y1 = img_h
+
+            new_x0 = max(0, new_x0)
+            new_y0 = max(0, new_y0)
+            new_x1 = min(img_w, new_x1)
+            new_y1 = min(img_h, new_y1)
+
+            if new_x1 <= new_x0:
+                new_x1 = min(img_w, new_x0 + 1)
+            if new_y1 <= new_y0:
+                new_y1 = min(img_h, new_y0 + 1)
+
+            return (int(new_x0), int(new_y0), int(new_x1), int(new_y1))
+
         if len(original_images) != len(cropped_images):
             raise ValueError(f"The number of original_images ({len(original_images)}) and cropped_images ({len(cropped_images)}) should be the same")
 
@@ -588,6 +710,8 @@ class BatchUncropAdvanced:
             bbox = bboxes[i]
             
             if use_combined_mask:
+                if combined_bounding_box is None or len(combined_bounding_box) == 0:
+                    raise ValueError("combined_bounding_box is required when use_combined_mask is True")
                 bb_x, bb_y, bb_width, bb_height = combined_bounding_box[0]
                 paste_region = bbox_to_region((bb_x, bb_y, bb_width, bb_height), img.size)
                 mask = combined_crop_mask[i]
@@ -596,12 +720,12 @@ class BatchUncropAdvanced:
                 paste_region = bbox_to_region((bb_x, bb_y, bb_width, bb_height), img.size)
                 mask = cropped_masks[i]
             
-            # scale paste_region
-            scale_x = scale_y = crop_rescale
-            paste_region = (round(paste_region[0]*scale_x), round(paste_region[1]*scale_y), round(paste_region[2]*scale_x), round(paste_region[3]*scale_y))
+            paste_region = scale_region_around_center(paste_region, crop_rescale, img.size)
 
             # rescale the crop image to fit the paste_region
-            crop = crop.resize((round(paste_region[2]-paste_region[0]), round(paste_region[3]-paste_region[1])))
+            crop_width = max(1, round(paste_region[2] - paste_region[0]))
+            crop_height = max(1, round(paste_region[3] - paste_region[1]))
+            crop = crop.resize((crop_width, crop_height))
             crop_img = crop.convert("RGB")
 
             #border blending
@@ -615,12 +739,12 @@ class BatchUncropAdvanced:
 
             if use_square_mask:
                 mask = Image.new("L", img.size, 0)
-                mask_block = Image.new("L", (paste_region[2]-paste_region[0], paste_region[3]-paste_region[1]), 255)
+                mask_block = Image.new("L", (crop_width, crop_height), 255)
                 mask_block = inset_border(mask_block, round(blend_ratio / 2), (0))
                 mask.paste(mask_block, paste_region)
             else:
                 original_mask = tensor2pil(mask)[0]
-                original_mask = original_mask.resize((paste_region[2]-paste_region[0], paste_region[3]-paste_region[1]))
+                original_mask = original_mask.resize((crop_width, crop_height))
                 mask = Image.new("L", img.size, 0)
                 mask.paste(original_mask, paste_region)
 
