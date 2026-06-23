@@ -1289,10 +1289,8 @@ class WanVideoNAG:
         diffusion_model.text_embedding.to(device)
         context = diffusion_model.text_embedding(conditioning[0][0].to(device, dtype))
 
-        type_str = str(type(model.model.model_config).__name__)
-        i2v = True if "WAN21_I2V" in type_str else False
-
         for idx, block in enumerate(diffusion_model.blocks):
+            i2v = hasattr(block.cross_attn, "k_img")
             patched_attn = WanCrossAttentionPatch(context, nag_scale, nag_alpha, nag_tau, i2v, input_type=input_type, inplace=inplace).__get__(block.cross_attn, block.__class__)
 
             model_clone.add_object_patch(f"diffusion_model.blocks.{idx}.cross_attn.forward", patched_attn)
