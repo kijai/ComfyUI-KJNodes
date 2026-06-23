@@ -424,17 +424,19 @@ app.registerExtension({
       const elementsWidget = findW("elements_data");
       const stylePaletteWidget = findW("style_palette_data");
       const bgBrightnessWidget = findW("bg_brightness");
-      const formatWidget = findW("output_format");           // "pretty" | "compact" (set via the Text menu)
+      const formatWidget = findW("output_format");           // "pretty" | "compact" (set via the toolbar)
+      const coordWidget = findW("coord_mode");               // "normalized" | "absolute" (set via the toolbar)
+      const orderWidget = findW("bbox_order");               // "yx" (Ideogram) | "xy" (Qwen/standard) (set via the toolbar)
       if (bgBrightnessWidget && typeof bgBrightnessWidget.value !== "number") bgBrightnessWidget.value = 25;
       const wWidget = findW("width"), hWidget = findW("height");
       // Hide the data widgets while keeping them serializable.
       function hideDataWidgets() {
-        for (const w of [elementsWidget, stylePaletteWidget, bgBrightnessWidget, formatWidget]) {
+        for (const w of [elementsWidget, stylePaletteWidget, bgBrightnessWidget, formatWidget, coordWidget, orderWidget]) {
           if (!w) continue;
           w.hidden = true;
           w.computeSize = () => [0, -4];
         }
-        for (const name of ["elements_data", "style_palette_data", "bg_brightness", "output_format"]) {
+        for (const name of ["elements_data", "style_palette_data", "bg_brightness", "output_format", "coord_mode", "bbox_order"]) {
           const i = node.inputs?.findIndex((inp) => inp.name === name);
           if (i != null && i !== -1) node.removeInput(i);
         }
@@ -483,16 +485,48 @@ app.registerExtension({
       const tokenSpan = document.createElement("span");
       tokenSpan.style.cssText = "color:#888; white-space:nowrap;";
       tokenSpan.title = "Rough token estimate (~chars/4). Grey <256, green healthy, orange nearing, red ≥2048 (model cap — will error)";
-      // Compact-output toggle next to the token count (compact is the format Ideogram 4 expects — default on).
-      const compactLbl = document.createElement("label");
-      compactLbl.style.cssText = "display:flex;align-items:center;gap:3px;cursor:pointer;flex:0 0 auto;color:#aaa;white-space:nowrap;";
-      compactLbl.title = "Compact JSON output (the format Ideogram 4 was trained on). Uncheck for pretty/indented. Copy reflects it.";
-      const compactCb = document.createElement("input"); compactCb.type = "checkbox";
-      compactCb.checked = (formatWidget?.value) !== "pretty";   // default: compact
-      stopProp(compactCb);
-      compactCb.addEventListener("change", () => { if (formatWidget) formatWidget.value = compactCb.checked ? "compact" : "pretty"; updateTokens(); });
-      compactLbl.appendChild(compactCb); compactLbl.appendChild(document.createTextNode("compact"));
-      compactLbl._cb = compactCb;
+      // Output-settings dropdown (formatting + bbox coordinate space/order) — writes the hidden widgets.
+      const outBtn = document.createElement("button");
+      outBtn.className = "kjideo-btn"; outBtn.textContent = "Output ▾";
+      outBtn.title = "Output JSON settings: compact/pretty, bbox coordinate space and axis order";
+      stopProp(outBtn);
+      const outToggle = (get, set, label, title) => {                 // checkbox row bound to a hidden widget
+        const l = document.createElement("label");
+        l.style.cssText = "display:flex;align-items:center;gap:4px;cursor:pointer;"; l.title = title;
+        const cb = document.createElement("input"); cb.type = "checkbox"; cb.checked = get();
+        stopProp(cb);
+        cb.addEventListener("change", () => { set(cb.checked); updateTokens(); flushChange(); });
+        l.appendChild(cb); l.appendChild(document.createTextNode(label));
+        l._cb = cb; return l;
+      };
+      const compactLbl = outToggle(
+        () => (formatWidget?.value) !== "pretty",
+        (on) => { if (formatWidget) formatWidget.value = on ? "compact" : "pretty"; },
+        "compact JSON", "Compact output (the format Ideogram 4 expects). Uncheck for pretty/indented.");
+      const absLbl = outToggle(
+        () => (coordWidget?.value) === "absolute",
+        (on) => { if (coordWidget) coordWidget.value = on ? "absolute" : "normalized"; },
+        "absolute pixels", "bbox in absolute pixels (scaled by width/height) instead of the 0-1000 grid. NON-STANDARD for Ideogram 4.");
+      const xyLbl = outToggle(
+        () => (orderWidget?.value) === "xy",
+        (on) => { if (orderWidget) orderWidget.value = on ? "xy" : "yx"; },
+        "xy order (Qwen)", "bbox axis order [xmin,ymin,xmax,ymax] (x1,y1,x2,y2, as Qwen-VL uses) instead of Ideogram's [ymin,xmin,ymax,xmax].");
+      const outMenu = document.createElement("div");
+      outMenu.className = "kjideo-menu kjideo-bgmenu";
+      outMenu.style.display = "none";
+      for (const l of [compactLbl, absLbl, xyLbl]) { const r = document.createElement("div"); r.className = "kjideo-bgrow"; r.appendChild(l); outMenu.appendChild(r); }
+      document.body.appendChild(outMenu);
+      node._outMenu = outMenu;
+      const outDismiss = outsideDismiss(outMenu, () => closeOutMenu(), outBtn);
+      function closeOutMenu() { outMenu.style.display = "none"; outDismiss.disarm(); }
+      outBtn.addEventListener("click", () => {
+        if (outMenu.style.display !== "none") { closeOutMenu(); return; }
+        outMenu.style.display = "";
+        const r = outBtn.getBoundingClientRect();
+        outMenu.style.left = Math.max(4, Math.min(r.left, window.innerWidth - outMenu.offsetWidth - 4)) + "px";
+        outMenu.style.top = Math.min(r.bottom + 4, window.innerHeight - outMenu.offsetHeight - 4) + "px";
+        outDismiss.arm();
+      });
       const grabBtn = document.createElement("button");
       grabBtn.className = "kjideo-btn";
       grabBtn.addEventListener("mousedown", (e) => e.stopPropagation());
@@ -705,7 +739,7 @@ app.registerExtension({
         tplMenu.style.top = Math.min(r.bottom + 4, window.innerHeight - tplMenu.offsetHeight - 4) + "px";
         tplDismiss.arm();
       });
-      bar.appendChild(hint); bar.appendChild(tokenSpan); bar.appendChild(compactLbl); bar.appendChild(bgBtn); bar.appendChild(txtBtn); bar.appendChild(copyBtn); bar.appendChild(importBtn); bar.appendChild(tplBtn); bar.appendChild(clearBtn);
+      bar.appendChild(hint); bar.appendChild(tokenSpan); bar.appendChild(outBtn); bar.appendChild(bgBtn); bar.appendChild(txtBtn); bar.appendChild(copyBtn); bar.appendChild(importBtn); bar.appendChild(tplBtn); bar.appendChild(clearBtn);
       updateGrabBtn();
 
       // Persistent global style-palette row
@@ -2041,6 +2075,18 @@ app.registerExtension({
         if (xmin > xmax) [xmin, xmax] = [xmax, xmin];
         return [ymin, xmin, ymax, xmax];
       }
+      // Caption bbox: 0-1000 grid (default) or absolute pixels (scaled by width/height) — must match the
+      // Python output. normBboxJS stays 0-1000 for the editor's grid input field, so keep this separate.
+      function captionBboxJS(b) {
+        const abs = (coordWidget?.value) === "absolute", xy = (orderWidget?.value) === "xy";
+        const sx = abs ? (wWidget?.value || 1000) : 1000, sy = abs ? (hWidget?.value || 1000) : 1000;
+        const cx = (v) => Math.max(0, Math.min(sx, Math.round(v * sx)));
+        const cy = (v) => Math.max(0, Math.min(sy, Math.round(v * sy)));
+        let ymin = cy(b.y), xmin = cx(b.x), ymax = cy(b.y + b.h), xmax = cx(b.x + b.w);
+        if (ymin > ymax) [ymin, ymax] = [ymax, ymin];
+        if (xmin > xmax) [xmin, xmax] = [xmax, xmin];
+        return xy ? [xmin, ymin, xmax, ymax] : [ymin, xmin, ymax, xmax];
+      }
       function buildCaption() {
         const cap = {};
         if ((getW("high_level_description") || "").trim()) cap.high_level_description = getW("high_level_description");
@@ -2057,7 +2103,7 @@ app.registerExtension({
         const elements = node._boxes.map((b) => {
           const etype = b.type === "text" ? "text" : "obj";
           const el = { type: etype };
-          if (!b.nobbox) el.bbox = normBboxJS(b);            // unplaced elements omit bbox
+          if (!b.nobbox) el.bbox = captionBboxJS(b);         // unplaced elements omit bbox
           if (etype === "text") el.text = b.text || "";
           el.desc = b.desc || "";
           const pal = cleanPalette(b.palette).slice(0, MAX_ELEM_COLORS);
@@ -2445,7 +2491,7 @@ app.registerExtension({
       // ── width/height widget callbacks ──
       for (const w of [wWidget, hWidget]) {
         if (!w) continue;
-        chainCallback(w, "callback", () => { syncCanvasToDims(); drawCanvas(); fitCanvas(); });
+        chainCallback(w, "callback", () => { syncCanvasToDims(); drawCanvas(); fitCanvas(); updateTokens(); });  // absolute coords depend on w/h
       }
       // Update the token estimate when the caption-level text widgets change.
       for (const name of ["background", "high_level_description", "aesthetics", "lighting", "medium", "style"]) {
@@ -2531,6 +2577,7 @@ app.registerExtension({
         closeBgMenu(); node._bgMenu?.remove();
         closeTxtMenu(); node._txtMenu?.remove();
         closeTplMenu(); node._tplMenu?.remove();
+        closeOutMenu(); node._outMenu?.remove();
         closeInlineEditor();
         closeLayersMenu();
         for (const ro of node._areaObservers) ro.disconnect();
@@ -2550,7 +2597,7 @@ app.registerExtension({
         if (!o) return;
         const p = node.properties;
         o.ideo = { boxes: node._boxes, palette: node._stylePalette, importMode: findW("import_mode")?.value,
-          outputFormat: findW("output_format")?.value,
+          outputFormat: findW("output_format")?.value, coordMode: findW("coord_mode")?.value, bboxOrder: findW("bbox_order")?.value,
           dock: { pinned: p.dockPinned, graph: p.dockGraph, rect: p.dockRect, panelH: node._panelH, min: p.dockMin,
             exposeParent: p.exposeToParent, parent: p.dockParent } };
       });
@@ -2594,6 +2641,14 @@ app.registerExtension({
         if (formatWidget) {                                   // restore output format from the blob; default compact unless explicitly pretty
           formatWidget.value = (o && o.ideo && o.ideo.outputFormat) === "pretty" ? "pretty" : "compact";
           compactLbl._cb.checked = formatWidget.value === "compact";
+        }
+        if (coordWidget) {                                    // restore coord mode; default normalized unless explicitly absolute
+          coordWidget.value = (o && o.ideo && o.ideo.coordMode) === "absolute" ? "absolute" : "normalized";
+          absLbl._cb.checked = coordWidget.value === "absolute";
+        }
+        if (orderWidget) {                                    // restore bbox axis order; default yx unless explicitly xy
+          orderWidget.value = (o && o.ideo && o.ideo.bboxOrder) === "xy" ? "xy" : "yx";
+          xyLbl._cb.checked = orderWidget.value === "xy";
         }
         node._configured = true;                              // mark as loaded so initial layout keeps the restored size
         hideDataWidgets();

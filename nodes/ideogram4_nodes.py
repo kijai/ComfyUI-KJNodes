@@ -130,17 +130,21 @@ def _render_preview(boxes, width, height, bg=None, brightness=50):
     return torch.from_numpy(arr).unsqueeze(0)
 
 
-def _norm_bbox(box):
-    # Normalized {x, y, w, h} fractions (0-1) -> [ymin, xmin, ymax, xmax] on a 0-1000 grid.
-    def c(v):
-        return max(0, min(1000, round(v * 1000)))
+def _norm_bbox(box, sx=1000, sy=1000, order="yx"):
+    # {x, y, w, h} fractions (0-1) -> bbox; x scaled by sx, y by sy.
+    # Default sx=sy=1000 is the Ideogram-standard 0-1000 grid; pass (width, height) for absolute pixels.
+    # order="yx" -> [ymin, xmin, ymax, xmax] (Ideogram); "xy" -> [xmin, ymin, xmax, ymax] (Qwen/standard).
+    def cx(v):
+        return max(0, min(sx, round(v * sx)))
+    def cy(v):
+        return max(0, min(sy, round(v * sy)))
     x, y, w, h = box.get("x", 0.0), box.get("y", 0.0), box.get("w", 0.0), box.get("h", 0.0)
-    ymin, xmin, ymax, xmax = c(y), c(x), c(y + h), c(x + w)
+    ymin, xmin, ymax, xmax = cy(y), cx(x), cy(y + h), cx(x + w)
     if ymin > ymax:
         ymin, ymax = ymax, ymin
     if xmin > xmax:
         xmin, xmax = xmax, xmin
-    return [ymin, xmin, ymax, xmax]
+    return [xmin, ymin, xmax, ymax] if order == "xy" else [ymin, xmin, ymax, xmax]
 
 
 def _palette(colors):
@@ -300,6 +304,14 @@ Toolbar:
                 io.String.Input("output_format", default="compact", socketless=True, advanced=True,
                                 tooltip="Output JSON formatting (set via the editor toolbar): 'compact' (default, what "
                                         "Ideogram 4 expects) or 'pretty' (indented, for readability)."),
+                io.String.Input("coord_mode", default="normalized", socketless=True, advanced=True,
+                                tooltip="bbox coordinate space (set via the editor toolbar): 'normalized' (default, the "
+                                        "0-1000 grid Ideogram 4 expects) or 'absolute' (pixels, scaled by width/height "
+                                        "— NON-STANDARD for Ideogram, for other tools that want pixel coords)."),
+                io.String.Input("bbox_order", default="yx", socketless=True, advanced=True,
+                                tooltip="bbox axis order (set via the editor toolbar): 'yx' (default, Ideogram's "
+                                        "[ymin,xmin,ymax,xmax]) or 'xy' ([xmin,ymin,xmax,ymax], the standard x1,y1,x2,y2 "
+                                        "that Qwen-VL and most detectors use)."),
                 io.BoundingBox.Input("bboxes", optional=True, force_input=True,
                                      tooltip="Optional pixel-space boxes ({x, y, width, height}) used to seed the "
                                              "editor's regions when it has none. Ignored once regions exist."),
@@ -313,14 +325,19 @@ Toolbar:
             ],
         )
 
+
     @classmethod
     def execute(cls, width, height, background, style,
                 high_level_description="", aesthetics="", lighting="", medium="",
                 style_palette_data="", elements_data="", import_json="", import_mode="when empty",
-                output_format="pretty", bboxes=None, image=None, bg_brightness=25) -> io.NodeOutput:
+                output_format="pretty", coord_mode="normalized", bbox_order="yx", bboxes=None, image=None, bg_brightness=25) -> io.NodeOutput:
         if import_mode not in ("when empty", "always"):      # old workflows saved before this widget existed
             import_mode = "when empty"
         dump = _dumps if output_format == "pretty" else (lambda v: json.dumps(v, ensure_ascii=False, separators=(",", ":")))
+        # bbox scale: 0-1000 grid (Ideogram-standard) or absolute pixels (width/height) when coord_mode=="absolute".
+        # bbox axis order: "yx" (Ideogram) or "xy" (Qwen/standard x1,y1,x2,y2).
+        bsx, bsy = (width, height) if coord_mode == "absolute" else (1000, 1000)
+        border = "xy" if bbox_order == "xy" else "yx"
         boxes = _parse_json_list(elements_data)
         boxes_seeded = False
         if not boxes and bboxes:
@@ -378,7 +395,7 @@ Toolbar:
                 etype = "text" if box.get("type") == "text" else "obj"
                 elem = {"type": etype}                      # key order matters
                 if not box.get("nobbox"):                   # unplaced elements omit bbox
-                    elem["bbox"] = _norm_bbox(box)
+                    elem["bbox"] = _norm_bbox(box, bsx, bsy, border)
                 if etype == "text":
                     elem["text"] = box.get("text", "")
                 elem["desc"] = box.get("desc", "")
