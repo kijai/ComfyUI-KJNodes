@@ -2426,6 +2426,54 @@ class VAELoaderKJ:
         vae.throw_exception_if_invalid()
         return (vae,)
 
+
+class VAEMergeKJ(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="VAEMergeKJ",
+            category="KJNodes/vae",
+            description="Merge two VAEs by weighted-averaging their weights. "
+                        "ratio is the weight toward vae_2 (0.0 = pure vae_1, 1.0 = pure vae_2). "
+                        "Both VAEs must share the same architecture (matching state dict keys and shapes).",
+            inputs=[
+                io.Vae.Input("vae_1"),
+                io.Vae.Input("vae_2"),
+                io.Float.Input("ratio", default=0.5, min=0.0, max=1.0, step=0.01),
+            ],
+            outputs=[
+                io.Vae.Output(display_name="vae"),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, vae_1, vae_2, ratio) -> io.NodeOutput:
+        from comfy.sd import VAE
+        sd1 = vae_1.get_sd()
+        sd2 = vae_2.get_sd()
+
+        mismatch = set(sd1.keys()) ^ set(sd2.keys())
+        if mismatch:
+            raise ValueError(
+                "Cannot merge: VAE architectures differ ({} non-matching keys, e.g. {}).".format(
+                    len(mismatch), list(mismatch)[:3]))
+
+        merged = {}
+        for k, v1 in sd1.items():
+            v2 = sd2[k]
+            if v1.shape != v2.shape:
+                raise ValueError("Cannot merge: shape mismatch for '{}' ({} vs {}).".format(k, tuple(v1.shape), tuple(v2.shape)))
+            # Only blend float weights; integer buffers (e.g. num_batches_tracked) are copied from vae_1.
+            if torch.is_floating_point(v1):
+                blended = torch.lerp(v1.float(), v2.to(device=v1.device).float(), ratio)
+                merged[k] = blended.to(dtype=v1.dtype)
+            else:
+                merged[k] = v1.clone()
+
+        merged_vae = VAE(sd=merged, device=vae_1.device, dtype=vae_1.vae_dtype)
+        merged_vae.throw_exception_if_invalid()
+        return io.NodeOutput(merged_vae)
+
 from comfy.samplers import sampling_function, CFGGuider
 class Guider_ScheduledCFG(CFGGuider):
 
