@@ -39,9 +39,7 @@ function getSetting(id, fallback) {
 // pattern's *on-screen* pixel size for the current zoom, then fill the canvas
 // with createPattern("repeat"). This is O(1) per frame (the GPU repeats the
 // tile) instead of stroking the whole graph every frame, and because the tile
-// is rendered at native device resolution and blitted ~1:1, there is no moiré /
-// uneven-dot artefact (which came from LiteGraph scaling a fixed low-res tile
-// with imageSmoothingEnabled = false).
+// is rendered at native device resolution and blitted ~1:1
 
 const patternDefs = {
 	dots: {
@@ -414,8 +412,6 @@ app.registerExtension({
 		// transform and before it paints the clear color / background pattern.
 		// Returning true tells LiteGraph we handled the background, so it skips
 		// both. We then paint the whole canvas with a single repeat-pattern fill
-		// built from a crisp, natively-rendered tile (background baked in) —
-		// one fill per frame, like LiteGraph's own grid, and moiré-free.
 		const origCallback = canvas.onRenderBackground;
 		canvas.onRenderBackground = function (cvs, ctx) {
 			if (origCallback) {
@@ -455,14 +451,7 @@ app.registerExtension({
 					const pattern = getPattern(ctx, def, tileW, tileH, iDw, iDh);
 
 					// Tile the (bg-baked, opaque) pattern over the whole canvas with a
-					// single nearest-neighbor fill — the same GPU-fast path LiteGraph
-					// uses (imageSmoothing on a transformed pattern fill drops Chrome
-					// onto a slow CPU path). The tile is rendered at device resolution,
-					// so unless we hit the size cap we give it an exact integer
-					// device-pixel period (a = 1): every repeat lands identically on the
-					// pixel grid, so nearest-neighbor stays crisp with no moiré. (When
-					// capped — extreme zoom-in — we stretch it; with so few large tiles
-					// on screen there is no visible moiré.)
+					// single nearest-neighbor fill. The tile is rendered at device resolution
 					const a = Math.round(onW) <= MAX_TILE_PX ? 1 : onW / iDw;
 					const d = Math.round(onH) <= MAX_TILE_PX ? 1 : onH / iDh;
 					const periodX = a * iDw;
