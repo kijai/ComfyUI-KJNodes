@@ -25,208 +25,192 @@ function getSetting(id, fallback) {
 	return app.ui.settings.getSettingValue(id) ?? fallback;
 }
 
-// ── Pattern generators ──────────────────────────────────────────────────────
-// Each returns an OffscreenCanvas to be used with createPattern("repeat").
-// `size` = tile size, `fg`/`bg` = hex colors, `t` = feature thickness.
+// ── Pattern tiles ─────────────────────────────────────────────────────────────
+// Each pattern is described by:
+//   tile(size) → [tileW, tileH]   the period of the pattern in graph units.
+//   draw(ctx, size, t, fg, bg)    draws ONE seamless tile of the foreground
+//                                  motif into a context already scaled so that
+//                                  [0..tileW] × [0..tileH] graph units fill the
+//                                  whole tile bitmap. The solid background is
+//                                  painted separately, so tiles are transparent
+//                                  except where the motif is drawn.
+//
+// At render time we rasterise one tile into a small OffscreenCanvas sized to the
+// pattern's *on-screen* pixel size for the current zoom, then fill the canvas
+// with createPattern("repeat"). This is O(1) per frame (the GPU repeats the
+// tile) instead of stroking the whole graph every frame, and because the tile
+// is rendered at native device resolution and blitted ~1:1, there is no moiré /
+// uneven-dot artefact (which came from LiteGraph scaling a fixed low-res tile
+// with imageSmoothingEnabled = false).
 
-function makeDots(size, fg, bg, t) {
-	const c = new OffscreenCanvas(size, size);
-	const ctx = c.getContext("2d");
-	ctx.fillStyle = bg;
-	ctx.fillRect(0, 0, size, size);
-	ctx.fillStyle = fg;
-	ctx.beginPath();
-	ctx.arc(size / 2, size / 2, t * 2, 0, Math.PI * 2);
-	ctx.fill();
-	return c;
-}
+const patternDefs = {
+	dots: {
+		tile: (size) => [size, size],
+		draw: (ctx, size, t, fg) => {
+			ctx.fillStyle = fg;
+			ctx.beginPath();
+			ctx.arc(size / 2, size / 2, t * 2, 0, Math.PI * 2);
+			ctx.fill();
+		},
+	},
 
-function makeGrid(size, fg, bg, t) {
-	const c = new OffscreenCanvas(size, size);
-	const ctx = c.getContext("2d");
-	ctx.fillStyle = bg;
-	ctx.fillRect(0, 0, size, size);
-	ctx.fillStyle = fg;
-	ctx.fillRect(size - t, 0, t, size - t);
-	ctx.fillRect(0, size - t, size, t);
-	return c;
-}
+	grid: {
+		tile: (size) => [size, size],
+		draw: (ctx, size, t, fg) => {
+			ctx.fillStyle = fg;
+			ctx.fillRect(size - t, 0, t, size - t);
+			ctx.fillRect(0, size - t, size, t);
+		},
+	},
 
-function makeCrossDots(size, fg, bg, t) {
-	const c = new OffscreenCanvas(size, size);
-	const ctx = c.getContext("2d");
-	ctx.fillStyle = bg;
-	ctx.fillRect(0, 0, size, size);
-	const half = size / 2;
-	const arm = Math.max(t + 1, size * 0.08);
-	const ht = t / 2;
-	ctx.fillStyle = fg;
-	ctx.fillRect(half - arm, half - ht, arm * 2, t);
-	ctx.fillRect(half - ht, half - arm, t, arm * 2);
-	return c;
-}
+	"cross dots": {
+		tile: (size) => [size, size],
+		draw: (ctx, size, t, fg) => {
+			const half = size / 2;
+			const arm = Math.max(t + 1, size * 0.08);
+			const ht = t / 2;
+			ctx.fillStyle = fg;
+			ctx.fillRect(half - arm, half - ht, arm * 2, t);
+			ctx.fillRect(half - ht, half - arm, t, arm * 2);
+		},
+	},
 
-function makeBlueprint(size, fg, bg, t) {
-	const c = new OffscreenCanvas(size, size);
-	const ctx = c.getContext("2d");
-	ctx.fillStyle = bg;
-	ctx.fillRect(0, 0, size, size);
-	const sub = size / 4;
-	const subColor = mixColors(bg, fg, 0.3);
-	ctx.fillStyle = subColor;
-	for (let i = sub; i < size; i += sub) {
-		ctx.fillRect(i, 0, t, size - t);
-		ctx.fillRect(0, i, size, t);
-	}
-	ctx.fillStyle = fg;
-	ctx.fillRect(size - t, 0, t, size - t);
-	ctx.fillRect(0, size - t, size, t);
-	return c;
-}
+	blueprint: {
+		tile: (size) => [size, size],
+		draw: (ctx, size, t, fg, bg) => {
+			const sub = size / 4;
+			ctx.fillStyle = mixColors(bg, fg, 0.3);
+			for (let i = sub; i < size; i += sub) {
+				ctx.fillRect(i, 0, t, size - t);
+				ctx.fillRect(0, i, size, t);
+			}
+			ctx.fillStyle = fg;
+			ctx.fillRect(size - t, 0, t, size - t);
+			ctx.fillRect(0, size - t, size, t);
+		},
+	},
 
-function makeIsometric(size, fg, bg, t) {
-	const w = size;
-	const h = Math.round(size / 2);
-	const c = new OffscreenCanvas(w, h);
-	const ctx = c.getContext("2d");
-	ctx.fillStyle = bg;
-	ctx.fillRect(0, 0, w, h);
-	ctx.strokeStyle = fg;
-	ctx.lineWidth = t;
-	ctx.beginPath();
-	ctx.moveTo(0, h / 2);
-	ctx.lineTo(w / 2, 0);
-	ctx.lineTo(w, h / 2);
-	ctx.moveTo(0, h / 2);
-	ctx.lineTo(w / 2, h);
-	ctx.lineTo(w, h / 2);
-	ctx.stroke();
-	return c;
-}
+	isometric: {
+		tile: (size) => [size, Math.round(size / 2)],
+		draw: (ctx, size, t, fg) => {
+			const w = size;
+			const h = Math.round(size / 2);
+			ctx.strokeStyle = fg;
+			ctx.lineWidth = t;
+			ctx.beginPath();
+			ctx.moveTo(0, h / 2);
+			ctx.lineTo(w / 2, 0);
+			ctx.lineTo(w, h / 2);
+			ctx.moveTo(0, h / 2);
+			ctx.lineTo(w / 2, h);
+			ctx.lineTo(w, h / 2);
+			ctx.stroke();
+		},
+	},
 
-function makeHexagons(size, fg, bg, t) {
-	const r = size / 2;
-	const w = r * 3;
-	const h = Math.round(r * Math.sqrt(3));
-	const c = new OffscreenCanvas(w, h);
-	const ctx = c.getContext("2d");
-	ctx.fillStyle = bg;
-	ctx.fillRect(0, 0, w, h);
-	ctx.strokeStyle = fg;
-	ctx.lineWidth = t;
+	hexagons: {
+		tile: (size) => [(size / 2) * 3, Math.round((size / 2) * Math.sqrt(3))],
+		draw: (ctx, size, t, fg) => {
+			const r = size / 2;
+			const h = Math.round(r * Math.sqrt(3));
+			ctx.strokeStyle = fg;
+			ctx.lineWidth = t;
+			const hex = (cx, cy) => {
+				ctx.beginPath();
+				for (let i = 0; i < 6; i++) {
+					const a = Math.PI / 3 * i;
+					const px = cx + r * Math.cos(a);
+					const py = cy + r * Math.sin(a);
+					if (i === 0) ctx.moveTo(px, py);
+					else ctx.lineTo(px, py);
+				}
+				ctx.closePath();
+				ctx.stroke();
+			};
+			hex(r, h / 2);
+			hex(r * 2.5, 0);
+			hex(r * 2.5, h);
+		},
+	},
 
-	function hex(cx, cy) {
-		ctx.beginPath();
-		for (let i = 0; i < 6; i++) {
-			const a = Math.PI / 3 * i;
-			const px = cx + r * Math.cos(a);
-			const py = cy + r * Math.sin(a);
-			if (i === 0) ctx.moveTo(px, py);
-			else ctx.lineTo(px, py);
-		}
-		ctx.closePath();
-		ctx.stroke();
-	}
+	octagons: {
+		tile: (size) => [size, size],
+		draw: (ctx, size, t, fg) => {
+			const s = size / (1 + Math.SQRT2);
+			const d = (size - s) / 2;
+			ctx.strokeStyle = fg;
+			ctx.lineWidth = t;
+			ctx.beginPath();
+			ctx.moveTo(d, 0);
+			ctx.lineTo(size - d, 0);
+			ctx.lineTo(size, d);
+			ctx.lineTo(size, size - d);
+			ctx.lineTo(size - d, size);
+			ctx.lineTo(d, size);
+			ctx.lineTo(0, size - d);
+			ctx.lineTo(0, d);
+			ctx.closePath();
+			ctx.stroke();
+		},
+	},
 
-	hex(r, h / 2);
-	hex(r * 2.5, 0);
-	hex(r * 2.5, h);
-	return c;
-}
+	waves: {
+		tile: (size) => [size, size],
+		draw: (ctx, size, t, fg, bg) => {
+			const lines = Math.max(2, Math.round(size / 20));
+			const spacing = size / lines;
+			ctx.lineWidth = t;
+			for (let i = 0; i < lines; i++) {
+				const blend = 0.1 + (i % 3) * 0.07;
+				const amp = spacing * (0.15 + (i % 4) * 0.05);
+				const baseY = spacing * i + spacing / 2;
+				ctx.strokeStyle = mixColors(bg, fg, blend);
+				ctx.beginPath();
+				for (let x = 0; x <= size; x++) {
+					const y = baseY + Math.sin((x / size) * Math.PI * 2 + i * 0.8) * amp;
+					if (x === 0) ctx.moveTo(x, y);
+					else ctx.lineTo(x, y);
+				}
+				ctx.stroke();
+			}
+		},
+	},
 
-function makeOctagons(size, fg, bg, t) {
-	const c = new OffscreenCanvas(size, size);
-	const ctx = c.getContext("2d");
-	ctx.fillStyle = bg;
-	ctx.fillRect(0, 0, size, size);
-	ctx.strokeStyle = fg;
-	ctx.lineWidth = t;
-
-	const s = size / (1 + Math.SQRT2);
-	const d = (size - s) / 2;
-
-	ctx.beginPath();
-	ctx.moveTo(d, 0);
-	ctx.lineTo(size - d, 0);
-	ctx.lineTo(size, d);
-	ctx.lineTo(size, size - d);
-	ctx.lineTo(size - d, size);
-	ctx.lineTo(d, size);
-	ctx.lineTo(0, size - d);
-	ctx.lineTo(0, d);
-	ctx.closePath();
-	ctx.stroke();
-	return c;
-}
-
-function makeWaves(size, fg, bg, t) {
-	const c = new OffscreenCanvas(size, size);
-	const ctx = c.getContext("2d");
-	ctx.fillStyle = bg;
-	ctx.fillRect(0, 0, size, size);
-	ctx.lineWidth = t;
-
-	const lines = Math.max(2, Math.round(size / 20));
-	const spacing = size / lines;
-
-	for (let i = 0; i < lines; i++) {
-		const blend = 0.1 + (i % 3) * 0.07;
-		ctx.strokeStyle = mixColors(bg, fg, blend);
-		const baseY = spacing * i + spacing / 2;
-		const amp = spacing * (0.15 + (i % 4) * 0.05);
-
-		ctx.beginPath();
-		for (let x = 0; x <= size; x++) {
-			const y = baseY + Math.sin((x / size) * Math.PI * 2 + i * 0.8) * amp;
-			if (x === 0) ctx.moveTo(x, y);
-			else ctx.lineTo(x, y);
-		}
-		ctx.stroke();
-	}
-	return c;
-}
-
-function makeCarbonFiber(size, fg, bg, t) {
-	const cell = Math.max(2, Math.round(size / 4));
-	const s = cell * 4;
-	const c = new OffscreenCanvas(s, s);
-	const ctx = c.getContext("2d");
-
-	const dark = bg;
-	const light = mixColors(bg, fg, 0.2);
-	const groove = mixColors(bg, fg, 0.07);
-
-	for (let row = 0; row < 4; row++) {
-		for (let col = 0; col < 4; col++) {
-			const phase = (col + row) % 4;
-			ctx.fillStyle = (phase < 2) ? light : dark;
-			ctx.fillRect(col * cell, row * cell, cell, cell);
-		}
-	}
-
-	ctx.fillStyle = groove;
-	const gt = Math.max(1, Math.round(t));
-	for (let i = 1; i < 4; i++) {
-		ctx.fillRect(0, i * cell, s, gt);
-		ctx.fillRect(i * cell, 0, gt, s);
-	}
-	return c;
-}
-
-
-const PATTERNS = {
-	default: null,
-	none: null,
-	dots: makeDots,
-	grid: makeGrid,
-	"cross dots": makeCrossDots,
-	blueprint: makeBlueprint,
-	isometric: makeIsometric,
-	hexagons: makeHexagons,
-	octagons: makeOctagons,
-	waves: makeWaves,
-	"carbon fiber": makeCarbonFiber,
+	"carbon fiber": {
+		tile: (size) => {
+			const cell = Math.max(2, Math.round(size / 4));
+			return [cell * 4, cell * 4];
+		},
+		draw: (ctx, size, t, fg, bg) => {
+			const cell = Math.max(2, Math.round(size / 4));
+			const s = cell * 4;
+			// Dark cells == background, left transparent so the bg shows through.
+			ctx.fillStyle = mixColors(bg, fg, 0.2);
+			for (let row = 0; row < 4; row++) {
+				for (let col = 0; col < 4; col++) {
+					if ((col + row) % 4 < 2) ctx.fillRect(col * cell, row * cell, cell, cell);
+				}
+			}
+			ctx.fillStyle = mixColors(bg, fg, 0.07);
+			const gt = Math.max(1, Math.round(t));
+			for (let i = 1; i < 4; i++) {
+				ctx.fillRect(0, i * cell, s, gt);
+				ctx.fillRect(i * cell, 0, gt, s);
+			}
+		},
+	},
 };
+
+// Ordered list of choices: 'default' (LiteGraph's own grid) + 'none' + patterns.
+const PATTERN_KEYS = ["default", "none", ...Object.keys(patternDefs)];
+
+// Below this on-screen tile size (device px) the motif is an indiscernible
+// smear, so we skip it and show the plain background.
+const MIN_TILE_PX = 3;
+// Cap the tile bitmap. This bounds the only per-zoom-frame work (re-rendering
+// one tile to match the new on-screen size); beyond this the tile is gently
+// upscaled by the pattern fill (few, large tiles when zoomed in → fine).
+const MAX_TILE_PX = 256;
 
 // ── State ───────────────────────────────────────────────────────────────────
 
@@ -235,14 +219,24 @@ let currentFg = "#444444";
 let currentBg = "#212121";
 let currentSize = 32;
 let currentThickness = 2;
+let currentTileW = 32;   // tile period (graph units) for the active pattern
+let currentTileH = 32;
 let dirty = true;
+
+// Bumped whenever a setting changes; lets the per-frame cache check compare a
+// number instead of building a key string each frame (avoids GC churn on drag).
+let settingsVersion = 0;
+
+// Cached tile bitmap + pattern — reused across frames; rebuilt only when the
+// settings version or the on-screen tile size changes. Panning/dragging (scale
+// unchanged) always hits the cache with zero allocation.
+const patternCache = { ver: -1, iDw: -1, iDh: -1, pattern: null };
 
 function invalidateCache() {
 	dirty = true;
+	settingsVersion++;
 	app.canvas?.setDirty(true, true);
 }
-
-
 
 function readSettings() {
 	currentType = getSetting("KJNodes.canvasBg.pattern", "default");
@@ -250,11 +244,40 @@ function readSettings() {
 	currentBg = asHex(getSetting("KJNodes.canvasBg.bgColor", "#212121"));
 	currentSize = getSetting("KJNodes.canvasBg.scale", 32);
 	currentThickness = getSetting("KJNodes.canvasBg.thickness", 2);
+	// Resolve the tile period once per change so the render loop never allocates.
+	const def = patternDefs[currentType];
+	if (def) {
+		const dims = def.tile(currentSize);
+		currentTileW = dims[0];
+		currentTileH = dims[1];
+	}
+}
+
+/** Build (or reuse) a repeat pattern of one tile rendered at `iDw × iDh` px. */
+function getPattern(ctx, def, tileW, tileH, iDw, iDh) {
+	if (patternCache.ver === settingsVersion && patternCache.iDw === iDw && patternCache.iDh === iDh && patternCache.pattern) {
+		return patternCache.pattern;
+	}
+
+	const oc = new OffscreenCanvas(iDw, iDh);
+	const tctx = oc.getContext("2d");
+	tctx.scale(iDw / tileW, iDh / tileH);
+	// Bake the background into the tile so the whole canvas is painted with a
+	// single opaque pattern fill (no separate solid-fill pass per frame).
+	tctx.fillStyle = currentBg;
+	tctx.fillRect(0, 0, tileW, tileH);
+	def.draw(tctx, currentSize, currentThickness, currentFg, currentBg);
+
+	patternCache.pattern = ctx.createPattern(oc, "repeat");
+	patternCache.ver = settingsVersion;
+	patternCache.iDw = iDw;
+	patternCache.iDh = iDh;
+	return patternCache.pattern;
 }
 
 // ── Commands ────────────────────────────────────────────────────────────────
 
-const patternCommands = Object.keys(PATTERNS).map((key) => ({
+const patternCommands = PATTERN_KEYS.map((key) => ({
 	id: `KJNodes.canvasBg.setPattern.${key}`,
 	label: key.charAt(0).toUpperCase() + key.slice(1),
 	menubarLabel: key.charAt(0).toUpperCase() + key.slice(1),
@@ -340,7 +363,7 @@ app.registerExtension({
 			tooltip: "Choose a background pattern for the node graph canvas. 'default' uses LiteGraph's built-in dot grid. 'none' disables all background drawing.",
 			type: "combo",
 			defaultValue: "default",
-			options: Object.keys(PATTERNS),
+			options: PATTERN_KEYS,
 			onChange: invalidateCache,
 		},
 		{
@@ -387,75 +410,12 @@ app.registerExtension({
 		const canvas = app.canvas;
 		if (!canvas) return;
 
-		let patternToken = null; // null = default, "" = none, string = custom
-		// Snapshot palette values lazily on first override so we capture post-palette state
-		let origBackgroundImage = null;
-		let origClearBgColor = null;
-		let origsCaptured = false;
-
-		function captureOriginals() {
-			if (origsCaptured) return;
-			origsCaptured = true;
-			origBackgroundImage = canvas.background_image;
-			origClearBgColor = canvas.clear_background_color;
-		}
-
-		function applyToLiteGraph() {
-			if (!dirty) return;
-			dirty = false;
-			readSettings();
-
-			// If ComfyUI's own background image setting is active, don't interfere
-			if (getSetting("Comfy.Canvas.BackgroundImage", "")) {
-				patternToken = null;
-				return;
-			}
-
-			if (currentType === "default") {
-				if (origsCaptured) {
-					canvas.background_image = origBackgroundImage;
-					canvas.clear_background_color = origClearBgColor;
-					canvas._pattern = undefined;
-					canvas._bg_img = undefined;
-				}
-				patternToken = null;
-				canvas.setDirty(true, true);
-				return;
-			}
-
-			// Capture originals before we overwrite them for the first time
-			captureOriginals();
-
-			if (currentType === "none") {
-				canvas.background_image = "";
-				canvas.clear_background_color = currentBg;
-				canvas._pattern = undefined;
-				canvas._bg_img = undefined;
-				patternToken = "";
-				canvas.setDirty(true, true);
-				return;
-			}
-
-			// Generate tile as OffscreenCanvas — passed directly to LiteGraph's
-			// createPattern which accepts any CanvasImageSource.
-			const gen = PATTERNS[currentType];
-			if (!gen) return;
-
-			const tile = gen(currentSize, currentFg, currentBg, currentThickness);
-			patternToken = `kjbg_${currentType}_${currentSize}_${currentThickness}_${currentFg}_${currentBg}`;
-			tile.name = patternToken;
-
-			canvas.background_image = patternToken;
-			canvas.clear_background_color = currentBg;
-			canvas._bg_img = tile;
-			canvas._pattern = undefined;
-			canvas.setDirty(true, true);
-		}
-
-		applyToLiteGraph();
-
-		// Enforce our values if palette service overwrites them.
-		// Returns false — LiteGraph's native code does all drawing.
+		// onRenderBackground runs before LiteGraph applies its own graph
+		// transform and before it paints the clear color / background pattern.
+		// Returning true tells LiteGraph we handled the background, so it skips
+		// both. We then paint the whole canvas with a single repeat-pattern fill
+		// built from a crisp, natively-rendered tile (background baked in) —
+		// one fill per frame, like LiteGraph's own grid, and moiré-free.
 		const origCallback = canvas.onRenderBackground;
 		canvas.onRenderBackground = function (cvs, ctx) {
 			if (origCallback) {
@@ -463,14 +423,74 @@ app.registerExtension({
 				if (result) return true;
 			}
 
-			applyToLiteGraph();
-
-			// If palette service overwrote our values, mark dirty for next frame.
-			if (!dirty && patternToken !== null && this.background_image !== patternToken) {
-				dirty = true;
+			if (dirty) {
+				readSettings();
+				dirty = false;
 			}
 
-			return false;
+			// If ComfyUI's own background image setting is active, don't interfere.
+			if (getSetting("Comfy.Canvas.BackgroundImage", "")) return false;
+
+			// 'default' → let LiteGraph draw its built-in dot grid as usual.
+			if (currentType === "default") return false;
+
+			const scale = this.ds.scale;
+			const offset = this.ds.offset;
+			const dpr = window.devicePixelRatio || 1;
+
+			ctx.save();
+
+			const def = patternDefs[currentType];
+			let painted = false;
+			if (def) {
+				const tileW = currentTileW;
+				const tileH = currentTileH;
+				const k = scale * dpr;
+				const onW = tileW * k;   // on-screen tile size, device px
+				const onH = tileH * k;
+
+				if (onW >= MIN_TILE_PX && onH >= MIN_TILE_PX) {
+					const iDw = Math.min(Math.round(onW), MAX_TILE_PX);
+					const iDh = Math.min(Math.round(onH), MAX_TILE_PX);
+					const pattern = getPattern(ctx, def, tileW, tileH, iDw, iDh);
+
+					// Tile the (bg-baked, opaque) pattern over the whole canvas with a
+					// single nearest-neighbor fill — the same GPU-fast path LiteGraph
+					// uses (imageSmoothing on a transformed pattern fill drops Chrome
+					// onto a slow CPU path). The tile is rendered at device resolution,
+					// so unless we hit the size cap we give it an exact integer
+					// device-pixel period (a = 1): every repeat lands identically on the
+					// pixel grid, so nearest-neighbor stays crisp with no moiré. (When
+					// capped — extreme zoom-in — we stretch it; with so few large tiles
+					// on screen there is no visible moiré.)
+					const a = Math.round(onW) <= MAX_TILE_PX ? 1 : onW / iDw;
+					const d = Math.round(onH) <= MAX_TILE_PX ? 1 : onH / iDh;
+					const periodX = a * iDw;
+					const periodY = d * iDh;
+					let px = dpr * scale * offset[0];
+					let py = dpr * scale * offset[1];
+					px -= Math.floor(px / periodX) * periodX;
+					py -= Math.floor(py / periodY) * periodY;
+
+					ctx.imageSmoothingEnabled = false;
+					ctx.setTransform(a, 0, 0, d, px, py);
+					ctx.fillStyle = pattern;
+					ctx.fillRect(-px / a, -py / d, cvs.width / a, cvs.height / d);
+					painted = true;
+				}
+			}
+
+			if (!painted) {
+				// 'none', or tiles too small to discern → plain background only.
+				ctx.setTransform(1, 0, 0, 1, 0, 0);
+				ctx.fillStyle = currentBg;
+				ctx.fillRect(0, 0, cvs.width, cvs.height);
+			}
+
+			ctx.restore();
+			return true;
 		};
+
+		invalidateCache();
 	},
 });
