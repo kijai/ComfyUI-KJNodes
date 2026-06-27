@@ -3,6 +3,7 @@ from PIL import Image, ImageDraw, ImageFilter
 import numpy as np
 import torch
 from torchvision.transforms import Resize, CenterCrop, InterpolationMode
+from scipy.ndimage import gaussian_filter1d
 import math
 
 #based on nodes from mtb https://github.com/melMass/comfy_mtb
@@ -249,6 +250,146 @@ class BatchUncrop:
             out_images.append(img.convert("RGB"))
 
         return (pil2tensor(out_images),)
+
+class BatchCropFromMaskAdvancedv2:
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "original_images": ("IMAGE",),
+                "masks": ("MASK",),
+                "crop_size_mult": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.001}),
+                "bbox_smooth_sigma": ("FLOAT", {"default": 3, "min": 0.5, "max": 5.0, "step": 0.1}),
+                "offset_x": ("INT", {"default": 0, "min": -9999, "max": 9999, "step": 1}),
+                "offset_y": ("INT", {"default": 0, "min": -9999, "max": 9999, "step": 1}),
+                "divisible_by": ("INT", {"default": 8, "min": 1, "max": 512, "step": 1}),
+            },
+        }
+
+    RETURN_TYPES = (
+        "IMAGE",
+        "IMAGE",
+        "MASK",
+        "BBOX",
+        "INT",
+        "INT",
+    )
+    RETURN_NAMES = (
+        "original_images",
+        "cropped_images",
+        "cropped_masks",
+        "bboxes",
+        "width",
+        "height",
+    )
+    FUNCTION = "crop"
+    CATEGORY = "KJNodes/masking"
+
+    def crop(self, masks, original_images, crop_size_mult, bbox_smooth_sigma, offset_x, offset_y, divisible_by):
+     
+        bounding_boxes = []
+        cropped_images = []
+        cropped_masks = []
+
+        # First, calculate the maximum bounding box size across all masks
+        curr_max_bbox_width = 0
+        curr_max_bbox_height = 0
+        for mask in masks:
+            _mask = tensor2pil(mask)[0]
+            non_zero_indices = np.nonzero(np.array(_mask))
+            if len(non_zero_indices[1]) == 0 or len(non_zero_indices[0]) == 0:
+                continue  # 跳过空mask（后面会单独处理）
+            min_x, max_x = np.min(non_zero_indices[1]), np.max(non_zero_indices[1])
+            min_y, max_y = np.min(non_zero_indices[0]), np.max(non_zero_indices[0])
+            width = max_x - min_x
+            height = max_y - min_y
+            curr_max_bbox_width = max(curr_max_bbox_width, width)
+            curr_max_bbox_height = max(curr_max_bbox_height, height)
+
+        # Apply the crop size multiplier
+        self.max_bbox_width = round(curr_max_bbox_width * crop_size_mult)
+        self.max_bbox_height = round(curr_max_bbox_height * crop_size_mult)
+        
+        # Make sure dimensions are divisible by the given value (round up)
+        self.max_bbox_width = math.ceil(self.max_bbox_width / divisible_by) * divisible_by
+        self.max_bbox_height = math.ceil(self.max_bbox_height / divisible_by) * divisible_by
+    
+        bbox_aspect_ratio = self.max_bbox_width / self.max_bbox_height
+
+        # ========== 第一步：收集所有帧的原始中心点 ==========
+        raw_centers = []  # 每个元素为 (center_x, center_y)
+        for mask in masks:
+            _mask = tensor2pil(mask)[0]
+            non_zero_indices = np.nonzero(np.array(_mask))
+            if len(non_zero_indices[1]) == 0 or len(non_zero_indices[0]) == 0:
+                # 空mask时使用图像中心作为临时中心（后续平滑时会被邻近帧修正）
+                center_x = original_images[0].shape[1] / 2.0
+                center_y = original_images[0].shape[0] / 2.0
+            else:
+                center_x = np.mean(non_zero_indices[1])
+                center_y = np.mean(non_zero_indices[0])
+            raw_centers.append((center_x, center_y))
+
+        # 转换为numpy数组
+        centers_x = np.array([c[0] for c in raw_centers])
+        centers_y = np.array([c[1] for c in raw_centers])
+
+        # ========== 第二步：高斯平滑（sigma 0.5~5.0 越大越平滑） ==========
+        smoothed_x = gaussian_filter1d(centers_x, sigma=bbox_smooth_sigma, mode='nearest')
+        smoothed_y = gaussian_filter1d(centers_y, sigma=bbox_smooth_sigma, mode='nearest')
+        smoothed_centers = [(round(x), round(y)) for x, y in zip(smoothed_x, smoothed_y)]
+
+        # ========== 第三步：使用平滑后的中心进行裁剪 ==========
+        for i, (mask, img) in enumerate(zip(masks, original_images)):
+            # 获取平滑后的中心（不再需要帧内平滑和 prev_center 状态）
+            center = smoothed_centers[i]
+
+            # Apply user offset to the center
+            center_x_offset = center[0] + offset_x
+            center_y_offset = center[1] + offset_y
+
+            # Create bounding box using max_bbox_width and max_bbox_height
+            half_box_width = round(self.max_bbox_width / 2)
+            half_box_height = round(self.max_bbox_height / 2)
+            min_x = max(0, center_x_offset - half_box_width)
+            max_x = min(img.shape[1], center_x_offset + half_box_width)
+            min_y = max(0, center_y_offset - half_box_height)
+            max_y = min(img.shape[0], center_y_offset + half_box_height)
+
+            # Append bounding box coordinates
+            bounding_boxes.append((min_x, min_y, max_x - min_x, max_y - min_y))
+
+            # Crop the image from the bounding box
+            cropped_img = img[min_y:max_y, min_x:max_x, :]
+            
+            # Crop the mask from the bounding box (mask is 2D)
+            cropped_mask = mask[min_y:max_y, min_x:max_x]
+
+            # Calculate the new dimensions while maintaining the aspect ratio
+            new_height = min(cropped_img.shape[0], self.max_bbox_height)
+            new_width = round(new_height * bbox_aspect_ratio)
+
+            # Resize the image
+            resize_transform = Resize((new_height, new_width))
+            resized_img = resize_transform(cropped_img.permute(2, 0, 1))
+
+            # Resize the mask using the same dimensions
+            resized_mask = resize_transform(cropped_mask.unsqueeze(0))
+
+            # Perform the center crop to the desired size
+            crop_transform = CenterCrop((self.max_bbox_height, self.max_bbox_width))
+            cropped_resized_img = crop_transform(resized_img)
+            cropped_resized_mask = crop_transform(resized_mask)
+
+            cropped_images.append(cropped_resized_img.permute(1, 2, 0))
+            cropped_masks.append(cropped_resized_mask.squeeze(0))
+
+        cropped_out = torch.stack(cropped_images, dim=0)
+        cropped_masks_out = torch.stack(cropped_masks, dim=0)
+        
+        return (original_images, cropped_out, cropped_masks_out, bounding_boxes, self.max_bbox_width, self.max_bbox_height)
+
 
 class BatchCropFromMaskAdvanced:
 

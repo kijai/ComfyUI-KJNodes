@@ -28,7 +28,7 @@ from .nodes.curve_nodes import (
     PointsEditor, CutAndDragOnPath,
 )
 from .nodes.batchcrop_nodes import (
-    BatchCropFromMask, BatchUncrop, BatchCropFromMaskAdvanced,
+    BatchCropFromMask, BatchUncrop, BatchCropFromMaskAdvanced, BatchCropFromMaskAdvancedv2,
     FilterZeroMasksAndCorrespondingImages, InsertImageBatchByIndexes, BatchUncropAdvanced,
     SplitBboxes, BboxToInt, BboxVisualize,
 )
@@ -197,6 +197,7 @@ NODE_CONFIG = {
     #batch cropping
     "BatchCropFromMask": {"class": BatchCropFromMask, "name": "Batch Crop From Mask"},
     "BatchCropFromMaskAdvanced": {"class": BatchCropFromMaskAdvanced, "name": "Batch Crop From Mask Advanced"},
+    "BatchCropFromMaskAdvancedv2": {"class": BatchCropFromMaskAdvancedv2, "name": "Batch Crop From Mask Advanced v2"},
     "FilterZeroMasksAndCorrespondingImages": {"class": FilterZeroMasksAndCorrespondingImages},
     "InsertImageBatchByIndexes": {"class": InsertImageBatchByIndexes, "name": "Insert Image Batch By Indexes"},
     "BatchUncrop": {"class": BatchUncrop, "name": "Batch Uncrop"},
