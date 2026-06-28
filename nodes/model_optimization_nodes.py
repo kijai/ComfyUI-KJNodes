@@ -96,6 +96,176 @@ def get_sage_func(sage_attention, allow_compile=False):
     return attention_sage
 
 
+_krea2_sage_logged_reasons = set()
+_krea2_sage_validated_shapes = set()
+
+def _krea2_log_once(reason, message, level=logging.INFO):
+    if reason in _krea2_sage_logged_reasons:
+        return
+    _krea2_sage_logged_reasons.add(reason)
+    logging.log(level, message)
+
+
+def _attention_arg(args, kwargs, index, name, default=None):
+    if len(args) > index:
+        return args[index]
+    return kwargs.get(name, default)
+
+
+def _is_krea2_model(model):
+    base_model = getattr(model, "model", model)
+    try:
+        import comfy.model_base
+        if isinstance(base_model, comfy.model_base.Krea2):
+            return True
+    except Exception:
+        pass
+
+    model_config = getattr(base_model, "model_config", None)
+    unet_config = getattr(model_config, "unet_config", {}) or {}
+    if unet_config.get("image_model") == "krea2":
+        return True
+
+    return base_model.__class__.__name__ == "Krea2"
+
+
+def _krea2_main_attention_heads(model):
+    base_model = getattr(model, "model", model)
+    model_config = getattr(base_model, "model_config", None)
+    unet_config = getattr(model_config, "unet_config", {}) or {}
+    return unet_config.get("heads", 48)
+
+
+def _krea2_sage_mode_supported(sage_attention):
+    # Krea2 is bf16/fp16-oriented. The fp8 Sage modes are fast, but too risky
+    # here because failures tend to surface as black images or non-finite output.
+    return "fp8" not in sage_attention
+
+
+def _run_krea2_sage_dry_run(new_attention, sage_attention, allowed_heads):
+    if not torch.cuda.is_available():
+        logging.warning("[KJNodes] Krea2 SageAttention dry-run skipped: CUDA is not available.")
+        return False
+
+    dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+    device = torch.device("cuda")
+    q = torch.randn((1, allowed_heads, 128, 128), device=device, dtype=dtype)
+    k = torch.randn_like(q)
+    v = torch.randn_like(q)
+
+    try:
+        out = new_attention.__wrapped__(q, k, v, allowed_heads, skip_reshape=True, transformer_options={})
+    except Exception as exc:
+        logging.warning(f"[KJNodes] Krea2 SageAttention dry-run failed for {sage_attention}: {exc}")
+        return False
+
+    finite = torch.isfinite(out).all().item()
+    expected_shape = (q.shape[0], q.shape[2], q.shape[1] * q.shape[3])
+    if out.shape != expected_shape or out.dtype != dtype or not finite:
+        logging.warning(
+            f"[KJNodes] Krea2 SageAttention dry-run failed validation: "
+            f"shape={tuple(out.shape)}, expected_shape={expected_shape}, dtype={out.dtype}, finite={finite}"
+        )
+        return False
+
+    logging.info(f"[KJNodes] Krea2 SageAttention dry-run passed for {sage_attention}.")
+    return True
+
+
+def _make_krea2_sage_attention_override(new_attention, sage_attention, model, dry_run=False):
+    allowed_heads = _krea2_main_attention_heads(model)
+    logging.info(
+        f"[KJNodes] Krea2 detected; using guarded SageAttention override. "
+        f"Only diffusion attention with heads={allowed_heads}, CUDA, fp16/bf16, no mask will be patched."
+    )
+
+    if dry_run:
+        _run_krea2_sage_dry_run(new_attention, sage_attention, allowed_heads)
+
+    def attention_override_sage(func, *args, **kwargs):
+        q = _attention_arg(args, kwargs, 0, "q")
+        k = _attention_arg(args, kwargs, 1, "k")
+        v = _attention_arg(args, kwargs, 2, "v")
+        heads = _attention_arg(args, kwargs, 3, "heads")
+        mask = _attention_arg(args, kwargs, 4, "mask")
+        if mask is None:
+            mask = kwargs.get("mask", None)
+        skip_reshape = kwargs.get("skip_reshape", False)
+
+        def fallback(reason, message, level=logging.INFO):
+            _krea2_log_once(reason, message, level)
+            return func(*args, **kwargs)
+
+        if not _krea2_sage_mode_supported(sage_attention):
+            return fallback(
+                f"{sage_attention}:unsupported-mode",
+                f"[KJNodes] Krea2: skipping SageAttention mode {sage_attention}; fp8 Sage modes are not allowlisted for Krea2.",
+                logging.WARNING,
+            )
+
+        if not all(torch.is_tensor(t) for t in (q, k, v)):
+            return fallback("not-tensors", "[KJNodes] Krea2: skipping SageAttention because q/k/v are not tensors.")
+        if not skip_reshape or q.ndim != 4 or k.ndim != 4 or v.ndim != 4:
+            return fallback("shape", "[KJNodes] Krea2: skipping SageAttention for non-BHLD attention input.")
+        if q.device.type != "cuda":
+            return fallback("device", "[KJNodes] Krea2: skipping SageAttention because attention is not on CUDA.")
+        if q.dtype not in (torch.float16, torch.bfloat16) or k.dtype != q.dtype or v.dtype != q.dtype:
+            return fallback(
+                f"dtype:{q.dtype}:{k.dtype}:{v.dtype}",
+                f"[KJNodes] Krea2: skipping SageAttention for dtype q={q.dtype}, k={k.dtype}, v={v.dtype}.",
+            )
+        if mask is not None:
+            return fallback("mask", "[KJNodes] Krea2: skipping SageAttention because an attention mask is present.")
+        if heads != allowed_heads or q.shape[1] != allowed_heads:
+            return fallback(
+                f"heads:{heads}:{q.shape[1]}",
+                f"[KJNodes] Krea2: skipping SageAttention for heads={heads}, q_heads={q.shape[1]}; likely text-fusion attention.",
+            )
+        if k.shape[1] != q.shape[1] or v.shape[1] != q.shape[1]:
+            return fallback("gqa", "[KJNodes] Krea2: skipping SageAttention because q/k/v head counts differ.")
+
+        try:
+            out = new_attention.__wrapped__(*args, **kwargs)
+        except Exception as exc:
+            return fallback(
+                f"exception:{type(exc).__name__}",
+                f"[KJNodes] Krea2: SageAttention failed ({exc}); falling back to original attention.",
+                logging.WARNING,
+            )
+
+        shape_key = (tuple(q.shape), q.dtype, sage_attention)
+        if shape_key not in _krea2_sage_validated_shapes:
+            finite = torch.isfinite(out).all().item()
+            if kwargs.get("skip_output_reshape", False):
+                expected_shape = q.shape
+            else:
+                expected_shape = (q.shape[0], q.shape[2], q.shape[1] * q.shape[3])
+            if out.shape != expected_shape or not finite:
+                return fallback(
+                    f"invalid:{shape_key}",
+                    f"[KJNodes] Krea2: SageAttention produced invalid output shape={tuple(out.shape)}, expected_shape={expected_shape}, finite={finite}; falling back.",
+                    logging.WARNING,
+                )
+            _krea2_sage_validated_shapes.add(shape_key)
+            logging.info(f"[KJNodes] Krea2: SageAttention validated for shape={tuple(q.shape)}, dtype={q.dtype}.")
+
+        return out
+
+    return attention_override_sage
+
+
+def make_sage_attention_override(sage_attention, allow_compile=False, model=None, dry_run=False):
+    new_attention = get_sage_func(sage_attention, allow_compile=allow_compile)
+
+    if model is not None and _is_krea2_model(model):
+        return _make_krea2_sage_attention_override(new_attention, sage_attention, model, dry_run=dry_run)
+
+    def attention_override_sage(func, *args, **kwargs):
+        return new_attention.__wrapped__(*args, **kwargs)
+
+    return attention_override_sage
+
+
 from comfy.patcher_extension import CallbacksMP
 class PathchSageAttentionKJ():
     @classmethod
@@ -105,7 +275,8 @@ class PathchSageAttentionKJ():
             "sage_attention": (sageattn_modes, {"default": False, "tooltip": "Patch the attention of the model passing through this node to use sageattn. To revert, run this node again with the disabled option. Requires the sageattention library to be installed."}),
         },
         "optional": {
-            "allow_compile": ("BOOLEAN", {"default": False, "tooltip": "Allow the use of torch.compile for the sage attention function, requires latest sageattn 2.2.0 or higher."})
+            "allow_compile": ("BOOLEAN", {"default": False, "tooltip": "Allow the use of torch.compile for the sage attention function, requires latest sageattn 2.2.0 or higher."}),
+            "dry_run": ("BOOLEAN", {"default": False, "tooltip": "Run a small CUDA SageAttention validation before enabling the guarded Krea2 override."})
             }
         }
 
@@ -115,18 +286,19 @@ class PathchSageAttentionKJ():
     EXPERIMENTAL = True
     CATEGORY = "KJNodes/experimental"
 
-    def patch(self, model, sage_attention, allow_compile=False):
+    def patch(self, model, sage_attention, allow_compile=False, dry_run=False):
         if sage_attention == "disabled":
             return model,
 
         model_clone = model.clone()
 
-        new_attention = get_sage_func(sage_attention, allow_compile=allow_compile)
-        def attention_override_sage(func, *args, **kwargs):
-            return new_attention.__wrapped__(*args, **kwargs)
-
         # attention override
-        model_clone.model_options["transformer_options"]["optimized_attention_override"] = attention_override_sage
+        model_clone.model_options["transformer_options"]["optimized_attention_override"] = make_sage_attention_override(
+            sage_attention,
+            allow_compile=allow_compile,
+            model=model_clone,
+            dry_run=dry_run,
+        )
 
         return model_clone,
 
@@ -289,12 +461,11 @@ class CheckpointLoaderKJ():
                 torch.backends.cuda.matmul.allow_fp16_accumulation = False
 
         if sage_attention != "disabled":
-            new_attention = get_sage_func(sage_attention)
-            def attention_override_sage(func, *args, **kwargs):
-                return new_attention.__wrapped__(*args, **kwargs)
-
             # attention override
-            model.model_options["transformer_options"]["optimized_attention_override"] = attention_override_sage
+            model.model_options["transformer_options"]["optimized_attention_override"] = make_sage_attention_override(
+                sage_attention,
+                model=model,
+            )
 
         return model, clip, vae
 
@@ -407,12 +578,11 @@ class DiffusionModelLoaderKJ():
             logging.info(f"Setting {model_name} compute dtype to {dtype}")
 
         if sage_attention != "disabled":
-            new_attention = get_sage_func(sage_attention)
-            def attention_override_sage(func, *args, **kwargs):
-                return new_attention.__wrapped__(*args, **kwargs)
-
             # attention override
-            model.model_options["transformer_options"]["optimized_attention_override"] = attention_override_sage
+            model.model_options["transformer_options"]["optimized_attention_override"] = make_sage_attention_override(
+                sage_attention,
+                model=model,
+            )
 
         return (model,)
 
