@@ -653,7 +653,7 @@ class TorchCompileModelAdvanced:
                 "mode": (["default", "max-autotune", "max-autotune-no-cudagraphs", "reduce-overhead"], {"default": "default"}),
                 "dynamic": (
                     ["auto", "true", "false"],
-                    {"default": "auto", "tooltip": "Use dynamic shape tracing."},
+                    {"default": "false", "tooltip": "Use dynamic shape tracing."},
                 ),
                 "compile_transformer_blocks_only": ("BOOLEAN", {"default": True, "tooltip": "Compile only transformer blocks, faster compile and less error prone"}),
                 "dynamo_cache_size_limit": ("INT", {"default": 64, "min": 0, "max": 1024, "step": 1, "tooltip": "torch._dynamo.config.cache_size_limit"}),
