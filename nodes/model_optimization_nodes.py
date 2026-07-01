@@ -1330,6 +1330,7 @@ def _find_subsequence(seq, sub, lo, hi):
             out.append(i)
     return out
 
+
 def krea2_attn_forward_weight(self, x, freqs=None, mask=None, transformer_options={}):
     from einops import rearrange
     from comfy.ldm.flux.math import apply_rope
@@ -1338,12 +1339,15 @@ def krea2_attn_forward_weight(self, x, freqs=None, mask=None, transformer_option
     q = rearrange(q, "B L (H D) -> B H L D", H=self.heads)
     k = rearrange(k, "B L (H D) -> B H L D", H=self.kvheads)
     v = rearrange(v, "B L (H D) -> B H L D", H=self.kvheads)
+    # weights: list of (pos, v_factor, k_bias). v_factor scales the token's VALUE (removal/de-emphasis; <0 flips
+    # to subtract the concept). k_bias adds to the token's attention logit (emphasis: more of the image attends
+    # to it -> more of the concept), which works far better for amplification than scaling the value.
     weights = transformer_options.get("krea2_token_weights")
     if weights:
         v = v.clone()
-        for pos, factor in weights:
-            if pos < v.shape[2]:
-                v[:, :, pos] = v[:, :, pos] * factor    # scale this prompt token's value (neg flips -> subtract)
+        for pos, v_factor, _ in weights:
+            if v_factor != 1.0 and pos < v.shape[2]:
+                v[:, :, pos] = v[:, :, pos] * v_factor
     q, k = self.qknorm(q, k)
     if freqs is not None:
         q, k = apply_rope(q, k, freqs)
@@ -1351,7 +1355,16 @@ def krea2_attn_forward_weight(self, x, freqs=None, mask=None, transformer_option
         rep = self.heads // self.kvheads
         k = k.repeat_interleave(rep, dim=1)
         v = v.repeat_interleave(rep, dim=1)
-    out = optimized_attention(q, k, v, self.heads, mask=mask, skip_reshape=True, transformer_options=transformer_options)
+    bias = None
+    if weights and any(kb != 0.0 for _, _, kb in weights):
+        bias = q.new_zeros(1, k.shape[2])
+        for pos, _, kb in weights:
+            if kb != 0.0 and pos < bias.shape[1]:
+                bias[:, pos] = kb
+    if bias is not None:
+        out = attention_pytorch(q, k, v, self.heads, mask=bias, skip_reshape=True)
+    else:
+        out = optimized_attention(q, k, v, self.heads, mask=mask, skip_reshape=True, transformer_options=transformer_options)
     return self.wo(out * torch.sigmoid(gate))
 
 class Krea2WeightPatch:
@@ -1366,8 +1379,8 @@ class Krea2PromptWeight:
             "required": {
                 "clip": ("CLIP",),
                 "model": ("MODEL",),
-                "text": ("STRING", {"multiline": True, "default": "", "tooltip": "Prompt with per-token weights in parentheses: (word:-1) removes/represses a concept, (word:2) emphasizes it, plain text = 1.0. Works on Krea2 where ComfyUI's normal (word:weight) does nothing (the Qwen3-VL LLM encoder ignores it). Set sampler CFG to 1.0."}),
-                "strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 4.0, "step": 0.05, "tooltip": "Global multiplier on the weighting effect (effective factor = 1 + strength*(weight-1)). The scaling compounds over all 28 blocks; lower this if results break up, raise for a stronger effect."}),
+                "text": ("STRING", {"multiline": True, "default": "", "tooltip": "Prompt with per-token weights in parentheses, e.g. (word:-1) removes/represses a concept, (word:2) emphasizes it, plain text = 1.0. Works on Krea2 where ComfyUI's normal (word:weight) does nothing (the Qwen3-VL LLM encoder ignores it). weight<1 scales the token's attention VALUE (subtracts/removes at <0); weight>1 boosts how much the image ATTENDS to the token (adds more of it). Set sampler CFG to 1.0."}),
+                "strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 4.0, "step": 0.05, "tooltip": "Global multiplier on the weighting effect. Effect compounds over all 28 blocks; lower if results break up, raise for a stronger effect. Removal (weight<0) is the reliable direction; emphasis (weight>1) works but is looser."}),
             },
         }
 
@@ -1396,7 +1409,10 @@ class Krea2PromptWeight:
 
         weight_pairs = []                              # (conditioning position, value multiplier)
         for phrase, w in terms:
-            factor = 1.0 + strength * (w - 1.0)
+            if w > 1.0:
+                v_factor, k_bias = 1.0, strength * (w - 1.0) * 2.0   # emphasis via attention boost
+            else:
+                v_factor, k_bias = 1.0 + strength * (w - 1.0), 0.0   # de-emphasis / removal via value scaling
             positions = []
             for variant in (" " + phrase, phrase):     # words usually carry a leading-space token in context
                 sub = _krea2_token_ids(clip, variant)
@@ -1414,7 +1430,7 @@ class Krea2PromptWeight:
                 continue
             for cp in positions:
                 if 0 <= cp < cond_len:
-                    weight_pairs.append((cp, factor))
+                    weight_pairs.append((cp, v_factor, k_bias))
 
         if not weight_pairs:
             return (model, cond)
