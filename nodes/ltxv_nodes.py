@@ -262,17 +262,23 @@ class LTXVAudioVideoMask(io.ComfyNode):
                 video_mask = video_latent["noise_mask"].clone()
                 # Adjust mask size based on mode
                 if max_length == "pad" and video_samples.shape[2] > video_latent["samples"].shape[2]:
-                    # Pad the mask if we padded the samples
-                    mask_padding = torch.zeros(
-                        video_mask.shape[0],
-                        video_mask.shape[1],
-                        video_samples.shape[2] - video_mask.shape[2],
-                        video_mask.shape[3],
-                        video_mask.shape[4],
-                        dtype=video_mask.dtype,
-                        device=video_mask.device
-                    )
-                    video_mask = torch.cat([video_mask, mask_padding], dim=2)
+                    extra = video_samples.shape[2] - video_mask.shape[2]
+                    if extra > 0:
+                        # Pad the mask if we padded the samples
+                        mask_padding = torch.zeros(
+                            video_mask.shape[0],
+                            video_mask.shape[1],
+                            extra,
+                            video_mask.shape[3],
+                            video_mask.shape[4],
+                            dtype=video_mask.dtype,
+                            device=video_mask.device
+                        )
+                        video_mask = torch.cat([video_mask, mask_padding], dim=2)
+                    else:
+                        # Existing mask already covers the padded samples;
+                        # trim it to match instead of padding by a negative amount.
+                        video_mask = video_mask[:, :, :video_samples.shape[2]]
                 elif max_length == "truncate":
                     # Truncate the mask to match truncated samples
                     video_mask = video_mask[:, :, :video_samples.shape[2]]
@@ -322,16 +328,22 @@ class LTXVAudioVideoMask(io.ComfyNode):
                 audio_mask = audio_latent["noise_mask"].clone()
                 # Adjust mask size based on mode
                 if max_length == "pad" and audio_samples.shape[2] > audio_latent["samples"].shape[2]:
-                    # Pad the mask if we padded the samples
-                    mask_padding = torch.zeros(
-                        audio_mask.shape[0],
-                        audio_mask.shape[1],
-                        audio_samples.shape[2] - audio_mask.shape[2],
-                        audio_mask.shape[3],
-                        dtype=audio_mask.dtype,
-                        device=audio_mask.device
-                    )
-                    audio_mask = torch.cat([audio_mask, mask_padding], dim=2)
+                    extra = audio_samples.shape[2] - audio_mask.shape[2]
+                    if extra > 0:
+                        # Pad the mask if we padded the samples
+                        mask_padding = torch.zeros(
+                            audio_mask.shape[0],
+                            audio_mask.shape[1],
+                            extra,
+                            audio_mask.shape[3],
+                            dtype=audio_mask.dtype,
+                            device=audio_mask.device
+                        )
+                        audio_mask = torch.cat([audio_mask, mask_padding], dim=2)
+                    else:
+                        # Existing mask already covers the padded samples;
+                        # trim it to match instead of padding by a negative amount.
+                        audio_mask = audio_mask[:, :, :audio_samples.shape[2]]
                 elif max_length == "truncate":
                     # Truncate the mask to match truncated samples
                     audio_mask = audio_mask[:, :, :audio_samples.shape[2]]
