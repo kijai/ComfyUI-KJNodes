@@ -1296,7 +1296,143 @@ class WanVideoNAG:
             model_clone.add_object_patch(f"diffusion_model.blocks.{idx}.cross_attn.forward", patched_attn)
 
         return (model_clone,)
-    
+
+
+# Krea2 (K2) per-token prompt weighting via attention value scaling.
+# ComfyUI's (token:weight) syntax is stripped by the Qwen3-VL tokenizer, and embedding-level weighting barely
+# works on LLM text encoders anyway. Instead we scale the VALUE vectors of the weighted prompt tokens inside
+# every block's self-attention
+_QWEN_IM_START, _QWEN_USER, _QWEN_NL, _QWEN_IM_END = 151644, 872, 198, 151645
+
+def _krea2_user_content_span(ids):
+    # token span of the user prompt, between '<|im_start|>user\n' and the next '<|im_end|>'
+    for i in range(len(ids) - 2):
+        if ids[i] == _QWEN_IM_START and ids[i + 1] == _QWEN_USER and ids[i + 2] == _QWEN_NL:
+            start = i + 3
+            end = start
+            while end < len(ids) and ids[end] != _QWEN_IM_END:
+                end += 1
+            return start, end
+    return None, None
+
+def _krea2_token_ids(clip, text):
+    tok = clip.tokenize(text)
+    key = next(iter(tok))
+    return [t[0] for t in tok[key][0]]
+
+def _find_subsequence(seq, sub, lo, hi):
+    out = []
+    n = len(sub)
+    if n == 0:
+        return out
+    for i in range(lo, hi - n + 1):
+        if seq[i:i + n] == sub:
+            out.append(i)
+    return out
+
+def krea2_attn_forward_weight(self, x, freqs=None, mask=None, transformer_options={}):
+    from einops import rearrange
+    from comfy.ldm.flux.math import apply_rope
+
+    q, k, v, gate = self.wq(x), self.wk(x), self.wv(x), self.gate(x)
+    q = rearrange(q, "B L (H D) -> B H L D", H=self.heads)
+    k = rearrange(k, "B L (H D) -> B H L D", H=self.kvheads)
+    v = rearrange(v, "B L (H D) -> B H L D", H=self.kvheads)
+    weights = transformer_options.get("krea2_token_weights")
+    if weights:
+        v = v.clone()
+        for pos, factor in weights:
+            if pos < v.shape[2]:
+                v[:, :, pos] = v[:, :, pos] * factor    # scale this prompt token's value (neg flips -> subtract)
+    q, k = self.qknorm(q, k)
+    if freqs is not None:
+        q, k = apply_rope(q, k, freqs)
+    if self.kvheads != self.heads:
+        rep = self.heads // self.kvheads
+        k = k.repeat_interleave(rep, dim=1)
+        v = v.repeat_interleave(rep, dim=1)
+    out = optimized_attention(q, k, v, self.heads, mask=mask, skip_reshape=True, transformer_options=transformer_options)
+    return self.wo(out * torch.sigmoid(gate))
+
+class Krea2WeightPatch:
+    def __get__(self, obj, objtype=None):
+        return types.MethodType(krea2_attn_forward_weight, obj)
+
+
+class Krea2PromptWeight:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "clip": ("CLIP",),
+                "model": ("MODEL",),
+                "text": ("STRING", {"multiline": True, "default": "", "tooltip": "Prompt with per-token weights in parentheses: (word:-1) removes/represses a concept, (word:2) emphasizes it, plain text = 1.0. Works on Krea2 where ComfyUI's normal (word:weight) does nothing (the Qwen3-VL LLM encoder ignores it). Set sampler CFG to 1.0."}),
+                "strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 4.0, "step": 0.05, "tooltip": "Global multiplier on the weighting effect (effective factor = 1 + strength*(weight-1)). The scaling compounds over all 28 blocks; lower this if results break up, raise for a stronger effect."}),
+            },
+        }
+
+    RETURN_TYPES = ("MODEL", "CONDITIONING")
+    RETURN_NAMES = ("model", "conditioning")
+    FUNCTION = "encode"
+    CATEGORY = "KJNodes/experimental"
+    DESCRIPTION = "Per-token prompt weighting for Krea2 (K2) via attention value scaling. Use (word:-1) to remove a concept, (word:1.5) to emphasize one -- works through the Qwen3-VL encoder where normal weighting doesn't. Outputs the patched model + conditioning; set the sampler CFG to 1.0."
+    EXPERIMENTAL = True
+
+    def encode(self, clip, model, text, strength):
+        import re
+        pattern = re.compile(r"\(([^():]+):(-?\d*\.?\d+)\)")
+        terms = [(m.group(1).strip(), float(m.group(2))) for m in pattern.finditer(text)]
+        clean = pattern.sub(lambda m: m.group(1), text)
+
+        tok = clip.tokenize(clean)
+        key = next(iter(tok))
+        ids = [t[0] for t in tok[key][0]]
+        cond = clip.encode_from_tokens_scheduled(tok)
+        cond_len = cond[0][0].shape[1]
+        visible_start = len(ids) - cond_len            # conditioning == ids[visible_start:]
+        start, end = _krea2_user_content_span(ids)
+        if start is None:
+            start, end = visible_start, len(ids)
+
+        weight_pairs = []                              # (conditioning position, value multiplier)
+        for phrase, w in terms:
+            factor = 1.0 + strength * (w - 1.0)
+            positions = []
+            for variant in (" " + phrase, phrase):     # words usually carry a leading-space token in context
+                sub = _krea2_token_ids(clip, variant)
+                ps, pe = _krea2_user_content_span(sub)
+                if ps is None:
+                    continue
+                sub = sub[ps:pe]
+                matches = _find_subsequence(ids, sub, start, end)
+                if matches:
+                    for mi in matches:
+                        positions.extend(mi + off - visible_start for off in range(len(sub)))
+                    break
+            if not positions:
+                logging.warning(f"Krea2PromptWeight: phrase '{phrase}' not found in prompt; skipped.")
+                continue
+            for cp in positions:
+                if 0 <= cp < cond_len:
+                    weight_pairs.append((cp, factor))
+
+        if not weight_pairs:
+            return (model, cond)
+        logging.info(f"Krea2PromptWeight: weighting {weight_pairs}")
+
+        model_clone = model.clone()
+        diffusion_model = model_clone.get_model_object("diffusion_model")
+
+        transformer_options = model_clone.model_options.get("transformer_options", {}).copy()
+        transformer_options["krea2_token_weights"] = weight_pairs
+        model_clone.model_options["transformer_options"] = transformer_options
+
+        for idx, block in enumerate(diffusion_model.blocks):
+            patched_attn = Krea2WeightPatch().__get__(block.attn, block.attn.__class__)
+            model_clone.add_object_patch(f"diffusion_model.blocks.{idx}.attn.forward", patched_attn)
+
+        return (model_clone, cond)
+
 class SkipLayerGuidanceWanVideo:
     @classmethod
     def INPUT_TYPES(s):
