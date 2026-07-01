@@ -784,6 +784,7 @@ class PatchTritonVAE(io.ComfyNode):
         if channels_last or int8_applied:
             if int8_applied and not channels_last:
                 logging.info("PatchTritonVAE: channels_last enforced, the int8 conv path requires it")
+            vae.disable_offload = True
             # reapply per load: weight staging restores the original contiguous layout
             def reapply_channels_last(patcher, device_to, lowvram_model_memory, force_patch_weights, full_load):
                 convert_conv_layout(patcher.model, channels_last=True)
