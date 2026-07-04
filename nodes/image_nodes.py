@@ -2197,6 +2197,134 @@ Then on another copy of the node provide the newly generated frames and choose h
 
         return (source_images, start_images, extended_images)
 
+class ImageBatchListCombineWithOverlap:
+
+    RETURN_TYPES = ("IMAGE", )
+    RETURN_NAMES = ("combined_images", )
+    OUTPUT_TOOLTIPS = (
+        "The combined images with overlap on each seam.",
+    )
+    INPUT_IS_LIST = True
+    FUNCTION = "imagesfrombatch"
+    CATEGORY = "KJNodes/image"
+    DESCRIPTION = """
+Helper node for video generation extension.
+Combines any number of image batches into a single batch, with overlap between successive batches.
+Example use: 
+- generate multiple video latents
+- combine them into a list (for example using Rebatch Latents)
+- VAE Decode the latent list and feed the decoded images into this node
+"""
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "image_batches": ("IMAGE", {"tooltip": "A list of image batches to combine."}),
+                "overlap": ("INT", {"default": 13,"min": 1, "max": 4096, "step": 1, "tooltip": "Number of overlapping frames between previous and following batch."}),
+                "overlap_side": (["previous", "following"], {"default": "source", "tooltip": "Which side to overlap on"}),
+                "overlap_mode": (["cut", "linear_blend", "ease_in_out", "filmic_crossfade", "perceptual_crossfade"], {"default": "linear_blend", "tooltip": "Method to use for overlapping frames"}),
+            }
+        }
+
+
+    def imagesfrombatch(self, image_batches, overlap, overlap_side, overlap_mode):
+        # Nothing to do on empty input
+        if not image_batches:
+            return torch.zeros((1, 64, 64, 3), device="cpu"),
+
+        # Nothing to do on single batch
+        if len(image_batches) == 1:
+            return image_batches[0],
+
+        # Use identical overlap settings for all batches
+        overlap = overlap[0]
+        overlap_side = overlap_side[0]
+        overlap_mode = overlap_mode[0]
+
+        combined_images = image_batches[0]
+        for index, batch in enumerate(image_batches[1:]):
+            combined_images = self._imagesfrombatch(
+                combined_images,
+                overlap,
+                overlap_side,
+                overlap_mode,
+                batch
+            )
+
+        return combined_images,
+
+    def _imagesfrombatch(self, source_images, overlap, overlap_side, overlap_mode, new_images=None):
+        extended_images = source_images
+
+        if overlap > len(source_images):
+            return extended_images
+
+        if new_images is not None:
+            if source_images.shape[1:3] != new_images.shape[1:3]:
+                raise ValueError(f"All image batches must have the same shape: {source_images.shape[1:3]} vs {new_images.shape[1:3]}")
+            # Determine where to place the overlap
+            prefix = source_images[:-overlap]
+            if overlap_side == "previous":
+                blend_src = source_images[-overlap:]
+                blend_dst = new_images[:overlap]
+            elif overlap_side == "following":
+                blend_src = new_images[:overlap]
+                blend_dst = source_images[-overlap:]
+            suffix = new_images[overlap:]
+
+            if overlap_mode == "linear_blend":
+                # Vectorized version - process all frames at once
+                alpha = torch.linspace(0, 1, overlap + 2, device=blend_src.device, dtype=blend_src.dtype)[1:-1]
+                alpha = alpha.view(-1, 1, 1, 1)  # Shape: [overlap, 1, 1, 1]
+                blended_images = (1 - alpha) * blend_src + alpha * blend_dst
+                extended_images = torch.cat((prefix, blended_images, suffix), dim=0)
+
+            elif overlap_mode == "filmic_crossfade":
+                gamma = 2.2
+                alpha = torch.linspace(0, 1, overlap + 2, device=blend_src.device, dtype=blend_src.dtype)[1:-1]
+                alpha = alpha.view(-1, 1, 1, 1)
+                linear_src = torch.pow(blend_src, gamma)
+                linear_dst = torch.pow(blend_dst, gamma)
+                blended = (1 - alpha) * linear_src + alpha * linear_dst
+                blended_images = torch.pow(blended, 1.0 / gamma)
+                extended_images = torch.cat((prefix, blended_images, suffix), dim=0)
+
+            elif overlap_mode == "perceptual_crossfade":
+                import kornia
+                alpha = torch.linspace(0, 1, overlap + 2, device=blend_src.device, dtype=blend_src.dtype)[1:-1]
+
+                src_nchw = blend_src.movedim(-1, 1)
+                dst_nchw = blend_dst.movedim(-1, 1)
+                lab_src = kornia.color.rgb_to_lab(src_nchw)
+                lab_dst = kornia.color.rgb_to_lab(dst_nchw)
+
+                # Blend in LAB space
+                alpha = alpha.view(-1, 1, 1, 1)  # [N,1,1,1] for broadcasting
+                blended_lab = (1 - alpha) * lab_src + alpha * lab_dst
+
+                # Convert back to RGB and reshape
+                blended_rgb = kornia.color.lab_to_rgb(blended_lab)
+                blended_images = blended_rgb.movedim(1, -1)  # [N,C,H,W] -> [N,H,W,C]
+                extended_images = torch.cat((prefix, blended_images, suffix), dim=0)
+
+            elif overlap_mode == "ease_in_out":
+                # Vectorized ease_in_out
+                t = torch.linspace(0, 1, overlap + 2, device=blend_src.device, dtype=blend_src.dtype)[1:-1]
+                eased_t = 3 * t * t - 2 * t * t * t  # ease_in_out formula
+                eased_t = eased_t.view(-1, 1, 1, 1)
+                blended_images = (1 - eased_t) * blend_src + eased_t * blend_dst
+                extended_images = torch.cat((prefix, blended_images, suffix), dim=0)
+
+            elif overlap_mode == "cut":
+                extended_images = torch.cat((prefix, suffix), dim=0)
+                if overlap_side == "following":
+                    extended_images = torch.cat((source_images, new_images[overlap:]), dim=0)
+                elif overlap_side == "previous":
+                    extended_images = torch.cat((source_images[:-overlap], new_images), dim=0)
+
+        return extended_images
+
 class GetLatentRangeFromBatch:
     
     RETURN_TYPES = ("LATENT", )
