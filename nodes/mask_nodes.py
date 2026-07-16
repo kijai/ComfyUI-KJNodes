@@ -7,6 +7,7 @@ import numpy as np
 from contextlib import nullcontext
 import os
 from tqdm import tqdm
+import logging
 
 from comfy import model_management
 from comfy.utils import ProgressBar
@@ -73,7 +74,7 @@ Segments an image or batch of images using CLIPSeg.
                         from huggingface_hub import snapshot_download
                         snapshot_download(repo_id="Kijai/clipseg-rd64-refined-fp16", local_dir=checkpoint_path, local_dir_use_symlinks=False)
                     self.model = CLIPSegForImageSegmentation.from_pretrained(checkpoint_path)
-                except:
+                except Exception:
                     checkpoint_path = "CIDAS/clipseg-rd64-refined"
                     self.model = CLIPSegForImageSegmentation.from_pretrained(checkpoint_path)
             processor = CLIPSegProcessor.from_pretrained(checkpoint_path)
@@ -101,7 +102,7 @@ Segments an image or batch of images using CLIPSeg.
         mask_tensor = torch.sigmoid(outputs.logits)
         mask_tensor = (mask_tensor - mask_tensor.min()) / (mask_tensor.max() - mask_tensor.min())
         mask_tensor = torch.where(mask_tensor > (threshold), mask_tensor, torch.tensor(0, dtype=torch.float))
-        print(mask_tensor.shape)
+
         if len(mask_tensor.shape) == 2:
             mask_tensor = mask_tensor.unsqueeze(0)
         mask_tensor = F.interpolate(mask_tensor.unsqueeze(1), size=(H, W), mode='nearest')
@@ -231,40 +232,34 @@ creates animation between them.
             image = Image.new("RGB", (width, height), "black")
             draw = ImageDraw.Draw(image)
             font = ImageFont.truetype(font_path, font_size)
-            
-            # Split the text into words
-            words = text.split()
-            
-            # Initialize variables for line creation
+
+            # Split the text into lines and wrap words to fit width
+            text_lines = text.split('\n')
             lines = []
-            current_line = []
-            current_line_width = 0
-            try: #new pillow  
-                # Iterate through words to create lines
+            for text_line in text_lines:
+                if text_line.strip() == "":
+                    # Preserve empty lines for multiple newlines
+                    lines.append("")
+                    continue
+                words = text_line.split()
+                current_line = []
                 for word in words:
-                    word_width = font.getbbox(word)[2]
-                    if current_line_width + word_width <= width - 2 * text_x:
+                    if current_line:
+                        test_line = " ".join(current_line + [word])
+                    else:
+                        test_line = word
+                    try:
+                        test_line_width = font.getbbox(test_line)[2]
+                    except Exception:
+                        test_line_width = font.getsize(test_line)[0]
+                    if test_line_width <= width - 2 * text_x:
                         current_line.append(word)
-                        current_line_width += word_width + font.getbbox(" ")[2] # Add space width
                     else:
                         lines.append(" ".join(current_line))
                         current_line = [word]
-                        current_line_width = word_width
-            except: #old pillow             
-                for word in words:
-                    word_width = font.getsize(word)[0]
-                    if current_line_width + word_width <= width - 2 * text_x:
-                        current_line.append(word)
-                        current_line_width += word_width + font.getsize(" ")[0] # Add space width
-                    else:
-                        lines.append(" ".join(current_line))
-                        current_line = [word]
-                        current_line_width = word_width
-            
-            # Add the last line if it's not empty
-            if current_line:
-                lines.append(" ".join(current_line))
-            
+                if current_line:
+                    lines.append(" ".join(current_line))
+
             # Draw each line of text separately
             y_offset = text_y
             for line in lines:
@@ -274,20 +269,20 @@ creates animation between them.
                 text_center_y = y_offset + text_height / 2
                 try:
                     draw.text((text_x, y_offset), line, font=font, fill=font_color, features=['-liga'])
-                except:
+                except Exception:
                     draw.text((text_x, y_offset), line, font=font, fill=font_color)
                 y_offset += text_height # Move to the next line
-            
+
             if start_rotation != end_rotation:
                 image = image.rotate(rotation, center=(text_center_x, text_center_y))
                 rotation += rotation_increment
-            
+
             image = np.array(image).astype(np.float32) / 255.0
             image = torch.from_numpy(image)[None,]
             mask = image[:, :, :, 0] 
             masks.append(mask)
             out.append(image)
-            
+
         if invert:
             return (1.0 - torch.cat(out, dim=0), 1.0 - torch.cat(masks, dim=0),)
         return (torch.cat(out, dim=0),torch.cat(masks, dim=0),)
@@ -376,7 +371,7 @@ class CreateFluidMask:
         from ..utility.fluid import Fluid
         try:
             from scipy.special import erf
-        except:
+        except ImportError:
             from scipy.spatial import erf
         out = []
         masks = []
@@ -389,7 +384,7 @@ class CreateFluidMask:
         INFLOW_VELOCITY = inflow_velocity
         INFLOW_COUNT = inflow_count
 
-        print('Generating fluid solver, this may take some time.')
+        logging.info('Generating fluid solver, this may take some time.')
         fluid = Fluid(RESOLUTION, 'dye')
 
         center = np.floor_divide(RESOLUTION, 2)
@@ -409,7 +404,7 @@ class CreateFluidMask:
 
         
         for f in range(DURATION):
-            print(f'Computing frame {f + 1} of {DURATION}.')
+            logging.info(f'Computing frame {f + 1} of {DURATION}.')
             if f <= INFLOW_DURATION:
                 fluid.velocity += inflow_velocity
                 fluid.dye += inflow_dye
@@ -453,8 +448,8 @@ class CreateAudioMask:
     def createaudiomask(self, frames, width, height, invert, audio_path, scale):
         try:
             import librosa
-        except ImportError:
-            raise Exception("Can not import librosa. Install it with 'pip install librosa'")
+        except ImportError as e:
+            raise ImportError("Can not import librosa. Install it with 'pip install librosa'") from e
         batch_size = frames
         out = []
         masks = []
@@ -1013,7 +1008,7 @@ class GrowMaskWithBlur:
         current_expand = expand
         for m in tqdm(growmask, desc="Expanding/Contracting Mask"):
             output = m.unsqueeze(0).unsqueeze(0).to(main_device)  # Add batch and channel dims for kornia
-            if abs(round(current_expand)) > 0:
+            if abs(round(current_expand)) > 0 and output.max() > 0:
                 # Create kernel - kornia expects kernel on same device as input
                 if tapered_corners:
                     kernel = torch.tensor([[0, 1, 0],
@@ -1311,7 +1306,6 @@ def get_mask_polygon(self, mask_np):
     
     return polygon.squeeze()
 
-import cv2
 class SeparateMasks:
     @classmethod
     def INPUT_TYPES(cls):
@@ -1334,6 +1328,7 @@ class SeparateMasks:
     DESCRIPTION = "Separates a mask into multiple masks based on the size of the connected components."
 
     def polygon_to_mask(self, polygon, shape):
+        import cv2
         mask = np.zeros((shape[0], shape[1]), dtype=np.uint8)  # Fixed shape handling
 
         if len(polygon.shape) == 2:  # Check if polygon points are valid
@@ -1342,6 +1337,7 @@ class SeparateMasks:
         return mask
 
     def get_mask_polygon(self, mask_np, max_points):
+        import cv2
         contours, _ = cv2.findContours(mask_np, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         if not contours:
             return None
@@ -1351,7 +1347,6 @@ class SeparateMasks:
         
         # Initialize with smaller epsilon for more points
         perimeter = cv2.arcLength(hull, True)
-        epsilon = perimeter * 0.01  # Start smaller
         
         min_eps = perimeter * 0.001  # Much smaller minimum
         max_eps = perimeter * 0.2   # Smaller maximum
@@ -1387,9 +1382,6 @@ class SeparateMasks:
         return best_approx.squeeze() if best_approx is not None else hull.squeeze()
 
     def separate(self, mask: torch.Tensor, size_threshold_width: int, size_threshold_height: int, max_poly_points: int, mode: str):
-        from scipy.ndimage import label, center_of_mass
-        import numpy as np
-        
         B, H, W = mask.shape
         separated = []
 
@@ -1398,7 +1390,7 @@ class SeparateMasks:
         for b in range(B):
             mask_np = mask[b].cpu().numpy().astype(np.uint8)
             structure = np.ones((3, 3), dtype=np.int8)
-            labeled, ncomponents = label(mask_np, structure=structure)
+            labeled, ncomponents = scipy.ndimage.label(mask_np, structure=structure)
             pbar = ProgressBar(ncomponents)
             
             for component in range(1, ncomponents + 1):
@@ -1412,7 +1404,7 @@ class SeparateMasks:
                 width = x_max - x_min + 1
                 height = y_max - y_min + 1
                 centroid_x = (x_min + x_max) / 2  # Calculate x centroid
-                print(f"Component {component}: width={width}, height={height}, x_pos={centroid_x}")
+                logging.info(f"Component {component}: width={width}, height={height}, x_pos={centroid_x}")
                 
                 if width >= size_threshold_width and height >= size_threshold_height:
                     if mode == "convex_polygons":
@@ -1515,7 +1507,7 @@ class ConsolidateMasksKJ:
             merged.append(mask_idx)
             final_masks.append(combined_mask)
 
-        print(f"Consolidated {B} masks into {len(final_masks)}")
+        logging.info(f"Consolidated {B} masks into {len(final_masks)}")
         return (torch.stack(final_masks, dim=0),)
 
 
@@ -1525,18 +1517,18 @@ class DrawMaskOnImage:
         return {"required": {
                     "image": ("IMAGE", ),
                     "mask": ("MASK", ),
-                    "color": ("STRING", {"default": "0, 0, 0", "tooltip": "Color as RGB values in range 0-255 or 0.0-1.0, separated by commas."}),
+                    "color": ("STRING", {"default": "0, 0, 0", "tooltip": "Color as RGB/RGBA values in range 0-255 or 0.0-1.0, separated by commas. Ex: 255, 0, 0, 128"}),
                   },
                   "optional": {
                     "device": (["cpu", "gpu"], {"default": "cpu", "tooltip": "Device to use for processing"}),
                 }
         }
-    
+
     RETURN_TYPES = ("IMAGE", )
     RETURN_NAMES = ("images",)
     FUNCTION = "apply"
     CATEGORY = "KJNodes/masking"
-    DESCRIPTION = "Applies the provided masks to the input images."
+    DESCRIPTION = "Applies the provided masks to the input images with Alpha Blending support."
 
     def apply(self, image, mask, color, device="cpu"):
         B, H, W, C = image.shape
@@ -1546,43 +1538,70 @@ class DrawMaskOnImage:
 
         in_masks = mask.clone().to(processing_device)
         in_images = image.clone().to(processing_device)
-        
+
+        # Resize mask if dimensions don't match
         if HM != H or WM != W:
             in_masks = F.interpolate(mask.unsqueeze(1), size=(H, W), mode='nearest-exact').squeeze(1)
+        # Handle batch size mismatch
         if B > BM:
             in_masks = in_masks.repeat((B + BM - 1) // BM, 1, 1)[:B]
         elif BM > B:
             in_masks = in_masks[:B]
-        
-        output_images = []
-        
-        # Parse background color - detect if values are integers or floats
-        bg_values = []
-        for x in color.split(","):
-            val_str = x.strip()
-            if '.' in val_str:
-                bg_values.append(float(val_str))
-            else:
-                bg_values.append(int(val_str) / 255.0)
 
-        background_color = torch.tensor(bg_values, dtype=torch.float32, device=in_images.device)
+        output_images = []
+
+        # Parse Color String (Handle RGB, RGBA, and Hex formats)
+        color = color.strip()
+        color_values = []
+
+        if color.startswith('#'):
+            # Handle hex format (#RGB, #RGBA, #RRGGBB, #RRGGBBAA)
+            hex_color = color.lstrip('#')
+            if len(hex_color) == 3:  # #RGB
+                color_values = [int(c*2, 16) / 255.0 for c in hex_color]
+            elif len(hex_color) == 4:  # #RGBA
+                color_values = [int(c*2, 16) / 255.0 for c in hex_color]
+            elif len(hex_color) == 6:  # #RRGGBB
+                color_values = [int(hex_color[i:i+2], 16) / 255.0 for i in (0, 2, 4)]
+            elif len(hex_color) == 8:  # #RRGGBBAA
+                color_values = [int(hex_color[i:i+2], 16) / 255.0 for i in (0, 2, 4, 6)]
+            else:
+                raise ValueError(f"Invalid hex color format: {color}")
+        else:
+            # Handle comma-separated RGB/RGBA format
+            for x in color.split(","):
+                val = float(x.strip())
+                color_values.append(val / 255.0 if val > 1.0 else val)
+
+        rgb = color_values[:3]
+        alpha_val = color_values[3] if len(color_values) == 4 else 1.0
+
+        fill_color = torch.tensor(rgb, dtype=torch.float32, device=processing_device)
 
         for i in tqdm(range(B), desc="DrawMaskOnImage batch"):
-            curr_mask = in_masks[i]
+            curr_mask = in_masks[i] # [H, W]
             img_idx = min(i, B - 1)
-            curr_image = in_images[img_idx]
-            mask_expanded = curr_mask.unsqueeze(-1).expand(-1, -1, 3)
-            masked_image = curr_image * (1 - mask_expanded) + background_color * (mask_expanded)
+            curr_image = in_images[img_idx] # [H, W, C]
+
+            blend_factor = curr_mask.unsqueeze(-1) * alpha_val
+            img_channels = curr_image.shape[-1]
+
+            if img_channels == 4:
+                img_rgb = curr_image[..., :3]
+                img_a = curr_image[..., 3:]
+                out_rgb = img_rgb * (1 - blend_factor) + fill_color * blend_factor
+                out_a = torch.maximum(img_a, blend_factor)
+                masked_image = torch.cat((out_rgb, out_a), dim=-1)
+            else:
+                masked_image = curr_image * (1 - blend_factor) + fill_color * blend_factor
             output_images.append(masked_image)
-        
-        # If no masks were processed, return empty tensor
+
         if not output_images:
-            return (torch.zeros((0, H, W, 3), dtype=image.dtype),)
+            return (torch.zeros((0, H, W, C), dtype=image.dtype),)
 
-        out_rgb = torch.stack(output_images, dim=0).cpu()
-        
-        return (out_rgb, )
+        out_tensor = torch.stack(output_images, dim=0).cpu()
 
+        return (out_tensor, )
 
 class BlockifyMask:
     @classmethod

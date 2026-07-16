@@ -1,12 +1,90 @@
-from .nodes.nodes import *
-from .nodes.curve_nodes import *
-from .nodes.batchcrop_nodes import *
-from .nodes.audioscheduler_nodes import *
-from .nodes.image_nodes import *
-from .nodes.intrinsic_lora_nodes import *
-from .nodes.mask_nodes import *
-from .nodes.model_optimization_nodes import *
-from .nodes.lora_nodes import *
+from .nodes.nodes import (
+    BOOLConstant, INTConstant, FloatConstant, StringConstant, StringConstantMultiline,
+    ScaleBatchPromptSchedule, GetLatentsFromBatchIndexed, ConditioningMultiCombine,
+    AppendStringsToList, JoinStrings, JoinStringMulti, CondPassThrough, ModelPassThrough,
+    ConditioningSetMaskAndCombine, ConditioningSetMaskAndCombine3,
+    ConditioningSetMaskAndCombine4, ConditioningSetMaskAndCombine5,
+    VRAM_Debug, SomethingToString, Sleep, EmptyLatentImagePresets,
+    EmptyLatentImageCustomPresets, WidgetToString, DummyOut, FlipSigmasAdjusted,
+    CustomSigmas, StringToFloatList, InjectNoiseToLatent, SoundReactive, GenerateNoise,
+    StableZero123_BatchSchedule, SV3D_BatchSchedule, Superprompt, CameraPoseVisualizer,
+    CheckpointPerturbWeights, DifferentialDiffusionAdvanced, FluxBlockLoraSelect,
+    HunyuanVideoBlockLoraSelect, Wan21BlockLoraSelect, LTX2BlockLoraSelect,
+    DiTBlockLoraLoader, CustomControlNetWeightsFluxFromList,
+    SetShakkerLabsUnionControlNetType, ModelSaveKJ, StyleModelApplyAdvanced,
+    AudioConcatenate, LeapfusionHunyuanI2V, ImageNoiseAugmentation, VAELoaderKJ, VAEMergeKJ,
+    ScheduledCFGGuidance, ApplyRifleXRoPE_WanVideo, ApplyRifleXRoPE_HunuyanVideo,
+    TimerNodeKJ, HunyuanVideoEncodeKeyframesToCond, LazySwitchKJ, LatentInpaintTTM,
+    SimpleCalculatorKJ, GetTrackRange, AddNoiseToTrackPath, VAEDecodeLoopKJ,
+    WanImageToVideoSVIPro, DeprecatedCompileNodeKJ, VisualizeSigmasKJ,
+    PreviewLatentNoiseMask, PlaySoundKJ,
+)
+from .nodes.curve_nodes import (
+    PlotCoordinates, SplineEditor, CreateShapeMaskOnPath, CreateShapeImageOnPath,
+    CreateTextOnPath, CreateGradientFromCoords, GradientToFloat, MaskOrImageToWeight,
+    WeightScheduleConvert, FloatToMask, WeightScheduleExtend, FloatToSigmas, SigmasToFloat,
+    GLIGENTextBoxApplyBatchCoords, CreateInstanceDiffusionTracking,
+    AppendInstanceDiffusionTracking, InterpolateCoords, DrawInstanceDiffusionTracking,
+    PointsEditor, CutAndDragOnPath,
+)
+from .nodes.batchcrop_nodes import (
+    BatchCropFromMask, BatchUncrop, BatchCropFromMaskAdvanced,
+    FilterZeroMasksAndCorrespondingImages, InsertImageBatchByIndexes, BatchUncropAdvanced,
+    SplitBboxes, BboxToInt, BboxVisualize,
+)
+from .nodes.audioscheduler_nodes import (
+    NormalizedAmplitudeToMask, NormalizedAmplitudeToFloatList,
+    OffsetMaskByNormalizedAmplitude, ImageTransformByNormalizedAmplitude,
+)
+from .nodes.image_nodes import (
+    ImagePass, ColorMatch, ColorMatchV2, SaveImageWithAlpha, ImageConcanate,
+    ImageConcatFromBatch, ImageGridComposite2x2, ImageGridComposite3x3,
+    ImageBatchTestPattern, ImageGrabPIL, Screencap_mss, ScreencapStream, WebcamCaptureCV2,
+    AddLabel, GetImageSizeAndCount, GetLatentSizeAndCount, ImageBatchRepeatInterleaving,
+    ImageUpscaleWithModelBatched, ImageNormalize_Neg1_To_1, RemapImageRange,
+    SplitImageChannels, MergeImageChannels, ImagePadForOutpaintMasked,
+    ImagePadForOutpaintTargetSize, ImagePrepForICLora, ImageAndMaskPreview,
+    CrossFadeImages, CrossFadeImagesMulti, TransitionImagesMulti, TransitionImagesInBatch,
+    ImageBatchJoinWithTransition, ShuffleImageBatch, GetImageRangeFromBatch,
+    RandomImageFromBatch, ImageBatchExtendWithOverlap, GetLatentRangeFromBatch,
+    InsertLatentToIndex, ImageBatchFilter, GetImagesFromBatchIndexed,
+    InsertImagesToBatchIndexed, PadImageBatchInterleaved, ReplaceImagesInBatch,
+    ReverseImageBatch, ImageBatchMulti, ImageTensorList, ImageAddMulti, ImageConcatMulti,
+    PreviewAnimation, ImageResizeKJ, ImageResizeKJv2, LoadAndResizeImage,
+    LoadImagesFromFolderKJ, ImageGridtoBatch, SaveImageKJ, SaveStringKJ, FastPreview,
+    FastPreviewBatch, ImageCropByMaskAndResize, ImageCropByMask, ImageUncropByMask,
+    ImageCropByMaskBatch, ImagePadKJ, LoadVideosFromFolder, EncodeVideoComponents,
+    DecodeAndSaveVideo, PreviewImageOrMask,
+)
+
+from .nodes.mask_nodes import (
+    BatchCLIPSeg, DownloadAndLoadCLIPSeg, CreateTextMask, ColorToMask, CreateFluidMask,
+    CreateAudioMask, CreateGradientMask, CreateFadeMask, CreateFadeMaskAdvanced,
+    CreateMagicMask, CreateShapeMask, CreateVoronoiMask, GetMaskSizeAndCount,
+    GrowMaskWithBlur, MaskBatchMulti, OffsetMask, RoundMask, ResizeMask, RemapMaskRange,
+    SeparateMasks, ConsolidateMasksKJ, DrawMaskOnImage, BlockifyMask,
+)
+from .nodes.model_optimization_nodes import (
+    PathchSageAttentionKJ, PatchFlashAttentionKJ, CheckpointLoaderKJ, DiffusionModelSelector,
+    DiffusionModelLoaderKJ, ModelPatchTorchSettings, PatchModelPatcherOrder,
+    TorchCompileModelFluxAdvancedV2, TorchCompileModelWanVideoV2,
+    TorchCompileModelAdvanced, TorchCompileVAE, TorchCompileControlNet,
+    WanVideoTeaCacheKJ, WanVideoEnhanceAVideoKJ, LTXVEnhanceAVideoKJ, WanVideoNAG, Krea2PromptWeight,
+    SkipLayerGuidanceWanVideo, CFGZeroStarAndInit, GGUFLoaderKJ, NABLA_AttentionKJ,
+    StartRecordCUDAMemoryHistory, EndRecordCUDAMemoryHistory, VisualizeCUDAMemoryHistory,
+    ModelMemoryUseReportPatch, ModelMemoryUsageFactorOverride, WanChunkFeedForward,
+    SamplerSelfRefineVideo, PiDColorBiasCorrection, Ideogram4OptimizationsKJ,
+)
+from .nodes.lora_nodes import LoraExtractKJ, LoraReduceRank
+from .nodes.image_transform_node import ImageTransformKJ
+from .nodes.sharpen_nodes import ImageSharpenKJ
+from .nodes.hdr_preview_node import HDRPreviewKJ
+from .nodes.preview_override_node import ModelPreviewOverrideKJ, GetPreviewOverrideFramesKJ
+from .nodes.context_windows_visualizer import ContextWindowsVisualizerKJ
+from .nodes.ideogram4_nodes import Ideogram4PromptBuilderKJ
+
+import logging
+
 NODE_CONFIG = {
     #constants
     "BOOLConstant": {"class": BOOLConstant, "name": "BOOL Constant"},
@@ -21,6 +99,7 @@ NODE_CONFIG = {
     "ConditioningSetMaskAndCombine4": {"class": ConditioningSetMaskAndCombine4, "name": "ConditioningSetMaskAndCombine4"},
     "ConditioningSetMaskAndCombine5": {"class": ConditioningSetMaskAndCombine5, "name": "ConditioningSetMaskAndCombine5"},
     "CondPassThrough": {"class": CondPassThrough},
+    "WanImageToVideoSVIPro": {"class": WanImageToVideoSVIPro, "name": "Wan Image To Video SVIPro"},
     #masking
     "DrawMaskOnImage": {"class": DrawMaskOnImage, "name": "Draw Mask On Image"},
     "DownloadAndLoadCLIPSeg": {"class": DownloadAndLoadCLIPSeg, "name": "(Down)load CLIPSeg"},
@@ -48,15 +127,18 @@ NODE_CONFIG = {
     #images
     "AddLabel": {"class": AddLabel, "name": "Add Label"},
     "ColorMatch": {"class": ColorMatch, "name": "Color Match"},
+    "ColorMatchV2": {"class": ColorMatchV2, "name": "Color Match V2"},
     "ImageTensorList": {"class": ImageTensorList, "name": "Image Tensor List"},
     "CrossFadeImages": {"class": CrossFadeImages, "name": "Cross Fade Images"},
     "CrossFadeImagesMulti": {"class": CrossFadeImagesMulti, "name": "Cross Fade Images Multi"},
     "GetImagesFromBatchIndexed": {"class": GetImagesFromBatchIndexed, "name": "Get Images From Batch Indexed"},
     "GetImageRangeFromBatch": {"class": GetImageRangeFromBatch, "name": "Get Image or Mask Range From Batch"},
+    "RandomImageFromBatch": {"class": RandomImageFromBatch, "name": "Random Image From Batch"},
     "GetLatentRangeFromBatch": {"class": GetLatentRangeFromBatch, "name": "Get Latent Range From Batch"},
     "GetLatentSizeAndCount": {"class": GetLatentSizeAndCount, "name": "Get Latent Size & Count"},
     "GetImageSizeAndCount": {"class": GetImageSizeAndCount, "name": "Get Image Size & Count"},
     "FastPreview": {"class": FastPreview, "name": "Fast Preview"},
+    "FastPreviewBatch": {"class": FastPreviewBatch, "name": "Fast Preview Batch"},
     "ImageBatchFilter": {"class": ImageBatchFilter, "name": "Image Batch Filter"},
     "ImageAndMaskPreview": {"class": ImageAndMaskPreview},
     "ImageAddMulti": {"class": ImageAddMulti, "name": "Image Add Multi"},
@@ -103,6 +185,15 @@ NODE_CONFIG = {
     "SplitImageChannels": {"class": SplitImageChannels, "name": "Split Image Channels"},
     "TransitionImagesMulti": {"class": TransitionImagesMulti, "name": "Transition Images Multi"},
     "TransitionImagesInBatch": {"class": TransitionImagesInBatch, "name": "Transition Images In Batch"},
+    "EncodeVideoComponents": {"class": EncodeVideoComponents, "name": "Encode Video Components"},
+    "DecodeAndSaveVideo": {"class": DecodeAndSaveVideo, "name": "Decode And Save Video"},
+    "ImageTransformKJ": {"class": ImageTransformKJ, "name": "Image Transform KJ"},
+    "Ideogram4PromptBuilderKJ": {"class": Ideogram4PromptBuilderKJ, "name": "Ideogram 4 Prompt Builder KJ"},
+    "HDRPreviewKJ": {"class": HDRPreviewKJ, "name": "HDR Preview KJ"},
+    "ModelPreviewOverrideKJ": {"class": ModelPreviewOverrideKJ, "name": "Model Preview Override KJ"},
+    "GetPreviewOverrideFramesKJ": {"class": GetPreviewOverrideFramesKJ, "name": "Get Preview Override Frames KJ"},
+    "PreviewImageOrMask": {"class": PreviewImageOrMask, "name": "Preview Image Or Mask"},
+    "ImageSharpenKJ": {"class": ImageSharpenKJ, "name": "Image Sharpen KJ"},
     #batch cropping
     "BatchCropFromMask": {"class": BatchCropFromMask, "name": "Batch Crop From Mask"},
     "BatchCropFromMaskAdvanced": {"class": BatchCropFromMaskAdvanced, "name": "Batch Crop From Mask Advanced"},
@@ -141,6 +232,7 @@ NODE_CONFIG = {
     "StyleModelApplyAdvanced": {"class": StyleModelApplyAdvanced, "name": "Style Model Apply Advanced"},
     "DiffusionModelSelector": {"class": DiffusionModelSelector, "name": "Diffusion Model Selector"},
     "LazySwitchKJ": {"class": LazySwitchKJ, "name": "Lazy Switch KJ"},
+    "VisualizeSigmasKJ": {"class": VisualizeSigmasKJ, "name": "Visualize Sigmas KJ"},
     #audioscheduler stuff
     "NormalizedAmplitudeToMask": {"class": NormalizedAmplitudeToMask},
     "NormalizedAmplitudeToFloatList": {"class": NormalizedAmplitudeToFloatList},
@@ -168,35 +260,30 @@ NODE_CONFIG = {
     "SoundReactive": {"class": SoundReactive, "name": "Sound Reactive"},
     "StableZero123_BatchSchedule": {"class": StableZero123_BatchSchedule, "name": "Stable Zero123 Batch Schedule"},
     "SV3D_BatchSchedule": {"class": SV3D_BatchSchedule, "name": "SV3D Batch Schedule"},
-    "LoadResAdapterNormalization": {"class": LoadResAdapterNormalization},
     "Superprompt": {"class": Superprompt, "name": "Superprompt"},
     "GLIGENTextBoxApplyBatchCoords": {"class": GLIGENTextBoxApplyBatchCoords},
-    "Intrinsic_lora_sampling": {"class": Intrinsic_lora_sampling, "name": "Intrinsic Lora Sampling"},
     "CheckpointPerturbWeights": {"class": CheckpointPerturbWeights, "name": "CheckpointPerturbWeights"},
     "Screencap_mss": {"class": Screencap_mss, "name": "Screencap mss"},
+    "ScreencapStream": {"class": ScreencapStream, "name": "Screencap Stream"},
     "WebcamCaptureCV2": {"class": WebcamCaptureCV2, "name": "Webcam Capture CV2"},
     "DifferentialDiffusionAdvanced": {"class": DifferentialDiffusionAdvanced, "name": "Differential Diffusion Advanced"},
     "DiTBlockLoraLoader": {"class": DiTBlockLoraLoader, "name": "DiT Block Lora Loader"},
     "FluxBlockLoraSelect": {"class": FluxBlockLoraSelect, "name": "Flux Block Lora Select"},
     "HunyuanVideoBlockLoraSelect": {"class": HunyuanVideoBlockLoraSelect, "name": "Hunyuan Video Block Lora Select"},
     "Wan21BlockLoraSelect": {"class": Wan21BlockLoraSelect, "name": "Wan21 Block Lora Select"},
+    "LTX2BlockLoraSelect": {"class": LTX2BlockLoraSelect, "name": "LTX2 Block Lora Select"},
     "CustomControlNetWeightsFluxFromList": {"class": CustomControlNetWeightsFluxFromList, "name": "Custom ControlNet Weights Flux From List"},
     "CheckpointLoaderKJ": {"class": CheckpointLoaderKJ, "name": "CheckpointLoaderKJ"},
     "DiffusionModelLoaderKJ": {"class": DiffusionModelLoaderKJ, "name": "Diffusion Model Loader KJ"},
-    "TorchCompileModelFluxAdvanced": {"class": TorchCompileModelFluxAdvanced, "name": "TorchCompileModelFluxAdvanced"},
     "TorchCompileModelFluxAdvancedV2": {"class": TorchCompileModelFluxAdvancedV2, "name": "TorchCompileModelFluxAdvancedV2"},
-    "TorchCompileModelHyVideo": {"class": TorchCompileModelHyVideo, "name": "TorchCompileModelHyVideo"},
     "TorchCompileVAE": {"class": TorchCompileVAE, "name": "TorchCompileVAE"},
     "TorchCompileControlNet": {"class": TorchCompileControlNet, "name": "TorchCompileControlNet"},
-    "PatchModelPatcherOrder": {"class": PatchModelPatcherOrder, "name": "Patch Model Patcher Order"},
-    "TorchCompileLTXModel": {"class": TorchCompileLTXModel, "name": "TorchCompileLTXModel"},
-    "TorchCompileCosmosModel": {"class": TorchCompileCosmosModel, "name": "TorchCompileCosmosModel"},
-    "TorchCompileModelQwenImage": {"class": TorchCompileModelQwenImage, "name": "TorchCompileModelQwenImage"},
-    "TorchCompileModelWanVideo": {"class": TorchCompileModelWanVideo, "name": "TorchCompileModelWanVideo"},
     "TorchCompileModelWanVideoV2": {"class": TorchCompileModelWanVideoV2, "name": "TorchCompileModelWanVideoV2"},
     "PathchSageAttentionKJ": {"class": PathchSageAttentionKJ, "name": "Patch Sage Attention KJ"},
+    "PatchFlashAttentionKJ": {"class": PatchFlashAttentionKJ, "name": "Patch Flash Attention KJ"},
     "LeapfusionHunyuanI2VPatcher": {"class": LeapfusionHunyuanI2V, "name": "Leapfusion Hunyuan I2V Patcher"},
     "VAELoaderKJ": {"class": VAELoaderKJ, "name": "VAELoader KJ"},
+    "VAEMergeKJ": {"class": VAEMergeKJ, "name": "VAE Merge KJ"},
     "VAEDecodeLoopKJ": {"class": VAEDecodeLoopKJ, "name": "VAE Decode Loop KJ"},
     "ScheduledCFGGuidance": {"class": ScheduledCFGGuidance, "name": "Scheduled CFG Guidance"},
     "ApplyRifleXRoPE_HunuyanVideo": {"class": ApplyRifleXRoPE_HunuyanVideo, "name": "Apply RifleXRoPE HunuyanVideo"},
@@ -207,8 +294,10 @@ NODE_CONFIG = {
     "TimerNodeKJ": {"class": TimerNodeKJ, "name": "Timer Node KJ"},
     "HunyuanVideoEncodeKeyframesToCond": {"class": HunyuanVideoEncodeKeyframesToCond, "name": "HunyuanVideo Encode Keyframes To Cond"},
     "CFGZeroStarAndInit": {"class": CFGZeroStarAndInit, "name": "CFG Zero Star/Init"},
+    "PiDColorBiasCorrection": {"class": PiDColorBiasCorrection, "name": "PiD Color Bias Correction"},
     "ModelPatchTorchSettings": {"class": ModelPatchTorchSettings, "name": "Model Patch Torch Settings"},
     "WanVideoNAG": {"class": WanVideoNAG, "name": "WanVideoNAG"},
+    "Krea2PromptWeight": {"class": Krea2PromptWeight, "name": "Krea2 Prompt Weight"},
     "GGUFLoaderKJ": {"class": GGUFLoaderKJ, "name": "GGUF Loader KJ"},
     "LatentInpaintTTM": {"class": LatentInpaintTTM, "name": "Latent Inpaint TTM"},
     "NABLA_AttentionKJ": {"class": NABLA_AttentionKJ, "name": "NABLA Attention KJ"},
@@ -216,6 +305,13 @@ NODE_CONFIG = {
     "StartRecordCUDAMemoryHistory": {"class": StartRecordCUDAMemoryHistory, "name": "Start Recording CUDAMemory History"},
     "EndRecordCUDAMemoryHistory": {"class": EndRecordCUDAMemoryHistory, "name": "End Recording CUDAMemory History"},
     "VisualizeCUDAMemoryHistory": {"class": VisualizeCUDAMemoryHistory, "name": "Visualize CUDAMemory History"},
+    "PreviewLatentNoiseMask": {"class": PreviewLatentNoiseMask, "name": "Preview Latent Noise Mask"},
+    "ModelMemoryUseReportPatch": {"class": ModelMemoryUseReportPatch, "name": "Model Memory Use Report Patch"},
+    "ModelMemoryUsageFactorOverride": {"class": ModelMemoryUsageFactorOverride, "name": "Model Memory Usage Factor Override"},
+    "WanChunkFeedForward": {"class": WanChunkFeedForward, "name": "Wan ChunkFeedForward"},
+    "Ideogram4OptimizationsKJ": {"class": Ideogram4OptimizationsKJ, "name": "Ideogram4 Optimizations KJ"},
+    "SamplerSelfRefineVideo": {"class": SamplerSelfRefineVideo, "name": "Sampler SelfRefineVideo"},
+    "PlaySoundKJ": {"class": PlaySoundKJ, "name": "Play Sound KJ"},
 
     #instance diffusion
     "CreateInstanceDiffusionTracking": {"class": CreateInstanceDiffusionTracking},
@@ -229,7 +325,53 @@ NODE_CONFIG = {
     #tracks
     "GetTrackRange": {"class": GetTrackRange, "name": "Get Track Range"},
     "AddNoiseToTrackPath": {"class": AddNoiseToTrackPath, "name": "Add Noise To Track"},
+
+    #context windows
+    "ContextWindowsVisualizerKJ": {"class": ContextWindowsVisualizerKJ, "name": "Context Windows Visualizer (KJ)"},
+    # deprecated
+    "PatchModelPatcherOrder": {"class": PatchModelPatcherOrder, "name": "Patch Model Patcher Order"},
+    "TorchCompileModelFluxAdvanced": {"class": DeprecatedCompileNodeKJ, "name": "TorchCompileModelFluxAdvanced"},
+    "TorchCompileLTXModel": {"class": DeprecatedCompileNodeKJ, "name": "TorchCompileLTXModel"},
+    "TorchCompileCosmosModel": {"class": DeprecatedCompileNodeKJ, "name": "TorchCompileCosmosModel"},
+    "TorchCompileModelHyVideo": {"class": DeprecatedCompileNodeKJ, "name": "TorchCompileModelHyVideo"},
+    "TorchCompileModelQwenImage": {"class": DeprecatedCompileNodeKJ, "name": "TorchCompileModelQwenImage"},
+    "TorchCompileModelWanVideo": {"class": DeprecatedCompileNodeKJ, "name": "TorchCompileModelWanVideo"},
 }
+
+#ltxv
+try:
+    from .nodes.ltxv_nodes import (
+        LTXVAddGuideMulti, LTXVAddGuidesFromBatch, LTXVAudioVideoMask, LTX2_NAG,
+        LTXVChunkFeedForward, LTX2SamplingPreviewOverride,
+        LTX2AudioLatentNormalizingSampling, LTXVImgToVideoInplaceKJ,
+        LTX2AttentionTunerPatch, LTX2MemoryEfficientSageAttentionPatch,
+        LTX2LoraLoaderAdvanced, WanVideoMemoryEfficientSageAttentionPatch,
+    )
+    NODE_CONFIG.update({
+    "LTXVEnhanceAVideoKJ": {"class": LTXVEnhanceAVideoKJ, "name": "LTXV Enhance A Video KJ"},
+    "LTXVAddGuideMulti": {"class": LTXVAddGuideMulti, "name": "LTXV Add Guide Multi"},
+    "LTXVAddGuidesFromBatch": {"class": LTXVAddGuidesFromBatch, "name": "LTXV Add Guides From Batch"},
+    "LTXVAudioVideoMask": {"class": LTXVAudioVideoMask, "name": "LTXV Audio Video Mask"},
+    "LTX2_NAG": {"class": LTX2_NAG, "name": "LTX2 NAG"},
+    "LTXVChunkFeedForward": {"class": LTXVChunkFeedForward, "name": "LTXV Chunk Feed Forward"},
+    "LTX2SamplingPreviewOverride": {"class": LTX2SamplingPreviewOverride, "name": "LTX2 Sampling Preview Override"},
+    "LTX2AudioLatentNormalizingSampling": {"class": LTX2AudioLatentNormalizingSampling, "name": "LTX2 Audio Latent Normalizing Sampling"},
+    "LTXVImgToVideoInplaceKJ": {"class": LTXVImgToVideoInplaceKJ, "name": "LTXV Img To Video Inplace KJ"},
+    "LTX2AttentionTunerPatch": {"class": LTX2AttentionTunerPatch, "name": "LTX2 Attention Tuner Patch"},
+    "LTX2MemoryEfficientSageAttentionPatch": {"class": LTX2MemoryEfficientSageAttentionPatch, "name": "LTX2 Memory Efficient Sage Attention Patch"},
+    "LTX2LoraLoaderAdvanced": {"class": LTX2LoraLoaderAdvanced, "name": "LTX2 Lora Loader Advanced"},
+    "WanVideoMemoryEfficientSageAttentionPatch": {"class": WanVideoMemoryEfficientSageAttentionPatch, "name": "WanVideo Memory Efficient Sage Attention Patch"},
+    })
+except Exception as e:
+    logging.warning(f"KJNodes: LTXV nodes could not be imported. LTXV nodes will be unavailable. Error: {e}", exc_info=True)
+
+try:
+    from .nodes.triton_vae import PatchTritonVAE
+    NODE_CONFIG.update({
+        "PatchTritonVAE": {"class": PatchTritonVAE, "name": "Patch Triton VAE"},
+    })
+except Exception:
+    logging.warning("KJNodes: PatchTritonVAE node could not be imported. PatchTritonVAE will be unavailable.", exc_info=True)
 
 def generate_node_mappings(node_config):
     node_class_mappings = {}
@@ -243,6 +385,41 @@ def generate_node_mappings(node_config):
 
 NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS = generate_node_mappings(NODE_CONFIG)
 
+# ------------------------------------------------------------------
+# Локальные пользовательские ноды из NodesGlobal.py
+# ------------------------------------------------------------------
+try:
+    from .NodesGlobal import (
+        NODE_CLASS_MAPPINGS as GLOBAL_MAP,
+        NODE_DISPLAY_NAME_MAPPINGS as GLOBAL_NAMES,
+    )
+
+    duplicates = set(NODE_CLASS_MAPPINGS) & set(GLOBAL_MAP)
+    if duplicates:
+        logging.warning(
+            "KJNodes Global: переопределяются существующие ноды: %s",
+            ", ".join(sorted(duplicates)),
+        )
+
+    NODE_CLASS_MAPPINGS.update(GLOBAL_MAP)
+
+    # Добавляем display name для каждой пользовательской ноды
+    for node_id, node_class in GLOBAL_MAP.items():
+        NODE_DISPLAY_NAME_MAPPINGS[node_id] = GLOBAL_NAMES.get(
+            node_id,
+            node_class.__name__,
+        )
+
+    logging.info(
+        "KJNodes Global Variables: успешно загружено нод: %d",
+        len(GLOBAL_MAP),
+    )
+
+except Exception:
+    logging.exception(
+        "KJNodes Global Variables: ошибка загрузки NodesGlobal.py"
+    )
+
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS", "WEB_DIRECTORY"]
 
 WEB_DIRECTORY = "./web"
@@ -252,21 +429,11 @@ from server import PromptServer
 from pathlib import Path
 
 if hasattr(PromptServer, "instance"):
-    try:
-        # NOTE: we add an extra static path to avoid comfy mechanism
-        # that loads every script in web.
-        PromptServer.instance.app.add_routes(
-            [web.static("/kjweb_async", (Path(__file__).parent.absolute() / "kjweb_async").as_posix())]
-        )
-    except:
-        pass
-
-# ←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←
-# ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ — ДОБАВЛЯЕМ В КОНЕЦ
-# ←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←
-from .NodesGlobal import NODE_CLASS_MAPPINGS as GLOBAL_MAP, NODE_DISPLAY_NAME_MAPPINGS as GLOBAL_NAMES
-
-NODE_CLASS_MAPPINGS.update(GLOBAL_MAP)
-NODE_DISPLAY_NAME_MAPPINGS.update(GLOBAL_NAMES)
-
-print("KJNodes Global Variables — УСПЕШНО ЗАГРУЖЕНЫ!")
+    # NOTE: we add an extra static path to avoid comfy mechanism that loads every script in web.
+    if not PromptServer.instance.app.router.frozen:
+        try:
+            PromptServer.instance.app.add_routes(
+                [web.static("/kjweb_async", (Path(__file__).parent.absolute() / "kjweb_async").as_posix())]
+            )
+        except Exception:
+            logging.exception("KJNodes: failed to register /kjweb_async static route")

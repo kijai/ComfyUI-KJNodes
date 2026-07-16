@@ -1,95 +1,40 @@
+import { chainCallback } from './utility.js';
 const { app } = window.comfyAPI.app;
+const { api } = window.comfyAPI.api;
 
-//from melmass
-export function makeUUID() {
-  let dt = new Date().getTime()
-  const uuid = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-    const r = ((dt + Math.random() * 16) % 16) | 0
-    dt = Math.floor(dt / 16)
-    return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16)
-  })
-  return uuid
-}
+let execId = null;
+api.addEventListener("executing", e => { execId = e.detail ?? null; });
 
-function chainCallback(object, property, callback) {
-  if (object == undefined) {
-    //This should not happen.
-    console.error("Tried to add callback to non-existant object")
-    return;
-  }
-  if (property in object) {
-    const callback_orig = object[property]
-    object[property] = function () {
-      const r = callback_orig.apply(this, arguments);
-      callback.apply(this, arguments);
-      return r
-    };
-  } else {
-    object[property] = callback;
-  }
-}
 app.registerExtension({
   name: 'KJNodes.FastPreview',
-
   async beforeRegisterNodeDef(nodeType, nodeData) {
-    if (nodeData?.name === 'FastPreview') {
-      chainCallback(nodeType.prototype, "onNodeCreated", function () {
+    if (nodeData?.name !== 'FastPreview') return;
+    chainCallback(nodeType.prototype, "onNodeCreated", function () {
+      this.setSize([550, 550]);
+      const nodeRef = this;
 
-        var element = document.createElement("div");
-        this.uuid = makeUUID()
-        element.id = `fast-preview-${this.uuid}`
-
-        this.previewWidget = this.addDOMWidget(nodeData.name, "FastPreviewWidget", element, {
-          serialize: false,
-          hideOnZoom: false,
-        });
-
-        this.previewer = new Previewer(this);
-
-        this.setSize([550, 550]);
-        this.resizable = false;
-        this.previewWidget.parentEl = document.createElement("div");
-        this.previewWidget.parentEl.className = "fast-preview";
-        this.previewWidget.parentEl.id = `fast-preview-${this.uuid}`
-        element.appendChild(this.previewWidget.parentEl);
-        
-        chainCallback(this, "onExecuted", function (message) {
-          let bg_image = message["bg_image"];
-          this.properties.imgData = {
-            name: "bg_image",
-            base64: bg_image
-          };
-          this.previewer.refreshBackgroundImage(this);
-        });
-       
-
-      }); // onAfterGraphConfigured
-    }//node created
-  } //before register
-})//register
-
-class Previewer {
-  constructor(context) {
-    this.node = context;
-    this.previousWidth = null;
-    this.previousHeight = null;
-  }
-  refreshBackgroundImage = () => {
-    const imgData = this.node?.properties?.imgData;
-    if (imgData?.base64) {
-      const base64String = imgData.base64;
-      const imageUrl = `data:${imgData.type};base64,${base64String}`;
-      const img = new Image();
-      img.src = imageUrl;
-      img.onload = () => {
-        const { width, height } = img;
-        if (width !== this.previousWidth || height !== this.previousHeight) {
-          this.node.setSize([width, height]);
-          this.previousWidth = width;
-          this.previousHeight = height;
-        }
-        this.node.previewWidget.element.style.backgroundImage = `url(${imageUrl})`;
+      const show = blob => {
+        const img = new Image();
+        img.onload = () => { nodeRef.imgs = [img]; nodeRef.setDirtyCanvas(true); };
+        img.src = URL.createObjectURL(blob);
       };
-    }
-  };
+
+      const metaHandler = e => {
+        const { blob, nodeId, displayNodeId } = e.detail;
+        if (String(displayNodeId || nodeId) === String(nodeRef.id)) show(blob);
+      };
+      const plainHandler = e => {
+        if (api.serverSupportsFeature?.("supports_preview_metadata")) return;
+        if (String(execId) === String(nodeRef.id)) show(e.detail);
+      };
+
+      api.addEventListener("b_preview_with_metadata", metaHandler);
+      api.addEventListener("b_preview", plainHandler);
+
+      chainCallback(nodeRef, "onRemoved", () => {
+        api.removeEventListener("b_preview_with_metadata", metaHandler);
+        api.removeEventListener("b_preview", plainHandler);
+      });
+    });
   }
+});

@@ -5,7 +5,6 @@ from PIL import Image, ImageDraw, ImageFont, ImageFilter
 import numpy as np
 from ..utility.utility import pil2tensor, tensor2pil
 import folder_paths
-import io
 import base64
 from io import BytesIO
 
@@ -94,7 +93,11 @@ def plot_coordinates_to_tensor(coordinates, height, width, bbox_height, bbox_wid
                                             color=color,
                                             mutation_scale=20))
             canvas.draw()
-            image_np = np.frombuffer(canvas.tostring_rgb(), dtype='uint8').reshape(int(height), int(width), 3).copy()
+            try:
+                image_np = np.frombuffer(canvas.tostring_rgb(), dtype='uint8').reshape(int(height), int(width), 3).copy()
+            except AttributeError:
+                image_np = np.frombuffer(canvas.tostring_argb(), dtype='uint8').reshape(int(height), int(width), 4)
+                image_np = image_np[:, :, [1, 2, 3]]  # Convert ARGB to RGB
             image_tensor = torch.from_numpy(image_np).float() / 255.0
             image_tensor = image_tensor.unsqueeze(0)
             image_batch.append(image_tensor)
@@ -138,15 +141,15 @@ Plots coordinates to sequence of images using Matplotlib.
         plot_image_tensor = plot_coordinates_to_tensor(coordinates, height, width, bbox_height, bbox_width, size_multiplier, text)
         
         return (plot_image_tensor, width, height, bbox_width, bbox_height)
-    
+
 class SplineEditor:
 
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "points_store": ("STRING", {"multiline": False}),
-                "coordinates": ("STRING", {"multiline": False}),
+                "points_store": ("STRING", {"multiline": False, "advanced": True}),
+                "coordinates": ("STRING", {"multiline": False, "advanced": True}),
                 "mask_width": ("INT", {"default": 512, "min": 8, "max": 4096, "step": 8}),
                 "mask_height": ("INT", {"default": 512, "min": 8, "max": 4096, "step": 8}),
                 "points_to_sample": ("INT", {"default": 16, "min": 2, "max": 1000, "step": 1}),
@@ -161,7 +164,7 @@ class SplineEditor:
                     "default": 'time'
                 }),
                 "interpolation": (
-                [   
+                [
                     'cardinal',
                     'monotone',
                     'basis',
@@ -170,6 +173,7 @@ class SplineEditor:
                     'step-after',
                     'polar',
                     'polar-reverse',
+                    'bezier',
                 ],
                 {
                 "default": 'cardinal'
@@ -177,7 +181,7 @@ class SplineEditor:
                 "tension": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.01}),
                 "repeat_output": ("INT", {"default": 1, "min": 1, "max": 4096, "step": 1}),
                 "float_output_type": (
-                [   
+                [
                     'list',
                     'pandas series',
                     'tensor',
@@ -288,18 +292,15 @@ output types:
         elif float_output_type == 'pandas series':
             try:
                 import pandas as pd
-            except:
-                raise Exception("MaskOrImageToWeight: pandas is not installed. Please install pandas to use this output_type")
+            except ImportError as e:
+                raise ImportError("MaskOrImageToWeight: pandas is not installed. Please install pandas to use this output_type") from e
             out_floats = pd.Series(all_normalized_y_values * repeat_output),
         elif float_output_type == 'tensor':
             out_floats = torch.tensor(all_normalized_y_values * repeat_output, dtype=torch.float32)
 
-        # Create a color map for grayscale intensities
         color_map = lambda y: torch.full((mask_height, mask_width, 3), y, dtype=torch.float32)
-
-        # Create a color map for grayscale intensities (from first spline only)
-        color_map = lambda y: torch.full((mask_height, mask_width, 3), y, dtype=torch.float32)
-        mask_tensors = [color_map(y) for y in normalized_y_values]
+        y_values_for_masks = normalized_y_values if normalized_y_values else [min_value]
+        mask_tensors = [color_map(y) for y in y_values_for_masks]
         masks_out = torch.stack(mask_tensors)
         masks_out = masks_out.repeat(repeat_output, 1, 1, 1)
         masks_out = masks_out.mean(dim=-1)
@@ -600,7 +601,7 @@ Locations are center locations.
                 # Draw the text
                 try:
                     draw.text(text_position, line, fill=color, font=current_font, features=['-liga'])
-                except:
+                except Exception:
                     draw.text(text_position, line, fill=color, font=current_font)
             
             image = pil2tensor(image)
@@ -760,7 +761,7 @@ and returns that as the selected output type.
             for image in images:
                 mean_values.append(image.mean().item())
         elif masks is not None and images is not None:
-            raise Exception("MaskOrImageToWeight: Use either mask or image input only.")
+            raise ValueError("MaskOrImageToWeight: Use either mask or image input only.")
                   
         # Convert mean_values to the specified output_type
         if output_type == 'list':
@@ -768,8 +769,8 @@ and returns that as the selected output type.
         elif output_type == 'pandas series':
             try:
                 import pandas as pd
-            except:
-                raise Exception("MaskOrImageToWeight: pandas is not installed. Please install pandas to use this output_type")
+            except ImportError as e:
+                raise ImportError("MaskOrImageToWeight: pandas is not installed. Please install pandas to use this output_type") from e
             out = pd.Series(mean_values),
         elif output_type == 'tensor':
             out = torch.tensor(mean_values, dtype=torch.float32),
@@ -1404,13 +1405,13 @@ class PointsEditor:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "points_store": ("STRING", {"multiline": False}),
-                "coordinates": ("STRING", {"multiline": False}),
-                "neg_coordinates": ("STRING", {"multiline": False}),
-                "bbox_store": ("STRING", {"multiline": False}),
-                "bboxes": ("STRING", {"multiline": False}),
+                "points_store": ("STRING", {"multiline": False, "advanced": True}),
+                "coordinates": ("STRING", {"multiline": False, "socketless": True, "advanced": True}),
+                "neg_coordinates": ("STRING", {"multiline": False, "socketless": True, "advanced": True}),
+                "bbox_store": ("STRING", {"multiline": False, "advanced": True}),
+                "bboxes": ("STRING", {"multiline": False, "socketless": True, "advanced": True}),
                 "bbox_format": (
-                [   
+                [
                     'xyxy',
                     'xywh',
                 ],
@@ -1429,29 +1430,32 @@ class PointsEditor:
     FUNCTION = "pointdata"
     CATEGORY = "KJNodes/experimental"
     DESCRIPTION = """
-# WORK IN PROGRESS  
-Do not count on this as part of your workflow yet,  
-probably contains lots of bugs and stability is not  
-guaranteed!!  
-  
+# WORK IN PROGRESS
+Do not count on this as part of your workflow yet,
+probably contains lots of bugs and stability is not
+guaranteed!!
+
 ## Graphical editor to create coordinates
 
 **Shift + click** to add a positive (green) point.
 **Shift + right click** to add a negative (red) point.
-**Ctrl + click** to draw a box.  
-**Right click on a point** to delete it.    
-Note that you can't delete from start/end of the points array.  
-  
-To add an image select the node and copy/paste or drag in the image.  
-Or from the bg_image input on queue (first frame of the batch).  
+**Right click on a point** to delete it.
+**Ctrl + click** to draw a bounding box.
+**Drag bbox corners** to resize, **drag inside** to move.
+**Right click on bbox** to delete it.
 
-**THE IMAGE IS SAVED TO THE NODE AND WORKFLOW METADATA**  
-you can clear the image from the context menu by right clicking on the canvas  
+To add an image select the node and copy/paste or drag in the image.
+Or from the bg_image input on queue (first frame of the batch).
+
+**THE IMAGE IS SAVED TO THE NODE AND WORKFLOW METADATA**
+you can clear the image from the context menu by right clicking on the canvas
 
 """
 
     def pointdata(self, points_store, bbox_store, width, height, coordinates, neg_coordinates, normalize, bboxes, bbox_format="xyxy", bg_image=None):
         coordinates = json.loads(coordinates)
+        if not coordinates:
+            raise ValueError("No points on the canvas. Use Shift+click to add positive points or Shift+right-click to add negative points before executing.")
         pos_coordinates = []
         for coord in coordinates:
             coord['x'] = int(round(coord['x']))
@@ -1479,7 +1483,6 @@ you can clear the image from the context menu by right clicking on the canvas
         # Create a blank mask
         mask = np.zeros((height, width), dtype=np.uint8)
         bboxes = json.loads(bboxes)
-        print(bboxes)
         valid_bboxes = []
         for bbox in bboxes:
             if (bbox.get("startX") is None or
@@ -1519,24 +1522,22 @@ you can clear the image from the context menu by right clicking on the canvas
         if bg_image is not None and len(valid_bboxes) > 0:
             x_min, y_min, x_max, y_max = bboxes[0]
             cropped_image = bg_image[:, y_min:y_max, x_min:x_max, :]
-
         elif bg_image is not None:
             cropped_image = bg_image
+        else:
+            cropped_image = torch.zeros(1, height, width, 3, dtype=torch.float32)
 
         if bg_image is None:
-            return (json.dumps(pos_coordinates), json.dumps(neg_coordinates), bboxes, mask_tensor)
+            return (json.dumps(pos_coordinates), json.dumps(neg_coordinates), bboxes, mask_tensor, cropped_image)
         else:
             transform = transforms.ToPILImage()
             image = transform(bg_image[0].permute(2, 0, 1))
             buffered = BytesIO()
             image.save(buffered, format="JPEG", quality=75)
+            img_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
 
-            # Step 3: Encode the image bytes to a Base64 string
-            img_bytes = buffered.getvalue()
-            img_base64 = base64.b64encode(img_bytes).decode('utf-8')
-        
             return {
-                "ui": {"bg_image": [img_base64]}, 
+                "ui": {"bg_image": [img_base64]},
                 "result": (json.dumps(pos_coordinates), json.dumps(neg_coordinates), bboxes, mask_tensor, cropped_image)
             }
 

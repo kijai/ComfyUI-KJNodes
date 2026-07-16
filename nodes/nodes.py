@@ -2,15 +2,22 @@ import torch
 import torch.nn as nn
 import numpy as np
 from PIL import Image
-import json, re, os, io, time
+import json
+import re
+import os
+import time
+import math
 import importlib
+import logging
 
 from comfy import model_management
 import folder_paths
 from nodes import MAX_RESOLUTION
-from comfy.utils import common_upscale, ProgressBar, load_torch_file
+from comfy.utils import common_upscale, ProgressBar, load_torch_file, save_torch_file, state_dict_prefix_replace
 from comfy.comfy_types.node_typing import IO
-from comfy_api.latest import io
+from comfy_api.latest import io, ui
+import comfy.latent_formats
+import node_helpers
 from io import BytesIO
 
 script_directory = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -27,6 +34,7 @@ class BOOLConstant:
     RETURN_NAMES = ("value",)
     FUNCTION = "get_value"
     CATEGORY = "KJNodes/constants"
+    SEARCH_ALIASES = ["boolean", "value"]
 
     def get_value(self, value):
         return (value,)
@@ -42,6 +50,7 @@ class INTConstant:
     RETURN_NAMES = ("value",)
     FUNCTION = "get_value"
     CATEGORY = "KJNodes/constants"
+    SEARCH_ALIASES = ["integer", "value"]
 
     def get_value(self, value):
         return (value,)
@@ -58,6 +67,7 @@ class FloatConstant:
     RETURN_NAMES = ("value",)
     FUNCTION = "get_value"
     CATEGORY = "KJNodes/constants"
+    SEARCH_ALIASES = ["float", "value"]
 
     def get_value(self, value):
         return (round(value, 6),)
@@ -73,6 +83,7 @@ class StringConstant:
     RETURN_TYPES = ("STRING",)
     FUNCTION = "passtring"
     CATEGORY = "KJNodes/constants"
+    SEARCH_ALIASES = ["text", "value"]
 
     def passtring(self, string):
         return (string, )
@@ -89,6 +100,7 @@ class StringConstantMultiline:
     RETURN_TYPES = ("STRING",)
     FUNCTION = "stringify"
     CATEGORY = "KJNodes/constants"
+    SEARCH_ALIASES = ["text", "value"]
 
     def stringify(self, string, strip_newlines):
         new_string = string
@@ -620,7 +632,7 @@ class VRAM_Debug:
     RETURN_TYPES = (IO.ANY, "IMAGE","MODEL","INT", "INT",)
     RETURN_NAMES = ("any_output", "image_pass", "model_pass", "freemem_before", "freemem_after")
     FUNCTION = "VRAMdebug"
-    CATEGORY = "KJNodes/misc"
+    CATEGORY = "KJNodes/memory"
     DESCRIPTION = """
 Returns the inputs unchanged, they are only used as triggers,  
 and performs comfy model management functions and garbage collection,  
@@ -629,7 +641,7 @@ reports free VRAM before and after the operations.
 
     def VRAMdebug(self, gc_collect, empty_cache, unload_all_models, image_pass=None, model_pass=None, any_input=None):
         freemem_before = model_management.get_free_memory()
-        print("VRAMdebug: free memory before: ", f"{freemem_before:,.0f}")
+        logging.info(f"VRAMdebug: free memory before: {freemem_before:,.0f}")
         if empty_cache:
             model_management.soft_empty_cache()
         if unload_all_models:
@@ -638,8 +650,8 @@ reports free VRAM before and after the operations.
             import gc
             gc.collect()
         freemem_after = model_management.get_free_memory()
-        print("VRAMdebug: free memory after: ", f"{freemem_after:,.0f}")
-        print("VRAMdebug: freed memory: ", f"{freemem_after - freemem_before:,.0f}")
+        logging.info(f"VRAMdebug: free memory after: {freemem_after:,.0f}")
+        logging.info(f"VRAMdebug: freed memory: {freemem_after - freemem_before:,.0f}")
         return {"ui": {
             "text": [f"{freemem_before:,.0f}x{freemem_after:,.0f}"]}, 
             "result": (any_input, image_pass, model_pass, freemem_before, freemem_after) 
@@ -819,7 +831,6 @@ class WidgetToString:
                          "any_input": (IO.ANY, ),
                          "node_title": ("STRING", {"multiline": False}),
                          "allowed_float_decimals": ("INT", {"default": 2, "min": 0, "max": 10, "tooltip": "Number of decimal places to display for float values"}),
-                         
                          },
             "hidden": {"extra_pnginfo": "EXTRA_PNGINFO",
                        "prompt": "PROMPT",
@@ -832,9 +843,10 @@ class WidgetToString:
     DESCRIPTION = """
 Selects a node and it's specified widget and outputs the value as a string.  
 If no node id or title is provided it will use the 'any_input' link and use that node.  
-To see node id's, enable node id display from Manager badge menu.  
+To see node id's, enable "Node ID Badge Mode" in main settings.
 Alternatively you can search with the node title. Node titles ONLY exist if they  
-are manually edited!  
+are manually edited!
+'widget_name' can be a comma separated list.
 The 'any_input' is required for making sure the node you want the value from exists in the workflow.
 """
 
@@ -842,28 +854,69 @@ The 'any_input' is required for making sure the node you want the value from exi
         workflow = extra_pnginfo["workflow"]
         #print(json.dumps(workflow, indent=4))
         results = []
-        node_id = None  # Initialize node_id to handle cases where no match is found
-        link_id = None
+        node_id = link_id = subgraph_prefix = None
         link_to_node_map = {}
+        node_to_subgraph_map = {}  # Track which subgraph each node belongs to
 
-        for node in workflow["nodes"]:
+        # Parse unique_id - handle both "parent:id" format and simple int format
+        if isinstance(unique_id, str) and ":" in unique_id:
+            unique_id_parts = unique_id.split(":")
+            unique_id_int = int(unique_id_parts[-1])  # Use the last part as the node id
+            subgraph_prefix = ":".join(unique_id_parts[:-1])  # Store the parent prefix (e.g., "14")
+        else:
+            unique_id_int = int(unique_id)
+
+        # Collect all nodes from main workflow and subgraphs
+        all_nodes = list(workflow.get("nodes", []))
+        definitions = workflow.get("definitions", {})
+        subgraphs = definitions.get("subgraphs", [])
+
+        # Find which main workflow node references each subgraph
+        subgraph_id_to_parent = {}
+        for node in workflow.get("nodes", []):
+            node_type = node.get("type", "")
+            # Subgraph nodes have a UUID as their type
+            if "-" in node_type and len(node_type) == 36:  # UUID format check
+                subgraph_id_to_parent[node_type] = node["id"]
+
+        for subgraph in subgraphs:
+            subgraph_id = subgraph.get("id", "")
+            parent_node_id = subgraph_id_to_parent.get(subgraph_id)
+
+            subgraph_nodes = subgraph.get("nodes", [])
+            for node in subgraph_nodes:
+                # Track which subgraph (parent node) this node belongs to
+                if parent_node_id is not None:
+                    node_to_subgraph_map[node["id"]] = parent_node_id
+            all_nodes.extend(subgraph_nodes)
+
+            # Also build link_to_node_map from subgraph links
+            subgraph_links = subgraph.get("links", [])
+            for link in subgraph_links:
+                # link format: [link_id, origin_id, origin_slot, target_id, target_slot, type]
+                if isinstance(link, dict):
+                    link_to_node_map[link["id"]] = link["origin_id"]
+                elif isinstance(link, list) and len(link) >= 2:
+                    link_to_node_map[link[0]] = link[1]
+
+        for node in all_nodes:
             if node_title:
                 if "title" in node:
                     if node["title"] == node_title:
                         node_id = node["id"]
                         break
                 else:
-                    print("Node title not found.")
+                    logging.warning("Node title not found.")
             elif id != 0:
                 if node["id"] == id:
                     node_id = id
                     break
             elif any_input is not None:
-                if node["type"] == "WidgetToString" and node["id"] == int(unique_id) and not link_id:
+                if node["type"] == "WidgetToString" and node["id"] == unique_id_int and not link_id:
                     for node_input in node["inputs"]:
                         if node_input["name"] == "any_input":
                             link_id = node_input["link"]
-                    
+
                 # Construct a map of links to node IDs for future reference
                 node_outputs = node.get("outputs", None)
                 if not node_outputs:
@@ -876,35 +929,86 @@ The 'any_input' is required for making sure the node you want the value from exi
                         link_to_node_map[link] = node["id"]
                         if link_id and link == link_id:
                             break
-        
+
         if link_id:
             node_id = link_to_node_map.get(link_id, None)
 
         if node_id is None:
             raise ValueError("No matching node found for the given title or id")
 
-        values = prompt[str(node_id)]
+        # Determine the correct prompt key
+        # First check if the target node is in a subgraph
+        target_subgraph_parent = node_to_subgraph_map.get(node_id)
+
+        if target_subgraph_parent is not None:
+            # Target node is in a subgraph, use the parent node id as prefix
+            prompt_key = f"{target_subgraph_parent}:{node_id}"
+        elif subgraph_prefix is not None:
+            # We're in a subgraph, use our prefix
+            prompt_key = f"{subgraph_prefix}:{node_id}"
+        else:
+            prompt_key = str(node_id)
+
+        # Try the prefixed key first, then fall back to just the node_id
+        if prompt_key not in prompt:
+            prompt_key = str(node_id)
+
+        if prompt_key not in prompt:
+            raise KeyError(f"Node not found in prompt. Tried keys: '{target_subgraph_parent}:{node_id}' and '{node_id}'")
+
+        values = prompt[prompt_key]
         if "inputs" in values:
+            inputs = values["inputs"]
+
+            # support comma-separated list and trim whitespace
+            widget_names = []
+            if widget_name:
+                widget_names = [w.strip() for w in widget_name.split(",") if w.strip()]
+
             if return_all:
                 # Format items based on type
                 formatted_items = []
-                for k, v in values["inputs"].items():
+                for k, v in inputs.items():
                     if isinstance(v, float):
                         item = f"{k}: {v:.{allowed_float_decimals}f}"
                     else:
                         item = f"{k}: {str(v)}"
                     formatted_items.append(item)
-                results.append(', '.join(formatted_items))
-            elif widget_name in values["inputs"]:
-                v = values["inputs"][widget_name]
-                if isinstance(v, float):
-                    v = f"{v:.{allowed_float_decimals}f}"
+                results.append(", ".join(formatted_items))
+
+            # Single widget name (trimmed)
+            elif len(widget_names) == 1:
+                name = widget_names[0]
+                if name in inputs:
+                    v = inputs[name]
+                    if isinstance(v, float):
+                        v = f"{v:.{allowed_float_decimals}f}"
+                    else:
+                        v = str(v)
+                    return (v, )
                 else:
-                    v = str(v)
-                return (v, )
+                    raise NameError(f"Widget not found: {node_id}.{name}")
+
+            # Multiple widget names: return "name: value" pairs
+            elif len(widget_names) > 1:
+                formatted_items = []
+                for name in widget_names:
+                    if name not in inputs:
+                        raise NameError(f"Widget not found: {node_id}.{name}")
+                    v = inputs[name]
+                    if isinstance(v, float):
+                        v = f"{v:.{allowed_float_decimals}f}"
+                    else:
+                        v = str(v)
+                    formatted_items.append(f"{name}: {v}")
+                return (", ".join(formatted_items), )
+
             else:
+                # No valid widget name provided
                 raise NameError(f"Widget not found: {node_id}.{widget_name}")
-        return (', '.join(results).strip(', '), )
+
+        return (", ".join(results).strip(", "), )
+
 
 class DummyOut:
 
@@ -1445,46 +1549,6 @@ https://huggingface.co/stabilityai/sv3d
         latent = torch.zeros([batch_size, 4, height // 8, width // 8])
         return (final_positive, final_negative, {"samples": latent})
 
-class LoadResAdapterNormalization:
-    @classmethod
-    def INPUT_TYPES(s):
-        return {
-            "required": {
-                "model": ("MODEL",),
-                "resadapter_path": (folder_paths.get_filename_list("checkpoints"), )
-            } 
-        }
-
-    RETURN_TYPES = ("MODEL",)
-    FUNCTION = "load_res_adapter"
-    CATEGORY = "KJNodes/experimental"
-
-    def load_res_adapter(self, model, resadapter_path):
-        print("ResAdapter: Checking ResAdapter path")
-        resadapter_full_path = folder_paths.get_full_path("checkpoints", resadapter_path)
-        if not os.path.exists(resadapter_full_path):
-            raise Exception("Invalid model path")
-        else:
-            print("ResAdapter: Loading ResAdapter normalization weights")
-            from comfy.utils import load_torch_file
-            prefix_to_remove = 'diffusion_model.'
-            model_clone = model.clone()
-            norm_state_dict = load_torch_file(resadapter_full_path)
-            new_values = {key[len(prefix_to_remove):]: value for key, value in norm_state_dict.items() if key.startswith(prefix_to_remove)}
-            print("ResAdapter: Attempting to add patches with ResAdapter weights")
-            try:
-                for key in model.model.diffusion_model.state_dict().keys():
-                    if key in new_values:
-                        original_tensor = model.model.diffusion_model.state_dict()[key]
-                        new_tensor = new_values[key].to(model.model.diffusion_model.dtype)
-                        if original_tensor.shape == new_tensor.shape:
-                            model_clone.add_object_patch(f"diffusion_model.{key}.data", new_tensor)
-                        else:
-                            print("ResAdapter: No match for key: ",key)
-            except:
-                raise Exception("Could not patch model, this way of patching was added to ComfyUI on March 3rd 2024, is your ComfyUI up to date?")
-            print("ResAdapter: Added resnet normalization patches")
-            return (model_clone, )
         
 class Superprompt:
     @classmethod
@@ -1515,7 +1579,7 @@ https://huggingface.co/roborovski/superprompt-v1
 
         checkpoint_path = os.path.join(script_directory, "models","superprompt-v1")
         if not os.path.exists(checkpoint_path):
-                print(f"Downloading model to: {checkpoint_path}")
+                logging.info(f"Downloading model to: {checkpoint_path}")
                 from huggingface_hub import snapshot_download
                 snapshot_download(repo_id="roborovski/superprompt-v1", 
                                   local_dir=checkpoint_path, 
@@ -1588,7 +1652,7 @@ or a .txt file with RealEstate camera intrinsics and coordinates, in a 3D plot.
         self.ax.set_zlabel('z', color='#999999')
         for text in self.ax.get_xticklabels() + self.ax.get_yticklabels() + self.ax.get_zticklabels():
             text.set_color('#999999')
-        print('initialize camera pose visualizer')
+        logging.info('initialize camera pose visualizer')
 
         if pose_file_path != "":
             with open(pose_file_path, 'r') as f:
@@ -1726,7 +1790,7 @@ class CheckpointPerturbWeights:
         pbar = ProgressBar(len(keys))
         for k in keys:
             v = dict[k]
-            print(f'{k}: {v.std()}') 
+            logging.info(f'{k}: {v.std()}')
             if k.startswith('joint_blocks'):
                 multiplier = joint_blocks
             elif k.startswith('final_layer'):
@@ -1823,7 +1887,7 @@ class HunyuanVideoBlockLoraSelect:
     OUTPUT_TOOLTIPS = ("The modified diffusion model.",)
     FUNCTION = "load_lora"
 
-    CATEGORY = "KJNodes/experimental"
+    CATEGORY = "KJNodes/hunyuanvideo"
     DESCRIPTION = "Select individual block alpha values, value of 0 removes the block altogether"
 
     def load_lora(self, **kwargs):
@@ -1845,11 +1909,34 @@ class Wan21BlockLoraSelect:
     OUTPUT_TOOLTIPS = ("The modified diffusion model.",)
     FUNCTION = "load_lora"
 
-    CATEGORY = "KJNodes/experimental"
+    CATEGORY = "KJNodes/wan"
     DESCRIPTION = "Select individual block alpha values, value of 0 removes the block altogether"
 
     def load_lora(self, **kwargs):
         return (kwargs,)
+
+class LTX2BlockLoraSelect:
+    @classmethod
+    def INPUT_TYPES(s):
+        arg_dict = {}
+        argument = ("FLOAT", {"default": 0.0, "min": 0.0, "max": 10000.0, "step": 0.01})
+
+        for i in range(48):
+            arg_dict["blocks.{}.".format(i)] = argument
+
+        return {"required": arg_dict}
+    
+    RETURN_TYPES = ("SELECTEDDITBLOCKS", )
+    RETURN_NAMES = ("blocks", )
+    OUTPUT_TOOLTIPS = ("The modified diffusion model.",)
+    FUNCTION = "load_lora"
+
+    CATEGORY = "KJNodes/ltxv"
+    DESCRIPTION = "Select individual block alpha values, value of 0 removes the block altogether"
+
+    def load_lora(self, **kwargs):
+        return (kwargs,)
+
     
 class DiTBlockLoraLoader:
     def __init__(self):
@@ -1873,7 +1960,7 @@ class DiTBlockLoraLoader:
     RETURN_NAMES = ("model", "rank", )
     OUTPUT_TOOLTIPS = ("The modified diffusion model.", "possible rank of the LoRA.")
     FUNCTION = "load_lora"
-    CATEGORY = "KJNodes/experimental"
+    CATEGORY = "KJNodes/lora"
 
     def load_lora(self, model, strength_model, lora_name=None, opt_lora_path=None, blocks=None):
         
@@ -1900,10 +1987,10 @@ class DiTBlockLoraLoader:
         weight_key = next((key for key in lora.keys() if key.endswith('weight')), None)
         # Print the shape of the value corresponding to the key
         if weight_key:
-            print(f"Shape of the first 'weight' key ({weight_key}): {lora[weight_key].shape}")
+            logging.info(f"Shape of the first 'weight' key ({weight_key}): {lora[weight_key].shape}")
             rank = str(lora[weight_key].shape[0])
         else:
-            print("No key ending with 'weight' found.")
+            logging.warning("No key ending with 'weight' found.")
             rank = "Couldn't find rank"
         self.loaded_lora = (lora_path, lora)
 
@@ -1935,22 +2022,22 @@ class DiTBlockLoraLoader:
                             # Only modify LoRA adapters, skip diff tuples
                             value = loaded[key]
                             if hasattr(value, 'weights'):
-                                print(f"Modifying LoRA adapter for key: {key}")
+                                logging.info(f"Modifying LoRA adapter for key: {key}")
                                 weights_list = list(value.weights)
                                 weights_list[2] = ratio
                                 loaded[key].weights = tuple(weights_list)
                             else:
-                                print(f"Skipping non-LoRA entry for key: {key}")
+                                logging.info(f"Skipping non-LoRA entry for key: {key}")
 
             for key in keys_to_delete:
                 del loaded[key]
 
-            print("loading lora keys:")
+            logging.info("loading lora keys:")
             for key, value in loaded.items():
                 if hasattr(value, 'weights'):
-                    print(f"Key: {key}, Alpha: {value.weights[2]}")
+                    logging.info(f"Key: {key}, Alpha: {value.weights[2]}")
                 else:
-                    print(f"Key: {key}, Type: {type(value)}")
+                    logging.info(f"Key: {key}, Type: {type(value)}")
 
         if model is not None:
             new_modelpatcher = model.clone()
@@ -1959,7 +2046,7 @@ class DiTBlockLoraLoader:
         k = set(k)
         for x in loaded:
             if (x not in k):
-                print("NOT LOADED {}".format(x))
+                logging.warning(f"NOT LOADED {x}")
 
         return (new_modelpatcher, rank)
     
@@ -1993,7 +2080,7 @@ class CustomControlNetWeightsFluxFromList:
         TimestepKeyframe = adv_control.utils.TimestepKeyframe
 
         weights = ControlWeights.controlnet(weights_input=list_of_floats, uncond_multiplier=uncond_multiplier, extras=cn_extras)
-        print(weights.weights_input)
+        logging.info(weights.weights_input)
         return (weights, TimestepKeyframeGroup.default(TimestepKeyframe(control_weights=weights)))
     
 SHAKKERLABS_UNION_CONTROLNET_TYPES = {
@@ -2046,7 +2133,6 @@ class ModelSaveKJ:
     CATEGORY = "advanced/model_merging"
 
     def save(self, model, filename_prefix, model_key_prefix, prompt=None, extra_pnginfo=None):
-        from comfy.utils import save_torch_file
         full_output_folder, filename, counter, subfolder, filename_prefix = folder_paths.get_save_image_path(filename_prefix, self.output_dir)
     
         output_checkpoint = f"{filename}_{counter:05}_.safetensors"
@@ -2054,10 +2140,10 @@ class ModelSaveKJ:
 
         load_models = [model]
 
-        model_management.load_models_gpu(load_models, force_patch_weights=True)
+        model_management.load_models_gpu(load_models)
         default_prefix = "model.diffusion_model."
 
-        sd = model.model.state_dict_for_saving(None, None, None)
+        sd = model.state_dict_for_saving(None, None, None)
 
         new_sd = {}
         for k in sd:
@@ -2069,7 +2155,7 @@ class ModelSaveKJ:
             if not t.is_contiguous():
                 t = t.contiguous()
             new_sd[new_key] = t
-        print(full_output_folder)
+        logging.info(f"full_output_folder: {full_output_folder}")
         if not os.path.exists(full_output_folder):
             os.makedirs(full_output_folder)
         save_torch_file(new_sd, os.path.join(full_output_folder, output_checkpoint))
@@ -2123,10 +2209,9 @@ Concatenates the audio1 to audio2 in the specified direction.
         sample_rate_1 = audio1["sample_rate"]
         sample_rate_2 = audio2["sample_rate"]
         if sample_rate_1 != sample_rate_2:
-            raise Exception("Sample rates of the two audios do not match")
-        
+            raise ValueError("Sample rates of the two audios do not match")
+
         waveform_1 = audio1["waveform"]
-        print(waveform_1.shape)
         waveform_2 = audio2["waveform"]
 
         # Concatenate based on the specified direction
@@ -2153,7 +2238,7 @@ class LeapfusionHunyuanI2V:
     RETURN_TYPES = ("MODEL",)
     FUNCTION = "patch"
 
-    CATEGORY = "KJNodes/experimental"
+    CATEGORY = "KJNodes/hunyuanvideo"
 
     def patch(self, model, latent, index, strength, start_percent, end_percent):
 
@@ -2214,8 +2299,10 @@ class ImageNoiseAugmentation:
         return image_out,
 
 class VAELoaderKJ:
+    video_taes = ["taehv", "lighttaew2_2", "lighttaew2_1", "lighttaehy1_5"]
+    image_taes = ["taesd", "taesdxl", "taesd3", "taef1"]
     @staticmethod
-    def vae_list():
+    def vae_list(s):
         vaes = folder_paths.get_filename_list("vae")
         approx_vaes = folder_paths.get_filename_list("vae_approx")
         sdxl_taesd_enc = False
@@ -2244,6 +2331,11 @@ class VAELoaderKJ:
                 f1_taesd_dec = True
             elif v.startswith("taef1_decoder."):
                 f1_taesd_enc = True
+            else:
+                for tae in s.video_taes:
+                    if v.startswith(tae):
+                        vaes.append(v)
+
         if sd1_taesd_dec and sd1_taesd_enc:
             vaes.append("taesd")
         if sdxl_taesd_dec and sdxl_taesd_enc:
@@ -2252,6 +2344,7 @@ class VAELoaderKJ:
             vaes.append("taesd3")
         if f1_taesd_dec and f1_taesd_enc:
             vaes.append("taef1")
+        vaes.append("pixel_space")
         return vaes
 
     @staticmethod
@@ -2287,30 +2380,99 @@ class VAELoaderKJ:
     @classmethod
     def INPUT_TYPES(s):
         return {
-            "required": { "vae_name": (s.vae_list(), ),
+            "required": { "vae_name": (s.vae_list(s), ),
                           "device": (["main_device", "cpu"],),
                           "weight_dtype": (["bf16", "fp16", "fp32" ],),
                          }
             }
-        
+
     RETURN_TYPES = ("VAE",)
     FUNCTION = "load_vae"
     CATEGORY = "KJNodes/vae"
 
     def load_vae(self, vae_name, device, weight_dtype):
         from comfy.sd import VAE
+        metadata = None
         dtype = {"bf16": torch.bfloat16, "fp16": torch.float16, "fp32": torch.float32}[weight_dtype]
         if device == "main_device":
             device = model_management.get_torch_device()
         elif device == "cpu":
             device = torch.device("cpu")
-        if vae_name in ["taesd", "taesdxl", "taesd3", "taef1"]:
+
+        if vae_name == "pixel_space":
+            sd = {}
+            sd["pixel_space_vae"] = torch.tensor(1.0)
+        elif vae_name in self.image_taes:
             sd = self.load_taesd(vae_name)
         else:
-            vae_path = folder_paths.get_full_path_or_raise("vae", vae_name)
-            sd = load_torch_file(vae_path)
-        vae = VAE(sd=sd, device=device, dtype=dtype)
+            if os.path.splitext(vae_name)[0] in self.video_taes:
+                vae_path = folder_paths.get_full_path_or_raise("vae_approx", vae_name)
+            else:
+                vae_path = folder_paths.get_full_path_or_raise("vae", vae_name)
+            sd, metadata = load_torch_file(vae_path, return_metadata=True)
+
+
+        is_audio_vae = (
+            "vocoder.conv_post.weight" in sd
+            or "vocoder.vocoder.conv_post.weight" in sd
+            or "vocoder.resblocks.0.convs1.0.weight" in sd
+            or "vocoder.vocoder.resblocks.0.convs1.0.weight" in sd
+        )
+        if is_audio_vae:
+            sd_audio = state_dict_prefix_replace(dict(sd), {"audio_vae.": "autoencoder.", "vocoder.": "vocoder."}, filter_keys=True)
+            vae = VAE(sd=sd_audio, metadata=metadata)
+        else:
+            vae = VAE(sd=sd, device=device, dtype=dtype, metadata=metadata)
+        vae.throw_exception_if_invalid()
         return (vae,)
+
+
+class VAEMergeKJ(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="VAEMergeKJ",
+            category="KJNodes/vae",
+            description="Merge two VAEs by weighted-averaging their weights. "
+                        "ratio is the weight toward vae_2 (0.0 = pure vae_1, 1.0 = pure vae_2). "
+                        "Both VAEs must share the same architecture (matching state dict keys and shapes).",
+            inputs=[
+                io.Vae.Input("vae_1"),
+                io.Vae.Input("vae_2"),
+                io.Float.Input("ratio", default=0.5, min=0.0, max=1.0, step=0.01),
+            ],
+            outputs=[
+                io.Vae.Output(display_name="vae"),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, vae_1, vae_2, ratio) -> io.NodeOutput:
+        from comfy.sd import VAE
+        sd1 = vae_1.get_sd()
+        sd2 = vae_2.get_sd()
+
+        mismatch = set(sd1.keys()) ^ set(sd2.keys())
+        if mismatch:
+            raise ValueError(
+                "Cannot merge: VAE architectures differ ({} non-matching keys, e.g. {}).".format(
+                    len(mismatch), list(mismatch)[:3]))
+
+        merged = {}
+        for k, v1 in sd1.items():
+            v2 = sd2[k]
+            if v1.shape != v2.shape:
+                raise ValueError("Cannot merge: shape mismatch for '{}' ({} vs {}).".format(k, tuple(v1.shape), tuple(v2.shape)))
+            # Only blend float weights; integer buffers (e.g. num_batches_tracked) are copied from vae_1.
+            if torch.is_floating_point(v1):
+                blended = torch.lerp(v1.float(), v2.to(device=v1.device).float(), ratio)
+                merged[k] = blended.to(dtype=v1.dtype)
+            else:
+                merged[k] = v1.clone()
+
+        merged_vae = VAE(sd=merged, device=vae_1.device, dtype=vae_1.vae_dtype)
+        merged_vae.throw_exception_if_invalid()
+        return io.NodeOutput(merged_vae)
 
 from comfy.samplers import sampling_function, CFGGuider
 class Guider_ScheduledCFG(CFGGuider):
@@ -2351,7 +2513,7 @@ class Guider_ScheduledCFG(CFGGuider):
             cfg = 1.0
 
         return sampling_function(self.inner_model, x, timestep, uncond, self.conds.get("positive", None), cfg, model_options=model_options, seed=seed)            
-  
+
 class ScheduledCFGGuidance:
     @classmethod
     def INPUT_TYPES(s):
@@ -2377,7 +2539,7 @@ cfg input can be a list of floats matching step count, or a single float for all
         guider.set_conds(positive, negative)
         guider.set_cfg(cfg, start_percent, end_percent)
         return (guider, )
-    
+
 
 class ApplyRifleXRoPE_WanVideo:
     @classmethod
@@ -2392,7 +2554,7 @@ class ApplyRifleXRoPE_WanVideo:
 
     RETURN_TYPES = ("MODEL",)
     FUNCTION = "patch"
-    CATEGORY = "KJNodes/experimental"
+    CATEGORY = "KJNodes/wan"
     EXPERIMENTAL = True
     DESCRIPTION = "Extends the potential frame count of HunyuanVideo using this method: https://github.com/thu-ml/RIFLEx"
 
@@ -2428,7 +2590,7 @@ class ApplyRifleXRoPE_HunuyanVideo:
 
     RETURN_TYPES = ("MODEL",)
     FUNCTION = "patch"
-    CATEGORY = "KJNodes/experimental"
+    CATEGORY = "KJNodes/hunyuanvideo"
     EXPERIMENTAL = True
     DESCRIPTION = "Extends the potential frame count of HunyuanVideo using this method: https://github.com/thu-ml/RIFLEx"
 
@@ -2553,7 +2715,7 @@ class HunyuanVideoEncodeKeyframesToCond:
     RETURN_NAMES = ("model", "positive", "negative", "latent")
     FUNCTION = "encode"
 
-    CATEGORY = "KJNodes/videomodels"
+    CATEGORY = "KJNodes/hunyuanvideo"
 
     def encode(self, model, positive, start_frame, end_frame, num_frames, vae, tile_size, overlap, temporal_size, temporal_overlap, negative=None):
 
@@ -2628,24 +2790,26 @@ class LazySwitchKJ:
 
 from comfy.patcher_extension import WrappersMP
 from comfy.sampler_helpers import prepare_mask
-class TTM_SampleWrapper:
+class TTM_OuterSampleWrapper:
     def __init__(self, mask, steps):
         self.mask = mask
         self.steps = steps
 
-    def __call__(self, sampler, guider, sigmas, extra_args, callback, noise, latent_image, denoise_mask, disable_pbar):
-        model_options = extra_args["model_options"]
-        wrappers = model_options["transformer_options"]["wrappers"]
+    def __call__(self, executor, noise, latent_image, sampler, sigmas, denoise_mask, callback, disable_pbar, seed, latent_shapes):
+        guider = executor.class_obj
+        guider.model_options
+        wrappers = guider.model_options["transformer_options"]["wrappers"]
         w = wrappers.setdefault(WrappersMP.APPLY_MODEL, {})
 
         if self.mask is not None:
             motion_mask = self.mask.reshape((-1, 1, self.mask.shape[-2], self.mask.shape[-1]))
-            motion_mask = prepare_mask(motion_mask, noise.shape, noise.device)
+            shape = latent_shapes[0]
+            motion_mask = prepare_mask(motion_mask, shape, noise.device)
 
         scale_latent_inpaint = guider.model_patcher.model.scale_latent_inpaint
         w["TTM_ApplyModel_Wrapper"] = [TTM_ApplyModel_Wrapper(latent_image, noise, motion_mask, self.steps, scale_latent_inpaint)]
 
-        out = sampler(guider, sigmas, extra_args, callback, noise, latent_image, denoise_mask, disable_pbar)
+        out = executor(noise, latent_image, sampler, sigmas, denoise_mask, callback, disable_pbar, seed, latent_shapes=latent_shapes)
 
         return out
 
@@ -2695,41 +2859,55 @@ class LatentInpaintTTM:
     FUNCTION = "patch"
     EXPERIMENTAL = True
     DESCRIPTION = "https://github.com/time-to-move/TTM"
+    SEARCH_ALIASES = ["time to move"]
     CATEGORY = "KJNodes/experimental"
 
     def patch(self, model, steps, mask=None):
         m = model.clone()
-        m.add_wrapper_with_key(WrappersMP.SAMPLER_SAMPLE, "TTM_SampleWrapper", TTM_SampleWrapper(mask, steps))
+        m.add_wrapper_with_key(WrappersMP.OUTER_SAMPLE, "TTM_OuterSampleWrapper", TTM_OuterSampleWrapper(mask, steps))
         return (m, )
 
 
-class SimpleCalculatorKJ:
+class SimpleCalculatorKJ(io.ComfyNode):
     @classmethod
-    def INPUT_TYPES(s):
-        return {
-            "required": {
-                "expression": ("STRING", {"default": "a + b", "multiline": True}),
-            },
-            "optional": {
-                "a": (IO.ANY, {"default": 0.0, "min": -1e10, "max": 1e10, "step": 0.01, "forceInput": True}),
-                "b": (IO.ANY, {"default": 0.0, "min": -1e10, "max": 1e10, "step": 0.01, "forceInput": True}),
-            }
-        }
+    def define_schema(cls):
+        template = io.Autogrow.TemplateNames(input=io.MultiType.Input("var", [io.Int, io.Float, io.Boolean], optional=True), names=["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"], min=2)
+        return io.Schema(
+            node_id="SimpleCalculatorKJ",
+            category="KJNodes/misc",
+            description="""
+Calculator node that evaluates a mathematical expression using inputs a and b.  
+    Supported operations: +, -, *, /, //, %, **, <<, >>, unary +/-  
+    Supported comparisons: ==, !=, <, <=, >, >=  
+    Supported logic: and, or, not  
+    Supported functions: abs(), round(), min(), max(), pow(), sqrt(), sin(), cos(), tan(), log(), log10(), exp(), floor(), ceil()  
+    Supported constants: pi, euler, True, False  
+""",
+            search_aliases=["math", "arithmetic", "expression", "logic"],
+            inputs=[
+                io.String.Input("expression", default="a + b", multiline=True),
+                io.Autogrow.Input("variables", template=template),
+            ],
+            outputs=[
+                io.Float.Output(),
+                io.Int.Output(),
+                io.Boolean.Output(),
+            ],
+        )
 
-    RETURN_TYPES = ("FLOAT", "INT",)
-    FUNCTION = "calculate"
-    CATEGORY = "KJNodes/misc"
-    DESCRIPTION = "Calculator node that evaluates a mathematical expression using inputs a and b."
-
-    def calculate(self, expression, a=None, b=None):
-
+    @classmethod
+    def execute(cls, variables, expression, a=None, b=None) -> io.NodeOutput:
         import ast
         import operator
-        import math
 
         # Allowed operations
-        allowed_operators = {ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.mul,  ast.Div: operator.truediv,
-            ast.Pow: operator.pow, ast.USub: operator.neg, ast.UAdd: operator.pos, ast.LShift: operator.lshift, ast.RShift: operator.rshift,
+        allowed_operators = {
+            ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.mul, ast.Div: operator.truediv,
+            ast.FloorDiv: operator.floordiv, ast.Mod: operator.mod, ast.Pow: operator.pow, 
+            ast.USub: operator.neg, ast.UAdd: operator.pos, ast.LShift: operator.lshift, 
+            ast.RShift: operator.rshift, ast.Eq: operator.eq, ast.NotEq: operator.ne, ast.Lt: operator.lt,
+            ast.LtE: operator.le, ast.Gt: operator.gt, ast.GtE: operator.ge, ast.And: operator.and_, 
+            ast.Or: operator.or_, ast.Not: operator.not_,
         }
 
         # Allowed functions
@@ -2741,11 +2919,21 @@ class SimpleCalculatorKJ:
             'ceil': math.ceil
         }
 
-        # Allowed constants
-        allowed_names = {'a': a, 'b': b, 'pi': math.pi, 'e': math.e}
+        # Allowed constants - start with pi, e, True, False
+        allowed_names = {'pi': math.pi, 'euler': math.e, 'True': True, 'False': False}
+
+        # Add all variables from autogrow to allowed_names
+        for var_name, var_value in variables.items():
+            allowed_names[var_name] = var_value
+
+        # Backwards compatibility: add a and b if they're provided (for old workflows)
+        if a is not None:
+            allowed_names['a'] = a
+        if b is not None:
+            allowed_names['b'] = b
 
         def eval_node(node):
-            if isinstance(node, ast.Constant):  # Numbers
+            if isinstance(node, ast.Constant):  # Numbers and booleans
                 return node.value
             elif isinstance(node, ast.Name):  # Variables
                 if node.id in allowed_names:
@@ -2762,6 +2950,25 @@ class SimpleCalculatorKJ:
                     raise ValueError(f"Operator {type(node.op).__name__} is not allowed")
                 operand = eval_node(node.operand)
                 return allowed_operators[type(node.op)](operand)
+            elif isinstance(node, ast.Compare):  # Comparison operations
+                left = eval_node(node.left)
+                for op, comparator in zip(node.ops, node.comparators):
+                    if type(op) not in allowed_operators:
+                        raise ValueError(f"Operator {type(op).__name__} is not allowed")
+                    right = eval_node(comparator)
+                    result = allowed_operators[type(op)](left, right)
+                    if not result:
+                        return False
+                    left = right
+                return True
+            elif isinstance(node, ast.BoolOp):  # Boolean operations (and, or)
+                if type(node.op) not in allowed_operators:
+                    raise ValueError(f"Operator {type(node.op).__name__} is not allowed")
+                values = [eval_node(value) for value in node.values]
+                if isinstance(node.op, ast.And):
+                    return all(values)
+                elif isinstance(node.op, ast.Or):
+                    return any(values)
             elif isinstance(node, ast.Call):  # Function calls
                 if not isinstance(node.func, ast.Name):
                     raise ValueError("Only simple function calls are allowed")
@@ -2775,10 +2982,10 @@ class SimpleCalculatorKJ:
         try:
             tree = ast.parse(expression, mode='eval')
             result = eval_node(tree.body)
-            return (float(result), int(result))
+            return io.NodeOutput(float(result), int(result), bool(result))
         except Exception as e:
-            print(f"CalculatorKJ Error: {str(e)}")
-            return (0.0, 0)
+            logging.error(f"CalculatorKJ Error: {str(e)}")
+            return io.NodeOutput(0.0, 0, False)
 
 
 class GetTrackRange(io.ComfyNode):
@@ -2914,3 +3121,285 @@ class VAEDecodeLoopKJ:
             images = images.reshape(-1, images.shape[-3], images.shape[-2], images.shape[-1])
 
         return (images, )
+
+class WanImageToVideoSVIPro(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="WanImageToVideoSVIPro",
+            category="conditioning/video_models",
+            inputs=[
+                io.Conditioning.Input("positive"),
+                io.Conditioning.Input("negative"),
+                io.Int.Input("length", default=81, min=1, max=MAX_RESOLUTION, step=4),
+                io.Latent.Input("anchor_samples"),
+                io.Latent.Input("prev_samples", optional=True),
+                io.Int.Input("motion_latent_count", default=1, min=0, max=128, step=1),
+            ],
+            outputs=[
+                io.Conditioning.Output(display_name="positive"),
+                io.Conditioning.Output(display_name="negative"),
+                io.Latent.Output(display_name="latent"),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, positive, negative, length, motion_latent_count, anchor_samples, prev_samples=None) -> io.NodeOutput:
+        anchor_latent = anchor_samples["samples"].clone()
+
+        B, C, T, H, W = anchor_latent.shape
+        empty_latent = torch.zeros([B, 16, ((length - 1) // 4) + 1, H, W], device=model_management.intermediate_device())
+
+        total_latents = (length - 1) // 4 + 1
+        device = anchor_latent.device
+        dtype = anchor_latent.dtype
+
+        if prev_samples is None or motion_latent_count == 0:
+            padding_size = total_latents - anchor_latent.shape[2]
+            image_cond_latent = anchor_latent
+        else:
+            motion_latent = prev_samples["samples"][:, :, -motion_latent_count:].clone()
+            padding_size = total_latents - anchor_latent.shape[2] - motion_latent.shape[2]
+            image_cond_latent = torch.cat([anchor_latent, motion_latent], dim=2)
+
+        padding = torch.zeros(1, C, padding_size, H, W, dtype=dtype, device=device)
+        padding = comfy.latent_formats.Wan21().process_out(padding)
+        image_cond_latent = torch.cat([image_cond_latent, padding], dim=2)
+
+        mask = torch.ones((1, 1, empty_latent.shape[2], H, W), device=device, dtype=dtype)
+        mask[:, :, :1] = 0.0
+
+        positive = node_helpers.conditioning_set_values(positive, {"concat_latent_image": image_cond_latent, "concat_mask": mask})
+        negative = node_helpers.conditioning_set_values(negative, {"concat_latent_image": image_cond_latent, "concat_mask": mask})
+
+        out_latent = {}
+        out_latent["samples"] = empty_latent
+        return io.NodeOutput(positive, negative, out_latent)
+
+class DeprecatedCompileNodeKJ:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+        "required": {
+            "model": (IO.ANY,),
+        },
+    }
+    RETURN_TYPES = (IO.ANY,)
+    FUNCTION = "passthrough"
+    CATEGORY = "KJNodes/deprecated"
+    DESCRIPTION = "This node has been replaced with TorchCompileModelAdvanced node, please use that instead."
+    def passthrough(self, model):
+        return (model,)
+
+
+class VisualizeSigmasKJ(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="VisualizeSigmasKJ",
+            category="KJNodes/misc",
+            inputs=[
+                io.Sigmas.Input("sigmas"),
+                io.Int.Input("start_step", default=0, min=-1, max=1000, step=1,
+                             tooltip="Step index to mark as the start of a range (inclusive). Set to -1 to disable."),
+                io.Int.Input("end_step", default=-1, min=-1, max=1000, step=1,
+                             tooltip="Step index to mark as the end of a range (inclusive). Set to - 1 to disable."),
+            ],
+            outputs=[
+                io.Sigmas.Output(display_name="sigmas_out"),
+                io.Image.Output(display_name="image"),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, sigmas, start_step=0, end_step=-1) -> io.NodeOutput:
+
+        start_idx = 0
+        end_idx = len(sigmas) - 1
+
+        if isinstance(start_step, float):
+            idxs = (sigmas <= start_step).nonzero(as_tuple=True)[0]
+            if len(idxs) > 0:
+                start_idx = idxs[0].item()
+        elif isinstance(start_step, int):
+            if start_step > 0:
+                start_idx = start_step
+
+        if isinstance(end_step, float):
+            idxs = (sigmas >= end_step).nonzero(as_tuple=True)[0]
+            if len(idxs) > 0:
+                end_idx = idxs[-1].item()
+        elif isinstance(end_step, int):
+            if end_step != -1:
+                end_idx = end_step - 1
+
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+        sigmas_np = sigmas.cpu().numpy()
+        if not np.isclose(sigmas_np[-1], 0.0, atol=1e-6):
+            sigmas_np = np.append(sigmas_np, 0.0)
+        buf = BytesIO()
+        fig = plt.figure(facecolor='#353535')
+        ax = fig.add_subplot(111)
+        ax.set_facecolor('#353535')  # Set axes background color
+        x_values = range(0, len(sigmas_np))
+        ax.plot(x_values, sigmas_np)
+        # Annotate each sigma value
+        ax.scatter(x_values, sigmas_np, color='white', s=20, zorder=3)  # Small dots at each sigma
+        for x, y in zip(x_values, sigmas_np):
+            # Show all annotations if few steps, or just show split step annotations
+            show_annotation = len(sigmas_np) <= 10
+            is_split_step = (start_idx > 0 and x == start_idx) or (end_idx != -1 and x == end_idx + 1)
+
+            if show_annotation or is_split_step:
+                color = 'orange'
+                if is_split_step:
+                    color = 'yellow'
+                ax.annotate(f"{y:.3f}", (x, y), textcoords="offset points", xytext=(10, 1), ha='center', color=color, fontsize=12)
+        ax.set_xticks(x_values)
+        ax.set_title("Sigmas", color='white')           # Title font color
+        ax.set_xlabel("Step", color='white')            # X label font color
+        ax.set_ylabel("Sigma Value", color='white')     # Y label font color
+        ax.tick_params(axis='x', colors='white', labelsize=10)        # X tick color
+        ax.tick_params(axis='y', colors='white', labelsize=10)        # Y tick color
+        # Add split point if end_step is defined
+        end_idx += 1
+        if end_idx != -1 and 0 <= end_idx < len(sigmas_np) - 1:
+            ax.axvline(end_idx, color='red', linestyle='--', linewidth=2, label='end_step split')
+        # Add split point if start_step is defined
+        if start_idx > 0 and 0 <= start_idx < len(sigmas_np):
+            ax.axvline(start_idx, color='green', linestyle='--', linewidth=2, label='start_step split')
+        if (end_idx != -1 and 0 <= end_idx < len(sigmas_np)) or (start_idx > 0 and 0 <= start_idx < len(sigmas_np)):
+            handles, labels = ax.get_legend_handles_labels()
+            if labels:
+                ax.legend()
+        # Draw shaded range
+        range_start_idx = start_idx if start_idx > 0 else 0
+        range_end_idx = end_idx if end_idx > 0 and end_idx < len(sigmas_np) else len(sigmas_np) - 1
+        if range_start_idx < range_end_idx:
+            ax.axvspan(range_start_idx, range_end_idx, color='lightblue', alpha=0.1, label='Sampled Range')
+
+
+        plt.tight_layout()
+        fig.canvas.draw()
+        w, h = fig.canvas.get_width_height()
+        try:
+            buf = np.frombuffer(fig.canvas.tostring_argb(), dtype=np.uint8)
+            buf = buf.reshape(h, w, 4)
+            buf = buf[:, :, [1, 2, 3]]  # Convert ARGB to RGB
+        except AttributeError:
+            buf = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
+            buf = buf.reshape(h, w, 3).copy()
+        image = torch.from_numpy(buf).float() / 255.0
+        image = image.unsqueeze(0) #(H, W, C) -> (1, H, W, C)
+        plt.close(fig)
+
+        sigmas_out = sigmas[start_idx:end_idx + 1] if end_idx != -1 else sigmas[start_idx:]
+
+        return io.NodeOutput(sigmas_out,image)
+
+class PreviewLatentNoiseMask(io.ComfyNode):
+
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="PreviewLatentNoiseMask",
+            category="KJNodes/latents",
+            description="Previews the latent noise mask",
+            inputs=[
+                io.Latent.Input("latent",),
+            ],
+            outputs=[
+                io.Mask.Output(display_name="mask"),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, latent) -> io.NodeOutput:
+        noise_mask = latent.get("noise_mask", None)
+        if noise_mask is None:
+            return io.NodeOutput(torch.zeros((1, 64, 64)))
+        noise_mask = noise_mask.clone()
+
+        if noise_mask.ndim == 5:
+            noise_mask = noise_mask[0, 0]
+
+        return io.NodeOutput(noise_mask)
+
+class PlaySoundKJ(io.ComfyNode):
+    """Plays audio in the browser when execution reaches this node."""
+
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="PlaySoundKJ",
+            category="KJNodes/audio",
+            description="Plays the input audio in the browser. Modes: 'always' plays on every execution, 'on_empty_queue' plays only when the queue finishes, 'on_change' plays only when the audio content changes. Duration limits playback length (0 = full audio).",
+            inputs=[
+                io.AnyType.Input("any_input", optional=True),
+                io.Audio.Input("audio", optional=True),
+                io.String.Input("audio_path", default="", tooltip="Path to an audio file. Used when audio input is not connected."),
+                io.Combo.Input("mode", options=["always", "on_empty_queue", "on_change"], default="always"),
+                io.Float.Input("volume", default=0.5, min=0.0, max=1.0, step=0.01),
+                io.Float.Input("duration", default=5.0, min=0.0, max=300.0, step=0.1, tooltip="Duration in seconds to play. 0 = play full audio."),
+            ],
+            outputs=[
+                io.AnyType.Output("any_output", display_name="any_output"),
+            ],
+            is_output_node=True,
+        )
+
+    @classmethod
+    def fingerprint_inputs(cls, **kwargs):
+        if kwargs.get("mode") == "on_change":
+            return False
+        return float("NaN")
+
+    @staticmethod
+    def _generate_chime():
+        sr = 32000
+        C, Ab, Bb = 523.26, 421.30, 466.16  # note frequencies
+        e = 0.14  # eighth note — adjust to change tempo
+        S, M, H = 16, 7, 2.5  # staccato / medium / held decay
+        melody = [
+            (C,e,S), (C,e,S), (C,e,S), (C,e*3,M),
+            (Ab,e*3,M), (Bb,e*3,M), (C,e*2,S), (Bb,e,S), (C,e*5,H),
+        ]
+        k = torch.exp(-torch.linspace(-2, 2, 15) ** 2)
+        k = (k / k.sum()).reshape(1, 1, -1)
+        parts = []
+        for freq, dur, decay in melody:
+            t = torch.linspace(0, dur, int(sr * dur))
+            tone = torch.tanh(3 * torch.sin(2 * math.pi * freq * t))
+            tone = torch.nn.functional.conv1d(tone.reshape(1, 1, -1), k, padding=7).squeeze()
+            parts.append(tone * torch.exp(-t * decay))
+        wav = torch.cat(parts) * 0.45
+        return {"waveform": wav.unsqueeze(0).unsqueeze(0), "sample_rate": sr}
+
+    @classmethod
+    def execute(cls, audio=None, audio_path="", mode="always", volume=0.5, duration=5.0, any_input=None) -> io.NodeOutput:
+        if audio is None:
+            if audio_path:
+                import av
+                with av.open(audio_path) as af:
+                    stream = af.streams.audio[0]
+                    sr = stream.codec_context.sample_rate
+                    frames = []
+                    for frame in af.decode(streams=stream.index):
+                        buf = torch.from_numpy(frame.to_ndarray())
+                        if buf.shape[0] != stream.channels:
+                            buf = buf.view(-1, stream.channels).t()
+                        frames.append(buf)
+                    wav = torch.cat(frames, dim=1).float()
+                audio = {"waveform": wav.unsqueeze(0), "sample_rate": sr}
+            else:
+                audio = cls._generate_chime()
+
+        preview = ui.PreviewAudio(audio, cls=cls)
+        ui_dict = preview.as_dict()
+        ui_dict["audio_hash"] = [hash(audio["waveform"].sum().item())]
+        return io.NodeOutput(
+            any_input,
+            ui=ui_dict,
+        )
