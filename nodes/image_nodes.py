@@ -4679,6 +4679,112 @@ class LoadVideosFromFolder:
         return None
 
 
+class LoadVideosFromFolderList(LoadVideosFromFolder):
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "video": ("STRING", {"default": "X://insert/path/"},),
+                "force_rate": ("FLOAT", {"default": 0, "min": 0, "max": 60, "step": 1, "disable": 0}),
+                "custom_width": ("INT", {"default": 0, "min": 0, "max": 4096, "disable": 0}),
+                "custom_height": ("INT", {"default": 0, "min": 0, "max": 4096, "disable": 0}),
+                "frame_load_cap": ("INT", {"default": 0, "min": 0, "max": 10000, "step": 1, "disable": 0}),
+                "skip_first_frames": ("INT", {"default": 0, "min": 0, "max": 10000, "step": 1}),
+                "select_every_nth": ("INT", {"default": 1, "min": 1, "max": 1000, "step": 1}),
+                "add_label": ("BOOLEAN", {"default": False}),
+            },
+            "hidden": {
+                "force_size": "STRING",
+                "unique_id": "UNIQUE_ID"
+            },
+        }
+
+    CATEGORY = "KJNodes/misc"
+
+    RETURN_TYPES = ("IMAGE", )
+    RETURN_NAMES = ("IMAGE", )
+    OUTPUT_IS_LIST = (True,)
+
+    FUNCTION = "load_video"
+
+    def load_video(self, add_label=False, **kwargs):
+        if kwargs.get('video') and not os.path.isabs(kwargs['video']) and args.base_directory:
+            kwargs['video'] = os.path.join(args.base_directory, kwargs['video'])
+
+        if self.vhs_nodes is None:
+            raise ImportError("This node requires ComfyUI-VideoHelperSuite to be installed.")
+
+        videos_list = []
+        filenames = []
+
+        for f in sorted(os.listdir(kwargs['video'])):
+            if os.path.isfile(os.path.join(kwargs['video'], f)):
+                file_parts = f.split('.')
+                if len(file_parts) > 1 and (file_parts[-1].lower() in ['webm', 'mp4', 'mkv', 'gif', 'mov']):
+                    videos_list.append(os.path.join(kwargs['video'], f))
+                    filenames.append(f)
+
+        kwargs.pop('video')
+
+        loaded_videos = []
+
+        for idx, video in enumerate(videos_list):
+            video_tensor = self.vhs_nodes.load_video_nodes.load_video(video=video, **kwargs)[0]
+
+            if add_label:
+                if video_tensor.dim() == 4:
+                    _, h, w, c = video_tensor.shape
+                else:
+                    h, w, c = video_tensor.shape
+
+                label_text = filenames[idx].rsplit('.', 1)[0]
+                font_size = max(16, w // 20)
+
+                try:
+                    font = ImageFont.truetype("arial.ttf", font_size)
+                except OSError:
+                    font = ImageFont.load_default()
+
+                dummy_img = Image.new("RGB", (w, 10), (0, 0, 0))
+                draw = ImageDraw.Draw(dummy_img)
+                text_bbox = draw.textbbox((0, 0), label_text, font=font)
+
+                extra_padding = max(12, font_size // 2)
+                label_height = text_bbox[3] - text_bbox[1] + extra_padding
+
+                label_img = Image.new("RGB", (w, label_height), (0, 0, 0))
+                draw = ImageDraw.Draw(label_img)
+
+                draw.text(
+                    (w // 2 - (text_bbox[2] - text_bbox[0]) // 2, 4),
+                    label_text,
+                    font=font,
+                    fill=(255, 255, 255)
+                )
+
+                label_np = np.asarray(label_img).astype(np.float32) / 255.0
+                label_tensor = torch.from_numpy(label_np)
+
+                if c == 1:
+                    label_tensor = label_tensor.mean(dim=2, keepdim=True)
+                elif c == 4:
+                    alpha = torch.ones((label_height, w, 1), dtype=label_tensor.dtype)
+                    label_tensor = torch.cat([label_tensor, alpha], dim=2)
+
+                if video_tensor.dim() == 4:
+                    label_tensor = label_tensor.unsqueeze(0).expand(
+                        video_tensor.shape[0], -1, -1, -1
+                    )
+                    video_tensor = torch.cat([label_tensor, video_tensor], dim=1)
+                else:
+                    video_tensor = torch.cat([label_tensor, video_tensor], dim=0)
+
+            loaded_videos.append(video_tensor)
+
+        return (loaded_videos,)
+
+
 class EncodeVideoComponents(io.ComfyNode):
     @classmethod
     def define_schema(cls):

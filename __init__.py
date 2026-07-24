@@ -53,8 +53,8 @@ from .nodes.image_nodes import (
     PreviewAnimation, ImageResizeKJ, ImageResizeKJv2, LoadAndResizeImage,
     LoadImagesFromFolderKJ, ImageGridtoBatch, SaveImageKJ, SaveStringKJ, FastPreview,
     FastPreviewBatch, ImageCropByMaskAndResize, ImageCropByMask, ImageUncropByMask,
-    ImageCropByMaskBatch, ImagePadKJ, LoadVideosFromFolder, EncodeVideoComponents,
-    DecodeAndSaveVideo, PreviewImageOrMask,
+    ImageCropByMaskBatch, ImagePadKJ, LoadVideosFromFolder, LoadVideosFromFolderList, 
+    EncodeVideoComponents, DecodeAndSaveVideo, PreviewImageOrMask,
 )
 
 from .nodes.mask_nodes import (
@@ -173,6 +173,7 @@ NODE_CONFIG = {
     "LoadAndResizeImage": {"class": LoadAndResizeImage, "name": "Load & Resize Image"},
     "LoadImagesFromFolderKJ": {"class": LoadImagesFromFolderKJ, "name": "Load Images From Folder (KJ)"},
     "LoadVideosFromFolder": {"class": LoadVideosFromFolder, "name": "Load Videos From Folder"},
+    "LoadVideosFromFolderList": {"class": LoadVideosFromFolderList, "name": "Load Videos From Folder (List)"},
     "MergeImageChannels": {"class": MergeImageChannels, "name": "Merge Image Channels"},
     "PadImageBatchInterleaved": {"class": PadImageBatchInterleaved, "name": "Pad Image Batch Interleaved"},
     "PreviewAnimation": {"class": PreviewAnimation, "name": "Preview Animation"},
