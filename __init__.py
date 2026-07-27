@@ -76,7 +76,6 @@ from .nodes.model_optimization_nodes import (
     SamplerSelfRefineVideo, PiDColorBiasCorrection, Ideogram4OptimizationsKJ,
 )
 from .nodes.lora_nodes import LoraExtractKJ, LoraReduceRank
-from .nodes.image_transform_node import ImageTransformKJ
 from .nodes.image_transform_node import ImageTransformKJ, BBOXToBoundingBoxKJ
 from .nodes.sharpen_nodes import ImageSharpenKJ
 from .nodes.hdr_preview_node import HDRPreviewKJ
