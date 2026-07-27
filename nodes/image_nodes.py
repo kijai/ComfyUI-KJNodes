@@ -865,7 +865,7 @@ class AddLabel:
     @classmethod
     def INPUT_TYPES(s):
         return {"required": {
-            "image":("IMAGE",),  
+            "image":("IMAGE",),
             "text_x": ("INT", {"default": 10, "min": 0, "max": 4096, "step": 1}),
             "text_y": ("INT", {"default": 2, "min": 0, "max": 4096, "step": 1}),
             "height": ("INT", {"default": 48, "min": -1, "max": 4096, "step": 1}),
@@ -903,6 +903,9 @@ ComfyUI/custom_nodes/ComfyUI-KJNodes/fonts
     def addlabel(self, image, text_x, text_y, text, height, font_size, font_color, label_color, font, direction, caption=""):
         batch_size = image.shape[0]
         width = image.shape[2]
+        channels = image.shape[3]
+        # match the label to the input, so alpha images stay 4 channel
+        pil_mode = "RGBA" if channels == 4 else "RGB"
 
         font_path = os.path.join(script_directory, "fonts", "TTNorms-Black.otf") if font == "TTNorms-Black.otf" else folder_paths.get_full_path("kjnodes_fonts", font)
 
@@ -913,6 +916,9 @@ ComfyUI/custom_nodes/ComfyUI-KJNodes/fonts
         # Convert to tuples for PIL
         font_color_tuple = tuple(font_color_rgb[:3])  # RGB only
         label_color_tuple = tuple(label_color_rgb[:3])  # RGB only
+        if pil_mode == "RGBA":
+            font_color_tuple += (font_color_rgb[3] if len(font_color_rgb) > 3 else 255,)
+            label_color_tuple += (label_color_rgb[3] if len(label_color_rgb) > 3 else 255,)
 
         def process_image(input_image, caption_text):
             font = ImageFont.truetype(font_path, font_size)
@@ -948,10 +954,10 @@ ComfyUI/custom_nodes/ComfyUI-KJNodes/fonts
                     # Adjust the image height automatically
                     margin = 8
                     required_height = (text_y + len(lines) * font_size) + margin # Calculate required height
-                    pil_image = Image.new("RGB", (width, required_height), label_color_tuple)
+                    pil_image = Image.new(pil_mode, (width, required_height), label_color_tuple)
                 else:
                     # Initialize with a minimal height
-                    label_image = Image.new("RGB", (width, height), label_color_tuple)
+                    label_image = Image.new(pil_mode, (width, height), label_color_tuple)
                     pil_image = label_image
 
             draw = ImageDraw.Draw(pil_image)
