@@ -12,7 +12,7 @@ from comfy_api.latest import io
 import folder_paths
 from nodes import MAX_RESOLUTION
 
-from ..utility.utility import string_to_color
+from ..utility.utility import string_to_color, normalize_bboxes, bbox_to_bounding_box
 
 def _upscale_mask(mask, width, height, method, crop):
     if method == "lanczos":
@@ -513,3 +513,30 @@ Use extra_padding to add padding with color or edge fill (clamp/repeat/mirror)."
         width, height = all_cropped[0].shape[2], all_cropped[0].shape[1]
 
         return io.NodeOutput(all_cropped, all_cropped_masks, all_bbox_tuples, all_bbox_masks, width, height, ui=preview_ui)
+
+
+class BBOXToBoundingBoxKJ(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="BBOXToBoundingBoxKJ",
+            display_name="BBOX to Bounding Box KJ",
+            category="KJNodes/image",
+            search_aliases=["bbox", "bounding box", "convert", "crop region"],
+            description="Convert a KJNodes BBOX to the native BOUNDING_BOX dict used by core nodes such as Crop Image.",
+            inputs=[
+                io.BBOX.Input("bbox", tooltip="BBOX from any KJNodes node. Single boxes and lists of boxes are both accepted."),
+                io.Combo.Input("bbox_format", options=["xywh", "xyxy"], default="xywh",
+                               tooltip="Layout of the incoming values."),
+                io.Int.Input("index", default=0, min=0, max=4096,
+                             tooltip="When the input holds multiple boxes, pick which one to output. Clamped to the last box."),
+            ],
+            outputs=[
+                io.BoundingBox.Output("bounding_box"),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, bbox, bbox_format, index) -> io.NodeOutput:
+        boxes = normalize_bboxes(bbox, bbox_format)
+        return io.NodeOutput(bbox_to_bounding_box(boxes[min(index, len(boxes) - 1)], bbox_format))
