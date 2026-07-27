@@ -929,7 +929,7 @@ class LTX2SamplingPreviewOverride(io.ComfyNode):
             is_experimental=True,
             inputs=[
                 io.Model.Input("model", tooltip="The model to add preview override to."),
-                io.Int.Input("preview_rate", default=8, min=1, max=60, step=1, tooltip="Preview frame rate."),
+                io.MultiType.Input(io.Float.Input("preview_rate", default=8.0, min=1.0, max=60.0, step=0.01, tooltip="Preview frame rate."), [io.Int]),
                 io.LatentUpscaleModel.Input("latent_upscale_model", optional=True, tooltip="Optional upscale model to use for higher resolution previews."),
                 io.Vae.Input("vae", optional=True, tooltip="VAE model to use normalizing the latents for the upscale model."),
             ],
