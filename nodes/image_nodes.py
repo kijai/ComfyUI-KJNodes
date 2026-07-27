@@ -35,7 +35,7 @@ from fractions import Fraction
 import node_helpers
 import folder_paths
 
-from ..utility.utility import string_to_color
+from ..utility.utility import string_to_color, normalize_bboxes, BBOX_TYPES
 
 try:
     from server import PromptServer, BinaryEventTypes
@@ -4204,7 +4204,7 @@ class ImageUncropByMask:
                         "destination": ("IMAGE",),
                         "source": ("IMAGE",),
                         "mask": ("MASK",),
-                        "bbox": ("BBOX",),
+                        "bbox": (BBOX_TYPES,),
                      },
                 }
 
@@ -4218,7 +4218,9 @@ class ImageUncropByMask:
         output_list = []
 
         B, H, W, C = destination.shape
-       
+
+        bbox = normalize_bboxes(bbox, "xyxy")
+
         for i in range(source.shape[0]):
             x0, y0, x1, y1 = bbox[i]
             bbox_height = y1 - y0

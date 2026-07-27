@@ -12,6 +12,48 @@ def pil2tensor(image: Union[Image.Image, List[Image.Image]]) -> torch.Tensor:
     return torch.from_numpy(np.array(image).astype(np.float32) / 255.0).unsqueeze(0)
 
 
+BBOX_TYPES = "BBOX,BOUNDING_BOX"
+
+def normalize_bboxes(bboxes, bbox_format="xywh") -> List[tuple]:
+    """Accept KJNodes BBOX tuples and/or native BOUNDING_BOX dicts, single or nested,
+    and return a flat list of 4-tuples in bbox_format ("xywh" or "xyxy").
+    Tuples are assumed to already be in bbox_format, dicts are converted."""
+    if isinstance(bboxes, (torch.Tensor, np.ndarray)):
+        bboxes = bboxes.tolist()
+    if isinstance(bboxes, dict):
+        bboxes = [bboxes]
+    elif isinstance(bboxes, (list, tuple)):
+        if len(bboxes) == 4 and all(isinstance(v, (int, float)) for v in bboxes):
+            bboxes = [bboxes]
+    else:
+        raise ValueError(f"Unsupported bbox input: {type(bboxes).__name__}")
+
+    out = []
+    for bbox in bboxes:
+        if isinstance(bbox, (torch.Tensor, np.ndarray)):
+            bbox = bbox.tolist()
+        if isinstance(bbox, (list, tuple)) and bbox and not all(isinstance(v, (int, float)) for v in bbox):
+            out.extend(normalize_bboxes(bbox, bbox_format))  # nested list, e.g. per-frame boxes
+            continue
+        if isinstance(bbox, dict):
+            x, y = int(bbox["x"]), int(bbox["y"])
+            w, h = int(bbox["width"]), int(bbox["height"])
+            out.append((x, y, x + w, y + h) if bbox_format == "xyxy" else (x, y, w, h))
+        elif isinstance(bbox, (list, tuple)) and len(bbox) >= 4:
+            out.append(tuple(int(v) for v in bbox[:4]))
+        else:
+            raise ValueError(f"Invalid bbox: {bbox}")
+    return out
+
+
+def bbox_to_bounding_box(bbox, bbox_format="xywh") -> dict:
+    """Convert a single KJNodes BBOX to the native BOUNDING_BOX dict."""
+    a, b, c, d = normalize_bboxes(bbox, bbox_format)[0]
+    if bbox_format == "xyxy":
+        return {"x": min(a, c), "y": min(b, d), "width": abs(c - a), "height": abs(d - b)}
+    return {"x": a, "y": b, "width": c, "height": d}
+
+
 def np2tensor(img_np: Union[np.ndarray, List[np.ndarray]]) -> torch.Tensor:
     if isinstance(img_np, list):
         return torch.cat([np2tensor(img) for img in img_np], dim=0)
