@@ -3197,7 +3197,7 @@ highest dimension.
             except Exception:
                 pass
 
-        return (out_image.cpu(), out_image.shape[2], out_image.shape[1], out_mask.cpu() if out_mask is not None else torch.zeros(64,64, device=torch.device("cpu"), dtype=torch.float32))
+        return (out_image.cpu(), out_image.shape[2], out_image.shape[1], out_mask.cpu() if out_mask is not None else torch.zeros(1, 64,64, device=torch.device("cpu"), dtype=torch.float32))
 
 class LoadAndResizeImage:
     _color_channels = ["alpha", "red", "green", "blue"]
@@ -3284,7 +3284,7 @@ class LoadAndResizeImage:
                 # Composite the frame onto the background
                 frame = Image.alpha_composite(bg_image, frame)
             else:
-                alpha_mask = torch.zeros((64, 64), dtype=torch.float32, device="cpu")
+                alpha_mask = torch.zeros((1, 64, 64), dtype=torch.float32, device="cpu")
             
             image = frame.convert("RGB")
 
@@ -3311,7 +3311,7 @@ class LoadAndResizeImage:
                 elif c == 'A':
                     mask = 1. - mask
             else:
-                mask = torch.zeros((64, 64), dtype=torch.float32, device="cpu")
+                mask = torch.zeros((1, 64, 64), dtype=torch.float32, device="cpu")
 
             output_images.append(image)
             output_masks.append(mask.unsqueeze(0))
