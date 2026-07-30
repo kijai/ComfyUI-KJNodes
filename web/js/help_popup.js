@@ -38,12 +38,15 @@ export const loadScript = (
   })
 }
 
-loadScript('kjweb_async/marked.min.js').catch((e) => {
-  console.error(e)
-})
-loadScript('kjweb_async/purify.min.js').catch((e) => {
-  console.error(e)
-})
+// Only load the marked/DOMPurify fallback when the native renderer is absent.
+if (!app.extensionManager?.renderMarkdownToHtml) {
+  loadScript('kjweb_async/marked.min.js').catch((e) => {
+    console.error(e)
+  })
+  loadScript('kjweb_async/purify.min.js').catch((e) => {
+    console.error(e)
+  })
+}
 
 const categories = ["KJNodes", "SUPIR", "VoiceCraft", "Marigold", "IC-Light", "WanVideoWrapper"];
 const nodeDescriptions = new Map();
