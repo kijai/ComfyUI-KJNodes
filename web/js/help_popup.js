@@ -38,12 +38,18 @@ export const loadScript = (
   })
 }
 
-loadScript('kjweb_async/marked.min.js').catch((e) => {
-  console.error(e)
-})
-loadScript('kjweb_async/purify.min.js').catch((e) => {
-  console.error(e)
-})
+// Only load the bundled marked/DOMPurify fallback when the frontend lacks the
+// native markdown renderer (added in ComfyUI_frontend PR #10700). On newer
+// frontends renderMarkdownToHtml is used instead, so loading these is dead
+// weight and, when the pack root isn't served, produces 404s (e.g. on Cloud).
+if (!app.extensionManager?.renderMarkdownToHtml) {
+  loadScript('kjweb_async/marked.min.js').catch((e) => {
+    console.error(e)
+  })
+  loadScript('kjweb_async/purify.min.js').catch((e) => {
+    console.error(e)
+  })
+}
 
 const categories = ["KJNodes", "SUPIR", "VoiceCraft", "Marigold", "IC-Light", "WanVideoWrapper"];
 const nodeDescriptions = new Map();
