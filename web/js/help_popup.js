@@ -38,10 +38,7 @@ export const loadScript = (
   })
 }
 
-// Only load the bundled marked/DOMPurify fallback when the frontend lacks the
-// native markdown renderer (added in ComfyUI_frontend PR #10700). On newer
-// frontends renderMarkdownToHtml is used instead, so loading these is dead
-// weight and, when the pack root isn't served, produces 404s (e.g. on Cloud).
+// Only load the marked/DOMPurify fallback when the native renderer is absent.
 if (!app.extensionManager?.renderMarkdownToHtml) {
   loadScript('kjweb_async/marked.min.js').catch((e) => {
     console.error(e)
