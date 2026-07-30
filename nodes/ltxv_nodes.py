@@ -853,8 +853,14 @@ def _get_ltx_rgb_factors_impl(is_23):
     return latent_rgb_factors, latent_rgb_factors_bias
 
 
+def _unwrap_upscale_model(latent_upscale_model):
+    # newer comfy wraps the upsampler in a ModelPatcher
+    return getattr(latent_upscale_model, "model", latent_upscale_model)
+
 def prepare_callback(model, steps, x0_output_dict=None, shape=None, latent_upscale_model=None, vae=None, rate=8, taeltx=False, num_keyframes=0, is_23=False):
     latent_rgb_factors, latent_rgb_factors_bias = get_ltx_rgb_factors(is_23)
+    upscaler = _unwrap_upscale_model(latent_upscale_model) if latent_upscale_model is not None else None
+    upscaler_dtype = next(upscaler.parameters()).dtype if upscaler is not None else None
     preview_format = "JPEG"
     if preview_format not in ["JPEG", "PNG"]:
         preview_format = "JPEG"
@@ -870,9 +876,9 @@ def prepare_callback(model, steps, x0_output_dict=None, shape=None, latent_upsca
         if num_keyframes > 0:
             x0 = x0[:, :, :-num_keyframes]
 
-        if latent_upscale_model is not None:
+        if upscaler is not None:
             x0 = vae.first_stage_model.per_channel_statistics.un_normalize(x0)
-            x0 =  latent_upscale_model(x0.to(torch.bfloat16))
+            x0 = upscaler(x0.to(upscaler_dtype))
             x0 = vae.first_stage_model.per_channel_statistics.normalize(x0)
 
         preview_bytes = None
@@ -896,7 +902,7 @@ class OuterSampleCallbackWrapper:
 
         original_callback = callback
         if self.latent_upscale_model is not None:
-            self.latent_upscale_model.to(device)
+            _unwrap_upscale_model(self.latent_upscale_model).to(device)
         if self.vae is not None and self.taeltx:
             self.vae.first_stage_model.to(device)
 
@@ -915,7 +921,7 @@ class OuterSampleCallbackWrapper:
                 original_callback(step, x0, x, total_steps)
         out = executor(noise, latent_image, sampler, sigmas, denoise_mask, combined_callback, disable_pbar, seed, latent_shapes=latent_shapes)
         if self.latent_upscale_model is not None:
-            self.latent_upscale_model.to(mm.unet_offload_device())
+            _unwrap_upscale_model(self.latent_upscale_model).to(mm.unet_offload_device())
         return out
 
 class LTX2SamplingPreviewOverride(io.ComfyNode):
@@ -929,7 +935,7 @@ class LTX2SamplingPreviewOverride(io.ComfyNode):
             is_experimental=True,
             inputs=[
                 io.Model.Input("model", tooltip="The model to add preview override to."),
-                io.Int.Input("preview_rate", default=8, min=1, max=60, step=1, tooltip="Preview frame rate."),
+                io.MultiType.Input(io.Float.Input("preview_rate", default=8.0, min=1.0, max=60.0, step=0.01, tooltip="Preview frame rate."), [io.Int]),
                 io.LatentUpscaleModel.Input("latent_upscale_model", optional=True, tooltip="Optional upscale model to use for higher resolution previews."),
                 io.Vae.Input("vae", optional=True, tooltip="VAE model to use normalizing the latents for the upscale model."),
             ],
