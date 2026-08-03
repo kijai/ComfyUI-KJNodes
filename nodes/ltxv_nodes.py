@@ -1738,6 +1738,12 @@ try:
     from comfy.ldm.wan.model import WanT2VCrossAttention as _WanT2VCrossAttention, WanI2VCrossAttention as _WanI2VCrossAttention
 except ImportError:
     _WanT2VCrossAttention = _WanI2VCrossAttention = None
+try:
+    from comfy.ldm.minimax.model import MiniMaxH3Model as _MiniMaxH3Model
+    from comfy.quant_ops import ck as _ck
+except ImportError:
+    _MiniMaxH3Model = None
+    _ck = None
 
 
 def _sageattn_int8_fp8_nhd(qkv, dtype):
@@ -1939,6 +1945,30 @@ def wan_i2v_cross_sageattn_forward(self, x, context, context_img_len, transforme
     return self.o(o.view(b, s, n * d))
 
 
+def minimax_sageattn_forward(self, x, rope_freqs=None, transformer_options={}):
+    # x: [S, hidden], unbatched packed sequence; q/k/v are NHD views into the fused qkv buffer
+    dtype = x.dtype
+    s = x.shape[0]
+    q, k, v = self.qkv_proj(x).split(self.heads * self.head_dim, dim=-1)
+    q = q.view(1, s, self.heads, self.head_dim)
+    k = k.view(1, s, self.heads, self.head_dim)
+    v = v.view(1, s, self.heads, self.head_dim)
+    if rope_freqs is not None:
+        # same fused per-head RMSNorm + partial split-half rope the stock forward uses, in place on the qkv buffer
+        qw = mm.cast_to(self.q_norm.weight, device=x.device)
+        kw = mm.cast_to(self.k_norm.weight, device=x.device)
+        _ck.rms_rope_split_half_(q, k, rope_freqs, qw, kw, epsilon=self.q_norm.eps, rot_dim=rope_freqs.shape[-3] * 2)
+    else:
+        q = self.q_norm(q)
+        k = self.k_norm(k)
+
+    qkv = [q, k, v]
+    del q, k, v
+    o = _sageattn_int8_fp8_nhd(qkv, dtype)
+
+    return self.out_proj(o.view(s, self.heads * self.head_dim))
+
+
 class WanVideoMemoryEfficientSageAttentionPatch(io.ComfyNode):
 
     @classmethod
@@ -1976,6 +2006,43 @@ class WanVideoMemoryEfficientSageAttentionPatch(io.ComfyNode):
                 model_clone.add_object_patch(f"diffusion_model.blocks.{idx}.cross_attn.forward", wan_i2v_cross_sageattn_forward.__get__(cross_attn, cross_attn.__class__))
             elif cross_attn is not None and type(cross_attn) is _WanT2VCrossAttention:
                 model_clone.add_object_patch(f"diffusion_model.blocks.{idx}.cross_attn.forward", wan_t2v_cross_sageattn_forward.__get__(cross_attn, cross_attn.__class__))
+
+        return io.NodeOutput(model_clone)
+
+
+class MiniMaxH3MemoryEfficientSageAttentionPatch(io.ComfyNode):
+
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="MiniMaxH3MemoryEfficientSageAttentionPatch",
+            display_name="MiniMax H3 Mem Eff Sage Attention Patch",
+            category="KJNodes/minimax",
+            description="EXPERIMENTAL! Activates custom sageattention on the MiniMax H3 self-attention to reduce peak VRAM usage, overrides the attention mode. Requires latest sageattention version.",
+            is_experimental=True,
+            inputs=[
+                io.Model.Input("model"),
+            ],
+            outputs=[
+                io.Model.Output(display_name="model"),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, model) -> io.NodeOutput:
+        if _cuda_archs is None:
+            raise RuntimeError("sageattention is not new enough version or could not determine CUDA architecture, cannot apply MiniMax H3 Memory Efficient Sage Attention Patch.")
+        if _ck is None:
+            raise RuntimeError("This ComfyUI version does not support MiniMax H3, cannot apply MiniMax H3 Memory Efficient Sage Attention Patch.")
+        model_clone = model.clone()
+        diffusion_model = model_clone.get_model_object("diffusion_model")
+        if _MiniMaxH3Model is not None and not isinstance(diffusion_model, _MiniMaxH3Model):
+            raise RuntimeError("MiniMax H3 Memory Efficient Sage Attention Patch can only be applied to a MiniMax H3 model.")
+
+        logging.info("Applying MiniMax H3 Memory Efficient Sage Attention Patch to all transformer blocks")
+
+        for idx, block in enumerate(diffusion_model.blocks):
+            model_clone.add_object_patch(f"diffusion_model.blocks.{idx}.attn.forward", minimax_sageattn_forward.__get__(block.attn, block.attn.__class__))
 
         return io.NodeOutput(model_clone)
 

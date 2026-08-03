@@ -347,6 +347,7 @@ try:
         LTX2AudioLatentNormalizingSampling, LTXVImgToVideoInplaceKJ,
         LTX2AttentionTunerPatch, LTX2MemoryEfficientSageAttentionPatch,
         LTX2LoraLoaderAdvanced, WanVideoMemoryEfficientSageAttentionPatch,
+        MiniMaxH3MemoryEfficientSageAttentionPatch,
     )
     NODE_CONFIG.update({
     "LTXVEnhanceAVideoKJ": {"class": LTXVEnhanceAVideoKJ, "name": "LTXV Enhance A Video KJ"},
@@ -362,6 +363,7 @@ try:
     "LTX2MemoryEfficientSageAttentionPatch": {"class": LTX2MemoryEfficientSageAttentionPatch, "name": "LTX2 Memory Efficient Sage Attention Patch"},
     "LTX2LoraLoaderAdvanced": {"class": LTX2LoraLoaderAdvanced, "name": "LTX2 Lora Loader Advanced"},
     "WanVideoMemoryEfficientSageAttentionPatch": {"class": WanVideoMemoryEfficientSageAttentionPatch, "name": "WanVideo Memory Efficient Sage Attention Patch"},
+    "MiniMaxH3MemoryEfficientSageAttentionPatch": {"class": MiniMaxH3MemoryEfficientSageAttentionPatch, "name": "MiniMax H3 Memory Efficient Sage Attention Patch"},
     })
 except Exception as e:
     logging.warning(f"KJNodes: LTXV nodes could not be imported. LTXV nodes will be unavailable. Error: {e}", exc_info=True)
