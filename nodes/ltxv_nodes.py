@@ -1746,6 +1746,120 @@ except ImportError:
     _ck = None
 
 
+if HAS_TRITON:
+    # Vendored from sageattention's quant_per_thread.py with the row offsets promoted to int64 to avoid overflow on large sequences.
+    def _quant_query_per_thread_int8_i64_kernel(Input, Output, Scale, L,
+                                                stride_iz, stride_ih, stride_in,
+                                                stride_oz, stride_oh, stride_on,
+                                                stride_sz, stride_sh,
+                                                C: tl.constexpr, BLK: tl.constexpr):
+        off_blk = tl.program_id(0) // 8
+        off_tld = tl.program_id(0) % 8
+        off_h = tl.program_id(1)
+        off_b = tl.program_id(2)
+
+        offs_n = off_blk * BLK + tl.arange(0, BLK // 8) * 8 + off_tld
+        offs_k = tl.arange(0, C)
+
+        input_ptrs = Input + off_b * stride_iz + off_h * stride_ih + offs_n[:, None].to(tl.int64) * stride_in + offs_k[None, :]
+        output_ptrs = Output + off_b * stride_oz + off_h * stride_oh + offs_n[:, None].to(tl.int64) * stride_on + offs_k[None, :]
+        scale_ptrs = Scale + off_b * stride_sz + off_h * stride_sh + off_blk * 8 + off_tld
+
+        x = tl.load(input_ptrs, mask=offs_n[:, None] < L)
+        x = x.to(tl.float32)
+        scale = tl.max(tl.abs(x)) / 127. + 0.0000001
+        x_int8 = x / scale
+        x_int8 += 0.5 * tl.where(x_int8 >= 0, 1, -1)
+        x_int8 = x_int8.to(tl.int8)
+        tl.store(output_ptrs, x_int8, mask=offs_n[:, None] < L)
+        tl.store(scale_ptrs, scale)
+
+    @triton.jit
+    def _quant_key_per_thread_int8_i64_kernel(Input, Output, Scale, L,
+                                              stride_iz, stride_ih, stride_in,
+                                              stride_oz, stride_oh, stride_on,
+                                              stride_sz, stride_sh,
+                                              C: tl.constexpr, BLK: tl.constexpr):
+        off_blk = tl.program_id(0) // 4
+        off_tld = tl.program_id(0) % 4
+        off_h = tl.program_id(1)
+        off_b = tl.program_id(2)
+
+        offs_n0 = off_blk * BLK + tl.arange(0, BLK // 8) * 8 + off_tld * 2
+        offs_n1 = off_blk * BLK + tl.arange(0, BLK // 8) * 8 + off_tld * 2 + 1
+        offs_k = tl.arange(0, C)
+
+        input_ptrs0 = Input + off_b * stride_iz + off_h * stride_ih + offs_n0[:, None].to(tl.int64) * stride_in + offs_k[None, :]
+        input_ptrs1 = Input + off_b * stride_iz + off_h * stride_ih + offs_n1[:, None].to(tl.int64) * stride_in + offs_k[None, :]
+        output_ptrs0 = Output + off_b * stride_oz + off_h * stride_oh + offs_n0[:, None].to(tl.int64) * stride_on + offs_k[None, :]
+        output_ptrs1 = Output + off_b * stride_oz + off_h * stride_oh + offs_n1[:, None].to(tl.int64) * stride_on + offs_k[None, :]
+        scale_ptrs = Scale + off_b * stride_sz + off_h * stride_sh + off_blk * 4 + off_tld
+
+        x0 = tl.load(input_ptrs0, mask=offs_n0[:, None] < L)
+        x1 = tl.load(input_ptrs1, mask=offs_n1[:, None] < L)
+        x0 = x0.to(tl.float32)
+        x1 = x1.to(tl.float32)
+        scale = max(tl.max(tl.abs(x0)), tl.max(tl.abs(x1))) / 127. + 0.0000001
+        x0_int8 = x0 / scale
+        x1_int8 = x1 / scale
+        x0_int8 += 0.5 * tl.where(x0_int8 >= 0, 1, -1)
+        x1_int8 += 0.5 * tl.where(x1_int8 >= 0, 1, -1)
+        x0_int8 = x0_int8.to(tl.int8)
+        x1_int8 = x1_int8.to(tl.int8)
+        tl.store(output_ptrs0, x0_int8, mask=offs_n0[:, None] < L)
+        tl.store(output_ptrs1, x1_int8, mask=offs_n1[:, None] < L)
+        tl.store(scale_ptrs, scale)
+
+
+def _per_thread_int8_i64(q, k, km=None, BLKQ=128, WARPQ=32, BLKK=64, WARPK=64, tensor_layout="NHD"):
+    # Drop-in for sageattention's per_thread_int8_triton, launching the int64-safe kernels above.
+    q_int8 = torch.empty(q.shape, dtype=torch.int8, device=q.device)
+    k_int8 = torch.empty(k.shape, dtype=torch.int8, device=k.device)
+
+    if km is not None:
+        k = k - km
+
+    if tensor_layout == "HND":
+        b, h_qo, qo_len, head_dim = q.shape
+        _, h_kv, kv_len, _ = k.shape
+        stride_bz_q, stride_h_q, stride_seq_q = q.stride(0), q.stride(1), q.stride(2)
+        stride_bz_qo, stride_h_qo, stride_seq_qo = q_int8.stride(0), q_int8.stride(1), q_int8.stride(2)
+        stride_bz_k, stride_h_k, stride_seq_k = k.stride(0), k.stride(1), k.stride(2)
+        stride_bz_ko, stride_h_ko, stride_seq_ko = k_int8.stride(0), k_int8.stride(1), k_int8.stride(2)
+    elif tensor_layout == "NHD":
+        b, qo_len, h_qo, head_dim = q.shape
+        _, kv_len, h_kv, _ = k.shape
+        stride_bz_q, stride_h_q, stride_seq_q = q.stride(0), q.stride(2), q.stride(1)
+        stride_bz_qo, stride_h_qo, stride_seq_qo = q_int8.stride(0), q_int8.stride(2), q_int8.stride(1)
+        stride_bz_k, stride_h_k, stride_seq_k = k.stride(0), k.stride(2), k.stride(1)
+        stride_bz_ko, stride_h_ko, stride_seq_ko = k_int8.stride(0), k_int8.stride(2), k_int8.stride(1)
+    else:
+        raise ValueError(f"Unknown tensor layout: {tensor_layout}")
+
+    q_scale = torch.empty((b, h_qo, (qo_len + BLKQ - 1) // BLKQ * (BLKQ // WARPQ) * 8), device=q.device, dtype=torch.float32)
+    k_scale = torch.empty((b, h_kv, (kv_len + BLKK - 1) // BLKK * (BLKK // WARPK) * 4), device=q.device, dtype=torch.float32)
+
+    grid = ((qo_len + BLKQ - 1) // BLKQ * (BLKQ // WARPQ) * 8, h_qo, b)
+    _quant_query_per_thread_int8_i64_kernel[grid](
+        q, q_int8, q_scale, qo_len,
+        stride_bz_q, stride_h_q, stride_seq_q,
+        stride_bz_qo, stride_h_qo, stride_seq_qo,
+        q_scale.stride(0), q_scale.stride(1),
+        C=head_dim, BLK=WARPQ
+    )
+
+    grid = ((kv_len + BLKK - 1) // BLKK * (BLKK // WARPK) * 4, h_kv, b)
+    _quant_key_per_thread_int8_i64_kernel[grid](
+        k, k_int8, k_scale, kv_len,
+        stride_bz_k, stride_h_k, stride_seq_k,
+        stride_bz_ko, stride_h_ko, stride_seq_ko,
+        k_scale.stride(0), k_scale.stride(1),
+        C=head_dim, BLK=WARPK
+    )
+
+    return q_int8, q_scale, k_int8, k_scale
+
+
 def _sageattn_int8_fp8_nhd(qkv, dtype):
     # qkv: [q, k, v], each [batch, seq_len, num_heads, head_dim] in NHD layout. Returns o in the same layout.
     # The list is consumed so the only references to the float q/k/v are the locals below, letting `del`
@@ -1765,7 +1879,7 @@ def _sageattn_int8_fp8_nhd(qkv, dtype):
     if _cuda_archs[0] in {"sm80", "sm86"}:
         # mean-sub in-place: passing km= makes the triton quant materialize k - km as a full float copy
         k.sub_(k.mean(dim=1, keepdim=True))
-        q_int8, q_scale, k_int8, k_scale = per_thread_int8_triton(q, k, tensor_layout=tensor_layout, BLKQ=128, WARPQ=32, BLKK=64, WARPK=64)
+        q_int8, q_scale, k_int8, k_scale = _per_thread_int8_i64(q, k, tensor_layout=tensor_layout, BLKQ=128, WARPQ=32, BLKK=64, WARPK=64)
         del q, k
         o = torch.empty(q_int8.size(), dtype=dtype, device=q_int8.device)
         v_fp16 = v.to(torch.float16)
@@ -1784,7 +1898,7 @@ def _sageattn_int8_fp8_nhd(qkv, dtype):
             pv_accum_dtype = "fp32+fp16"
             quant_v_scale_max = 2.25
         k.sub_(k.mean(dim=1, keepdim=True))
-        q_int8, q_scale, k_int8, k_scale = per_thread_int8_triton(q, k, tensor_layout=tensor_layout, BLKQ=128, WARPQ=32, BLKK=64, WARPK=64)
+        q_int8, q_scale, k_int8, k_scale = _per_thread_int8_i64(q, k, tensor_layout=tensor_layout, BLKQ=128, WARPQ=32, BLKK=64, WARPK=64)
         del q, k
         v_fp8, v_scale, _ = per_channel_fp8(v, tensor_layout=tensor_layout, scale_max=quant_v_scale_max, smooth_v=False)
         del v
@@ -1796,7 +1910,7 @@ def _sageattn_int8_fp8_nhd(qkv, dtype):
         del v_fp8, v_scale
     elif _cuda_archs[0] == "sm90":
         k.sub_(k.mean(dim=1, keepdim=True))
-        q_int8, q_scale, k_int8, k_scale = per_thread_int8_triton(q, k, tensor_layout=tensor_layout, BLKQ=64, WARPQ=16, BLKK=128, WARPK=128)
+        q_int8, q_scale, k_int8, k_scale = _per_thread_int8_i64(q, k, tensor_layout=tensor_layout, BLKQ=64, WARPQ=16, BLKK=128, WARPK=128)
         del q, k
         v_fp8, v_scale, _ = per_channel_fp8(v, tensor_layout=tensor_layout, smooth_v=False)
         del v

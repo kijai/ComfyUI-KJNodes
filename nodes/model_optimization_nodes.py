@@ -81,6 +81,10 @@ def get_sage_func(sage_attention, allow_compile=False):
             # add a heads dimension if there isn't already one
             if mask.ndim == 3:
                 mask = mask.unsqueeze(1)
+        # Copy only when a row offset would actually exceed int32.
+        seq_dim = 2 if tensor_layout == "HND" else 1
+        if any((t.shape[seq_dim] - 1) * t.stride(seq_dim) >= 2**31 for t in (q, k, v)):
+            q, k, v = q.contiguous(), k.contiguous(), v.contiguous()
         out = sage_func(q, k, v, attn_mask=mask, is_causal=False, tensor_layout=tensor_layout).to(in_dtype)
         if tensor_layout == "HND":
             if not skip_output_reshape:
