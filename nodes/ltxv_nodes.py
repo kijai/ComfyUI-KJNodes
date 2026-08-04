@@ -1748,6 +1748,7 @@ except ImportError:
 
 if HAS_TRITON:
     # Vendored from sageattention's quant_per_thread.py with the row offsets promoted to int64 to avoid overflow on large sequences.
+    @triton.jit
     def _quant_query_per_thread_int8_i64_kernel(Input, Output, Scale, L,
                                                 stride_iz, stride_ih, stride_in,
                                                 stride_oz, stride_oh, stride_on,
