@@ -325,9 +325,12 @@ def _ltx_num_keyframes(guider):
     return 0
 
 
-def _normalize_ltx_x0(x0, latent_shapes, num_keyframes):
-    # LTX flattens spatial+temporal into a token sequence and may append keyframe latents
-    # at the tail. Restore 5D and trim so downstream previewers see standard video latents.
+def _normalize_packed_x0(x0, latent_shapes, num_keyframes):
+    # Restore standard video latents from flattened packs: LTX token sequences, and
+    # multi-stream AV packs (LTX2, MiniMax H3) where the callback runs inside the
+    # sampler's pack/unpack wrapper and sees the flat [B, 1, N] tensor. The first
+    # latent_shapes entry is always the video stream; LTX may also append keyframe
+    # latents at the tail.
     if latent_shapes and len(latent_shapes) > 0:
         target = latent_shapes[0]
         if x0.ndim == 3 and len(target) >= 3:
@@ -358,6 +361,8 @@ class _PreviewOverrideWrapper:
         is_ltx = _is_ltx_latent_format(model_patcher.model.latent_format)
         is_ltx2 = is_ltx and _is_ltx2_diffusion_model(model_patcher)
         num_keyframes = _ltx_num_keyframes(guider) if is_ltx else 0
+        # Multi-stream models (audio+video) hand this wrapper the flat pack, not the nested view.
+        unpack_x0 = is_ltx or (latent_shapes is not None and len(latent_shapes) > 1)
 
         # LTX reuses the LTX-specific node's WrappedPreviewer; we call decode_latent_to_preview
         # directly per step, bypassing its decode_latent_to_preview_image rate-limiting.
@@ -419,8 +424,8 @@ class _PreviewOverrideWrapper:
                 # sigmas often lives on CPU while noise is on CUDA — align before the multiply.
                 s0 = sigmas[0].to(noise.device) if hasattr(sigmas[0], "to") else sigmas[0]
                 seeded = noise * s0
-                if is_ltx:
-                    seeded = _normalize_ltx_x0(seeded, latent_shapes, num_keyframes)
+                if unpack_x0:
+                    seeded = _normalize_packed_x0(seeded, latent_shapes, num_keyframes)
                 initial_seed_cpu = seeded.detach().float().cpu()
         except Exception as e:
             logging.warning(f"[KJ PreviewOverride] initial seed Δ pre-fill failed: {e}")
@@ -449,8 +454,8 @@ class _PreviewOverrideWrapper:
                     init_latent = noise * s0
                 else:
                     init_latent = noise
-                if is_ltx:
-                    init_latent = _normalize_ltx_x0(init_latent, latent_shapes, num_keyframes)
+                if unpack_x0:
+                    init_latent = _normalize_packed_x0(init_latent, latent_shapes, num_keyframes)
                 pil_init = None
                 if ltx_previewer is not None and init_latent.ndim == 5:
                     pil_frames = _ltx_decode_to_pil(ltx_previewer, init_latent, max_frames=1)
@@ -490,8 +495,8 @@ class _PreviewOverrideWrapper:
                     # NEVER rebind x0 — the sampler reuses the same tensor downstream
                     # (unpack_latents reshapes it). Preview mutations stay on x0_view.
                     x0_view = x0
-                    if is_ltx:
-                        x0_view = _normalize_ltx_x0(x0_view, latent_shapes, num_keyframes)
+                    if unpack_x0:
+                        x0_view = _normalize_packed_x0(x0_view, latent_shapes, num_keyframes)
 
                     pil_frames = []
                     max_pil = anim_frames if animate_video else 1
