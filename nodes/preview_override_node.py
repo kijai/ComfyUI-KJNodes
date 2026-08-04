@@ -10,9 +10,12 @@ import torch
 
 import comfy.model_management
 import comfy.patcher_extension
+import folder_paths
 import latent_preview
 from comfy_api.latest import io
 from PIL import Image, ImageOps
+
+from .tiny_vae import load_tiny_vae_decoder
 
 try:
     from .ltxv_nodes import WrappedPreviewer as _LTXWrappedPreviewer, get_ltx_rgb_factors as _ltx_rgb_factors
@@ -300,6 +303,22 @@ def _ltx_full_vae_decode_to_pil(vae, x0_5d, max_frames=None, stride=1):
     return [Image.fromarray(u8[i]) for i in range(u8.shape[0])]
 
 
+def _tiny_vae_decode_to_pil(decoder, x0, max_frames=None, stride=1):
+    # Raises on failure so the caller can disable the decoder instead of retrying every step.
+    if x0.ndim == 4:
+        rgb = decoder.decode(x0[:1])[0].movedim(0, -1).unsqueeze(0)
+    elif x0.ndim == 5:
+        indices = list(range(0, x0.shape[2], max(1, stride)))
+        if max_frames is not None and 0 < max_frames < len(indices):
+            picks = np.linspace(0, len(indices) - 1, max_frames).round().astype(int).tolist()
+            indices = [indices[i] for i in picks]
+        rgb = decoder.decode_video(x0[:1], frame_indices=indices)
+    else:
+        return []
+    u8 = rgb.clamp(0, 1).mul(255).to(torch.uint8).cpu().numpy()
+    return [Image.fromarray(u8[i]) for i in range(u8.shape[0])]
+
+
 def _is_ltx_latent_format(latent_format):
     return "LTX" in type(latent_format).__name__
 
@@ -326,11 +345,7 @@ def _ltx_num_keyframes(guider):
 
 
 def _normalize_packed_x0(x0, latent_shapes, num_keyframes):
-    # Restore standard video latents from flattened packs: LTX token sequences, and
-    # multi-stream AV packs (LTX2, MiniMax H3) where the callback runs inside the
-    # sampler's pack/unpack wrapper and sees the flat [B, 1, N] tensor. The first
-    # latent_shapes entry is always the video stream; LTX may also append keyframe
-    # latents at the tail.
+    # Restore standard video latents from flattened packs
     if latent_shapes and len(latent_shapes) > 0:
         target = latent_shapes[0]
         if x0.ndim == 3 and len(target) >= 3:
@@ -344,7 +359,7 @@ def _normalize_packed_x0(x0, latent_shapes, num_keyframes):
 
 
 class _PreviewOverrideWrapper:
-    def __init__(self, max_resolution, node_id, jpeg_quality, suppress_default, preview_frames=1, preview_fps=12, vae=None):
+    def __init__(self, max_resolution, node_id, jpeg_quality, suppress_default, preview_frames=1, preview_fps=12, vae=None, tiny_vae="none"):
         self.max_resolution = max_resolution
         self.node_id = str(node_id) if node_id is not None else None
         self.jpeg_quality = jpeg_quality
@@ -352,6 +367,7 @@ class _PreviewOverrideWrapper:
         self.preview_frames = preview_frames
         self.preview_fps = preview_fps
         self.vae = vae
+        self.tiny_vae = tiny_vae
         self.frames = []
 
     def __call__(self, executor, noise, latent_image, sampler, sigmas, denoise_mask, callback, disable_pbar, seed, latent_shapes):
@@ -363,6 +379,19 @@ class _PreviewOverrideWrapper:
         num_keyframes = _ltx_num_keyframes(guider) if is_ltx else 0
         # Multi-stream models (audio+video) hand this wrapper the flat pack, not the nested view.
         unpack_x0 = is_ltx or (latent_shapes is not None and len(latent_shapes) > 1)
+
+        # Tiny VAE from models/vae_approx
+        tiny_vae = None
+        if self.tiny_vae and self.tiny_vae != "none" and load_tiny_vae_decoder is not None:
+            tiny_vae = load_tiny_vae_decoder(self.tiny_vae)
+            if tiny_vae is not None and latent_shapes and len(latent_shapes[0]) >= 2:
+                channels = int(latent_shapes[0][1])
+                if channels != tiny_vae.latent_channels:
+                    logging.warning(
+                        f"[KJ PreviewOverride] '{self.tiny_vae}' decodes {tiny_vae.latent_channels}-channel "
+                        f"latents but this model's are {channels}-channel; ignoring it."
+                    )
+                    tiny_vae = None
 
         # LTX reuses the LTX-specific node's WrappedPreviewer; we call decode_latent_to_preview
         # directly per step, bypassing its decode_latent_to_preview_image rate-limiting.
@@ -457,7 +486,10 @@ class _PreviewOverrideWrapper:
                 if unpack_x0:
                     init_latent = _normalize_packed_x0(init_latent, latent_shapes, num_keyframes)
                 pil_init = None
-                if ltx_previewer is not None and init_latent.ndim == 5:
+                if tiny_vae is not None:
+                    pil_frames = _tiny_vae_decode_to_pil(tiny_vae, init_latent, max_frames=1)
+                    pil_init = pil_frames[0] if pil_frames else None
+                elif ltx_previewer is not None and init_latent.ndim == 5:
                     pil_frames = _ltx_decode_to_pil(ltx_previewer, init_latent, max_frames=1)
                     pil_init = pil_frames[0] if pil_frames else None
                 elif rgb_factors is not None:
@@ -490,7 +522,8 @@ class _PreviewOverrideWrapper:
 
 
         def new_callback(step, x0, x, total_steps_):
-            if previewer is not None or fallback_previewer is not None or ltx_previewer is not None:
+            nonlocal tiny_vae
+            if previewer is not None or fallback_previewer is not None or ltx_previewer is not None or tiny_vae is not None:
                 try:
                     # NEVER rebind x0 — the sampler reuses the same tensor downstream
                     # (unpack_latents reshapes it). Preview mutations stay on x0_view.
@@ -500,7 +533,14 @@ class _PreviewOverrideWrapper:
 
                     pil_frames = []
                     max_pil = anim_frames if animate_video else 1
-                    if ltx_full_vae is not None and x0_view.ndim == 5:
+                    if tiny_vae is not None:
+                        try:
+                            pil_frames = _tiny_vae_decode_to_pil(tiny_vae, x0_view, max_frames=max_pil)
+                        except Exception as e:
+                            # OOM at 16x upscale is the likely cause — drop to the cheap paths for good.
+                            logging.warning(f"[KJ PreviewOverride] tiny VAE decode failed, falling back: {e}")
+                            tiny_vae = None
+                    if not pil_frames and ltx_full_vae is not None and x0_view.ndim == 5:
                         pil_frames = _ltx_full_vae_decode_to_pil(ltx_full_vae, x0_view, max_frames=max_pil)
                     if not pil_frames and ltx_previewer is not None and x0_view.ndim == 5:
                         try:
@@ -711,6 +751,14 @@ class ModelPreviewOverrideKJ(io.ComfyNode):
                             "(VAE pinned to GPU). Any other LTX VAE = full-quality decode via "
                             "vae.decode() — MUCH slower per step.",
                 ),
+                io.Combo.Input(
+                    "tiny_vae",
+                    options=["none"] + folder_paths.get_filename_list("vae_approx"),
+                    default="none",
+                    optional=True,
+                    tooltip="Tiny VAE decoder from models/vae_approx for true-RGB previews. "
+                            "Overrides Latent2RGB and the 'vae' input.",
+                ),
             ],
             outputs=[io.Model.Output(tooltip="Model with preview override attached.")],
             hidden=[io.Hidden.unique_id],
@@ -718,14 +766,14 @@ class ModelPreviewOverrideKJ(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, model, max_resolution, jpeg_quality, suppress_default_preview, preview_frames, preview_fps, vae=None) -> io.NodeOutput:
+    def execute(cls, model, max_resolution, jpeg_quality, suppress_default_preview, preview_frames, preview_fps, vae=None, tiny_vae="none") -> io.NodeOutput:
         m = model.clone()
         m.add_wrapper_with_key(
             comfy.patcher_extension.WrappersMP.OUTER_SAMPLE,
             "kj_preview_override",
             _PreviewOverrideWrapper(
                 max_resolution, cls.hidden.unique_id, jpeg_quality, suppress_default_preview,
-                preview_frames, preview_fps, vae,
+                preview_frames, preview_fps, vae, tiny_vae,
             ),
         )
         return io.NodeOutput(m)
