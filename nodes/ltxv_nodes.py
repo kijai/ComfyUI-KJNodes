@@ -1,6 +1,7 @@
 from comfy_extras.nodes_lt import get_noise_mask, LTXVAddGuide, _append_guide_attention_entry
 import types
 import math
+import importlib
 from typing import Tuple
 import comfy
 from comfy_api.latest import io
@@ -1705,29 +1706,34 @@ try:
     _cuda_archs = get_cuda_arch_versions()
 except Exception:
     pass
-try:
-    from sageattention.core import _qattn_sm89
-    cuda_version = get_cuda_version()
-    sageplus_sm89_available = hasattr(_qattn_sm89, 'qk_int8_sv_f8_accum_f16_fuse_v_scale_attn_inst_buf') and cuda_version >= (12, 8)
-except ImportError:
+_QATTN_PROBE = {
+    "sm80": "qk_int8_sv_f16_accum_f32_attn",
+    "sm89": "qk_int8_sv_f8_accum_f32_fuse_v_scale_attn_inst_buf",
+    "sm90": "qk_int8_sv_f8_accum_f32_fuse_v_scale_attn_inst_buf",
+}
+
+def _resolve_qattn(arch):
     try:
-        from sageattention.core import sm89_compile as _qattn_sm89
-    except ImportError:
-        _qattn_sm89 = None
-try:
-    from sageattention.core import _qattn_sm80
-except ImportError:
+        core = importlib.import_module("sageattention.core")
+    except Exception:
+        return None
+    candidates = [getattr(core, f"_qattn_{arch}", None), getattr(core, f"{arch}_compile", None)]
     try:
-        from sageattention.core import sm80_compile as _qattn_sm80
-    except ImportError:
-        _qattn_sm80 = None
-try:
-    from sageattention.core import  _qattn_sm90
-except ImportError:
-    try:
-        from sageattention.core import sm90_compile as _qattn_sm90
-    except ImportError:
-        _qattn_sm90 = None
+        mod = importlib.import_module(f"sageattention.{arch}_compile")
+        candidates += [mod, getattr(mod, f"_qattn_{arch}", None)]
+    except Exception:
+        pass
+    for obj in candidates:
+        if obj is not None and hasattr(obj, _QATTN_PROBE[arch]):
+            return obj
+    return None
+
+_qattn_sm80 = _resolve_qattn("sm80")
+_qattn_sm89 = _resolve_qattn("sm89")
+_qattn_sm90 = _resolve_qattn("sm90")
+
+if _qattn_sm89 is not None:
+    sageplus_sm89_available = hasattr(_qattn_sm89, 'qk_int8_sv_f8_accum_f16_fuse_v_scale_attn_inst_buf') and get_cuda_version() >= (12, 8)
 
 from comfy.ldm.lightricks.model import apply_rotary_emb
 try:
