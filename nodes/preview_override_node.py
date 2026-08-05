@@ -118,7 +118,18 @@ def _probe_nvenc():
     except Exception:
         return False
 
-_NVENC_AVAILABLE = _probe_nvenc()
+# --disable-api-nodes installs a CSP with no media-src
+def _csp_blocks_video():
+    try:
+        from comfy.cli_args import args as _args
+        return bool(getattr(_args, "disable_api_nodes", False))
+    except Exception:
+        return False
+
+_HAS_NVENC = _probe_nvenc()
+_NVENC_AVAILABLE = _HAS_NVENC and not _csp_blocks_video()
+if _HAS_NVENC and not _NVENC_AVAILABLE:
+    logging.info("[KJ PreviewOverride] --disable-api-nodes blocks blob: video, using WebP for animated previews.")
 
 # NVENC H.264 rejects sub-145×49 inputs at avcodec_open2 — fall back to WebP for small frames.
 _NVENC_MIN_W = 145
