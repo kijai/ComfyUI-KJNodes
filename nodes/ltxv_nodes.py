@@ -1707,13 +1707,16 @@ except Exception:
     pass
 try:
     from sageattention.core import _qattn_sm89
-    cuda_version = get_cuda_version()
-    sageplus_sm89_available = hasattr(_qattn_sm89, 'qk_int8_sv_f8_accum_f16_fuse_v_scale_attn_inst_buf') and cuda_version >= (12, 8)
 except ImportError:
     try:
+        # sageattention >= 2.2 exposes the same kernels as sm89_compile instead
         from sageattention.core import sm89_compile as _qattn_sm89
     except ImportError:
         _qattn_sm89 = None
+# check whichever of the two imports above succeeded, not just the first one
+if _qattn_sm89 is not None:
+    cuda_version = get_cuda_version()
+    sageplus_sm89_available = hasattr(_qattn_sm89, 'qk_int8_sv_f8_accum_f16_fuse_v_scale_attn_inst_buf') and cuda_version >= (12, 8)
 try:
     from sageattention.core import _qattn_sm80
 except ImportError:
