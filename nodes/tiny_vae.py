@@ -63,7 +63,7 @@ class TinyVAEDecoder:
             self.device, [torch.float16, torch.bfloat16])
         self.model = build_tae_decoder(sd)
         self.model.load_state_dict(sd)
-        self.model.eval().to(device=self.device, dtype=self.dtype)
+        self.model = _place(self.model, self.device, self.dtype)
 
         self.latent_channels = self.model[1].weight.shape[1]
         self.upscale_ratio = 2 ** sum(isinstance(m, nn.Upsample) for m in self.model)
@@ -80,6 +80,13 @@ class TinyVAEDecoder:
         indices = range(x.shape[1]) if frame_indices is None else frame_indices
         frames = [self.decode(x[:, t].unsqueeze(0))[0].movedim(0, -1) for t in indices]
         return torch.stack(frames, dim=0)
+
+
+def _place(model, device, dtype):
+    model = model.eval().to(device=device, dtype=dtype)
+    if torch.device(device).type == "cuda":
+        model.to(memory_format=torch.channels_last)
+    return model
 
 
 def is_taehv_state_dict(sd):
@@ -103,11 +110,12 @@ class TAEHVDecoder:
             model.encoder[0] = conv(3 * patch_size ** 2, model.encoder[0].out_channels)
             model.decoder[-1] = conv(model.decoder[-1].in_channels, 3 * patch_size ** 2)
         model.load_state_dict(sd)
+        del model.encoder  # decode only, so keep it off the device entirely
 
         self.device = device if device is not None else comfy.model_management.vae_device()
         self.dtype = dtype if dtype is not None else comfy.model_management.vae_dtype(
             self.device, [torch.float16, torch.bfloat16])
-        self.model = model.eval().to(device=self.device, dtype=self.dtype)
+        self.model = _place(model, self.device, self.dtype)
         self.latent_channels = latent_channels
         self.upscale_ratio = patch_size * 2 ** sum(isinstance(m, nn.Upsample) for m in model.decoder)
         self.is_h3 = latent_channels == 24 and patch_size == 2
