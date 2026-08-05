@@ -377,8 +377,6 @@ class _PreviewOverrideWrapper:
         is_ltx = _is_ltx_latent_format(model_patcher.model.latent_format)
         is_ltx2 = is_ltx and _is_ltx2_diffusion_model(model_patcher)
         num_keyframes = _ltx_num_keyframes(guider) if is_ltx else 0
-        # Multi-stream models (audio+video) hand this wrapper the flat pack, not the nested view.
-        unpack_x0 = is_ltx or (latent_shapes is not None and len(latent_shapes) > 1)
 
         # Tiny VAE from models/vae_approx
         tiny_vae = None
@@ -452,9 +450,7 @@ class _PreviewOverrideWrapper:
             if sigmas is not None and len(sigmas) > 0:
                 # sigmas often lives on CPU while noise is on CUDA — align before the multiply.
                 s0 = sigmas[0].to(noise.device) if hasattr(sigmas[0], "to") else sigmas[0]
-                seeded = noise * s0
-                if unpack_x0:
-                    seeded = _normalize_packed_x0(seeded, latent_shapes, num_keyframes)
+                seeded = _normalize_packed_x0(noise * s0, latent_shapes, num_keyframes)
                 initial_seed_cpu = seeded.detach().float().cpu()
         except Exception as e:
             logging.warning(f"[KJ PreviewOverride] initial seed Δ pre-fill failed: {e}")
@@ -483,8 +479,7 @@ class _PreviewOverrideWrapper:
                     init_latent = noise * s0
                 else:
                     init_latent = noise
-                if unpack_x0:
-                    init_latent = _normalize_packed_x0(init_latent, latent_shapes, num_keyframes)
+                init_latent = _normalize_packed_x0(init_latent, latent_shapes, num_keyframes)
                 pil_init = None
                 if tiny_vae is not None:
                     pil_frames = _tiny_vae_decode_to_pil(tiny_vae, init_latent, max_frames=1)
@@ -527,9 +522,7 @@ class _PreviewOverrideWrapper:
                 try:
                     # NEVER rebind x0 — the sampler reuses the same tensor downstream
                     # (unpack_latents reshapes it). Preview mutations stay on x0_view.
-                    x0_view = x0
-                    if unpack_x0:
-                        x0_view = _normalize_packed_x0(x0_view, latent_shapes, num_keyframes)
+                    x0_view = _normalize_packed_x0(x0, latent_shapes, num_keyframes)
 
                     pil_frames = []
                     max_pil = anim_frames if animate_video else 1
