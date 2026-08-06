@@ -1924,7 +1924,7 @@ def _sageattn_int8_fp8_nhd(qkv, dtype):
         o = torch.empty(q_int8.size(), dtype=dtype, device=q_int8.device)
         _qattn_sm90.qk_int8_sv_f8_accum_f32_fuse_v_scale_attn_inst_buf(q_int8, k_int8, v_fp8, o, q_scale, k_scale, v_scale, _tensor_layout, _is_caual, _qk_quant_gran, sm_scale, _return_lse)
         del v_fp8, v_scale
-    elif _cuda_archs[0] == "sm120":
+    elif _cuda_archs[0] in {"sm120", "sm121"}:
         if not sageplus_sm89_available:
             pv_accum_dtype = "fp32"
         else:
