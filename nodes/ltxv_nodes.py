@@ -2067,27 +2067,45 @@ def wan_i2v_cross_sageattn_forward(self, x, context, context_img_len, transforme
 
 
 def minimax_sageattn_forward(self, x, rope_freqs=None, transformer_options={}):
-    # x: [S, hidden], unbatched packed sequence; q/k/v are NHD views into the fused qkv buffer
+    # x: [S, hidden], unbatched packed sequence; q/k/v are NHD views into the fused qkv buffer.
+    # A single-item list (MiniMaxLowVRAMAttention's block patch) hands over the sole reference
+    # to the block's normed h so it can be freed right after the qkv GEMM.
+    if isinstance(x, list):
+        x = x.pop()
     dtype = x.dtype
+    device = x.device
     s = x.shape[0]
     q, k, v = self.qkv_proj(x).split(self.heads * self.head_dim, dim=-1)
+    del x
     q = q.view(1, s, self.heads, self.head_dim)
     k = k.view(1, s, self.heads, self.head_dim)
     v = v.view(1, s, self.heads, self.head_dim)
     if rope_freqs is not None:
         # same fused per-head RMSNorm + partial split-half rope the stock forward uses, in place on the qkv buffer
-        qw = mm.cast_to(self.q_norm.weight, device=x.device)
-        kw = mm.cast_to(self.k_norm.weight, device=x.device)
+        qw = mm.cast_to(self.q_norm.weight, device=device)
+        kw = mm.cast_to(self.k_norm.weight, device=device)
         _ck.rms_rope_split_half_(q, k, rope_freqs, qw, kw, epsilon=self.q_norm.eps, rot_dim=rope_freqs.shape[-3] * 2)
     else:
         q = self.q_norm(q)
         k = self.k_norm(k)
 
-    qkv = [q, k, v]
-    del q, k, v
-    o = _sageattn_int8_fp8_nhd(qkv, dtype)
+    n = min(transformer_options.get("minimax_head_chunks", 1), self.heads) if isinstance(transformer_options, dict) else 1
+    if n <= 1:
+        qkv = [q, k, v]
+        del q, k, v
+        o = _sageattn_int8_fp8_nhd(qkv, dtype)
+        return self.out_proj(o.view(s, self.heads * self.head_dim))
 
-    return self.out_proj(o.view(s, self.heads * self.head_dim))
+    # head-group slicing from MiniMaxLowVRAMAttention: quantize and attend per group so the int8/fp8 working set shrinks by the group count
+    out = torch.empty((s, self.heads * self.head_dim), dtype=dtype, device=device)
+    out_nhd = out.view(1, s, self.heads, self.head_dim)
+    hs = 0
+    for i in range(n):
+        he = hs + self.heads // n + (1 if i < self.heads % n else 0)
+        out_nhd[:, :, hs:he] = _sageattn_int8_fp8_nhd([q[:, :, hs:he], k[:, :, hs:he], v[:, :, hs:he]], dtype)
+        hs = he
+    del q, k, v  # last references to the fused qkv buffer -> freed before out_proj
+    return self.out_proj(out)
 
 
 class WanVideoMemoryEfficientSageAttentionPatch(io.ComfyNode):

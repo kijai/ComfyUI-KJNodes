@@ -112,7 +112,7 @@ def minimax_attn_lowmem_forward(self, x, rope_freqs=None, transformer_options={}
     q = q.transpose(0, 1).unsqueeze(0)
     k = k.transpose(0, 1).unsqueeze(0)
     v = v.transpose(0, 1).unsqueeze(0)
-    n = min(getattr(self, "kj_head_chunks", 1), self.heads)
+    n = min(transformer_options.get("minimax_head_chunks", 1), self.heads) if isinstance(transformer_options, dict) else 1
     if n <= 1:
         out = optimized_attention(q, k, v, self.heads, mask=None, skip_reshape=True, transformer_options=transformer_options).squeeze(0)
     else:
@@ -128,6 +128,10 @@ def minimax_attn_lowmem_forward(self, x, rope_freqs=None, transformer_options={}
     return self.out_proj(out)
 
 
+# attention overrides (e.g. Sol-Attn) compose via optimized_attention instead of wrapping this forward
+minimax_attn_lowmem_forward._uses_optimized_attention = True
+
+
 def minimax_block_lowmem_forward(self, x, t_emb, mod_segments, rope_freqs, transformer_options={}):
     # DiTBlock.forward, but hands h to attn in a list so attn can free it after the qkv GEMM
     shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.adaln_proj(t_emb)
@@ -135,17 +139,6 @@ def minimax_block_lowmem_forward(self, x, t_emb, mod_segments, rope_freqs, trans
     x = _mod_gate(x, gate_msa, self.attn(h, rope_freqs=rope_freqs, transformer_options=transformer_options), mod_segments)
     h = _mod_scale_shift(self.norm2(x), shift_mlp, scale_mlp, mod_segments)
     return _mod_gate(x, gate_mlp, self.mlp(h), mod_segments)
-
-
-class MiniMaxAttnPatch:
-    def __init__(self, head_chunks):
-        self.head_chunks = head_chunks
-
-    def __get__(self, obj, objtype=None):
-        def wrapped_forward(self_module, *args, **kwargs):
-            self_module.kj_head_chunks = self.head_chunks
-            return minimax_attn_lowmem_forward(self_module, *args, **kwargs)
-        return types.MethodType(wrapped_forward, obj)
 
 
 class MiniMaxLowVRAMAttention(io.ComfyNode):
@@ -181,9 +174,24 @@ class MiniMaxLowVRAMAttention(io.ComfyNode):
                             "(expected diffusion_model.blocks[*].attn.qkv_proj); returning model unchanged.")
             return io.NodeOutput(model)
 
+        # the attn forwards read this per-branch, so head slicing follows the node in either chain order
+        if head_chunks > 1:
+            m.model_options["transformer_options"]["minimax_head_chunks"] = head_chunks
+        # Sol-Attn's compose gate uses this instead of the stock forward, keeping the low-VRAM path on sparse calls
+        m.model_options["transformer_options"]["sol_take_forward"] = minimax_attn_lowmem_forward
+
+        composed = False
         for idx, block in enumerate(blocks):
             m.add_object_patch(f"diffusion_model.blocks.{idx}.forward", types.MethodType(minimax_block_lowmem_forward, block))
-            patched_attn = MiniMaxAttnPatch(head_chunks).__get__(block.attn, block.attn.__class__)
-            m.add_object_patch(f"diffusion_model.blocks.{idx}.attn.forward", patched_attn)
+            attn_key = f"diffusion_model.blocks.{idx}.attn.forward"
+            if attn_key in m.object_patches:
+                # another attention patch (e.g. mem eff sage) owns this key; keep it, it picks up head_chunks from transformer_options
+                composed = True
+                continue
+            m.add_object_patch(attn_key, types.MethodType(minimax_attn_lowmem_forward, block.attn))
+
+        if composed:
+            logging.info("MiniMaxLowVRAMAttention: composing with an existing attention patch; "
+                         "keeping its forward, adding the block-level h release and passing head_chunks through.")
 
         return io.NodeOutput(m)
