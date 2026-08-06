@@ -388,6 +388,41 @@ def generate_node_mappings(node_config):
 
 NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS = generate_node_mappings(NODE_CONFIG)
 
+# ------------------------------------------------------------------
+# Локальные пользовательские ноды из NodesGlobal.py
+# ------------------------------------------------------------------
+try:
+    from .NodesGlobal import (
+        NODE_CLASS_MAPPINGS as GLOBAL_MAP,
+        NODE_DISPLAY_NAME_MAPPINGS as GLOBAL_NAMES,
+    )
+
+    duplicates = set(NODE_CLASS_MAPPINGS) & set(GLOBAL_MAP)
+    if duplicates:
+        logging.warning(
+            "KJNodes Global: переопределяются существующие ноды: %s",
+            ", ".join(sorted(duplicates)),
+        )
+
+    NODE_CLASS_MAPPINGS.update(GLOBAL_MAP)
+
+    # Добавляем display name для каждой пользовательской ноды
+    for node_id, node_class in GLOBAL_MAP.items():
+        NODE_DISPLAY_NAME_MAPPINGS[node_id] = GLOBAL_NAMES.get(
+            node_id,
+            node_class.__name__,
+        )
+
+    logging.info(
+        "KJNodes Global Variables: успешно загружено нод: %d",
+        len(GLOBAL_MAP),
+    )
+
+except Exception:
+    logging.exception(
+        "KJNodes Global Variables: ошибка загрузки NodesGlobal.py"
+    )
+
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS", "WEB_DIRECTORY"]
 
 WEB_DIRECTORY = "./web"
