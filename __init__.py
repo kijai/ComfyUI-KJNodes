@@ -368,6 +368,16 @@ try:
 except Exception as e:
     logging.warning(f"KJNodes: LTXV nodes could not be imported. LTXV nodes will be unavailable. Error: {e}", exc_info=True)
 
+#minimax
+try:
+    from .nodes.minimax_nodes import MiniMaxChunkFeedForward, MiniMaxLowVRAMAttention
+    NODE_CONFIG.update({
+    "MiniMaxChunkFeedForward": {"class": MiniMaxChunkFeedForward, "name": "MiniMax H3 ChunkFeedForward"},
+    "MiniMaxLowVRAMAttention": {"class": MiniMaxLowVRAMAttention, "name": "MiniMax H3 Low VRAM Attention"},
+    })
+except Exception as e:
+    logging.warning(f"KJNodes: MiniMax nodes could not be imported. MiniMax nodes will be unavailable. Error: {e}", exc_info=True)
+
 try:
     from .nodes.triton_vae import PatchTritonVAE
     NODE_CONFIG.update({
