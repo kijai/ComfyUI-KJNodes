@@ -642,13 +642,25 @@ reports free VRAM before and after the operations.
     def VRAMdebug(self, gc_collect, empty_cache, unload_all_models, image_pass=None, model_pass=None, any_input=None):
         freemem_before = model_management.get_free_memory()
         logging.info(f"VRAMdebug: free memory before: {freemem_before:,.0f}")
-        if empty_cache:
-            model_management.soft_empty_cache()
-        if unload_all_models:
-            model_management.unload_all_models()
         if gc_collect:
             import gc
             gc.collect()
+
+        try:
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
+        except (AttributeError, RuntimeError) as exc:
+            logging.debug(f"VRAMdebug: cuda synchronize skipped: {exc}")
+
+        if unload_all_models:
+            model_management.unload_all_models()
+
+        if gc_collect:
+            import gc
+            gc.collect()
+
+        if empty_cache:
+            model_management.soft_empty_cache()
         freemem_after = model_management.get_free_memory()
         logging.info(f"VRAMdebug: free memory after: {freemem_after:,.0f}")
         logging.info(f"VRAMdebug: freed memory: {freemem_after - freemem_before:,.0f}")
