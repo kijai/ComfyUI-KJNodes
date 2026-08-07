@@ -1919,6 +1919,16 @@ def _sageattn_int8_fp8_nhd(qkv, dtype):
         k.sub_(k.mean(dim=1, keepdim=True))
         q_int8, q_scale, k_int8, k_scale = _per_thread_int8_i64(q, k, tensor_layout=tensor_layout, BLKQ=64, WARPQ=16, BLKK=128, WARPK=128)
         del q, k
+        # sageattention sm90 kernel requires kv_len padded to CTA_K=128, but
+        # per_channel_fp8 only pads to 64 (upstream TODO in sageattention/quant.py).
+        # sageattention.core.sageattn_qk_int8_pv_fp8_cuda_sm90 handles this at the
+        # top-level API; mirror that pad here so kv_len%128 != 0 (e.g. MiniMax H3
+        # with long text prompts) does not trigger a C++ assertion abort.
+        seq_dim = 1  # NHD layout
+        kv_len = v.size(seq_dim)
+        v_pad_len = 128 - (kv_len % 128) if kv_len % 128 != 0 else 0
+        if v_pad_len > 0:
+            v = torch.cat([v, torch.zeros(v.size(0), v_pad_len, v.size(2), v.size(3), dtype=v.dtype, device=v.device)], dim=seq_dim)
         v_fp8, v_scale, _ = per_channel_fp8(v, tensor_layout=tensor_layout, smooth_v=False)
         del v
         o = torch.empty(q_int8.size(), dtype=dtype, device=q_int8.device)
