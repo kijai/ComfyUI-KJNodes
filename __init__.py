@@ -378,13 +378,18 @@ try:
 except Exception as e:
     logging.warning(f"KJNodes: MiniMax nodes could not be imported. MiniMax nodes will be unavailable. Error: {e}", exc_info=True)
 
-try:
-    from .nodes.triton_vae import PatchTritonVAE
-    NODE_CONFIG.update({
-        "PatchTritonVAE": {"class": PatchTritonVAE, "name": "Patch Triton VAE"},
-    })
-except Exception:
-    logging.warning("KJNodes: PatchTritonVAE node could not be imported. PatchTritonVAE will be unavailable.", exc_info=True)
+import importlib.util
+
+if importlib.util.find_spec("triton") is not None:
+    try:
+        from .nodes.triton_vae import PatchTritonVAE
+        NODE_CONFIG.update({
+            "PatchTritonVAE": {"class": PatchTritonVAE, "name": "Patch Triton VAE"},
+        })
+    except Exception:
+        logging.warning("KJNodes: PatchTritonVAE node could not be imported. PatchTritonVAE will be unavailable.", exc_info=True)
+else:
+    logging.info("KJNodes: triton not installed, skipping PatchTritonVAE node.")
 
 def generate_node_mappings(node_config):
     node_class_mappings = {}
