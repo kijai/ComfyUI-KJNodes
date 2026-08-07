@@ -1074,6 +1074,9 @@ read the values of promoted widgets on the subgraph surface.
             # Build a more specific map: (interior_node_id, widget_name) -> surface_name
             # by tracing definition links AND matching to the specific widget.
             interior_widget_to_surface = {}
+            # Promoted widget slots in definition-input order:
+            # (def_input_index, interior_node_id, widget_name, surface_name)
+            promoted_slots = []
             if sg_definition:
                 def_inputs = sg_definition.get("inputs", [])
                 def_links = sg_definition.get("links", [])
@@ -1124,6 +1127,10 @@ read the values of promoted widgets on the subgraph surface.
                                 surface = inp.get("label") or inp.get("name", def_input_name)
                                 break
                         interior_widget_to_surface[(nid, widget_name_on_node)] = surface
+                        if widget_name_on_node and target_slot < len(node_inputs) and node_inputs[target_slot].get("widget"):
+                            promoted_slots.append((def_input_idx, nid, widget_name_on_node, surface))
+
+                promoted_slots.sort(key=lambda s: s[0])
 
             # Iterate proxyWidgets and look up resolved values from interior nodes.
             # Overwrites Step A link references with actual values where available.
@@ -1144,6 +1151,29 @@ read the values of promoted widgets on the subgraph surface.
                     if pw_value is not None:
                         pw_value = resolve_prompt_value(pw_value)
                         subgraph_inputs[surface_name] = pw_value
+
+            # Frontend 1.46+ (ComfyUI 0.30) no longer writes properties.proxyWidgets,
+            # and the workflow sent at execution time drops promoted widgets from the
+            # container's inputs entirely. The subgraph definition still describes them:
+            # each is an IO link from the input node (-10) into an interior widget slot,
+            # so read the values from those interior nodes in the prompt.
+            for _, interior_node_id, widget_name_on_node, surface_name in promoted_slots:
+                if surface_name in subgraph_inputs and not isinstance(subgraph_inputs[surface_name], list):
+                    continue
+                pkey = make_interior_prompt_key(interior_node_id)
+                if pkey in prompt:
+                    slot_value = prompt[pkey].get("inputs", {}).get(widget_name_on_node)
+                    if slot_value is not None:
+                        subgraph_inputs[surface_name] = resolve_prompt_value(slot_value)
+
+            # Interior nodes that were bypassed or pruned have no prompt entry. The
+            # container's widgets_values still holds one value per promoted widget,
+            # positionally in definition-input order.
+            sg_widget_values = target_workflow_node.get("widgets_values")
+            if isinstance(sg_widget_values, list) and len(promoted_slots) == len(sg_widget_values):
+                for (_, _, _, surface_name), slot_value in zip(promoted_slots, sg_widget_values):
+                    if surface_name not in subgraph_inputs:
+                        subgraph_inputs[surface_name] = slot_value
 
             if not subgraph_inputs:
                 raise ValueError(f"Subgraph node {node_id}: no input values could be resolved")
