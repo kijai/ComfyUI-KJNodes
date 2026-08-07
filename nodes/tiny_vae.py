@@ -82,6 +82,12 @@ class TinyVAEDecoder:
         return torch.stack(frames, dim=0)
 
 
+def _to_nhwc(out):
+    """[B, 3, T, H, W] -> [T, H, W, 3], contiguous. The bare movedim view leaves the later
+    host copy a strided repack, which costs more than the decode itself."""
+    return out[0].movedim(0, -1).contiguous()
+
+
 def _place(model, device, dtype):
     model = model.eval().to(device=device, dtype=dtype)
     if torch.device(device).type == "cuda":
@@ -147,7 +153,7 @@ class TAEHVDecoder:
         return x.movedim(2, 1).to(device=latent.device, dtype=torch.float32)
 
     def decode_video(self, latent, frame_indices=None):
-        """[B, C, T, H, W] -> [n, H*ratio, W*ratio, 3]."""
+        """[B, C, T, H, W] -> [n, H*ratio, W*ratio, 3], contiguous."""
         t_total = latent.shape[2]
         n = t_total if frame_indices is None else max(1, min(len(frame_indices), t_total))
         if n == t_total:
@@ -156,14 +162,15 @@ class TAEHVDecoder:
             if self.is_h3:
                 out = self._decode_h3_full(latent[:1])
                 if out.shape[2] > 0:
-                    return out[0].movedim(0, -1)
-            return self._decode(latent[:1])[0].movedim(0, -1)
+                    return _to_nhwc(out)
+            return _to_nhwc(self._decode(latent[:1]))
         # MemBlock state chains forward, so frames can't be sampled across the clip without
         # decoding everything before them — take a prefix to keep the per-step cost bounded
         out = self._decode(latent[:1, :, :n])[0].movedim(0, -1)
         if out.shape[0] > n:
+            # gather already lands contiguous, so subsample before paying for the copy
             out = out[torch.linspace(0, out.shape[0] - 1, n).round().long()]
-        return out
+        return out.contiguous()
 
 
 def load_tiny_vae_decoder(name, device=None, dtype=None):

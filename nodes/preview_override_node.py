@@ -317,7 +317,7 @@ def _ltx_full_vae_decode_to_pil(vae, x0_5d, max_frames=None, stride=1):
 def _tiny_vae_decode_to_pil(decoder, x0, max_frames=None, stride=1):
     # Raises on failure so the caller can disable the decoder instead of retrying every step.
     if x0.ndim == 4:
-        rgb = decoder.decode(x0[:1])[0].movedim(0, -1).unsqueeze(0)
+        rgb = decoder.decode(x0[:1])[0].movedim(0, -1).unsqueeze(0).contiguous()
     elif x0.ndim == 5:
         indices = list(range(0, x0.shape[2], max(1, stride)))
         if max_frames is not None and 0 < max_frames < len(indices):
