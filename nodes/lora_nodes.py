@@ -83,9 +83,9 @@ def extract_lora(diff, key, rank, algorithm, lora_type, lowrank_iters=7, adaptiv
 
     if clamp_quantile:
         dist = torch.cat([U.flatten(), Vh.flatten()])
-        if dist.numel() > 100_000:
-            # Sample 100,000 elements for quantile estimation
-            idx = torch.randperm(dist.numel(), device=dist.device)[:100_000]
+        if dist.numel() > 200_000:
+            # Sample 200,000 elements for quantile estimation
+            idx = torch.randperm(dist.numel(), device=dist.device)[:200_000]
             dist_sample = dist[idx]
             hi_val = torch.quantile(dist_sample, CLAMP_QUANTILE)
         else:
