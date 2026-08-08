@@ -2203,6 +2203,172 @@ Then on another copy of the node provide the newly generated frames and choose h
 
         return (source_images, start_images, extended_images)
 
+class ImageBatchExtendWithOverlapList:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "images": ("IMAGE",),
+                "overlap": ("INT", {
+                    "default": 13,
+                    "min": 1,
+                    "max": 4096,
+                    "step": 1
+                }),
+                "overlap_side": (
+                    ["source", "new_images"],
+                    {"default": "source"}
+                ),
+                "overlap_mode": (
+                    [
+                        "cut",
+                        "linear_blend",
+                        "ease_in_out",
+                        "filmic_crossfade",
+                        "perceptual_crossfade",
+                    ],
+                    {"default": "linear_blend"}
+                ),
+            }
+        }
+
+    RETURN_TYPES = ("IMAGE",)
+    RETURN_NAMES = ("images",)
+    FUNCTION = "execute"
+    CATEGORY = "image/batch"
+
+    INPUT_IS_LIST = True
+    OUTPUT_IS_LIST = (False,)
+
+    @staticmethod
+    def merge_batches(
+        source_images,
+        new_images,
+        overlap,
+        overlap_side,
+        overlap_mode,
+    ):
+        if source_images.shape[1:3] != new_images.shape[1:3]:
+            raise ValueError(
+                f"Source and new images must have same shape: "
+                f"{source_images.shape[1:3]} vs {new_images.shape[1:3]}"
+            )
+
+        overlap = min(overlap, len(source_images), len(new_images))
+
+        if overlap <= 0:
+            return torch.cat((source_images, new_images), dim=0)
+
+        prefix = source_images[:-overlap]
+
+        if overlap_side == "source":
+            blend_src = source_images[-overlap:]
+            blend_dst = new_images[:overlap]
+        else:
+            blend_src = new_images[:overlap]
+            blend_dst = source_images[-overlap:]
+
+        suffix = new_images[overlap:]
+
+        if overlap_mode == "linear_blend":
+            alpha = torch.linspace(
+                0, 1, overlap + 2,
+                device=blend_src.device,
+                dtype=blend_src.dtype
+            )[1:-1].view(-1, 1, 1, 1)
+
+            blended = (1 - alpha) * blend_src + alpha * blend_dst
+            return torch.cat((prefix, blended, suffix), dim=0)
+
+        elif overlap_mode == "ease_in_out":
+            t = torch.linspace(
+                0, 1, overlap + 2,
+                device=blend_src.device,
+                dtype=blend_src.dtype
+            )[1:-1]
+
+            eased = (3 * t * t - 2 * t * t * t).view(-1, 1, 1, 1)
+
+            blended = (1 - eased) * blend_src + eased * blend_dst
+            return torch.cat((prefix, blended, suffix), dim=0)
+
+        elif overlap_mode == "filmic_crossfade":
+            gamma = 2.2
+
+            alpha = torch.linspace(
+                0, 1, overlap + 2,
+                device=blend_src.device,
+                dtype=blend_src.dtype
+            )[1:-1].view(-1, 1, 1, 1)
+
+            src = torch.pow(blend_src, gamma)
+            dst = torch.pow(blend_dst, gamma)
+
+            blended = (1 - alpha) * src + alpha * dst
+            blended = torch.pow(blended, 1.0 / gamma)
+
+            return torch.cat((prefix, blended, suffix), dim=0)
+
+        elif overlap_mode == "perceptual_crossfade":
+            import kornia
+
+            alpha = torch.linspace(
+                0, 1, overlap + 2,
+                device=blend_src.device,
+                dtype=blend_src.dtype
+            )[1:-1].view(-1, 1, 1, 1)
+
+            src = blend_src.movedim(-1, 1)
+            dst = blend_dst.movedim(-1, 1)
+
+            lab_src = kornia.color.rgb_to_lab(src)
+            lab_dst = kornia.color.rgb_to_lab(dst)
+
+            blended = (1 - alpha) * lab_src + alpha * lab_dst
+            blended = kornia.color.lab_to_rgb(blended)
+
+            blended = blended.movedim(1, -1)
+
+            return torch.cat((prefix, blended, suffix), dim=0)
+
+        elif overlap_mode == "cut":
+            if overlap_side == "new_images":
+                return torch.cat(
+                    (source_images, new_images[overlap:]),
+                    dim=0,
+                )
+
+            return torch.cat(
+                (source_images[:-overlap], new_images),
+                dim=0,
+            )
+
+        raise ValueError(f"Unknown overlap mode: {overlap_mode}")
+
+    def execute(self, images, overlap, overlap_side, overlap_mode):
+
+        if isinstance(overlap, list):
+            overlap = overlap[0]
+        if isinstance(overlap_side, list):
+            overlap_side = overlap_side[0]
+        if isinstance(overlap_mode, list):
+            overlap_mode = overlap_mode[0]
+        if not images:
+            raise ValueError("No image batches supplied")
+        if len(images) == 1:
+            return (images[0],)
+        merged = images[0]
+
+        for batch in images[1:]:
+            merged = self.merge_batches(
+                merged,
+                batch,
+                overlap,
+                overlap_side,
+                overlap_mode,
+            )
+        return (merged,)
+
 class GetLatentRangeFromBatch:
     
     RETURN_TYPES = ("LATENT", )
@@ -4685,6 +4851,112 @@ class LoadVideosFromFolder:
         if s.vhs_nodes is not None:
             return s.vhs_nodes.utils.hash_path(video)
         return None
+
+
+class LoadVideosFromFolderList(LoadVideosFromFolder):
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "video": ("STRING", {"default": "X://insert/path/"},),
+                "force_rate": ("FLOAT", {"default": 0, "min": 0, "max": 60, "step": 1, "disable": 0}),
+                "custom_width": ("INT", {"default": 0, "min": 0, "max": 4096, "disable": 0}),
+                "custom_height": ("INT", {"default": 0, "min": 0, "max": 4096, "disable": 0}),
+                "frame_load_cap": ("INT", {"default": 0, "min": 0, "max": 10000, "step": 1, "disable": 0}),
+                "skip_first_frames": ("INT", {"default": 0, "min": 0, "max": 10000, "step": 1}),
+                "select_every_nth": ("INT", {"default": 1, "min": 1, "max": 1000, "step": 1}),
+                "add_label": ("BOOLEAN", {"default": False}),
+            },
+            "hidden": {
+                "force_size": "STRING",
+                "unique_id": "UNIQUE_ID"
+            },
+        }
+
+    CATEGORY = "KJNodes/misc"
+
+    RETURN_TYPES = ("IMAGE", )
+    RETURN_NAMES = ("IMAGE", )
+    OUTPUT_IS_LIST = (True,)
+
+    FUNCTION = "load_video"
+
+    def load_video(self, add_label=False, **kwargs):
+        if kwargs.get('video') and not os.path.isabs(kwargs['video']) and args.base_directory:
+            kwargs['video'] = os.path.join(args.base_directory, kwargs['video'])
+
+        if self.vhs_nodes is None:
+            raise ImportError("This node requires ComfyUI-VideoHelperSuite to be installed.")
+
+        videos_list = []
+        filenames = []
+
+        for f in sorted(os.listdir(kwargs['video'])):
+            if os.path.isfile(os.path.join(kwargs['video'], f)):
+                file_parts = f.split('.')
+                if len(file_parts) > 1 and (file_parts[-1].lower() in ['webm', 'mp4', 'mkv', 'gif', 'mov']):
+                    videos_list.append(os.path.join(kwargs['video'], f))
+                    filenames.append(f)
+
+        kwargs.pop('video')
+
+        loaded_videos = []
+
+        for idx, video in enumerate(videos_list):
+            video_tensor = self.vhs_nodes.load_video_nodes.load_video(video=video, **kwargs)[0]
+
+            if add_label:
+                if video_tensor.dim() == 4:
+                    _, h, w, c = video_tensor.shape
+                else:
+                    h, w, c = video_tensor.shape
+
+                label_text = filenames[idx].rsplit('.', 1)[0]
+                font_size = max(16, w // 20)
+
+                try:
+                    font = ImageFont.truetype("arial.ttf", font_size)
+                except OSError:
+                    font = ImageFont.load_default()
+
+                dummy_img = Image.new("RGB", (w, 10), (0, 0, 0))
+                draw = ImageDraw.Draw(dummy_img)
+                text_bbox = draw.textbbox((0, 0), label_text, font=font)
+
+                extra_padding = max(12, font_size // 2)
+                label_height = text_bbox[3] - text_bbox[1] + extra_padding
+
+                label_img = Image.new("RGB", (w, label_height), (0, 0, 0))
+                draw = ImageDraw.Draw(label_img)
+
+                draw.text(
+                    (w // 2 - (text_bbox[2] - text_bbox[0]) // 2, 4),
+                    label_text,
+                    font=font,
+                    fill=(255, 255, 255)
+                )
+
+                label_np = np.asarray(label_img).astype(np.float32) / 255.0
+                label_tensor = torch.from_numpy(label_np)
+
+                if c == 1:
+                    label_tensor = label_tensor.mean(dim=2, keepdim=True)
+                elif c == 4:
+                    alpha = torch.ones((label_height, w, 1), dtype=label_tensor.dtype)
+                    label_tensor = torch.cat([label_tensor, alpha], dim=2)
+
+                if video_tensor.dim() == 4:
+                    label_tensor = label_tensor.unsqueeze(0).expand(
+                        video_tensor.shape[0], -1, -1, -1
+                    )
+                    video_tensor = torch.cat([label_tensor, video_tensor], dim=1)
+                else:
+                    video_tensor = torch.cat([label_tensor, video_tensor], dim=0)
+
+            loaded_videos.append(video_tensor)
+
+        return (loaded_videos,)
 
 
 class EncodeVideoComponents(io.ComfyNode):
