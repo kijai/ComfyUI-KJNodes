@@ -7,9 +7,14 @@ import comfy.model_management as mm
 import comfy.ops
 import comfy.quant_ops
 from comfy.ldm.modules.attention import optimized_attention
-from comfy.ldm.minimax.model import _mod_scale_shift, _mod_gate
+from comfy.ldm.minimax.model import _mod_scale_shift, _mod_gate, PackedLayout
 
-from comfy_api.latest import io
+from comfy_api.latest import io, ui
+
+try:
+    from server import PromptServer
+except Exception:
+    PromptServer = None
 
 
 def minimax_mlp_chunked_forward(self, x):
@@ -195,3 +200,81 @@ class MiniMaxLowVRAMAttention(io.ComfyNode):
                          "keeping its forward, adding the block-level h release and passing head_chunks through.")
 
         return io.NodeOutput(m)
+
+
+class MiniMaxH3TokenCounter(io.ComfyNode):
+
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="MiniMaxH3TokenCounter",
+            display_name="MiniMax H3 Token Counter",
+            category="KJNodes/misc",
+            description="Counts the packed sequence length a MiniMax H3 generation will run at, without sampling. "
+                        "Builds the same [text | keyframes/references | audio | video] layout the model uses, from the "
+                        "AV latent and the conditioning (text length, keyframe and reference blocks included).",
+            inputs=[
+                io.Latent.Input("samples", tooltip="The AV latent that would be sampled (video+audio pair from the H3 latent nodes)."),
+                io.Conditioning.Input("conditioning", tooltip="Positive conditioning; text length and any keyframe/reference blocks are read from it."),
+            ],
+            outputs=[
+                io.Latent.Output(display_name="samples", tooltip="The input latent, unchanged."),
+                io.Conditioning.Output(display_name="conditioning", tooltip="The input conditioning, unchanged."),
+                io.Int.Output(display_name="tokens"),
+                io.String.Output(display_name="breakdown"),
+            ],
+            hidden=[io.Hidden.unique_id],
+        )
+
+    @classmethod
+    def execute(cls, samples, conditioning) -> io.NodeOutput:
+        latent = samples["samples"]
+        if getattr(latent, "is_nested", False):
+            video, audio = latent.unbind()[:2]
+            audio_t = audio.shape[-1]
+        else:
+            video, audio_t = latent, 0
+        if video.ndim != 5:
+            raise ValueError(f"MiniMaxH3TokenCounter: expected a video latent of shape [B, C, T, H, W], got {tuple(video.shape)}")
+
+        # mirror model_base.MiniMaxH3.extra_conds: h/w rounded up to the DiT's 2x2 patch
+        latent_t = video.shape[2]
+        lat_h = (video.shape[3] + 1) // 2 * 2
+        lat_w = (video.shape[4] + 1) // 2 * 2
+
+        # scheduled conds can differ in text length; report the largest sequence
+        layout = max((PackedLayout(cond.shape[1], latent_t, lat_h, lat_w, audio_t,
+                                   keyframes=cond_dict.get("minimax_keyframes"),
+                                   refs=cond_dict.get("minimax_refs"),
+                                   frame_count=cond_dict.get("minimax_frame_count"))
+                      for cond, cond_dict in conditioning), key=lambda l: l.seq_len)
+
+        rows = {}
+        seg_count = {}
+        for a, b, kind in layout.segments:
+            rows[kind] = rows.get(kind, 0) + (b - a)
+            seg_count[kind] = seg_count.get(kind, 0) + 1
+
+        parts = [("total", str(layout.seq_len))]
+        # int32 offset limit of the sageattention quant/attention kernels at H3's 56x128 heads
+        if layout.seq_len * 7168 >= 2**31:
+            parts.append(("WARNING", f"over the int32-safe attention range ({2**31 // 7168} tokens), sageattention kernels may overflow"))
+        parts.append(("text", str(rows.get("text", 0))))
+        if "cond" in rows:
+            parts.append(("keyframes", f"{rows['cond']} ({seg_count['cond']} frame{'s' if seg_count['cond'] > 1 else ''})"))
+        if "ref_img" in rows:
+            parts.append(("image/video refs", f"{rows['ref_img']} ({seg_count['ref_img']} block{'s' if seg_count['ref_img'] > 1 else ''})"))
+        if "ref_audio" in rows:
+            parts.append(("audio refs", f"{rows['ref_audio']} ({seg_count['ref_audio']} block{'s' if seg_count['ref_audio'] > 1 else ''})"))
+        parts.append(("audio", str(rows.get("audio", 0))))
+        parts.append(("video", f"{rows.get('video', 0)} ({latent_t}x{lat_h // 2}x{lat_w // 2} patches)"))
+
+        breakdown = "\n".join(f"{k}: {v}" for k, v in parts)
+        # inline display on the node; the frontend text preview strips all tags except <br>/<a>, so plain text only
+        unique_id = getattr(cls.hidden, "unique_id", None)
+        if PromptServer is not None and unique_id:
+            try:
+                PromptServer.instance.send_progress_text(breakdown.replace("WARNING:", "⚠"), unique_id)
+            except Exception:
+                pass
+        return io.NodeOutput(samples, conditioning, layout.seq_len, breakdown, ui=ui.PreviewText(breakdown))
