@@ -1,3 +1,4 @@
+import inspect
 import logging
 import types
 
@@ -242,12 +243,23 @@ class MiniMaxH3TokenCounter(io.ComfyNode):
         lat_h = (video.shape[3] + 1) // 2 * 2
         lat_w = (video.shape[4] + 1) // 2 * 2
 
+        # older comfy versions have a PackedLayout without some kwargs; only fail if the conditioning actually uses one
+        supported = set(inspect.signature(PackedLayout.__init__).parameters)
+
+        def build_layout(cond, cond_dict):
+            kwargs = {"keyframes": cond_dict.get("minimax_keyframes"),
+                      "refs": cond_dict.get("minimax_refs"),
+                      "frame_count": cond_dict.get("minimax_frame_count")}
+            missing = [k for k, v in kwargs.items() if v is not None and k not in supported]
+            if missing:
+                raise RuntimeError(f"MiniMaxH3TokenCounter: this ComfyUI version's PackedLayout does not support {missing}, "
+                                   "update ComfyUI to count this conditioning correctly.")
+            return PackedLayout(cond.shape[1], latent_t, lat_h, lat_w, audio_t,
+                                **{k: v for k, v in kwargs.items() if v is not None and k in supported})
+
         # scheduled conds can differ in text length; report the largest sequence
-        layout = max((PackedLayout(cond.shape[1], latent_t, lat_h, lat_w, audio_t,
-                                   keyframes=cond_dict.get("minimax_keyframes"),
-                                   refs=cond_dict.get("minimax_refs"),
-                                   frame_count=cond_dict.get("minimax_frame_count"))
-                      for cond, cond_dict in conditioning), key=lambda l: l.seq_len)
+        layout = max((build_layout(cond, cond_dict) for cond, cond_dict in conditioning),
+                     key=lambda l: l.seq_len)
 
         rows = {}
         seg_count = {}
