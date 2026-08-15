@@ -562,13 +562,20 @@ class Int8CausalConv3d(CausalConv3d):
                                                    BLOCK=4096, num_warps=8)
 
         C_out = self.out_channels
-        scale_vec = self.int8_sw * amax.float()
+        int8_qw = self.int8_qw
+        int8_sw = self.int8_sw
+        if int8_sw.device != x.device:  # lowvram partial load keeps custom buffers off-device
+            int8_qw = int8_qw.to(x.device)
+            int8_sw = int8_sw.to(x.device)
+        scale_vec = int8_sw * amax.float()
         bias = self.bias
+        if bias is not None and bias.device != x.device:  # lowvram partial load keeps bias param off-device
+            bias = bias.to(x.device)
         T_out = T_in - 2
         M = T_out * hw
         out = torch.empty(M, C_out, device=x.device, dtype=x.dtype)
         grid = (triton.cdiv(M, 128), triton.cdiv(C_out, 64))
-        _conv3d_s8[grid](qx, self.int8_qw, out, scale_vec,
+        _conv3d_s8[grid](qx, int8_qw, out, scale_vec,
                          bias.float() if bias is not None else scale_vec,
                          H, W, C_pad, C_out, 3 * C_pad, M,
                          BLOCK_M=128, BLOCK_N=64, BLOCK_K=64,
@@ -606,12 +613,19 @@ class Int8Conv2d(comfy.ops.disable_weight_init.Conv2d):
                                                    BLOCK=4096, num_warps=8)
 
         C_out = self.out_channels
-        scale_vec = self.int8_sw * amax.float()
+        int8_qw = self.int8_qw
+        int8_sw = self.int8_sw
+        if int8_sw.device != x.device:  # lowvram partial load keeps custom buffers off-device
+            int8_qw = int8_qw.to(x.device)
+            int8_sw = int8_sw.to(x.device)
+        scale_vec = int8_sw * amax.float()
         bias = self.bias
+        if bias is not None and bias.device != x.device:  # lowvram partial load keeps bias param off-device
+            bias = bias.to(x.device)
         M = B * H * W
         out = torch.empty(M, C_out, device=x.device, dtype=x.dtype)
         grid = (triton.cdiv(M, 128), triton.cdiv(C_out, 64))
-        _conv2d_s8[grid](qx, self.int8_qw, out, scale_vec,
+        _conv2d_s8[grid](qx, int8_qw, out, scale_vec,
                          bias.float() if bias is not None else scale_vec,
                          H, W, C_pad, C_out, 3 * C_pad, M,
                          BLOCK_M=128, BLOCK_N=64, BLOCK_K=64,
@@ -647,13 +661,20 @@ class Int8InnerConv3d(comfy.ops.disable_weight_init.Conv3d):
                                                    BLOCK=4096, num_warps=8)
 
         C_out = self.out_channels
-        scale_vec = self.int8_sw * amax.float()
+        int8_qw = self.int8_qw
+        int8_sw = self.int8_sw
+        if int8_sw.device != x.device:  # lowvram partial load keeps custom buffers off-device
+            int8_qw = int8_qw.to(x.device)
+            int8_sw = int8_sw.to(x.device)
+        scale_vec = int8_sw * amax.float()
         bias = self.bias
+        if bias is not None and bias.device != x.device:  # lowvram partial load keeps bias param off-device
+            bias = bias.to(x.device)
         T_out = T_in - 2
         M = T_out * H * W
         out = torch.empty(M, C_out, device=x.device, dtype=x.dtype)
         grid = (triton.cdiv(M, 128), triton.cdiv(C_out, 64))
-        _conv3d_s8[grid](qx, self.int8_qw, out, scale_vec,
+        _conv3d_s8[grid](qx, int8_qw, out, scale_vec,
                          bias.float() if bias is not None else scale_vec,
                          H, W, C_pad, C_out, 3 * C_pad, M,
                          BLOCK_M=128, BLOCK_N=64, BLOCK_K=64,
