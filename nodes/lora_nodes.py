@@ -83,9 +83,9 @@ def extract_lora(diff, key, rank, algorithm, lora_type, lowrank_iters=7, adaptiv
 
     if clamp_quantile:
         dist = torch.cat([U.flatten(), Vh.flatten()])
-        if dist.numel() > 100_000:
-            # Sample 100,000 elements for quantile estimation
-            idx = torch.randperm(dist.numel(), device=dist.device)[:100_000]
+        if dist.numel() > 200_000:
+            # Sample 200,000 elements for quantile estimation
+            idx = torch.randperm(dist.numel(), device=dist.device)[:200_000]
             dist_sample = dist[idx]
             hi_val = torch.quantile(dist_sample, CLAMP_QUANTILE)
         else:
@@ -436,6 +436,38 @@ def extract_linear(weight, lora_rank, dynamic_method, dynamic_param, device, sca
     return param_dict
 
 
+def extract_linear_factored(lora_down, lora_up, lora_rank, dynamic_method, dynamic_param, device, scale=1):
+    """SVD of lora_up @ lora_down without materializing the product.
+
+    up @ down == Qu @ (Ru @ Rd.T) @ Qd.T, so the singular values of the merged
+    weight are those of the small rank x rank core. Exact, and peak memory is the
+    two thin QRs instead of out_size x in_size.
+    """
+    down = lora_down.to(device).float()
+    up = lora_up.to(device).float()
+    out_size, in_size = up.shape[0], down.shape[1]
+
+    Qu, Ru = torch.linalg.qr(up)
+    Qd, Rd = torch.linalg.qr(down.transpose(0, 1))
+    U, S, Vh = torch.linalg.svd(Ru @ Rd.transpose(0, 1), full_matrices=False)
+
+    if dynamic_method and dynamic_method != "disabled":
+        param_dict = rank_resize(S, lora_rank, dynamic_method, dynamic_param, scale)
+        lora_rank = param_dict["new_rank"]
+    else:
+        lora_rank = min(lora_rank, S.numel())
+        param_dict = {"new_rank": lora_rank, "new_alpha": float(scale * lora_rank)}
+
+    sqrt_S = torch.sqrt(S[:lora_rank])
+    U = (Qu @ U[:, :lora_rank]) * sqrt_S
+    Vh = sqrt_S.unsqueeze(1) * (Vh[:lora_rank] @ Qd.transpose(0, 1))
+
+    param_dict["lora_down"] = Vh.reshape(lora_rank, in_size).cpu()
+    param_dict["lora_up"] = U.reshape(out_size, lora_rank).cpu()
+    del U, S, Vh, Qu, Ru, Qd, Rd, up, down
+    return param_dict
+
+
 def merge_conv(lora_down, lora_up, device):
     in_rank, in_size, kernel_size, k_ = lora_down.shape
     out_size, out_rank, _, _ = lora_up.shape
@@ -618,7 +650,8 @@ def resize_lora_model(lora_sd, new_rank, save_dtype, device, dynamic_method, dyn
                 out_size, out_rank = lora_up_weight.shape
                 merged_size = out_size * in_size
 
-            if merged_size > 100_000_000:  # Skip if >100M elements
+            # Linear layers of any size go through the factored path; conv still needs the merge
+            if merged_size > 100_000_000 and (conv2d or conv3d):
                 logging.warning(f"Skipping {block_down_name}: merged weight too large ({merged_size:,} elements)")
                 tqdm.write(f"SKIPPED: {block_down_name} - too large ({merged_size:,} elements)")
                 pbar.update(1)
@@ -635,6 +668,8 @@ def resize_lora_model(lora_sd, new_rank, save_dtype, device, dynamic_method, dyn
             elif conv3d:
                 full_weight_matrix = merge_conv3d(lora_down_weight, lora_up_weight, device)
                 param_dict = extract_conv3d(full_weight_matrix, new_rank, dynamic_method, dynamic_param, device, scale)
+            elif merged_size > 100_000_000:
+                param_dict = extract_linear_factored(lora_down_weight, lora_up_weight, new_rank, dynamic_method, dynamic_param, device, scale)
             else:
                 full_weight_matrix = merge_linear(lora_down_weight, lora_up_weight, device)
                 param_dict = extract_linear(full_weight_matrix, new_rank, dynamic_method, dynamic_param, device, scale)

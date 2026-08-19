@@ -5,6 +5,7 @@ import torch
 import importlib
 import math
 import datetime
+import pickle
 from tqdm import tqdm
 
 import folder_paths
@@ -81,6 +82,10 @@ def get_sage_func(sage_attention, allow_compile=False):
             # add a heads dimension if there isn't already one
             if mask.ndim == 3:
                 mask = mask.unsqueeze(1)
+        # Copy only when a row offset would actually exceed int32.
+        seq_dim = 2 if tensor_layout == "HND" else 1
+        if any((t.shape[seq_dim] - 1) * t.stride(seq_dim) >= 2**31 for t in (q, k, v)):
+            q, k, v = q.contiguous(), k.contiguous(), v.contiguous()
         out = sage_func(q, k, v, attn_mask=mask, is_causal=False, tensor_layout=tensor_layout).to(in_dtype)
         if tensor_layout == "HND":
             if not skip_output_reshape:
@@ -1904,6 +1909,39 @@ try:
 except ImportError:
     PromptServer = None
 
+
+class _RestrictedSnapshotUnpickler(pickle.Unpickler):
+    """Unpickler that refuses to import arbitrary globals.
+
+    A CUDA memory snapshot produced by ``torch.cuda.memory._dump_snapshot`` is pure
+    data (nested dict/list/tuple and str/int/float/bool/None), none of which requires
+    importing a class or function during unpickling. We therefore reject every global
+    lookup except a small allowlist of harmless container reconstructors. Legitimate
+    snapshots load unchanged, while a crafted "snapshot" file cannot execute code
+    (e.g. a ``__reduce__`` payload calling ``exec``/``os.system``) because that path
+    goes through ``find_class``.
+    """
+
+    # These reconstructors only build data containers and cannot execute code.
+    _ALLOWED_GLOBALS = {
+        "builtins": {"dict", "list", "tuple", "set", "frozenset", "bytearray", "complex"},
+        "collections": {"OrderedDict"},
+    }
+
+    def find_class(self, module, name):
+        if name in self._ALLOWED_GLOBALS.get(module, frozenset()):
+            return super().find_class(module, name)
+        raise pickle.UnpicklingError(
+            f"Refusing to load disallowed global '{module}.{name}' from CUDA memory "
+            "snapshot; the file is not a trusted snapshot and may be malicious."
+        )
+
+
+def _safe_load_cuda_snapshot(file_obj):
+    """Deserialize a CUDA memory-history snapshot without allowing code execution."""
+    return _RestrictedSnapshotUnpickler(file_obj).load()
+
+
 class VisualizeCUDAMemoryHistory():
     @classmethod
     def INPUT_TYPES(s):
@@ -1923,7 +1961,6 @@ class VisualizeCUDAMemoryHistory():
     OUTPUT_NODE = True
 
     def visualize(self, snapshot_path, unique_id):
-        import pickle
         from torch.cuda import _memory_viz
         import uuid
 
@@ -1931,7 +1968,7 @@ class VisualizeCUDAMemoryHistory():
         output_dir = get_output_directory()
 
         with open(snapshot_path, "rb") as f:
-            snapshot = pickle.load(f)
+            snapshot = _safe_load_cuda_snapshot(f)
 
         html = _memory_viz.trace_plot(snapshot)
         html_filename = f"cuda_memory_history_{uuid.uuid4().hex}.html"
