@@ -93,14 +93,20 @@ function planConnections(ordered) {
 			const inputCandidates = [];
 			let hasExact = false;
 
+			const inName = (inp.name || inp.label || "").toLowerCase();
+
 			for (let a = b - 1; a >= 0; a--) {
 				const nodeA = ordered[a];
 				if (!nodeA.outputs) continue;
 
 				for (let outIdx = 0; outIdx < nodeA.outputs.length; outIdx++) {
-					const tier = typeMatchTier(nodeA.outputs[outIdx].type, inp.type);
+					const out = nodeA.outputs[outIdx];
+					const tier = typeMatchTier(out.type, inp.type);
 					if (tier < 0) continue;
 					if (tier === 2) hasExact = true;
+
+					const outName = (out.name || out.label || "").toLowerCase();
+					const nameMatch = inName !== "" && inName === outName ? 1 : 0;
 
 					const outPos = getSlotPos(nodeA, false, outIdx);
 					const dx = outPos[0] - inPos[0];
@@ -111,6 +117,7 @@ function planConnections(ordered) {
 						sourceNode: nodeA,
 						outIdx,
 						tier,
+						nameMatch,
 						dist: dx * dx + dy * dy,
 					});
 				}
@@ -123,11 +130,11 @@ function planConnections(ordered) {
 		}
 	}
 
-	// Filter out non-exact matches for inputs that have an exact candidate
-	const filtered = candidates.filter(c => c.tier === 2 || !c.hasExact);
+	// Filter out non-exact matches for inputs that have an exact candidate (keep name matches)
+	const filtered = candidates.filter(c => c.tier === 2 || c.nameMatch || !c.hasExact);
 
-	// Sort globally: higher tier first, then closest pair
-	filtered.sort((x, y) => (y.tier - x.tier) || (x.dist - y.dist));
+	// Sort globally: name match first, then higher type tier, then closest pair
+	filtered.sort((x, y) => (y.nameMatch - x.nameMatch) || (y.tier - x.tier) || (x.dist - y.dist));
 
 	// Greedy global assignment — closest pairs first
 	const planned = [];

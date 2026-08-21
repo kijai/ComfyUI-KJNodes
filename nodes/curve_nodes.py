@@ -95,7 +95,7 @@ def plot_coordinates_to_tensor(coordinates, height, width, bbox_height, bbox_wid
             canvas.draw()
             try:
                 image_np = np.frombuffer(canvas.tostring_rgb(), dtype='uint8').reshape(int(height), int(width), 3).copy()
-            except:
+            except AttributeError:
                 image_np = np.frombuffer(canvas.tostring_argb(), dtype='uint8').reshape(int(height), int(width), 4)
                 image_np = image_np[:, :, [1, 2, 3]]  # Convert ARGB to RGB
             image_tensor = torch.from_numpy(image_np).float() / 255.0
@@ -292,18 +292,15 @@ output types:
         elif float_output_type == 'pandas series':
             try:
                 import pandas as pd
-            except:
-                raise Exception("MaskOrImageToWeight: pandas is not installed. Please install pandas to use this output_type")
+            except ImportError as e:
+                raise ImportError("MaskOrImageToWeight: pandas is not installed. Please install pandas to use this output_type") from e
             out_floats = pd.Series(all_normalized_y_values * repeat_output),
         elif float_output_type == 'tensor':
             out_floats = torch.tensor(all_normalized_y_values * repeat_output, dtype=torch.float32)
 
-        # Create a color map for grayscale intensities
         color_map = lambda y: torch.full((mask_height, mask_width, 3), y, dtype=torch.float32)
-
-        # Create a color map for grayscale intensities (from first spline only)
-        color_map = lambda y: torch.full((mask_height, mask_width, 3), y, dtype=torch.float32)
-        mask_tensors = [color_map(y) for y in normalized_y_values]
+        y_values_for_masks = normalized_y_values if normalized_y_values else [min_value]
+        mask_tensors = [color_map(y) for y in y_values_for_masks]
         masks_out = torch.stack(mask_tensors)
         masks_out = masks_out.repeat(repeat_output, 1, 1, 1)
         masks_out = masks_out.mean(dim=-1)
@@ -604,7 +601,7 @@ Locations are center locations.
                 # Draw the text
                 try:
                     draw.text(text_position, line, fill=color, font=current_font, features=['-liga'])
-                except:
+                except Exception:
                     draw.text(text_position, line, fill=color, font=current_font)
             
             image = pil2tensor(image)
@@ -764,7 +761,7 @@ and returns that as the selected output type.
             for image in images:
                 mean_values.append(image.mean().item())
         elif masks is not None and images is not None:
-            raise Exception("MaskOrImageToWeight: Use either mask or image input only.")
+            raise ValueError("MaskOrImageToWeight: Use either mask or image input only.")
                   
         # Convert mean_values to the specified output_type
         if output_type == 'list':
@@ -772,8 +769,8 @@ and returns that as the selected output type.
         elif output_type == 'pandas series':
             try:
                 import pandas as pd
-            except:
-                raise Exception("MaskOrImageToWeight: pandas is not installed. Please install pandas to use this output_type")
+            except ImportError as e:
+                raise ImportError("MaskOrImageToWeight: pandas is not installed. Please install pandas to use this output_type") from e
             out = pd.Series(mean_values),
         elif output_type == 'tensor':
             out = torch.tensor(mean_values, dtype=torch.float32),

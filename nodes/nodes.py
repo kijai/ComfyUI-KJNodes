@@ -13,7 +13,7 @@ import logging
 from comfy import model_management
 import folder_paths
 from nodes import MAX_RESOLUTION
-from comfy.utils import common_upscale, ProgressBar, load_torch_file, save_torch_file
+from comfy.utils import common_upscale, ProgressBar, load_torch_file, save_torch_file, state_dict_prefix_replace
 from comfy.comfy_types.node_typing import IO
 from comfy_api.latest import io, ui
 import comfy.latent_formats
@@ -1561,45 +1561,6 @@ https://huggingface.co/stabilityai/sv3d
         latent = torch.zeros([batch_size, 4, height // 8, width // 8])
         return (final_positive, final_negative, {"samples": latent})
 
-class LoadResAdapterNormalization:
-    @classmethod
-    def INPUT_TYPES(s):
-        return {
-            "required": {
-                "model": ("MODEL",),
-                "resadapter_path": (folder_paths.get_filename_list("checkpoints"), )
-            } 
-        }
-
-    RETURN_TYPES = ("MODEL",)
-    FUNCTION = "load_res_adapter"
-    CATEGORY = "KJNodes/experimental"
-
-    def load_res_adapter(self, model, resadapter_path):
-        logging.info("ResAdapter: Checking ResAdapter path")
-        resadapter_full_path = folder_paths.get_full_path("checkpoints", resadapter_path)
-        if not os.path.exists(resadapter_full_path):
-            raise Exception("Invalid model path")
-        else:
-            logging.info("ResAdapter: Loading ResAdapter normalization weights")
-            prefix_to_remove = 'diffusion_model.'
-            model_clone = model.clone()
-            norm_state_dict = load_torch_file(resadapter_full_path)
-            new_values = {key[len(prefix_to_remove):]: value for key, value in norm_state_dict.items() if key.startswith(prefix_to_remove)}
-            logging.info("ResAdapter: Attempting to add patches with ResAdapter weights")
-            try:
-                for key in model.model.diffusion_model.state_dict().keys():
-                    if key in new_values:
-                        original_tensor = model.model.diffusion_model.state_dict()[key]
-                        new_tensor = new_values[key].to(model.model.diffusion_model.dtype)
-                        if original_tensor.shape == new_tensor.shape:
-                            model_clone.add_object_patch(f"diffusion_model.{key}.data", new_tensor)
-                        else:
-                            logging.warning("ResAdapter: No match for key: %s", key)
-            except:
-                raise Exception("Could not patch model, this way of patching was added to ComfyUI on March 3rd 2024, is your ComfyUI up to date?")
-            logging.info("ResAdapter: Added resnet normalization patches")
-            return (model_clone, )
         
 class Superprompt:
     @classmethod
@@ -1970,7 +1931,7 @@ class LTX2BlockLoraSelect:
     @classmethod
     def INPUT_TYPES(s):
         arg_dict = {}
-        argument = ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1000.0, "step": 0.01})
+        argument = ("FLOAT", {"default": 0.0, "min": 0.0, "max": 10000.0, "step": 0.01})
 
         for i in range(48):
             arg_dict["blocks.{}.".format(i)] = argument
@@ -2191,7 +2152,7 @@ class ModelSaveKJ:
 
         load_models = [model]
 
-        model_management.load_models_gpu(load_models, force_patch_weights=True)
+        model_management.load_models_gpu(load_models)
         default_prefix = "model.diffusion_model."
 
         sd = model.state_dict_for_saving(None, None, None)
@@ -2260,7 +2221,7 @@ Concatenates the audio1 to audio2 in the specified direction.
         sample_rate_1 = audio1["sample_rate"]
         sample_rate_2 = audio2["sample_rate"]
         if sample_rate_1 != sample_rate_2:
-            raise Exception("Sample rates of the two audios do not match")
+            raise ValueError("Sample rates of the two audios do not match")
 
         waveform_1 = audio1["waveform"]
         waveform_2 = audio2["waveform"]
@@ -2462,13 +2423,68 @@ class VAELoaderKJ:
                 vae_path = folder_paths.get_full_path_or_raise("vae", vae_name)
             sd, metadata = load_torch_file(vae_path, return_metadata=True)
 
-        if "vocoder.conv_post.weight" in sd or "vocoder.vocoder.conv_post.weight" in sd:
-            from comfy.ldm.lightricks.vae.audio_vae import AudioVAE
-            vae = AudioVAE(sd, metadata)
+
+        is_audio_vae = (
+            "vocoder.conv_post.weight" in sd
+            or "vocoder.vocoder.conv_post.weight" in sd
+            or "vocoder.resblocks.0.convs1.0.weight" in sd
+            or "vocoder.vocoder.resblocks.0.convs1.0.weight" in sd
+        )
+        if is_audio_vae:
+            sd_audio = state_dict_prefix_replace(dict(sd), {"audio_vae.": "autoencoder.", "vocoder.": "vocoder."}, filter_keys=True)
+            vae = VAE(sd=sd_audio, metadata=metadata)
         else:
             vae = VAE(sd=sd, device=device, dtype=dtype, metadata=metadata)
-            vae.throw_exception_if_invalid()
+        vae.throw_exception_if_invalid()
         return (vae,)
+
+
+class VAEMergeKJ(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="VAEMergeKJ",
+            category="KJNodes/vae",
+            description="Merge two VAEs by weighted-averaging their weights. "
+                        "ratio is the weight toward vae_2 (0.0 = pure vae_1, 1.0 = pure vae_2). "
+                        "Both VAEs must share the same architecture (matching state dict keys and shapes).",
+            inputs=[
+                io.Vae.Input("vae_1"),
+                io.Vae.Input("vae_2"),
+                io.Float.Input("ratio", default=0.5, min=0.0, max=1.0, step=0.01),
+            ],
+            outputs=[
+                io.Vae.Output(display_name="vae"),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, vae_1, vae_2, ratio) -> io.NodeOutput:
+        from comfy.sd import VAE
+        sd1 = vae_1.get_sd()
+        sd2 = vae_2.get_sd()
+
+        mismatch = set(sd1.keys()) ^ set(sd2.keys())
+        if mismatch:
+            raise ValueError(
+                "Cannot merge: VAE architectures differ ({} non-matching keys, e.g. {}).".format(
+                    len(mismatch), list(mismatch)[:3]))
+
+        merged = {}
+        for k, v1 in sd1.items():
+            v2 = sd2[k]
+            if v1.shape != v2.shape:
+                raise ValueError("Cannot merge: shape mismatch for '{}' ({} vs {}).".format(k, tuple(v1.shape), tuple(v2.shape)))
+            # Only blend float weights; integer buffers (e.g. num_batches_tracked) are copied from vae_1.
+            if torch.is_floating_point(v1):
+                blended = torch.lerp(v1.float(), v2.to(device=v1.device).float(), ratio)
+                merged[k] = blended.to(dtype=v1.dtype)
+            else:
+                merged[k] = v1.clone()
+
+        merged_vae = VAE(sd=merged, device=vae_1.device, dtype=vae_1.vae_dtype)
+        merged_vae.throw_exception_if_invalid()
+        return io.NodeOutput(merged_vae)
 
 from comfy.samplers import sampling_function, CFGGuider
 class Guider_ScheduledCFG(CFGGuider):
@@ -3284,7 +3300,7 @@ class VisualizeSigmasKJ(io.ComfyNode):
             buf = np.frombuffer(fig.canvas.tostring_argb(), dtype=np.uint8)
             buf = buf.reshape(h, w, 4)
             buf = buf[:, :, [1, 2, 3]]  # Convert ARGB to RGB
-        except:
+        except AttributeError:
             buf = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
             buf = buf.reshape(h, w, 3).copy()
         image = torch.from_numpy(buf).float() / 255.0

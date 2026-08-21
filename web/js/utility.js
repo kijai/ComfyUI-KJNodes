@@ -62,7 +62,15 @@ export function getNodeAtPoint(graph, cx, cy) {
 export function typesCompatible(a, b) {
   if (a === "*" || b === "*") return true;
   if (a === b) return true;
-  if (typeof a === "string" && typeof b === "string" && a.toUpperCase() === b.toUpperCase()) return true;
+  if (typeof a !== "string" || typeof b !== "string") return false;
+  if (a.toUpperCase() === b.toUpperCase()) return true;
+  // ComfyUI accepts union types like "STRING,INT" — match if any token overlaps
+  if (a.includes(",") || b.includes(",")) {
+    const aTokens = a.toUpperCase().split(",").map(s => s.trim()).filter(Boolean);
+    const bTokens = b.toUpperCase().split(",").map(s => s.trim()).filter(Boolean);
+    if (aTokens.includes("*") || bTokens.includes("*")) return true;
+    return aTokens.some(t => bTokens.includes(t));
+  }
   return false;
 }
 
@@ -87,8 +95,9 @@ export function addMiddleClickPan(element) {
     const startX = e.clientX, startY = e.clientY;
     const startOffsetX = ds.offset[0], startOffsetY = ds.offset[1];
     const onMove = (me) => {
-      ds.offset[0] = startOffsetX + (me.clientX - startX);
-      ds.offset[1] = startOffsetY + (me.clientY - startY);
+      const scale = ds.scale || 1;   // offset is graph-space; LiteGraph pans by (screen delta / scale)
+      ds.offset[0] = startOffsetX + (me.clientX - startX) / scale;
+      ds.offset[1] = startOffsetY + (me.clientY - startY) / scale;
       app.canvas.setDirty(true, true);
     };
     const onUp = () => {
@@ -109,7 +118,7 @@ export function resolveSourcePreview(node, inputSlot) {
   if (!node.graph) return null;
   const input = node.inputs?.[inputSlot];
   if (!input || input.link == null) return null;
-  const link = node.graph.links?.[input.link] ?? node.graph.links?.get?.(input.link);
+  const link = node.graph.links?.get(input.link);
   if (!link) return null;
   const srcNode = node.graph.getNodeById(link.origin_id);
   if (!srcNode) return null;
@@ -168,7 +177,7 @@ export function watchImageInputs(node, inputName, onChange) {
     for (const slotIdx of slots) {
       const input = node.inputs[slotIdx];
       if (!input || input.link == null) continue;
-      const link = node.graph.links?.[input.link] ?? node.graph.links?.get?.(input.link);
+      const link = node.graph.links?.get(input.link);
       if (!link) continue;
       const srcNode = node.graph.getNodeById(link.origin_id);
       if (!srcNode) continue;
@@ -183,7 +192,9 @@ export function watchImageInputs(node, inputName, onChange) {
     }
   }
 
-  chainCallback(node, "onConnectionsChange", function () {
+  chainCallback(node, "onConnectionsChange", function (type) {
+    // Only react to input connection changes, not output
+    if (type != null && type !== 1) return;
     setTimeout(() => {
       watch();
       onChange(resolve());
@@ -195,15 +206,44 @@ export function watchImageInputs(node, inputName, onChange) {
   return unwatchWidgets;
 }
 
+// ─── Video frame capture ───
+// Draws the current frame of a video element to a fresh canvas at native resolution.
+// If the video isn't decoded yet (readyState < 2), waits once for "loadeddata" before capturing.
+// Calls callback(canvas) with the resulting canvas. Caller decides whether to use it directly
+// (drawImage accepts canvas) or convert via toDataURL.
+export function captureVideoFrame(videoEl, callback) {
+  const capture = () => {
+    if (!videoEl.videoWidth || !videoEl.videoHeight) return;
+    const c = document.createElement("canvas");
+    c.width = videoEl.videoWidth;
+    c.height = videoEl.videoHeight;
+    c.getContext("2d").drawImage(videoEl, 0, 0);
+    callback(c);
+  };
+  if (videoEl.readyState >= 2) {
+    capture();
+  } else {
+    const onReady = () => { videoEl.removeEventListener("loadeddata", onReady); capture(); };
+    videoEl.addEventListener("loadeddata", onReady);
+  }
+}
+
 // ─── Bounding box hit test ───
 // Tests whether (mx, my) hits a corner handle or the interior of a rect defined by (x1, y1)–(x2, y2).
-// Returns "resize-tl", "resize-tr", "resize-bl", "resize-br", "move", or null.
+// Returns "resize-tl", "resize-tr", "resize-bl", "resize-br", "resize-t", "resize-b", "resize-l", "resize-r", "move", or null.
 export function rectHitTest(mx, my, x1, y1, x2, y2, radius) {
   const hit = (cx, cy) => Math.abs(mx - cx) < radius && Math.abs(my - cy) < radius;
+  // Corners first (higher priority)
   if (hit(x1, y1)) return "resize-tl";
   if (hit(x2, y1)) return "resize-tr";
   if (hit(x1, y2)) return "resize-bl";
   if (hit(x2, y2)) return "resize-br";
+  // Edges
+  if (mx >= x1 && mx <= x2 && Math.abs(my - y1) < radius) return "resize-t";
+  if (mx >= x1 && mx <= x2 && Math.abs(my - y2) < radius) return "resize-b";
+  if (my >= y1 && my <= y2 && Math.abs(mx - x1) < radius) return "resize-l";
+  if (my >= y1 && my <= y2 && Math.abs(mx - x2) < radius) return "resize-r";
+  // Interior
   if (mx >= x1 && mx <= x2 && my >= y1 && my <= y2) return "move";
   return null;
 }
@@ -213,6 +253,8 @@ export function cursorForBboxMode(mode) {
   if (mode === "move") return "move";
   if (mode === "resize-tl" || mode === "resize-br") return "nwse-resize";
   if (mode === "resize-tr" || mode === "resize-bl") return "nesw-resize";
+  if (mode === "resize-t" || mode === "resize-b") return "ns-resize";
+  if (mode === "resize-l" || mode === "resize-r") return "ew-resize";
   return null;
 }
 

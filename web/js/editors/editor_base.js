@@ -1,4 +1,4 @@
-import { addMiddleClickPan, chainCallback, makeUUID, watchImageInputs } from '../utility.js';
+import { addMiddleClickPan, captureVideoFrame, chainCallback, makeUUID, watchImageInputs } from '../utility.js';
 
 export function createEditorStylesheet(id, className) {
   let styleTag = document.head.querySelector(`#${id}`)
@@ -68,6 +68,7 @@ export function createContextMenuElement(className) {
 // ─── Base Editor Canvas ───
 
 const maxDisplayDim = 1024;
+const buttonRowHeight = 28;
 
 export class BaseEditorCanvas {
   constructor(context, reset = false) {
@@ -229,17 +230,25 @@ export class BaseEditorCanvas {
   // ─── Image Handling ───
 
   handleImageLoad = (img, downscaledImg) => {
-    // Set coord space to image dimensions
+    // Set coord space to image dimensions, rescaling existing points if the space changed
+    const oldCoordW = this.coordWidth, oldCoordH = this.coordHeight;
     this.coordWidth = img.width;
     this.coordHeight = img.height;
     this.widthWidget.value = img.width;
     this.heightWidget.value = img.height;
+    if (oldCoordW && oldCoordH && (oldCoordW !== img.width || oldCoordH !== img.height)) {
+      this.onCoordSpaceResized?.(oldCoordW, oldCoordH);
+    }
     this.onImageResize?.(img);
 
-    // Cap display size, preserving aspect ratio
+    // Cap display size to the current node width if the user has already resized it,
+    // otherwise fall back to maxDisplayDim. This prevents the node from expanding to
+    // fill the image — instead the image scales to fit the node.
+    const nodeCanvasW = Math.max(64, Math.round(this.node.size[0] - 45));
+    const fitDim = Math.min(nodeCanvasW, maxDisplayDim);
     let displayW = img.width, displayH = img.height;
-    if (displayW > maxDisplayDim || displayH > maxDisplayDim) {
-      const scale = maxDisplayDim / Math.max(displayW, displayH);
+    if (displayW > fitDim || displayH > fitDim) {
+      const scale = fitDim / Math.max(displayW, displayH);
       displayW = Math.round(displayW * scale);
       displayH = Math.round(displayH * scale);
     }
@@ -249,7 +258,8 @@ export class BaseEditorCanvas {
       this.height = displayH;
       this.resizeCanvas();
 
-      if (displayW > 256) this.setNodeWidth(displayW + 45);
+      // Only expand the node width if it's narrower than the image — never shrink it
+      if (displayW + 45 > this.node.size[0]) this.setNodeWidth(displayW + 45);
       this.onSizeChanged();
       if (this.node.graph) {
         try { this.node.arrange?.(); } catch (_) {}
@@ -522,9 +532,56 @@ export class BaseEditorCanvas {
     setupMenuItems(node.contextMenu, menuEls);
     document.body.appendChild(node.contextMenu);
 
-    node.addWidget("button", "Reset canvas", null, () => {
-      try { node.editor = new editorClass(node, true); }
-      catch (error) { console.error(`Error creating ${editorClass.name}:`, error); }
+    // Shared helper — loads the stored background image into the editor.
+    // alignToImage: if true, resizes the node to fit the image first (old behaviour).
+    //               if false, scales the image to fit the current node size (new behaviour).
+    const _reloadBgImage = (alignToImage) => {
+      const imgData = node.properties.imgData;
+      if (!imgData) return;
+      const img = new Image();
+      img.onload = () => {
+        if (!node.editor) return;
+        if (alignToImage) {
+          // Temporarily lift the node-size cap so processImage can expand the node
+          const savedSize = [node.size[0], node.size[1]];
+          node.setSize([Math.min(img.width, maxDisplayDim) + 45, savedSize[1]]);
+        }
+        node.editor.processImage(img);
+      };
+      if (imgData.base64) {
+        img.src = `data:${imgData.type || 'image/png'};base64,${imgData.base64}`;
+      } else if (imgData.filename) {
+        img.src = `/view?filename=${encodeURIComponent(imgData.filename)}&type=temp&no-cache=${Date.now()}`;
+      }
+    };
+
+    // Two side-by-side buttons in a single DOM widget row.
+    // "Reset canvas" — clears points and re-fits the image to the current node size.
+    // "Align to image" — resizes the node to match the image dimensions (legacy behaviour).
+    const buttonRow = document.createElement("div");
+    buttonRow.style.cssText = "display:flex;gap:4px;width:100%;box-sizing:border-box;";
+    const makeRowBtn = (label, onClick) => {
+      const btn = document.createElement("button");
+      btn.textContent = label;
+      btn.style.cssText = "flex:1;height:24px;padding:0 6px;font:12px sans-serif;cursor:pointer;";
+      btn.addEventListener("click", onClick);
+      return btn;
+    };
+    buttonRow.appendChild(makeRowBtn("Reset canvas", () => {
+      try {
+        node.editor = new editorClass(node, true);
+        _reloadBgImage(false);
+      } catch (error) { console.error(`Error creating ${editorClass.name}:`, error); }
+    }));
+    buttonRow.appendChild(makeRowBtn("Align to image", () => {
+      try {
+        if (!node.editor) node.editor = new editorClass(node);
+        _reloadBgImage(true);
+      } catch (error) { console.error(`Error aligning ${editorClass.name}:`, error); }
+    }));
+    node.addDOMWidget("editor_buttons", "editorButtonRow", buttonRow, {
+      serialize: false, hideOnZoom: false,
+      getMinHeight: () => buttonRowHeight, getMaxHeight: () => buttonRowHeight, getHeight: () => buttonRowHeight,
     });
 
     node.setSize(initialSize);
@@ -592,7 +649,13 @@ export class BaseEditorCanvas {
     watchImageInputs(node, "bg_image", (sources) => {
       if (!node.editor || !node._bgWatchReady) return;
       const source = sources[0];
-      if (source && !source.isVideo) {
+      if (source?.isVideo && source.videoEl) {
+        // Capture the first/current frame from a VHS-style video preview
+        node._bgFromConnectedSource = true;
+        captureVideoFrame(source.videoEl, (canvas) => {
+          if (node.editor) node.editor.processImage(canvas);
+        });
+      } else if (source && !source.isVideo) {
         node._bgFromConnectedSource = true;
         const img = new Image();
         img.crossOrigin = "anonymous";
@@ -625,7 +688,7 @@ export class BaseEditorCanvas {
 
     if (this.width > 256) this.setNodeWidth(this.width + 45);
     this.node[heightKey] = this.height + 40;
-    this.node.setSize([this.node.size[0], this.height + heightOffset]);
+    this.node.setSize([this.node.size[0], this.height + heightOffset + buttonRowHeight]);
 
     this.setupEventListeners();
     this.render();
@@ -634,7 +697,7 @@ export class BaseEditorCanvas {
   // Shared onSizeChanged — uses stored heightKey/heightOffset
   onSizeChanged() {
     this.node[this._heightKey] = this.height + 40;
-    this.node.setSize([this.node.size[0], this.height + this._heightOffset]);
+    this.node.setSize([this.node.size[0], this.height + this._heightOffset + buttonRowHeight]);
     if (this.node.graph) this.node.graph.setDirtyCanvas(true, true);
   }
 

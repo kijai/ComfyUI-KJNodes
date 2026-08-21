@@ -1,6 +1,7 @@
-from comfy_extras.nodes_lt import get_noise_mask, LTXVAddGuide
+from comfy_extras.nodes_lt import get_noise_mask, LTXVAddGuide, _append_guide_attention_entry
 import types
 import math
+import importlib
 from typing import Tuple
 import comfy
 from comfy_api.latest import io
@@ -10,6 +11,11 @@ import logging
 import comfy.model_management as mm
 import comfy.ldm.modules.attention as _comfy_attn
 from comfy.ldm.lightricks.model import apply_rotary_emb as _apply_rope
+try:
+    from comfy.ldm.lightricks.model import GuideAttentionMask as _GuideAttentionMask, _attention_with_guide_mask as _ltx_attn_with_guide_mask
+except ImportError:
+    _GuideAttentionMask = None
+    _ltx_attn_with_guide_mask = None
 device = mm.get_torch_device()
 import latent_preview
 
@@ -30,7 +36,7 @@ class LTXVAddGuideMulti(LTXVAddGuide):
                         max=9999,
                         tooltip=f"Frame index for guide {i}.",
                     ),
-                    io.Float.Input(f"strength_{i}", default=1.0, min=0.0, max=1.0, step=0.01, tooltip=f"Strength for guide {i}."),
+                    io.Float.Input(f"strength_{i}", default=1.0, min=0.0, max=10.0, step=0.01, tooltip=f"Strength for guide {i}."),
                 ])
             options.append(io.DynamicCombo.Option(
                 key=str(num_guides),
@@ -96,6 +102,11 @@ class LTXVAddGuideMulti(LTXVAddGuide):
                 scale_factors,
             )
 
+            # Track this guide for per-reference attention control.
+            pre_filter_count = t.shape[2] * t.shape[3] * t.shape[4]
+            guide_latent_shape = list(t.shape[2:])  # [F, H, W]
+            positive, negative = _append_guide_attention_entry(positive, negative, pre_filter_count, guide_latent_shape, strength=strength)
+
         return io.NodeOutput(positive, negative, {"samples": latent_image, "noise_mask": noise_mask})
 
 class LTXVAddGuidesFromBatch(LTXVAddGuide):
@@ -112,7 +123,7 @@ class LTXVAddGuidesFromBatch(LTXVAddGuide):
                 io.Vae.Input("vae"),
                 io.Latent.Input("latent"),
                 io.Image.Input("images", tooltip="Batch of images - non-black images will be used as guides"),
-                io.Float.Input("strength", default=1.0, min=0.0, max=1.0, step=0.01),
+                io.Float.Input("strength", default=1.0, min=0.0, max=10.0, step=0.01, tooltip="Strength for all guides."),
             ],
             outputs=[
                 io.Conditioning.Output(display_name="positive"),
@@ -154,6 +165,11 @@ class LTXVAddGuidesFromBatch(LTXVAddGuide):
                         strength,
                         scale_factors,
                     )
+
+                    # Track this guide for per-reference attention control.
+                    pre_filter_count = t.shape[2] * t.shape[3] * t.shape[4]
+                    guide_latent_shape = list(t.shape[2:])  # [F, H, W]
+                    positive, negative = _append_guide_attention_entry(positive, negative, pre_filter_count, guide_latent_shape, strength=strength)
                 else:
                     print(f"Warning: Skipping guide at index {i} - conditioning frames exceed latent sequence length")
 
@@ -333,26 +349,35 @@ class LTXVAudioVideoMask(io.ComfyNode):
 
         return io.NodeOutput(video_latent, audio_latent)
 
-def _compute_attention(self, query, context, attn_precision=None, transformer_options={}):
-    """Compute attention and return the result. Cleans up intermediate tensors."""
+def _compute_attention(self, query, context, attn_precision=None, transformer_options={}, mask=None):
+    """Compute attention and return the result. Cleans up intermediate tensors.
+
+    When `mask` is non-None, bypass wrap_attn and call attention_pytorch directly —
+    sage and similar backends drop arbitrary masks.
+    """
     k = self.k_norm(self.to_k(context)).to(query.dtype)
     v = self.to_v(context).to(query.dtype)
-    x = comfy.ldm.modules.attention.optimized_attention(query, k, v, heads=self.heads, attn_precision=attn_precision, transformer_options=transformer_options).flatten(2)
+    if mask is None:
+        x = comfy.ldm.modules.attention.optimized_attention(query, k, v, heads=self.heads, attn_precision=attn_precision, transformer_options=transformer_options).flatten(2)
+    else:
+        x = comfy.ldm.modules.attention.attention_pytorch(query, k, v, heads=self.heads, mask=mask, attn_precision=attn_precision, _inside_attn_wrapper=True, transformer_options=transformer_options).flatten(2)
     del k, v
     return x
 
-def nag_attention(self, query, context_positive, nag_context, attn_precision=None, transformer_options={}):
-    x_positive = _compute_attention(self, query, context_positive, attn_precision, transformer_options)
+def nag_attention(self, query, context_positive, nag_context, attn_precision=None, transformer_options={}, mask=None):
+    # mask (e.g. PromptRelay's temporal routing) only applies to the real-context, not NAG context
+    x_positive = _compute_attention(self, query, context_positive, attn_precision, transformer_options, mask=mask)
     x_negative = _compute_attention(self, query, nag_context, attn_precision, transformer_options)
     return x_positive, x_negative
 
 def normalized_attention_guidance(self, x_positive, x_negative):
     if self.inplace:
         nag_guidance = x_negative.mul_(self.nag_scale - 1).neg_().add_(x_positive, alpha=self.nag_scale)
+        del x_negative
     else:
-        nag_guidance = x_positive * self.nag_scale - x_negative * (self.nag_scale - 1)
-
-    del x_negative
+        nag_guidance = x_negative * (self.nag_scale - 1)
+        del x_negative
+        nag_guidance = (x_positive * self.nag_scale).sub_(nag_guidance)
 
     norm_positive = torch.norm(x_positive, p=1, dim=-1, keepdim=True)
     norm_guidance = torch.norm(nag_guidance, p=1, dim=-1, keepdim=True)
@@ -369,15 +394,18 @@ def normalized_attention_guidance(self, x_positive, x_negative):
     del mask, adjustment
 
     if self.inplace:
-        nag_guidance.sub_(x_positive).mul_(self.nag_alpha).add_(x_positive)
+        return nag_guidance.sub_(x_positive).mul_(self.nag_alpha).add_(x_positive)
     else:
-        nag_guidance = nag_guidance * self.nag_alpha + x_positive * (1 - self.nag_alpha)
-    del x_positive
-
-    return nag_guidance
+        nag_guidance.mul_(self.nag_alpha)
+        return nag_guidance.add_(x_positive * (1 - self.nag_alpha))
 
 #region NAG
 def ltxv_crossattn_forward_nag(self, x, context, mask=None, transformer_options={}, **kwargs):
+
+    if mask is None:
+        mask_provider = transformer_options.get("promptrelay_mask_fn")
+        if mask_provider is not None:
+            mask = mask_provider(x.shape[1], context.shape[1], x.dtype, x.device, transformer_options)
 
     # Single or [pos, neg] pair
     if context.shape[0] == 1:
@@ -391,7 +419,7 @@ def ltxv_crossattn_forward_nag(self, x, context, mask=None, transformer_options=
     q_pos = self.q_norm(self.to_q(x_pos))
     del x_pos
 
-    x_positive, x_negative = nag_attention(self, q_pos, context_pos, self.nag_context, attn_precision=self.attn_precision, transformer_options=transformer_options)
+    x_positive, x_negative = nag_attention(self, q_pos, context_pos, self.nag_context, attn_precision=self.attn_precision, transformer_options=transformer_options, mask=mask)
     del context_pos, q_pos
 
     x_pos_out = normalized_attention_guidance(self, x_positive, x_negative)
@@ -651,7 +679,7 @@ class WrappedPreviewer():
             message = BytesIO()
             message.write((1).to_bytes(length=4, byteorder='big')*2)
             message.write(ind.to_bytes(length=4, byteorder='big'))
-            message.write(struct.pack('16p', serv.last_node_id.encode('ascii')))
+            message.write(struct.pack('16p', (serv.last_node_id or "").encode('ascii')))
             i.save(message, format="JPEG", quality=95, compress_level=1)
             #NOTE: send sync already uses call_soon_threadsafe
             serv.send_sync(server.BinaryEventTypes.PREVIEW_IMAGE,
@@ -680,7 +708,14 @@ class WrappedPreviewer():
             return latent_image
 
 
-def prepare_callback(model, steps, x0_output_dict=None, shape=None, latent_upscale_model=None, vae=None, rate=8, taeltx=False, num_keyframes=0, is_23=False):
+def get_ltx_rgb_factors(is_23):
+    """Return (latent_rgb_factors, latent_rgb_factors_bias) for LTX (is_23=False) or
+    LTX2/LTXAV (is_23=True). Exposed so other nodes can build a WrappedPreviewer with
+    the right LTX factors without duplicating the 128-row tables."""
+    return _get_ltx_rgb_factors_impl(is_23)
+
+
+def _get_ltx_rgb_factors_impl(is_23):
     if not is_23:
         latent_rgb_factors = [
                 [ 0.0350,  0.0159,  0.0132],
@@ -816,7 +851,17 @@ def prepare_callback(model, steps, x0_output_dict=None, shape=None, latent_upsca
     else:
         latent_rgb_factors = [[0.002269406570121646, -0.02110900916159153, -0.009850316680967808], [-0.016038373112678528, -0.012462412007153034, -0.01112896017730236], [0.025274179875850677, 0.011209743097424507, 0.025426799431443214], [0.04690725728869438, 0.041542328894138336, 0.03568895906209946], [-0.02388044260442257, -0.0018645941745489836, 0.01858334057033062], [0.03720448538661003, 0.0220357533544302, 0.027937663719058037], [-0.07273884862661362, -0.09326262027025223, -0.11579664051532745], [-0.063837431371212, 0.00026216846890747547, 0.03042735904455185], [0.02903873845934868, 0.042082373052835464, 0.030649805441498756], [0.03777873516082764, 0.0322984978556633, -0.005671461578458548], [-0.0075670829974114895, -0.012113905511796474, -0.01638956367969513], [0.026524530723690987, 0.060518112033605576, 0.059549521654844284], [0.10093028098344803, 0.10073262453079224, 0.0505094900727272], [0.03725508227944374, 0.015382086858153343, 0.005786076188087463], [-0.03139607608318329, -0.01690264232456684, -0.0013519978383556008], [-0.027200624346733093, -0.02517341822385788, -0.008874989114701748], [0.024963486939668655, 0.04293748363852501, 0.05582639202475548], [-0.0364827960729599, -0.026975594460964203, -0.021950015798211098], [0.027655167505145073, 0.025136707350611687, 0.043967027217149734], [0.035822272300720215, 0.013104500249028206, 0.01113432738929987], [0.05353763327002525, 0.013606574386358261, -0.018720127642154694], [-0.013587888330221176, -0.01689346879720688, -0.027842802926898003], [0.059415675699710846, 0.03734271228313446, 0.04562298208475113], [-0.02946414425969124, -0.038338612765073776, 0.001805233070626855], [0.03921474143862724, 0.0651894062757492, 0.10681862384080887], [-0.00744189927354455, 0.007951526902616024, 0.020728807896375656], [-0.04038553684949875, -0.05215264856815338, -0.07213657349348068], [-0.004655141849070787, 0.01305423304438591, 0.026104029268026352], [0.03434251993894577, 0.018448110669851303, 0.013096392154693604], [0.0022075253073126078, -0.0011812079465016723, 0.0002940484555438161], [-0.00043441299931146204, 0.02366728149354458, 0.035889431834220886], [-0.030657343566417694, -0.024926183745265007, -0.012355240061879158], [-0.018955843523144722, -0.017360301688313484, -0.008214764297008514], [-0.01113052573055029, -0.01201171800494194, -0.002986249281093478], [0.018902746960520744, 0.01758778840303421, 0.026414571329951286], [-0.019977254793047905, -0.01605399139225483, -0.019136475399136543], [-0.00300968368537724, -0.017609693109989166, -0.013655650429427624], [0.0022096361499279737, 0.017998533323407173, 0.01815750263631344], [0.05186990648508072, 0.03285299986600876, 0.016072165220975876], [0.012626334093511105, 0.0013884707586839795, -0.012077193707227707], [-0.0037861645687371492, -0.013902144506573677, -0.01911942847073078], [-0.014163163490593433, -0.00513274222612381, -0.014303527772426605], [-0.010461323894560337, 0.009658926166594028, 0.01644069515168667], [-0.008665377274155617, 0.002501955023035407, -0.009703717194497585], [-0.03404829278588295, -0.02546044997870922, -0.014914450235664845], [0.04997691139578819, 0.06592527031898499, 0.073111392557621], [0.027394814416766167, 0.024555068463087082, 0.019957970827817917], [-0.027501430362462997, -0.01673700101673603, -0.03089248389005661], [-0.018696032464504242, -0.0020940247923135757, 0.015244065783917904], [-0.0062704551964998245, -0.0067006442695856094, -0.007532030809670687], [0.014871004968881607, 0.009914354421198368, 0.020960720255970955], [0.03662937879562378, 0.04413224756717682, 0.04220828413963318], [-0.011242181062698364, -0.013539309613406658, -0.016438307240605354], [-0.014854325912892818, 0.0038217694964259863, -0.002461288822814822], [-0.014826249331235886, 0.0009719038498587906, -0.012078499421477318], [-0.029396841302514076, -0.01432017982006073, 0.013018904253840446], [0.02755064144730568, 0.028369395062327385, 0.01640605367720127], [0.12049165368080139, 0.1395745575428009, 0.14566579461097717], [0.019721267744898796, 0.009739740751683712, 0.0023876908235251904], [-0.007320966571569443, 0.0065013207495212555, 0.01603059470653534], [0.007391378283500671, -0.0073603675700724125, -0.01770283281803131], [0.02984853833913803, 0.012391146272420883, 0.010563627816736698], [-0.013479884713888168, -0.008637298829853535, -0.013457189314067364], [0.04127075523138046, 0.03032625839114189, 0.024770958349108696], [-0.06524652987718582, -0.012209279462695122, 0.02087211236357689], [-0.1179763451218605, -0.060323599725961685, -0.07592175155878067], [-0.07122819870710373, -0.04385707899928093, -0.022124603390693665], [-0.04682473465800285, -0.022610662505030632, -0.010107148438692093], [-0.0054328180849552155, -0.010368981398642063, -0.008167334832251072], [0.029181398451328278, 0.030588403344154358, 0.028090540319681168], [0.016619984060525894, 0.004931286443024874, -0.006450849585235119], [0.01035264041274786, 0.002237115055322647, 0.0013903985964134336], [-0.04313831403851509, -0.061772625893354416, -0.08946335315704346], [0.0150345079600811, 0.007781678810715675, 0.0011013159528374672], [-0.013585779815912247, 0.008117705583572388, 0.020367907360196114], [-0.172962948679924, -0.16406646370887756, -0.1668281853199005], [0.0083833709359169, 0.0015236001927405596, -0.01731627807021141], [0.021939430385828018, 0.018004458397626877, 0.014768349006772041], [0.008083095774054527, -0.013463049195706844, -0.022061636671423912], [0.024328550323843956, 0.0128010343760252, 0.014966367743909359], [0.05850301682949066, 0.027980001643300056, 0.02225641906261444], [0.09690416604280472, 0.06929530203342438, 0.03253814950585365], [0.048208240419626236, 0.025294817984104156, 0.023508133366703987], [-0.026432134211063385, -0.040383171290159225, -0.03950457274913788], [-0.021598653867840767, -0.017070941627025604, -0.010933087207376957], [0.011645167134702206, 0.002806191798299551, 0.003779367310926318], [0.10478592664003372, 0.08954174816608429, 0.06555330753326416], [0.015151776373386383, -0.016160616651177406, -0.024905217811465263], [0.019659176468849182, 0.008487952873110771, 0.002426224760711193], [-0.05173315480351448, -0.026337839663028717, -0.02127116546034813], [0.016987523064017296, 0.006270893849432468, 0.0015798212261870503], [0.007938026450574398, -0.005250005517154932, -0.020408453419804573], [0.013017759658396244, 0.01654384844005108, 0.04163840040564537], [-0.009886542335152626, -0.026848411187529564, -0.03070281818509102], [0.01108171883970499, 0.01827266439795494, -0.007332107983529568], [-0.0285995751619339, -0.031727731227874756, -0.03370537981390953], [0.005299570970237255, 0.05678633600473404, 0.02825017087161541], [-0.055322226136922836, -0.09084303677082062, -0.12999044358730316], [0.01844066195189953, 0.031044499948620796, 0.021148500964045525], [-0.004471115302294493, 0.005830412730574608, 0.00911418441683054], [-0.04053843766450882, -0.016424428671598434, -0.0010634599020704627], [0.03858831524848938, 0.007309338077902794, -0.005618985276669264], [0.01423253770917654, -0.0055681923404335976, 3.394074519746937e-05], [0.11455483734607697, 0.14653916656970978, 0.1488018035888672], [-0.005231931805610657, -0.0033921014983206987, -0.000995257287286222], [0.01449565589427948, 0.019586293026804924, 0.04565812274813652], [-0.005179048050194979, -0.011201606132090092, -0.0008710073889233172], [-0.015361929312348366, 0.00778581015765667, -0.008238887414336205], [-0.1147838830947876, -0.09109023958444595, -0.050579313188791275], [0.09037500619888306, 0.09597006440162659, 0.10811734944581985], [0.001873677596449852, -0.01772197335958481, -0.07681205868721008], [-0.020383257418870926, -0.016072455793619156, -0.01077069528400898], [-0.060444317758083344, -0.05499502643942833, -0.06153025105595589], [-0.016717270016670227, 0.026493264362215996, 0.021835654973983765], [0.008203534409403801, 0.00418612826615572, 0.013867748901247978], [0.0789225772023201, 0.05467747151851654, 0.016568133607506752], [-0.15149451792240143, -0.1526806503534317, -0.14325062930583954], [0.00538366474211216, 0.010192245244979858, -0.00449327751994133], [-0.004906965419650078, -0.005569908302277327, -0.02096559666097164], [0.024530155584216118, 0.010962833650410175, 0.0034586559049785137], [0.03551010414958, 0.017310436815023422, 0.007064413744956255], [0.11111932247877121, 0.09825586527585983, 0.08827318251132965], [-0.051722846925258636, -0.047595202922821045, -0.03763044252991676], [-0.02975175902247429, -0.02153967320919037, -0.021425534039735794], [-0.03462936729192734, -0.025198571383953094, -0.017322326079010963], [-0.016921017318964005, -0.012419789098203182, -0.0154880927875638], [-0.08035065978765488, -0.08451078832149506, -0.09623870998620987], [-0.03870908170938492, -0.04211008921265602, -0.04383759945631027]]
         latent_rgb_factors_bias = [-0.6957847476005554, -0.7276281118392944, -0.7405748963356018]
+    return latent_rgb_factors, latent_rgb_factors_bias
 
+
+def _unwrap_upscale_model(latent_upscale_model):
+    # newer comfy wraps the upsampler in a ModelPatcher
+    return getattr(latent_upscale_model, "model", latent_upscale_model)
+
+def prepare_callback(model, steps, x0_output_dict=None, shape=None, latent_upscale_model=None, vae=None, rate=8, taeltx=False, num_keyframes=0, is_23=False):
+    latent_rgb_factors, latent_rgb_factors_bias = get_ltx_rgb_factors(is_23)
+    upscaler = _unwrap_upscale_model(latent_upscale_model) if latent_upscale_model is not None else None
+    upscaler_dtype = next(upscaler.parameters()).dtype if upscaler is not None else None
     preview_format = "JPEG"
     if preview_format not in ["JPEG", "PNG"]:
         preview_format = "JPEG"
@@ -832,9 +877,9 @@ def prepare_callback(model, steps, x0_output_dict=None, shape=None, latent_upsca
         if num_keyframes > 0:
             x0 = x0[:, :, :-num_keyframes]
 
-        if latent_upscale_model is not None:
+        if upscaler is not None:
             x0 = vae.first_stage_model.per_channel_statistics.un_normalize(x0)
-            x0 =  latent_upscale_model(x0.to(torch.bfloat16))
+            x0 = upscaler(x0.to(upscaler_dtype))
             x0 = vae.first_stage_model.per_channel_statistics.normalize(x0)
 
         preview_bytes = None
@@ -858,7 +903,7 @@ class OuterSampleCallbackWrapper:
 
         original_callback = callback
         if self.latent_upscale_model is not None:
-            self.latent_upscale_model.to(device)
+            _unwrap_upscale_model(self.latent_upscale_model).to(device)
         if self.vae is not None and self.taeltx:
             self.vae.first_stage_model.to(device)
 
@@ -877,7 +922,7 @@ class OuterSampleCallbackWrapper:
                 original_callback(step, x0, x, total_steps)
         out = executor(noise, latent_image, sampler, sigmas, denoise_mask, combined_callback, disable_pbar, seed, latent_shapes=latent_shapes)
         if self.latent_upscale_model is not None:
-            self.latent_upscale_model.to(mm.unet_offload_device())
+            _unwrap_upscale_model(self.latent_upscale_model).to(mm.unet_offload_device())
         return out
 
 class LTX2SamplingPreviewOverride(io.ComfyNode):
@@ -891,7 +936,7 @@ class LTX2SamplingPreviewOverride(io.ComfyNode):
             is_experimental=True,
             inputs=[
                 io.Model.Input("model", tooltip="The model to add preview override to."),
-                io.Int.Input("preview_rate", default=8, min=1, max=60, step=1, tooltip="Preview frame rate."),
+                io.MultiType.Input(io.Float.Input("preview_rate", default=8.0, min=1.0, max=60.0, step=0.01, tooltip="Preview frame rate."), [io.Int]),
                 io.LatentUpscaleModel.Input("latent_upscale_model", optional=True, tooltip="Optional upscale model to use for higher resolution previews."),
                 io.Vae.Input("vae", optional=True, tooltip="VAE model to use normalizing the latents for the upscale model."),
             ],
@@ -1427,6 +1472,8 @@ def ltx2_forward(
 
                 if self_attention_mask is None:
                     _sa_out = _comfy_attn.optimized_attention(q, k, v, _a1.heads, attn_precision=_a1.attn_precision, transformer_options=transformer_options)
+                elif _GuideAttentionMask is not None and isinstance(self_attention_mask, _GuideAttentionMask):
+                    _sa_out = _ltx_attn_with_guide_mask(q, k, v, _a1.heads, self_attention_mask, attn_precision=_a1.attn_precision, transformer_options=transformer_options)
                 else:
                     _sa_out = _comfy_attn.optimized_attention_masked(q, k, v, _a1.heads, self_attention_mask, attn_precision=_a1.attn_precision, transformer_options=transformer_options)
                 del q, k, v
@@ -1434,13 +1481,14 @@ def ltx2_forward(
                     _gate = _a1.to_gate_logits(norm_vx)
                     _b, _t, _ = _sa_out.shape
                     _sa_out = _sa_out.view(_b, _t, _a1.heads, _a1.dim_head)
-                    _sa_out = (_sa_out * (2.0 * torch.sigmoid(_gate)).unsqueeze(-1)).view(_b, _t, _a1.heads * _a1.dim_head)
+                    _sa_out.mul_((2.0 * torch.sigmoid(_gate)).unsqueeze(-1))
+                    _sa_out = _sa_out.view(_b, _t, _a1.heads * _a1.dim_head)
                     del _gate
 
                 attn1_out = _a1.to_out(_sa_out)
                 del _sa_out, norm_vx
             else:
-                attn1_out = self.attn1(norm_vx, pe=v_pe, transformer_options=transformer_options)
+                attn1_out = self.attn1(norm_vx, pe=v_pe, mask=self_attention_mask, transformer_options=transformer_options)
                 del norm_vx
             # video cross-attention
             vgate_msa = self.get_ada_values(self.scale_shift_table, vx.shape[0], v_timestep, slice(2, 3))[0]
@@ -1656,33 +1704,257 @@ _cuda_archs = None
 try:
     from sageattention.core import per_thread_int8_triton, per_warp_int8_cuda, per_block_int8_triton, per_channel_fp8, get_cuda_arch_versions, attn_false
     _cuda_archs = get_cuda_arch_versions()
-except:
+except Exception:
     pass
-try:
-    from sageattention.core import _qattn_sm89
-    cuda_version = get_cuda_version()
-    sageplus_sm89_available = hasattr(_qattn_sm89, 'qk_int8_sv_f8_accum_f16_fuse_v_scale_attn_inst_buf') and cuda_version >= (12, 8)
-except ImportError:
+_QATTN_PROBE = {
+    "sm80": "qk_int8_sv_f16_accum_f32_attn",
+    "sm89": "qk_int8_sv_f8_accum_f32_fuse_v_scale_attn_inst_buf",
+    "sm90": "qk_int8_sv_f8_accum_f32_fuse_v_scale_attn_inst_buf",
+}
+
+def _resolve_qattn(arch):
     try:
-        from sageattention.core import sm89_compile as _qattn_sm89
-    except ImportError:
-        _qattn_sm89 = None
-try:
-    from sageattention.core import _qattn_sm80
-except ImportError:
+        core = importlib.import_module("sageattention.core")
+    except Exception:
+        return None
+    candidates = [getattr(core, f"_qattn_{arch}", None), getattr(core, f"{arch}_compile", None)]
     try:
-        from sageattention.core import sm80_compile as _qattn_sm80
-    except ImportError:
-        _qattn_sm80 = None
-try:
-    from sageattention.core import  _qattn_sm90
-except ImportError:
-    try:
-        from sageattention.core import sm90_compile as _qattn_sm90
-    except ImportError:
-        _qattn_sm90 = None
+        mod = importlib.import_module(f"sageattention.{arch}_compile")
+        candidates += [mod, getattr(mod, f"_qattn_{arch}", None)]
+    except Exception:
+        pass
+    for obj in candidates:
+        if obj is not None and hasattr(obj, _QATTN_PROBE[arch]):
+            return obj
+    return None
+
+_qattn_sm80 = _resolve_qattn("sm80")
+_qattn_sm89 = _resolve_qattn("sm89")
+_qattn_sm90 = _resolve_qattn("sm90")
+
+if _qattn_sm89 is not None:
+    sageplus_sm89_available = hasattr(_qattn_sm89, 'qk_int8_sv_f8_accum_f16_fuse_v_scale_attn_inst_buf') and get_cuda_version() >= (12, 8)
 
 from comfy.ldm.lightricks.model import apply_rotary_emb
+try:
+    from comfy.ldm.flux.math import apply_rope as _wan_apply_rope
+except ImportError:
+    _wan_apply_rope = None
+try:
+    from comfy.ldm.wan.model import WanT2VCrossAttention as _WanT2VCrossAttention, WanI2VCrossAttention as _WanI2VCrossAttention
+except ImportError:
+    _WanT2VCrossAttention = _WanI2VCrossAttention = None
+try:
+    from comfy.ldm.minimax.model import MiniMaxH3Model as _MiniMaxH3Model
+    from comfy.quant_ops import ck as _ck
+except ImportError:
+    _MiniMaxH3Model = None
+    _ck = None
+
+
+if HAS_TRITON:
+    # Vendored from sageattention's quant_per_thread.py with the row offsets promoted to int64 to avoid overflow on large sequences.
+    @triton.jit
+    def _quant_query_per_thread_int8_i64_kernel(Input, Output, Scale, L,
+                                                stride_iz, stride_ih, stride_in,
+                                                stride_oz, stride_oh, stride_on,
+                                                stride_sz, stride_sh,
+                                                C: tl.constexpr, BLK: tl.constexpr):
+        off_blk = tl.program_id(0) // 8
+        off_tld = tl.program_id(0) % 8
+        off_h = tl.program_id(1)
+        off_b = tl.program_id(2)
+
+        offs_n = off_blk * BLK + tl.arange(0, BLK // 8) * 8 + off_tld
+        offs_k = tl.arange(0, C)
+
+        input_ptrs = Input + off_b * stride_iz + off_h * stride_ih + offs_n[:, None].to(tl.int64) * stride_in + offs_k[None, :]
+        output_ptrs = Output + off_b * stride_oz + off_h * stride_oh + offs_n[:, None].to(tl.int64) * stride_on + offs_k[None, :]
+        scale_ptrs = Scale + off_b * stride_sz + off_h * stride_sh + off_blk * 8 + off_tld
+
+        x = tl.load(input_ptrs, mask=offs_n[:, None] < L)
+        x = x.to(tl.float32)
+        scale = tl.max(tl.abs(x)) / 127. + 0.0000001
+        x_int8 = x / scale
+        x_int8 += 0.5 * tl.where(x_int8 >= 0, 1, -1)
+        x_int8 = x_int8.to(tl.int8)
+        tl.store(output_ptrs, x_int8, mask=offs_n[:, None] < L)
+        tl.store(scale_ptrs, scale)
+
+    @triton.jit
+    def _quant_key_per_thread_int8_i64_kernel(Input, Output, Scale, L,
+                                              stride_iz, stride_ih, stride_in,
+                                              stride_oz, stride_oh, stride_on,
+                                              stride_sz, stride_sh,
+                                              C: tl.constexpr, BLK: tl.constexpr):
+        off_blk = tl.program_id(0) // 4
+        off_tld = tl.program_id(0) % 4
+        off_h = tl.program_id(1)
+        off_b = tl.program_id(2)
+
+        offs_n0 = off_blk * BLK + tl.arange(0, BLK // 8) * 8 + off_tld * 2
+        offs_n1 = off_blk * BLK + tl.arange(0, BLK // 8) * 8 + off_tld * 2 + 1
+        offs_k = tl.arange(0, C)
+
+        input_ptrs0 = Input + off_b * stride_iz + off_h * stride_ih + offs_n0[:, None].to(tl.int64) * stride_in + offs_k[None, :]
+        input_ptrs1 = Input + off_b * stride_iz + off_h * stride_ih + offs_n1[:, None].to(tl.int64) * stride_in + offs_k[None, :]
+        output_ptrs0 = Output + off_b * stride_oz + off_h * stride_oh + offs_n0[:, None].to(tl.int64) * stride_on + offs_k[None, :]
+        output_ptrs1 = Output + off_b * stride_oz + off_h * stride_oh + offs_n1[:, None].to(tl.int64) * stride_on + offs_k[None, :]
+        scale_ptrs = Scale + off_b * stride_sz + off_h * stride_sh + off_blk * 4 + off_tld
+
+        x0 = tl.load(input_ptrs0, mask=offs_n0[:, None] < L)
+        x1 = tl.load(input_ptrs1, mask=offs_n1[:, None] < L)
+        x0 = x0.to(tl.float32)
+        x1 = x1.to(tl.float32)
+        scale = max(tl.max(tl.abs(x0)), tl.max(tl.abs(x1))) / 127. + 0.0000001
+        x0_int8 = x0 / scale
+        x1_int8 = x1 / scale
+        x0_int8 += 0.5 * tl.where(x0_int8 >= 0, 1, -1)
+        x1_int8 += 0.5 * tl.where(x1_int8 >= 0, 1, -1)
+        x0_int8 = x0_int8.to(tl.int8)
+        x1_int8 = x1_int8.to(tl.int8)
+        tl.store(output_ptrs0, x0_int8, mask=offs_n0[:, None] < L)
+        tl.store(output_ptrs1, x1_int8, mask=offs_n1[:, None] < L)
+        tl.store(scale_ptrs, scale)
+
+
+def _per_thread_int8_i64(q, k, km=None, BLKQ=128, WARPQ=32, BLKK=64, WARPK=64, tensor_layout="NHD"):
+    # Drop-in for sageattention's per_thread_int8_triton, launching the int64-safe kernels above.
+    q_int8 = torch.empty(q.shape, dtype=torch.int8, device=q.device)
+    k_int8 = torch.empty(k.shape, dtype=torch.int8, device=k.device)
+
+    if km is not None:
+        k = k - km
+
+    if tensor_layout == "HND":
+        b, h_qo, qo_len, head_dim = q.shape
+        _, h_kv, kv_len, _ = k.shape
+        stride_bz_q, stride_h_q, stride_seq_q = q.stride(0), q.stride(1), q.stride(2)
+        stride_bz_qo, stride_h_qo, stride_seq_qo = q_int8.stride(0), q_int8.stride(1), q_int8.stride(2)
+        stride_bz_k, stride_h_k, stride_seq_k = k.stride(0), k.stride(1), k.stride(2)
+        stride_bz_ko, stride_h_ko, stride_seq_ko = k_int8.stride(0), k_int8.stride(1), k_int8.stride(2)
+    elif tensor_layout == "NHD":
+        b, qo_len, h_qo, head_dim = q.shape
+        _, kv_len, h_kv, _ = k.shape
+        stride_bz_q, stride_h_q, stride_seq_q = q.stride(0), q.stride(2), q.stride(1)
+        stride_bz_qo, stride_h_qo, stride_seq_qo = q_int8.stride(0), q_int8.stride(2), q_int8.stride(1)
+        stride_bz_k, stride_h_k, stride_seq_k = k.stride(0), k.stride(2), k.stride(1)
+        stride_bz_ko, stride_h_ko, stride_seq_ko = k_int8.stride(0), k_int8.stride(2), k_int8.stride(1)
+    else:
+        raise ValueError(f"Unknown tensor layout: {tensor_layout}")
+
+    q_scale = torch.empty((b, h_qo, (qo_len + BLKQ - 1) // BLKQ * (BLKQ // WARPQ) * 8), device=q.device, dtype=torch.float32)
+    k_scale = torch.empty((b, h_kv, (kv_len + BLKK - 1) // BLKK * (BLKK // WARPK) * 4), device=q.device, dtype=torch.float32)
+
+    grid = ((qo_len + BLKQ - 1) // BLKQ * (BLKQ // WARPQ) * 8, h_qo, b)
+    _quant_query_per_thread_int8_i64_kernel[grid](
+        q, q_int8, q_scale, qo_len,
+        stride_bz_q, stride_h_q, stride_seq_q,
+        stride_bz_qo, stride_h_qo, stride_seq_qo,
+        q_scale.stride(0), q_scale.stride(1),
+        C=head_dim, BLK=WARPQ
+    )
+
+    grid = ((kv_len + BLKK - 1) // BLKK * (BLKK // WARPK) * 4, h_kv, b)
+    _quant_key_per_thread_int8_i64_kernel[grid](
+        k, k_int8, k_scale, kv_len,
+        stride_bz_k, stride_h_k, stride_seq_k,
+        stride_bz_ko, stride_h_ko, stride_seq_ko,
+        k_scale.stride(0), k_scale.stride(1),
+        C=head_dim, BLK=WARPK
+    )
+
+    return q_int8, q_scale, k_int8, k_scale
+
+
+def _sageattn_int8_fp8_nhd(qkv, dtype):
+    # qkv: [q, k, v], each [batch, seq_len, num_heads, head_dim] in NHD layout. Returns o in the same layout.
+    # The list is consumed so the only references to the float q/k/v are the locals below, letting `del`
+    # actually free them before the kernel runs — attention is the VRAM peak in these models.
+    q, k, v = qkv
+    qkv.clear()
+    head_dim_og = q.shape[-1]
+
+    tensor_layout="NHD"
+    _tensor_layout = 0 # NHD
+    _is_caual = 0
+    _qk_quant_gran = 3
+    _return_lse = 0
+    sm_scale = head_dim_og**-0.5
+    quant_v_scale_max = 448.0
+
+    if _cuda_archs[0] in {"sm80", "sm86"}:
+        # mean-sub in-place: passing km= makes the triton quant materialize k - km as a full float copy
+        k.sub_(k.mean(dim=1, keepdim=True))
+        q_int8, q_scale, k_int8, k_scale = _per_thread_int8_i64(q, k, tensor_layout=tensor_layout, BLKQ=128, WARPQ=32, BLKK=64, WARPK=64)
+        del q, k
+        o = torch.empty(q_int8.size(), dtype=dtype, device=q_int8.device)
+        v_fp16 = v.to(torch.float16)
+        del v
+        _qattn_sm80.qk_int8_sv_f16_accum_f32_attn(q_int8, k_int8, v_fp16, o, q_scale, k_scale, _tensor_layout, _is_caual, _qk_quant_gran, sm_scale, _return_lse)
+    elif _cuda_archs[0] == "sm75":
+        k.sub_(k.mean(dim=1, keepdim=True))
+        q_int8, q_scale, k_int8, k_scale = per_block_int8_triton(q, k, sm_scale=sm_scale, tensor_layout=tensor_layout)
+        del q, k
+        o, _ = attn_false(q_int8, k_int8, v, q_scale, k_scale, tensor_layout=tensor_layout, output_dtype=dtype, attn_mask=None, return_lse=False)
+        del v
+    elif _cuda_archs[0] == "sm89":
+        if not sageplus_sm89_available:
+            pv_accum_dtype = "fp32+fp32"
+        else:
+            pv_accum_dtype = "fp32+fp16"
+            quant_v_scale_max = 2.25
+        k.sub_(k.mean(dim=1, keepdim=True))
+        q_int8, q_scale, k_int8, k_scale = _per_thread_int8_i64(q, k, tensor_layout=tensor_layout, BLKQ=128, WARPQ=32, BLKK=64, WARPK=64)
+        del q, k
+        v_fp8, v_scale, _ = per_channel_fp8(v, tensor_layout=tensor_layout, scale_max=quant_v_scale_max, smooth_v=False)
+        del v
+        o = torch.empty(q_int8.size(), dtype=dtype, device=q_int8.device)
+        if pv_accum_dtype == "fp32+fp16":
+            _qattn_sm89.qk_int8_sv_f8_accum_f16_fuse_v_scale_attn_inst_buf(q_int8, k_int8, v_fp8, o, q_scale, k_scale, v_scale, _tensor_layout, _is_caual, _qk_quant_gran, sm_scale, _return_lse)
+        elif pv_accum_dtype == "fp32+fp32":
+            _qattn_sm89.qk_int8_sv_f8_accum_f32_fuse_v_scale_attn_inst_buf(q_int8, k_int8, v_fp8, o, q_scale, k_scale, v_scale, _tensor_layout, _is_caual, _qk_quant_gran, sm_scale, _return_lse)
+        del v_fp8, v_scale
+    elif _cuda_archs[0] == "sm90":
+        k.sub_(k.mean(dim=1, keepdim=True))
+        q_int8, q_scale, k_int8, k_scale = _per_thread_int8_i64(q, k, tensor_layout=tensor_layout, BLKQ=64, WARPQ=16, BLKK=128, WARPK=128)
+        del q, k
+        # sageattention sm90 kernel requires kv_len padded to CTA_K=128, but
+        # per_channel_fp8 only pads to 64 (upstream TODO in sageattention/quant.py).
+        # sageattention.core.sageattn_qk_int8_pv_fp8_cuda_sm90 handles this at the
+        # top-level API; mirror that pad here so kv_len%128 != 0 (e.g. MiniMax H3
+        # with long text prompts) does not trigger a C++ assertion abort.
+        seq_dim = 1  # NHD layout
+        kv_len = v.size(seq_dim)
+        v_pad_len = 128 - (kv_len % 128) if kv_len % 128 != 0 else 0
+        if v_pad_len > 0:
+            v = torch.cat([v, torch.zeros(v.size(0), v_pad_len, v.size(2), v.size(3), dtype=v.dtype, device=v.device)], dim=seq_dim)
+        v_fp8, v_scale, _ = per_channel_fp8(v, tensor_layout=tensor_layout, smooth_v=False)
+        del v
+        o = torch.empty(q_int8.size(), dtype=dtype, device=q_int8.device)
+        _qattn_sm90.qk_int8_sv_f8_accum_f32_fuse_v_scale_attn_inst_buf(q_int8, k_int8, v_fp8, o, q_scale, k_scale, v_scale, _tensor_layout, _is_caual, _qk_quant_gran, sm_scale, _return_lse)
+        del v_fp8, v_scale
+    elif _cuda_archs[0] in {"sm120", "sm121"}:
+        if not sageplus_sm89_available:
+            pv_accum_dtype = "fp32"
+        else:
+            pv_accum_dtype = "fp32+fp16"
+            quant_v_scale_max = 2.25
+        _qk_quant_gran = 2 # per warp
+        # km kept here: the CUDA quant fuses the mean-sub with no temp copy
+        q_int8, q_scale, k_int8, k_scale = per_warp_int8_cuda(q, k, km=k.mean(dim=1, keepdim=True), tensor_layout=tensor_layout, BLKQ=128, WARPQ=32, BLKK=64)
+        del q, k
+        v_fp8, v_scale, _ = per_channel_fp8(v, tensor_layout=tensor_layout, scale_max=quant_v_scale_max, smooth_v=False)
+        del v
+        o = torch.empty(q_int8.size(), dtype=dtype, device=q_int8.device)
+        if pv_accum_dtype == "fp32":
+            _qattn_sm89.qk_int8_sv_f8_accum_f32_fuse_v_scale_attn(q_int8, k_int8, v_fp8, o, q_scale, k_scale, v_scale, _tensor_layout, _is_caual, _qk_quant_gran, sm_scale, _return_lse)
+        elif pv_accum_dtype == "fp32+fp16":
+            _qattn_sm89.qk_int8_sv_f8_accum_f16_fuse_v_scale_attn_inst_buf(q_int8, k_int8, v_fp8, o, q_scale, k_scale, v_scale, _tensor_layout, _is_caual, _qk_quant_gran, sm_scale, _return_lse)
+        del v_fp8, v_scale
+
+    del q_int8, q_scale, k_int8, k_scale
+    return o
 
 
 def ltx2_sageattn_forward(self, x, context=None, mask=None, pe=None, k_pe=None, transformer_options={}):
@@ -1706,6 +1978,21 @@ def ltx2_sageattn_forward(self, x, context=None, mask=None, pe=None, k_pe=None, 
     # value
     v = self.to_v(context)
 
+    # Sage kernels don't support masking — fall back to the upstream masked paths.
+    if mask is not None:
+        if _GuideAttentionMask is not None and isinstance(mask, _GuideAttentionMask):
+            o = _ltx_attn_with_guide_mask(q, k, v, self.heads, mask, attn_precision=self.attn_precision, transformer_options=transformer_options)
+        else:
+            o = _comfy_attn.optimized_attention_masked(q, k, v, self.heads, mask, attn_precision=self.attn_precision, transformer_options=transformer_options)
+        if self.to_gate_logits is not None:
+            gate_logits = self.to_gate_logits(x)
+            _b, _t, _ = o.shape
+            o = o.view(_b, _t, self.heads, self.dim_head)
+            o.mul_((2.0 * torch.sigmoid(gate_logits)).unsqueeze(-1))
+            o = o.view(_b, _t, self.heads * self.dim_head)
+            del gate_logits
+        return self.to_out(o)
+
     # Reshape from [batch, seq_len, total_dim] to [batch, seq_len, num_heads, head_dim]
     batch_size, seq_len, _ = q.shape
     head_dim_og = self.dim_head
@@ -1714,81 +2001,199 @@ def ltx2_sageattn_forward(self, x, context=None, mask=None, pe=None, k_pe=None, 
     k = k.view(batch_size, k.shape[1], self.heads, head_dim_og)
     v = v.view(batch_size, v.shape[1], self.heads, head_dim_og)
 
-    tensor_layout="NHD"
-    _tensor_layout = 0 # NHD
-    _is_caual = 0
-    _qk_quant_gran = 3
-    _return_lse = 0
-    sm_scale = head_dim_og**-0.5
-    quant_v_scale_max = 448.0
+    qkv = [q, k, v]
+    del q, k, v
+    o = _sageattn_int8_fp8_nhd(qkv, dtype)
 
-    if _cuda_archs[0] in {"sm80", "sm86"}:
-        q_int8, q_scale, k_int8, k_scale = per_thread_int8_triton(q, k, km=k.mean(dim=1, keepdim=True), tensor_layout=tensor_layout, BLKQ=128, WARPQ=32, BLKK=64, WARPK=64)
-        del q, k
-        o = torch.empty(q_int8.size(), dtype=dtype, device=q_int8.device)
-        v_fp16 = v.to(torch.float16).contiguous()
-        del v
-        _qattn_sm80.qk_int8_sv_f16_accum_f32_attn(q_int8, k_int8, v_fp16, o, q_scale, k_scale, _tensor_layout, _is_caual, _qk_quant_gran, sm_scale, _return_lse)
-    elif _cuda_archs[0] == "sm75":
-        q_int8, q_scale, k_int8, k_scale = per_block_int8_triton(q, k, km=k.mean(dim=1, keepdim=True), sm_scale=sm_scale, tensor_layout=tensor_layout)
-        del q, k
-        o, _ = attn_false(q_int8, k_int8, v, q_scale, k_scale, tensor_layout=tensor_layout, output_dtype=dtype, attn_mask=None, return_lse=False)
-        del v
-    elif _cuda_archs[0] == "sm89":
-        if not sageplus_sm89_available:
-            pv_accum_dtype = "fp32+fp32"
-        else:
-            pv_accum_dtype = "fp32+fp16"
-            quant_v_scale_max = 2.25
-        q_int8, q_scale, k_int8, k_scale = per_thread_int8_triton(q, k, km=k.mean(dim=1, keepdim=True), tensor_layout=tensor_layout, BLKQ=128, WARPQ=32, BLKK=64, WARPK=64)
-        del q, k
-        v_fp8, v_scale, _ = per_channel_fp8(v, tensor_layout=tensor_layout, scale_max=quant_v_scale_max, smooth_v=False)
-        del v
-        o = torch.empty(q_int8.size(), dtype=dtype, device=q_int8.device)
-        if pv_accum_dtype == "fp32+fp16":
-            _qattn_sm89.qk_int8_sv_f8_accum_f16_fuse_v_scale_attn_inst_buf(q_int8, k_int8, v_fp8, o, q_scale, k_scale, v_scale, _tensor_layout, _is_caual, _qk_quant_gran, sm_scale, _return_lse)
-        elif pv_accum_dtype == "fp32+fp32":
-            _qattn_sm89.qk_int8_sv_f8_accum_f32_fuse_v_scale_attn_inst_buf(q_int8, k_int8, v_fp8, o, q_scale, k_scale, v_scale, _tensor_layout, _is_caual, _qk_quant_gran, sm_scale, _return_lse)
-        del v_fp8, v_scale
-    elif _cuda_archs[0] == "sm90":
-        q_int8, q_scale, k_int8, k_scale = per_thread_int8_triton(q, k, km=k.mean(dim=1, keepdim=True), tensor_layout=tensor_layout, BLKQ=64, WARPQ=16, BLKK=128, WARPK=128)
-        del q, k,
-        v_fp8, v_scale, _ = per_channel_fp8(v, tensor_layout=tensor_layout, smooth_v=False)
-        del v
-        o = torch.empty(q_int8.size(), dtype=dtype, device=q_int8.device)
-        _qattn_sm90.qk_int8_sv_f8_accum_f32_fuse_v_scale_attn_inst_buf(q_int8, k_int8, v_fp8, o, q_scale, k_scale, v_scale, _tensor_layout, _is_caual, _qk_quant_gran, sm_scale, _return_lse)
-        del v_fp8, v_scale
-    elif _cuda_archs[0] == "sm120":
-        if not sageplus_sm89_available:
-            pv_accum_dtype = "fp32"
-        else:
-            pv_accum_dtype = "fp32+fp16"
-            quant_v_scale_max = 2.25
-        _qk_quant_gran = 2 # per warp
-        q_int8, q_scale, k_int8, k_scale = per_warp_int8_cuda(q, k, km=k.mean(dim=1, keepdim=True), tensor_layout=tensor_layout, BLKQ=128, WARPQ=32, BLKK=64)
-        del q, k
-        v_fp8, v_scale, _ = per_channel_fp8(v, tensor_layout=tensor_layout, scale_max=quant_v_scale_max, smooth_v=False)
-        del v
-        o = torch.empty(q_int8.size(), dtype=dtype, device=q_int8.device)
-        if pv_accum_dtype == "fp32":
-            _qattn_sm89.qk_int8_sv_f8_accum_f32_fuse_v_scale_attn(q_int8, k_int8, v_fp8, o, q_scale, k_scale, v_scale, _tensor_layout, _is_caual, _qk_quant_gran, sm_scale, _return_lse)
-        elif pv_accum_dtype == "fp32+fp16":
-            _qattn_sm89.qk_int8_sv_f8_accum_f16_fuse_v_scale_attn_inst_buf(q_int8, k_int8, v_fp8, o, q_scale, k_scale, v_scale, _tensor_layout, _is_caual, _qk_quant_gran, sm_scale, _return_lse)
-        del v_fp8, v_scale
-
-    del q_int8, q_scale, k_int8, k_scale
-
-    o = o.view(batch_size, seq_len, -1)
-
+    # o is [B, T, H, D] from sage kernel (NHD layout)
     if self.to_gate_logits is not None:
         gate_logits = self.to_gate_logits(x)  # (B, T, H)
-        b, t, _ = o.shape
-        o = o.view(b, t, self.heads, self.dim_head)
-        gates = 2.0 * torch.sigmoid(gate_logits)  # zero-init -> identity
-        o = o * gates.unsqueeze(-1)
-        o = o.view(b, t, self.heads * self.dim_head)
+        o.mul_((2.0 * torch.sigmoid(gate_logits)).unsqueeze(-1))
+        del gate_logits
 
-    return self.to_out(o)
+    return self.to_out(o.view(batch_size, seq_len, -1))
+
+
+def wan_sageattn_forward(self, x, freqs, transformer_options={}):
+    r"""
+    Args:
+        x(Tensor): Shape [B, L, num_heads, C / num_heads]
+        freqs(Tensor): Rope freqs, shape [1024, C / num_heads / 2]
+    """
+    dtype = x.dtype
+    b, s, n, d = *x.shape[:2], self.num_heads, self.head_dim
+
+    q = self.norm_q(self.q(x)).view(b, s, n, d)
+    k = self.norm_k(self.k(x)).view(b, s, n, d)
+    q, k = _wan_apply_rope(q, k, freqs)
+    v = self.v(x).view(b, s, n, d)
+
+    qkv = [q, k, v]
+    del q, k, v
+    o = _sageattn_int8_fp8_nhd(qkv, dtype)
+
+    return self.o(o.view(b, s, n * d))
+
+
+def wan_t2v_cross_sageattn_forward(self, x, context, transformer_options={}, **kwargs):
+    dtype = x.dtype
+    b, s, n, d = *x.shape[:2], self.num_heads, self.head_dim
+
+    q = self.norm_q(self.q(x)).view(b, s, n, d)
+    k = self.norm_k(self.k(context)).view(b, -1, n, d)
+    v = self.v(context).view(b, -1, n, d)
+
+    qkv = [q, k, v]
+    del q, k, v
+    o = _sageattn_int8_fp8_nhd(qkv, dtype)
+
+    return self.o(o.view(b, s, n * d))
+
+
+def wan_i2v_cross_sageattn_forward(self, x, context, context_img_len, transformer_options={}):
+    dtype = x.dtype
+    b, s, n, d = *x.shape[:2], self.num_heads, self.head_dim
+
+    context_img = context[:, :context_img_len]
+    context = context[:, context_img_len:]
+
+    q = self.norm_q(self.q(x)).view(b, s, n, d)
+    k_img = self.norm_k_img(self.k_img(context_img)).view(b, -1, n, d)
+    v_img = self.v_img(context_img).view(b, -1, n, d)
+    # local q reference survives the helper's consume — still needed for the text attention below
+    qkv_img = [q, k_img, v_img]
+    del k_img, v_img
+    img_o = _sageattn_int8_fp8_nhd(qkv_img, dtype)
+
+    k = self.norm_k(self.k(context)).view(b, -1, n, d)
+    v = self.v(context).view(b, -1, n, d)
+    qkv = [q, k, v]
+    del q, k, v
+    o = _sageattn_int8_fp8_nhd(qkv, dtype)
+
+    o.add_(img_o)
+    del img_o
+    return self.o(o.view(b, s, n * d))
+
+
+def minimax_sageattn_forward(self, x, rope_freqs=None, transformer_options={}):
+    # x: [S, hidden], unbatched packed sequence; q/k/v are NHD views into the fused qkv buffer.
+    # A single-item list (MiniMaxLowVRAMAttention's block patch) hands over the sole reference
+    # to the block's normed h so it can be freed right after the qkv GEMM.
+    if isinstance(x, list):
+        x = x.pop()
+    dtype = x.dtype
+    device = x.device
+    s = x.shape[0]
+    q, k, v = self.qkv_proj(x).split(self.heads * self.head_dim, dim=-1)
+    del x
+    q = q.view(1, s, self.heads, self.head_dim)
+    k = k.view(1, s, self.heads, self.head_dim)
+    v = v.view(1, s, self.heads, self.head_dim)
+    if rope_freqs is not None:
+        # same fused per-head RMSNorm + partial split-half rope the stock forward uses, in place on the qkv buffer
+        qw = mm.cast_to(self.q_norm.weight, device=device)
+        kw = mm.cast_to(self.k_norm.weight, device=device)
+        _ck.rms_rope_split_half_(q, k, rope_freqs, qw, kw, epsilon=self.q_norm.eps, rot_dim=rope_freqs.shape[-3] * 2)
+    else:
+        q = self.q_norm(q)
+        k = self.k_norm(k)
+
+    n = min(transformer_options.get("minimax_head_chunks", 1), self.heads) if isinstance(transformer_options, dict) else 1
+    if n <= 1:
+        qkv = [q, k, v]
+        del q, k, v
+        o = _sageattn_int8_fp8_nhd(qkv, dtype)
+        return self.out_proj(o.view(s, self.heads * self.head_dim))
+
+    # head-group slicing from MiniMaxLowVRAMAttention: quantize and attend per group so the int8/fp8 working set shrinks by the group count
+    out = torch.empty((s, self.heads * self.head_dim), dtype=dtype, device=device)
+    out_nhd = out.view(1, s, self.heads, self.head_dim)
+    hs = 0
+    for i in range(n):
+        he = hs + self.heads // n + (1 if i < self.heads % n else 0)
+        out_nhd[:, :, hs:he] = _sageattn_int8_fp8_nhd([q[:, :, hs:he], k[:, :, hs:he], v[:, :, hs:he]], dtype)
+        hs = he
+    del q, k, v  # last references to the fused qkv buffer -> freed before out_proj
+    return self.out_proj(out)
+
+
+class WanVideoMemoryEfficientSageAttentionPatch(io.ComfyNode):
+
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="WanVideoMemoryEfficientSageAttentionPatch",
+            display_name="WanVideo Mem Eff Sage Attention Patch",
+            category="KJNodes/wan",
+            description="EXPERIMENTAL! Activates custom sageattention on the WanVideo self-attention to reduce peak VRAM usage, overrides the attention mode. Requires latest sageattention version.",
+            is_experimental=True,
+            inputs=[
+                io.Model.Input("model"),
+            ],
+            outputs=[
+                io.Model.Output(display_name="model"),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, model) -> io.NodeOutput:
+        if _cuda_archs is None:
+            raise RuntimeError("sageattention is not new enough version or could not determine CUDA architecture, cannot apply WanVideo Memory Efficient Sage Attention Patch.")
+        if _wan_apply_rope is None:
+            raise RuntimeError("Could not import apply_rope from comfy.ldm.flux.math, cannot apply WanVideo Memory Efficient Sage Attention Patch.")
+        model_clone = model.clone()
+        diffusion_model = model_clone.get_model_object("diffusion_model")
+
+        logging.info("Applying WanVideo Memory Efficient Sage Attention Patch to all transformer blocks")
+
+        for idx, block in enumerate(diffusion_model.blocks):
+            model_clone.add_object_patch(f"diffusion_model.blocks.{idx}.self_attn.forward", wan_sageattn_forward.__get__(block.self_attn, block.self_attn.__class__))
+            cross_attn = getattr(block, "cross_attn", None)
+            # exact type match on purpose: subclasses like WanT2VCrossAttentionGather have different semantics
+            if cross_attn is not None and type(cross_attn) is _WanI2VCrossAttention:
+                model_clone.add_object_patch(f"diffusion_model.blocks.{idx}.cross_attn.forward", wan_i2v_cross_sageattn_forward.__get__(cross_attn, cross_attn.__class__))
+            elif cross_attn is not None and type(cross_attn) is _WanT2VCrossAttention:
+                model_clone.add_object_patch(f"diffusion_model.blocks.{idx}.cross_attn.forward", wan_t2v_cross_sageattn_forward.__get__(cross_attn, cross_attn.__class__))
+
+        return io.NodeOutput(model_clone)
+
+
+class MiniMaxH3MemoryEfficientSageAttentionPatch(io.ComfyNode):
+
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="MiniMaxH3MemoryEfficientSageAttentionPatch",
+            display_name="MiniMax H3 Mem Eff Sage Attention Patch",
+            category="KJNodes/minimax",
+            description="EXPERIMENTAL! Activates custom sageattention on the MiniMax H3 self-attention to reduce peak VRAM usage, overrides the attention mode. Requires latest sageattention version.",
+            is_experimental=True,
+            inputs=[
+                io.Model.Input("model"),
+            ],
+            outputs=[
+                io.Model.Output(display_name="model"),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, model) -> io.NodeOutput:
+        if _cuda_archs is None:
+            raise RuntimeError("sageattention is not new enough version or could not determine CUDA architecture, cannot apply MiniMax H3 Memory Efficient Sage Attention Patch.")
+        if _ck is None:
+            raise RuntimeError("This ComfyUI version does not support MiniMax H3, cannot apply MiniMax H3 Memory Efficient Sage Attention Patch.")
+        model_clone = model.clone()
+        diffusion_model = model_clone.get_model_object("diffusion_model")
+        if _MiniMaxH3Model is not None and not isinstance(diffusion_model, _MiniMaxH3Model):
+            raise RuntimeError("MiniMax H3 Memory Efficient Sage Attention Patch can only be applied to a MiniMax H3 model.")
+
+        logging.info("Applying MiniMax H3 Memory Efficient Sage Attention Patch to all transformer blocks")
+
+        for idx, block in enumerate(diffusion_model.blocks):
+            model_clone.add_object_patch(f"diffusion_model.blocks.{idx}.attn.forward", minimax_sageattn_forward.__get__(block.attn, block.attn.__class__))
+
+        return io.NodeOutput(model_clone)
 
 
 import folder_paths
