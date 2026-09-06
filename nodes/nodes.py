@@ -2159,7 +2159,7 @@ class ModelSaveKJ:
         if not os.path.exists(full_output_folder):
             os.makedirs(full_output_folder)
         save_torch_file(new_sd, os.path.join(full_output_folder, output_checkpoint))
-        return {}
+        return {"ui": {"files": [ui.SavedResult(os.path.basename(output_checkpoint), subfolder, io.FolderType.output)]}}
        
 class StyleModelApplyAdvanced:
     @classmethod

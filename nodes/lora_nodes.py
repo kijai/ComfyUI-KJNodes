@@ -6,7 +6,7 @@ import os
 import logging
 from tqdm import tqdm
 import numpy as np
-from comfy_api.latest import io
+from comfy_api.latest import io, ui
 
 device = comfy.model_management.get_torch_device()
 
@@ -220,7 +220,7 @@ class LoraExtractKJ(io.ComfyNode):
         output_checkpoint = os.path.join(full_output_folder, output_checkpoint)
 
         comfy.utils.save_torch_file(output_sd, output_checkpoint, metadata=None)
-        return io.NodeOutput()
+        return io.NodeOutput(ui={"files": [ui.SavedResult(os.path.basename(output_checkpoint), subfolder, io.FolderType.output)]})
 
 class LoraReduceRank(io.ComfyNode):
     @classmethod
@@ -295,7 +295,7 @@ class LoraReduceRank(io.ComfyNode):
         logging.info(f"Saving resized LoRA to {output_checkpoint}")
 
         comfy.utils.save_torch_file(output_sd, output_checkpoint, metadata=metadata)
-        return io.NodeOutput()
+        return io.NodeOutput(ui={"files": [ui.SavedResult(os.path.basename(output_checkpoint), subfolder, io.FolderType.output)]})
 
 # Convert LoRA to different rank approximation (should only be used to go to lower rank)
 # This code is based off the extract_lora_from_models.py file which is based on https://github.com/cloneofsimo/lora/blob/develop/lora_diffusion/cli_svd.py
