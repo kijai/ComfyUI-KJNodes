@@ -1,14 +1,20 @@
+from bisect import bisect_left, bisect_right
+from itertools import accumulate
 import inspect
 import logging
+import math
 import types
 
 import torch
 
 import comfy.model_management as mm
+import comfy.nested_tensor
 import comfy.ops
 import comfy.quant_ops
+import comfy.utils
 from comfy.ldm.modules.attention import optimized_attention
-from comfy.ldm.minimax.model import _mod_scale_shift, _mod_gate, PackedLayout
+from comfy.ldm.minimax.model import _mod_scale_shift, _mod_gate, PackedLayout, FRAME_PER_TOKEN
+from comfy_extras.nodes_minimax_h3 import FPS, AUDIO_LATENT_FPS, temporal_shape
 
 from comfy_api.latest import io, ui
 
@@ -293,3 +299,101 @@ class MiniMaxH3TokenCounter(io.ComfyNode):
             except Exception:
                 pass
         return io.NodeOutput(samples, conditioning, layout.seq_len, breakdown, ui=ui.PreviewText(breakdown))
+
+
+class MiniMaxH3AudioVideoMask(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="MiniMaxH3AudioVideoMask",
+            category="KJNodes/minimax",
+            description="Creates temporal noise masks for MiniMax H3 AV latents. Ranges are [start, end), rounded inward to whole latent tokens. Conditioning positions are not changed.",
+            inputs=[
+                io.Latent.Input("av_latent"),
+                io.Float.Input("video_start_time", default=0.0, min=0.0, max=10000.0, step=0.01, tooltip="Start time in seconds for the video mask."),
+                io.Float.Input("video_end_time", default=5.0, min=0.0, max=10000.0, step=0.01, tooltip="Exclusive end time in seconds for the video mask."),
+                io.Float.Input("audio_start_time", default=0.0, min=0.0, max=10000.0, step=0.01, tooltip="Start time in seconds for the audio mask."),
+                io.Float.Input("audio_end_time", default=5.0, min=0.0, max=10000.0, step=0.01, tooltip="Exclusive end time in seconds for the audio mask."),
+                io.Combo.Input("max_length", options=["truncate", "pad", "partial"], default="truncate",
+                    tooltip="Uses the larger end time for both streams. 'truncate': cut down to the 17n+5 frame grid. 'pad': extend up to that grid; added regions always generate. 'partial': keep existing lengths."),
+                io.Combo.Input("existing_mask_mode", options=["add", "subtract", "overwrite"], optional=True, default="add",
+                    tooltip="'add': max of existing and new masks. 'subtract': clear the selected range (starts from zero without a mask). 'overwrite': replace both masks. Use an empty range with overwrite to preserve a stream."),
+            ],
+            outputs=[io.Latent.Output(display_name="av_latent")],
+        )
+
+    @classmethod
+    def execute(cls, av_latent, video_start_time, video_end_time, audio_start_time, audio_end_time, max_length="truncate", existing_mask_mode="add") -> io.NodeOutput:
+        samples = av_latent["samples"]
+        if not isinstance(samples, comfy.nested_tensor.NestedTensor) or len(samples.tensors) != 2:
+            raise ValueError("MiniMaxH3AudioVideoMask expects a MiniMax H3 AV latent")
+        video, audio = samples.unbind()
+        if video.ndim != 5 or video.shape[1] != 24 or audio.ndim != 4 or audio.shape[1:3] != (32, 2):
+            raise ValueError("MiniMaxH3AudioVideoMask expects video [B,24,T,H,W] and audio [B,32,2,T]")
+        video_length, audio_length = video.shape[2], audio.shape[-1]
+        frame_count = sum(FRAME_PER_TOKEN[i % len(FRAME_PER_TOKEN)] for i in range(video_length))
+        end_time = max(video_end_time, audio_end_time)
+        if max_length != "partial":
+            grid = range(5, max(frame_count, math.ceil(end_time * FPS)) + 18, 17)
+            if max_length == "pad":
+                index = bisect_left(grid, max(end_time, frame_count / FPS), key=lambda f: f / FPS)
+                frame_count, video_length, audio_length = temporal_shape(grid[index])
+                while audio_length < audio.shape[-1]:
+                    frame_count, video_length, audio_length = temporal_shape(frame_count + 17)
+            else:
+                index = bisect_right(grid, min(end_time, frame_count / FPS), key=lambda f: f / FPS) - 1
+                while index >= 0:
+                    frame_count, video_length, audio_length = temporal_shape(grid[index])
+                    if audio_length <= audio.shape[-1]:
+                        break
+                    index -= 1
+                if index < 0:
+                    raise ValueError("MiniMax H3 truncate needs at least 5 frames (5/24 seconds) and their audio; use partial to keep the current length")
+        video_bounds = [0] + list(accumulate(FRAME_PER_TOKEN[i % len(FRAME_PER_TOKEN)] for i in range(video_length)))
+        video_bounds = [frame / FPS for frame in video_bounds]
+        existing = av_latent.get("noise_mask")
+        if existing is not None and existing_mask_mode != "overwrite":
+            if not isinstance(existing, comfy.nested_tensor.NestedTensor) or len(existing.tensors) != 2:
+                raise ValueError("MiniMax H3 noise_mask must be a NestedTensor pair of video and audio masks")
+            existing = existing.unbind()
+        else:
+            existing = (None, None)
+        masks = []
+        streams = []
+        for samples, previous_mask, dim, length, start, end, boundaries in (
+            (video, existing[0], 2, video_length, video_start_time, video_end_time, video_bounds),
+            (audio, existing[1], 3, audio_length, audio_start_time, audio_end_time, [i / AUDIO_LATENT_FPS for i in range(audio_length + 1)]),
+        ):
+            mask_shape = (samples.shape[0], 1, *samples.shape[2:])
+            if previous_mask is not None:
+                mask = comfy.utils.reshape_mask(previous_mask, mask_shape).clone()
+            else:
+                # Match LTX's zero baseline, including subtract without an existing mask.
+                mask = torch.zeros(mask_shape, device=samples.device, dtype=torch.float32)
+            original_length = samples.shape[dim]
+            if length < original_length:
+                samples = samples.narrow(dim, 0, length).clone()
+                mask = mask.narrow(dim, 0, length).clone()
+            elif length > original_length:
+                pad_shape = list(samples.shape)
+                pad_shape[dim] = length - original_length
+                samples = torch.cat((samples, samples.new_zeros(pad_shape)), dim=dim)
+                pad_shape = list(mask.shape)
+                pad_shape[dim] = length - original_length
+                mask = torch.cat((mask, mask.new_zeros(pad_shape)), dim=dim)
+            first = bisect_left(boundaries, start)
+            last = bisect_right(boundaries, end) - 1
+            if last > first:
+                selected = mask.narrow(dim, first, last - first)
+                if existing_mask_mode == "subtract":
+                    selected.zero_()
+                else:
+                    selected.clamp_(min=1.0)
+            if length > original_length:
+                mask.narrow(dim, original_length, length - original_length).fill_(1.0)
+            streams.append(samples)
+            masks.append(mask)
+        output = av_latent.copy()
+        output["samples"] = comfy.nested_tensor.NestedTensor(streams)
+        output["noise_mask"] = comfy.nested_tensor.NestedTensor(masks)
+        return io.NodeOutput(output)

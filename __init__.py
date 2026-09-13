@@ -373,10 +373,11 @@ except Exception as e:
 
 #minimax
 try:
-    from .nodes.minimax_nodes import MiniMaxChunkFeedForward, MiniMaxLowVRAMAttention, MiniMaxH3TokenCounter
+    from .nodes.minimax_nodes import MiniMaxChunkFeedForward, MiniMaxLowVRAMAttention, MiniMaxH3TokenCounter, MiniMaxH3AudioVideoMask
     NODE_CONFIG.update({
     "MiniMaxChunkFeedForward": {"class": MiniMaxChunkFeedForward, "name": "MiniMax H3 ChunkFeedForward"},
     "MiniMaxLowVRAMAttention": {"class": MiniMaxLowVRAMAttention, "name": "MiniMax H3 Low VRAM Attention"},
+    "MiniMaxH3AudioVideoMask": {"class": MiniMaxH3AudioVideoMask, "name": "MiniMax H3 Audio Video Mask"},
     "MiniMaxH3TokenCounter": {"class": MiniMaxH3TokenCounter, "name": "MiniMax H3 Token Counter"},
     })
 except Exception as e:
