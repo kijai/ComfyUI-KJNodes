@@ -37,6 +37,10 @@ try:
 except ImportError:
     PromptServer = None
 
+# Consecutive failed tiny-VAE decodes before the decoder is given up on for the run.
+_TINY_VAE_MAX_FAILURES = 3
+
+
 def _suppressed_preview_image(self_, preview_format, x0):
     return None
 
@@ -389,14 +393,36 @@ def _frames_to_arrays(frames, max_res, budget_bytes=256 << 20):
     return out
 
 
-def _tiny_vae_decode_frames(decoder, x0, max_frames=None, compile_preview=False):
-    # Raises on failure so the caller can disable the decoder instead of retrying every step.
+def _downscale_latent_for_preview(x0, upscale_ratio, max_res):
+    """Shrink the latent so the tiny-VAE decode lands at the preview's display size.
+
+    The frames are contained to max_res right after decoding, so at a 16x upscale
+    everything decoded above it is built in VRAM and then thrown away. On a 1536x864
+    video latent that waste is ~1.7 GB per step, which is the difference between a
+    preview that fits alongside a staged model and one that OOMs.
+    """
+    if not max_res or max_res <= 0 or not upscale_ratio:
+        return x0
+    h, w = x0.shape[-2], x0.shape[-1]
+    longest = max(h, w) * upscale_ratio
+    if longest <= max_res:
+        return x0
+    scale = max_res / longest
+    th, tw = max(1, round(h * scale)), max(1, round(w * scale))
+    flat = x0.reshape(x0.shape[0], -1, h, w)
+    flat = torch.nn.functional.interpolate(flat, size=(th, tw), mode="bilinear", align_corners=False)
+    return flat.reshape(*x0.shape[:-2], th, tw)
+
+
+def _tiny_vae_decode_frames(decoder, x0, max_frames=None, compile_preview=False, max_res=0):
+    # Raises on failure; the caller decides whether to retry or give up on the decoder.
     # Returns the whole [T, 3, H, W] clip on the CPU (uint8 from the 2D decoder, model dtype from
     # TAEHV) or None. The compiler treats GPU allocations it did not plan as rogue and pays for them
     # every step, so the decode joins the sampler thread's allocation graph and every GPU tensor is
     # gone before the scope closes. Needs a core with per-thread graphs; older cores skip it.
     if x0.ndim not in (4, 5):
         return None, None
+    x0 = _downscale_latent_for_preview(x0, getattr(decoder, "upscale_ratio", 0), max_res)
     compiled = compile_preview and comfy.model_prefetch is not None and comfy.model_prefetch.malloc_graph_enabled(x0.device)
     if compiled:
         comfy.model_prefetch.malloc_graph_begin(x0.device)
@@ -432,8 +458,8 @@ def _as_pil(frame):
     return frame if isinstance(frame, Image.Image) else Image.fromarray(frame)
 
 
-def _tiny_vae_decode_to_pil(decoder, x0, max_frames=None, compile_preview=False):
-    frames, _ = _tiny_vae_decode_frames(decoder, x0, max_frames, compile_preview)
+def _tiny_vae_decode_to_pil(decoder, x0, max_frames=None, compile_preview=False, max_res=0):
+    frames, _ = _tiny_vae_decode_frames(decoder, x0, max_frames, compile_preview, max_res)
     return [] if frames is None else [_as_pil(a) for a in _frames_to_arrays(frames, 0)]
 
 
@@ -581,6 +607,7 @@ class _PreviewOverrideWrapper:
 
         # Tiny VAE from models/vae_approx
         tiny_vae = None
+        tiny_vae_failures = 0
         if self.tiny_vae and self.tiny_vae != "none" and load_tiny_vae_decoder is not None:
             tiny_vae = load_tiny_vae_decoder(self.tiny_vae)
             if tiny_vae is not None and latent_shapes and len(latent_shapes[0]) >= 2:
@@ -684,7 +711,7 @@ class _PreviewOverrideWrapper:
                 init_latent = _normalize_packed_x0(init_latent, latent_shapes, num_keyframes)
                 pil_init = None
                 if tiny_vae is not None:
-                    pil_frames = _tiny_vae_decode_to_pil(tiny_vae, init_latent, max_frames=1, compile_preview=compile_preview)
+                    pil_frames = _tiny_vae_decode_to_pil(tiny_vae, init_latent, max_frames=1, compile_preview=compile_preview, max_res=max_res)
                     pil_init = pil_frames[0] if pil_frames else None
                 elif ltx_previewer is not None and init_latent.ndim == 5:
                     pil_frames = _ltx_decode_to_pil(ltx_previewer, init_latent, max_frames=1)
@@ -758,17 +785,29 @@ class _PreviewOverrideWrapper:
         def produce_frames(x0_view):
             # (frames, span): a [T, 3, H, W] CPU tensor from the tiny VAE, else a PIL list from
             # whichever previewer applies, else []; span = latent tokens (first, last) the frames cover
-            nonlocal tiny_vae
+            nonlocal tiny_vae, tiny_vae_failures
             max_pil = anim_frames if animate_video else 1
             if tiny_vae is not None:
                 try:
-                    frames, span = _tiny_vae_decode_frames(tiny_vae, x0_view, max_frames=max_pil, compile_preview=compile_preview)
+                    frames, span = _tiny_vae_decode_frames(tiny_vae, x0_view, max_frames=max_pil, compile_preview=compile_preview, max_res=max_res)
                     if frames is not None:
+                        tiny_vae_failures = 0
                         return frames, span
                 except Exception as e:
-                    # OOM at 16x upscale is the likely cause — drop to the cheap paths for good.
-                    logging.warning(f"[KJ PreviewOverride] tiny VAE decode failed, falling back: {e}")
-                    tiny_vae = None
+                    # OOM at 16x upscale is the likely cause. One bad step is not proof the
+                    # decoder is unusable — free VRAM moves step to step, and the sampler's
+                    # own allocations can be what lost the race — so use the cheap paths for
+                    # this step and keep the decoder for the next one.
+                    tiny_vae_failures += 1
+                    logging.warning(
+                        f"[KJ PreviewOverride] tiny VAE decode failed "
+                        f"({tiny_vae_failures}/{_TINY_VAE_MAX_FAILURES}), falling back this step: {e}"
+                    )
+                    if tiny_vae_failures >= _TINY_VAE_MAX_FAILURES:
+                        logging.warning(
+                            "[KJ PreviewOverride] tiny VAE preview disabled for the rest of this run."
+                        )
+                        tiny_vae = None
             pil_frames = []
             if ltx_full_vae is not None and x0_view.ndim == 5:
                 pil_frames = _ltx_full_vae_decode_to_pil(ltx_full_vae, x0_view, max_frames=max_pil)
