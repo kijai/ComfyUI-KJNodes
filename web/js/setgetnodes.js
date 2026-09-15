@@ -801,6 +801,14 @@ app.registerExtension({
 						getter.setName(this.widgets[0].value);
 					});
 				}
+				// Reconcile previousName so the migration above cannot fire again on a
+				// stale name. Without this, a SetNode whose previousName drifts from its
+				// current widget value (paste, partial load, or any path that mutates the
+				// widget without going through the text-widget callback) permanently
+				// hijacks any future GetNode named the old value.
+				if (this.widgets[0].value) {
+					this.properties.previousName = this.widgets[0].value;
+				}
 				app.canvas?.setDirty(true, true);
 			}
 
