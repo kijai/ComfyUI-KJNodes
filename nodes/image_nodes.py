@@ -100,6 +100,7 @@ to a Multi-Variate Gaussian Distribution (MVGD) transfer in conjunction with cla
 matching. As shown below our HM-MVGD-HM compound outperforms existing methods.   
 https://github.com/hahnec/color-matcher/
 
+The 'mvgd' and 'hm-mvgd-hm' methods require matching dimensions for input and reference images.
 """
 
     def colormatch(self, image_ref, image_target, method, strength=1.0, multithread=True):
@@ -123,7 +124,7 @@ https://github.com/hahnec/color-matcher/
         images_target_np = images_target.numpy()
 
         def process(i):
-            cm = ColorMatcher()
+            cm = ColorMatcher(method=method)
             image_target_np_i = images_target_np if batch_size == 1 else images_target[i].numpy()
             image_ref_np_i = image_ref_np if image_ref.size(0) == 1 else images_ref[i].numpy()
             try:
@@ -134,6 +135,8 @@ https://github.com/hahnec/color-matcher/
                 return torch.from_numpy(image_result)
 
             except Exception as e:
+                if method in ("mvgd", "hm-mvgd-hm"):
+                    raise ValueError(str(e)) from e
                 logging.warning(f"Thread {i} error: {e}")
                 return torch.from_numpy(image_target_np_i)  # fallback
 
@@ -166,6 +169,7 @@ matching. As shown below our HM-MVGD-HM compound outperforms existing methods.
 https://github.com/hahnec/color-matcher/   
 
 'reinhard_lab_gpu' method uses Kornia for GPU-accelerated color transfer in Lab color space.
+The 'mvgd' and 'hm-mvgd-hm' methods require matching dimensions for input and reference images.
 """,
             inputs=[
                 io.Image.Input("image_target"),
@@ -229,7 +233,7 @@ https://github.com/hahnec/color-matcher/
         ref_batch_size = image_ref.size(0)
 
         def process(i):
-            cm = ColorMatcher()
+            cm = ColorMatcher(method=method)
             image_target_np = image_target[i].cpu().numpy()
             image_ref_np = image_ref[min(i, ref_batch_size - 1)].cpu().numpy()
             try:
@@ -240,6 +244,8 @@ https://github.com/hahnec/color-matcher/
                 return torch.from_numpy(image_result)
 
             except Exception as e:
+                if method in ("mvgd", "hm-mvgd-hm"):
+                    raise ValueError(str(e)) from e
                 logging.error(f"Thread {i} error: {e}")
                 return torch.from_numpy(image_target_np)  # fallback
         if multithread and batch_size > 1:
