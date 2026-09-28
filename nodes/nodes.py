@@ -2221,6 +2221,535 @@ Concatenates the audio1 to audio2 in the specified direction.
             concatenated_audio= torch.cat((waveform_2, waveform_1), dim=2)  # Concatenate along width
         return ({"waveform": concatenated_audio, "sample_rate": sample_rate_1},)
 
+class MergeAudioList(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="MergeAudioList",
+            display_name="Merge Audio List",
+            description=("Merges a list of audio streams using either a time-based or video-frame-based overlap."),
+            category="KJNodes/audio",
+            search_aliases=[
+                "merge audio",
+                "merge audio list",
+                "combine audio",
+                "concat audio",
+                "blend audio",
+                "crossfade audio",
+            ],
+            is_input_list=True,
+            inputs=[
+                io.Audio.Input("audio_list", tooltip="Audio streams to merge together."),
+                io.DynamicCombo.Input(
+                    "overlap_units",
+                    options=[
+                        io.DynamicCombo.Option(
+                            "seconds",
+                            [
+                                io.Float.Input(
+                                    "overlap_duration",
+                                    display_name="Overlap",
+                                    default=0.5,
+                                    min=0.001,
+                                    max=3600.0,
+                                    step=0.001,
+                                    tooltip="Overlap duration in seconds.",
+                                ),
+                            ],
+                        ),
+                        io.DynamicCombo.Option(
+                            "frames",
+                            [
+                                io.Int.Input(
+                                    "overlap_frames",
+                                    display_name="Overlap",
+                                    default=13,
+                                    min=1,
+                                    max=4096,
+                                    step=1,
+                                    tooltip="Number of video frames to overlap.",
+                                ),
+                                io.Float.Input(
+                                    "fps",
+                                    default=24.0,
+                                    min=0.001,
+                                    max=240.0,
+                                    step=0.001,
+                                    tooltip="Video FPS used to convert frames to seconds.",
+                                ),
+                            ],
+                        ),
+                    ],
+                    display_name="overlap_units",
+                    tooltip=("How the overlap is specified: Seconds uses a direct time duration; Frames uses video frames and FPS."),
+                ),
+                io.Combo.Input(
+                    "overlap_side",
+                    options=["previous", "next"],
+                    default="previous",
+                    tooltip=("Determines which audio stream supplies the first side of the overlap."),
+                ),
+                io.Combo.Input(
+                    "overlap_mode",
+                    options=[
+                        "cut",
+                        "linear",
+                        "smooth",
+                        "equal_power",
+                    ],
+                    default="linear_blend",
+                    tooltip=(
+                        "How overlapping audio is combined:\n"
+                        "• cut: Hard transition; one stream replaces the other.\n"
+                        "• linear: Linear amplitude crossfade.\n"
+                        "• smooth: Smooth S-curve amplitude crossfade with gradual transitions at both ends.\n"
+                        "• equal_power: Constant-power crossfade using complementary sine/cosine gains."
+                    ),
+                ),
+            ],
+            outputs=[io.Audio.Output(display_name="audio")],
+        )
+
+    @staticmethod
+    def _get_audio_components(audio):
+        """
+        Resolve a native ComfyUI Audio mapping or VHS LazyAudioMap.
+
+        Accessing the mapping keys causes LazyAudioMap to decode the
+        underlying audio only when it is actually needed.
+        """
+
+        if audio is None:
+            return None, None
+
+        waveform = audio["waveform"]
+        sample_rate = int(audio["sample_rate"])
+
+        return waveform, sample_rate
+
+    @staticmethod
+    def _resample_audio(
+        waveform,
+        previous_rate,
+        target_rate,
+    ):
+        """
+        Resample [1, channels, samples] audio using linear interpolation.
+
+        Audio is normally 44.1 kHz in VHS, so this is primarily here to
+        safely handle files with differing sample rates.
+        """
+
+        if previous_rate == target_rate:
+            return waveform
+
+        if waveform.shape[-1] <= 1:
+            return waveform
+
+        next_length = max(
+            1,
+            round(
+                waveform.shape[-1]
+                * target_rate
+                / previous_rate
+            ),
+        )
+
+        original_dtype = waveform.dtype
+
+        # interpolate requires floating point.
+        waveform = waveform.float()
+        waveform = nn.functional.interpolate(
+            waveform,
+            size=next_length,
+            mode="linear",
+            align_corners=False,
+        )
+
+        return waveform.to(original_dtype)
+
+    @staticmethod
+    def _match_audio_channels(
+        previous_audio,
+        next_audio,
+    ):
+        """
+        Make the next audio have the same channel count as the previous audio.
+
+        Mono -> stereo:
+            duplicate the mono channel.
+
+        Stereo/multichannel -> mono:
+            average channels.
+        """
+
+        previous_channels = previous_audio.shape[1]
+        next_channels = next_audio.shape[1]
+
+        if previous_channels == next_channels:
+            return next_audio
+
+        if previous_channels == 1:
+            return next_audio.mean(
+                dim=1,
+                keepdim=True,
+            )
+
+        if next_channels == 1:
+            return next_audio.expand(
+                -1,
+                previous_channels,
+                -1,
+            )
+
+        # Generic fallback for unusual channel counts.
+        next_audio = next_audio.mean(
+            dim=1,
+            keepdim=True,
+        )
+
+        return next_audio.expand(
+            -1,
+            previous_channels,
+            -1,
+        )
+
+    @staticmethod
+    def _audio_alpha(
+        length,
+        mode,
+        device,
+        dtype,
+    ):
+        """
+        Generate the destination-side crossfade amount.
+
+        Returned shape:
+            [1, 1, samples]
+        """
+
+        if length <= 0:
+            return torch.empty(
+                (1, 1, 0),
+                device=device,
+                dtype=dtype,
+            )
+
+        t = torch.linspace(
+            0,
+            1,
+            length + 2,
+            device=device,
+            dtype=dtype,
+        )[1:-1]
+
+        if mode == "linear":
+            alpha = t
+
+        elif mode == "smooth":
+            alpha = (
+                3 * t * t
+                - 2 * t * t * t
+            )
+
+        elif mode == "equal_power":
+            # Equal-power crossfade.
+            alpha = torch.sin(
+                t * (torch.pi / 2)
+            )
+
+        else:
+            alpha = t
+
+        return alpha.view(
+            1,
+            1,
+            -1,
+        )
+
+    # ------------------------------------------------------------------
+    # AUDIO MERGING
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def merge_audio(
+        cls,
+        previous_audio,
+        next_audio,
+        overlap_seconds,
+        overlap_side,
+        overlap_mode,
+    ):
+        """
+        Merge two audio streams using an overlap expressed in seconds.
+
+        The overlap duration is converted to samples using the previous
+        audio sample rate.
+        """
+
+        previous_waveform, previous_rate = (
+            cls._get_audio_components(previous_audio)
+        )
+
+        next_waveform, next_rate = (
+            cls._get_audio_components(next_audio)
+        )
+
+        # If only one side contains audio, preserve the available audio.
+        if previous_waveform is None:
+            if next_waveform is None:
+                return None
+
+            return {
+                "waveform": next_waveform,
+                "sample_rate": next_rate,
+            }
+
+        if next_waveform is None:
+            return {
+                "waveform": previous_waveform,
+                "sample_rate": previous_rate,
+            }
+
+        # Make sure both waveforms use the same sample rate.
+        next_waveform = cls._resample_audio(
+            next_waveform,
+            next_rate,
+            previous_rate,
+        )
+
+        # Make sure both waveforms use the same number of channels.
+        next_waveform = cls._match_audio_channels(
+            previous_waveform,
+            next_waveform,
+        )
+
+        # Calculate the audio overlap from video frames.
+        overlap_seconds = float(overlap_seconds)
+
+        overlap_samples = max(
+            0,
+            round(
+                overlap_seconds
+                * previous_rate
+            ),
+        )
+
+        overlap_samples = min(
+            overlap_samples,
+            previous_waveform.shape[-1],
+            next_waveform.shape[-1],
+        )
+
+        if overlap_samples <= 0:
+            waveform = torch.cat(
+                (
+                    previous_waveform,
+                    next_waveform,
+                ),
+                dim=-1,
+            )
+
+            return {
+                "waveform": waveform,
+                "sample_rate": previous_rate,
+            }
+
+        # --------------------------------------------------------------
+        # CUT
+        # --------------------------------------------------------------
+
+        if overlap_mode == "cut":
+
+            if overlap_side == "next":
+                waveform = torch.cat(
+                    (
+                        previous_waveform,
+                        next_waveform[
+                            :,
+                            :,
+                            overlap_samples:,
+                        ],
+                    ),
+                    dim=-1,
+                )
+
+            else:
+                waveform = torch.cat(
+                    (
+                        previous_waveform[
+                            :,
+                            :,
+                            :-overlap_samples,
+                        ],
+                        next_waveform,
+                    ),
+                    dim=-1,
+                )
+
+            return {
+                "waveform": waveform,
+                "sample_rate": previous_rate,
+            }
+
+        # --------------------------------------------------------------
+        # CROSSFADE
+        # --------------------------------------------------------------
+
+        if overlap_side == "previous":
+            blend_src = previous_waveform[
+                :,
+                :,
+                -overlap_samples:,
+            ]
+
+            blend_dst = next_waveform[
+                :,
+                :,
+                :overlap_samples,
+            ]
+
+        else:
+            blend_src = next_waveform[
+                :,
+                :,
+                :overlap_samples,
+            ]
+
+            blend_dst = previous_waveform[
+                :,
+                :,
+                -overlap_samples:,
+            ]
+
+        alpha = cls._audio_alpha(
+            overlap_samples,
+            overlap_mode,
+            blend_src.device,
+            blend_src.dtype,
+        )
+
+        # For equal-power crossfade, use complementary sine/cosine gains rather than simply multiplying by (1-alpha) and alpha.
+        if overlap_mode == "equal_power":
+
+            t = torch.linspace(
+                0,
+                1,
+                overlap_samples + 2,
+                device=blend_src.device,
+                dtype=blend_src.dtype,
+            )[1:-1]
+
+            gain_src = torch.cos(
+                t * (torch.pi / 2)
+            ).view(1, 1, -1)
+
+            gain_dst = torch.sin(
+                t * (torch.pi / 2)
+            ).view(1, 1, -1)
+
+            blended = (
+                blend_src * gain_src
+                + blend_dst * gain_dst
+            )
+
+        else:
+            blended = (
+                (1 - alpha) * blend_src
+                + alpha * blend_dst
+            )
+
+        prefix = previous_waveform[
+            :,
+            :,
+            :-overlap_samples,
+        ]
+
+        suffix = next_waveform[
+            :,
+            :,
+            overlap_samples:,
+        ]
+
+        waveform = torch.cat(
+            (
+                prefix,
+                blended,
+                suffix,
+            ),
+            dim=-1,
+        )
+
+        return {
+            "waveform": waveform,
+            "sample_rate": previous_rate,
+        }
+
+    @staticmethod
+    def _unwrap_input(value):
+        if isinstance(value, list):
+            return value[0] if value else None
+        return value
+
+    @classmethod
+    def execute(
+        cls,
+        audio_list,
+        overlap_units,
+        overlap_side,
+        overlap_mode,
+    ):
+
+        units = cls._unwrap_input(overlap_units.get("overlap_units", "frames"))
+
+        if units == "seconds":
+            duration = cls._unwrap_input(overlap_units.get("overlap_duration", 0.5))
+            overlap_seconds = float(duration)
+
+        elif units == "frames":
+            frames = cls._unwrap_input(overlap_units.get("overlap_frames", 13))
+            fps = cls._unwrap_input(overlap_units.get("fps", 24.0))
+
+            frames = int(frames)
+            fps = float(fps)
+            overlap_seconds = frames / fps
+
+        else:
+            raise ValueError(f"Unknown overlap units: {units!r}")
+
+        if not audio_list:
+            raise ValueError("No audio supplied")
+
+        if len(audio_list) == 1:
+            return io.NodeOutput(cls._audio_to_output(audio_list[0]))
+
+        merged_audio = audio_list[0]
+
+        for index in range(1, len(audio_list)):
+            merged_audio = cls.merge_audio(
+                merged_audio,
+                audio_list[index],
+                overlap_seconds,
+                overlap_side,
+                overlap_mode,
+            )
+
+        return io.NodeOutput(cls._audio_to_output(merged_audio))
+
+    @staticmethod
+    def _audio_to_output(audio):
+        """
+        Normalize the final audio representation.
+
+        A LazyAudioMap can be returned directly, but once audio has
+        been merged it is already a normal waveform dictionary.
+        """
+
+        if audio is None:
+            return None
+
+        return audio
+
 class LeapfusionHunyuanI2V:
     @classmethod
     def INPUT_TYPES(s):
