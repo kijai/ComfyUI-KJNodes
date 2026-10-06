@@ -48,7 +48,8 @@ def build_tae_decoder(sd):
 
 
 class TinyVAEDecoder:
-    """Decode-only tiny VAE. Output is [0, 1], matching the TAE family's convention."""
+    """Decode-only tiny VAE. decode() is float32 in [0, 1] like the TAE family; decode_video() is uint8."""
+    decodes_prefix = False   # honours frame_indices exactly
 
     def __init__(self, sd, device=None, dtype=None):
         # keys may carry a "taesd_decoder."/"decoder." prefix; strip whatever is common
@@ -74,18 +75,19 @@ class TinyVAEDecoder:
         return out.to(device=latent.device, dtype=torch.float32)
 
     def decode_video(self, latent, frame_indices=None):
-        """[B, C, T, H, W] -> [T, H*ratio, W*ratio, 3]. Decodes one frame at a time —
-        at 16x the full-resolution activations are the memory peak, not the weights."""
+        """[B, C, T, H, W] -> [T, 3, H*ratio, W*ratio] uint8 on the CPU. Decodes one frame at a time
+        in the model dtype and casts before the host copy, so the GPU never holds more than one frame;
+        frames land directly in the preallocated output instead of a second stack copy."""
         x = latent[0]
-        indices = range(x.shape[1]) if frame_indices is None else frame_indices
-        frames = [self.decode(x[:, t].unsqueeze(0))[0].movedim(0, -1) for t in indices]
-        return torch.stack(frames, dim=0)
-
-
-def _to_nhwc(out):
-    """[B, 3, T, H, W] -> [T, H, W, 3], contiguous. The bare movedim view leaves the later
-    host copy a strided repack, which costs more than the decode itself."""
-    return out[0].movedim(0, -1).contiguous()
+        indices = list(range(x.shape[1])) if frame_indices is None else list(frame_indices)
+        out = None
+        for i, t in enumerate(indices):
+            f = self.model(x[:, t].unsqueeze(0).to(device=self.device, dtype=self.dtype))[0]
+            f = f.clamp_(0, 1).mul_(255).to(torch.uint8)
+            if out is None:
+                out = torch.empty((len(indices),) + tuple(f.shape), dtype=torch.uint8)
+            out[i].copy_(f)
+        return out
 
 
 def _place(model, device, dtype):
@@ -101,6 +103,7 @@ def is_taehv_state_dict(sd):
 
 class TAEHVDecoder:
     """Temporal tiny VAE (madebyollin/taehv), decode only."""
+    decodes_prefix = True    # memblock state chains forward, so partial requests decode the prefix
 
     def __init__(self, sd, device=None, dtype=None):
         from comfy.taesd.taehv import TAEHV, conv
@@ -127,9 +130,9 @@ class TAEHVDecoder:
         self.is_h3 = latent_channels == 24 and patch_size == 2
 
     def _decode(self, latent):
-        # [B, C, T, H, W] -> [B, 3, T*t_upscale - trim, H*ratio, W*ratio]
-        out = self.model.decode(latent.to(device=self.device, dtype=self.dtype))
-        return out.to(device=latent.device, dtype=torch.float32)
+        # [B, C, T, H, W] -> [B, 3, T*t_upscale - trim, H*ratio, W*ratio] on the intermediate device
+        # (CPU unless --gpu-only); frames stream off the GPU one at a time inside the memblock loop
+        return self.model.decode(latent.to(device=self.device, dtype=self.dtype))
 
     def decode(self, latent):
         """[B, C, H, W] -> [B, 3, H*ratio, W*ratio], decoded as a single frame."""
@@ -150,10 +153,10 @@ class TAEHVDecoder:
         x = torch.nn.functional.pad(x, (0, 0, 0, 0, 0, 0, 0, -x.shape[1] % chunk))
         x = x.unflatten(1, (-1, chunk))[:, :, m.frames_to_trim:].flatten(1, 2)
         x = x[:, :-3 * m.t_upscale]
-        return x.movedim(2, 1).to(device=latent.device, dtype=torch.float32)
+        return x.movedim(2, 1)
 
     def decode_video(self, latent, frame_indices=None):
-        """[B, C, T, H, W] -> [n, H*ratio, W*ratio, 3], contiguous."""
+        """[B, C, T, H, W] -> [n, 3, H*ratio, W*ratio] on the intermediate device, no repack."""
         t_total = latent.shape[2]
         n = t_total if frame_indices is None else max(1, min(len(frame_indices), t_total))
         if n == t_total:
@@ -162,15 +165,14 @@ class TAEHVDecoder:
             if self.is_h3:
                 out = self._decode_h3_full(latent[:1])
                 if out.shape[2] > 0:
-                    return _to_nhwc(out)
-            return _to_nhwc(self._decode(latent[:1]))
+                    return out[0].movedim(0, 1)
+            return self._decode(latent[:1])[0].movedim(0, 1)
         # MemBlock state chains forward, so frames can't be sampled across the clip without
         # decoding everything before them — take a prefix to keep the per-step cost bounded
-        out = self._decode(latent[:1, :, :n])[0].movedim(0, -1)
+        out = self._decode(latent[:1, :, :n])[0].movedim(0, 1)
         if out.shape[0] > n:
-            # gather already lands contiguous, so subsample before paying for the copy
             out = out[torch.linspace(0, out.shape[0] - 1, n).round().long()]
-        return out.contiguous()
+        return out
 
 
 def load_tiny_vae_decoder(name, device=None, dtype=None):

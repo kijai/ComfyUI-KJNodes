@@ -138,11 +138,14 @@ def minimax_attn_lowmem_forward(self, x, rope_freqs=None, transformer_options={}
 minimax_attn_lowmem_forward._uses_optimized_attention = True
 
 
-def minimax_block_lowmem_forward(self, x, t_emb, mod_segments, rope_freqs, transformer_options={}):
+def minimax_block_lowmem_forward(self, x, t_emb, mod_segments, rope_freqs, transformer_options={}, attention=None):
     # DiTBlock.forward, but hands h to attn in a list so attn can free it after the qkv GEMM
     shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.adaln_proj(t_emb)
-    h = [_mod_scale_shift(self.norm1(x), shift_msa, scale_msa, mod_segments)]
-    x = _mod_gate(x, gate_msa, self.attn(h, rope_freqs=rope_freqs, transformer_options=transformer_options), mod_segments)
+    h = _mod_scale_shift(self.norm1(x), shift_msa, scale_msa, mod_segments)
+    if attention is None:
+        attention = self.attn
+        h = [h]
+    x = _mod_gate(x, gate_msa, attention(h, rope_freqs=rope_freqs, transformer_options=transformer_options), mod_segments)
     h = _mod_scale_shift(self.norm2(x), shift_mlp, scale_mlp, mod_segments)
     return _mod_gate(x, gate_mlp, self.mlp(h), mod_segments)
 

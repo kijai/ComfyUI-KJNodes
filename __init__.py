@@ -78,6 +78,7 @@ from .nodes.model_optimization_nodes import (
 from .nodes.lora_nodes import LoraExtractKJ, LoraReduceRank
 from .nodes.image_transform_node import ImageTransformKJ, BBOXToBoundingBoxKJ
 from .nodes.sharpen_nodes import ImageSharpenKJ
+from .nodes.nodes_looping import LOOP_NODES
 from .nodes.hdr_preview_node import HDRPreviewKJ
 from .nodes.preview_override_node import ModelPreviewOverrideKJ, GetPreviewOverrideFramesKJ
 from .nodes.context_windows_visualizer import ContextWindowsVisualizerKJ
@@ -322,6 +323,8 @@ NODE_CONFIG = {
     #lora
     "LoraExtractKJ": {"class": LoraExtractKJ, "name": "LoraExtractKJ"},
     "LoraReduceRankKJ": {"class": LoraReduceRank, "name": "LoraReduceRank"},
+    #looping
+    **{n.GET_SCHEMA().node_id: {"class": n, "name": n.GET_SCHEMA().display_name} for n in LOOP_NODES},
 
     #tracks
     "GetTrackRange": {"class": GetTrackRange, "name": "Get Track Range"},

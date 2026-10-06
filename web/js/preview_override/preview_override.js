@@ -335,6 +335,13 @@ app.registerExtension({
             const headerLeft = el("span", "kj-pov-header-left", header);
             const headerTitle = el("span", "kj-pov-panel-title", headerLeft);
             headerTitle.textContent = "Preview Override";
+            // Speaker toggle: shown once a clip with an audio track arrives. Videos start muted so
+            // autoplay is allowed; unmuting is a user gesture, which is what the browser requires.
+            let audioMuted = true;
+            const audioBtn = el("button", "kj-pov-audio-btn", headerLeft);
+            audioBtn.textContent = "🔇";
+            audioBtn.title = "Toggle preview audio";
+            audioBtn.style.display = "none";
             const headerSummary = el("span", "kj-pov-panel-summary", header);
             headerSummary.textContent = "idle";
 
@@ -386,6 +393,88 @@ app.registerExtension({
             }
             const sdRow = makeCell("σ / Δ");
             const timeRow = makeCell("step time (ms)");
+            // Spectrogram of the decoded preview audio, shown once an audio VAE is connected; carries
+            // the clip playhead.
+            const specWrap = el("div", "kj-pov-spec", panel);
+            const specHead = el("div", "kj-pov-graph-head", specWrap);
+            const specLbl = el("span", "kj-pov-graph-label", specHead);
+            specLbl.textContent = "audio spectrogram";
+            const specCanvas = el("canvas", "kj-pov-spec-canvas", specWrap);
+            specWrap.style.display = "none";
+            let specShown = false;
+            let specBumped = false;     // panel grown for the strip once per node, not per run
+            let specRun = 0;            // run token so a strip still decoding at reset is dropped
+            let specDrawKey = null;
+            const stepSpecImgs = [];   // per-step decoded strip images
+            const stepHasAudio = [];   // per-step: MP4 carries an AAC track
+            const stepFps = [];        // per-step encode fps; clips with audio are baked in real time
+            // Only the visible element is ever unmuted: the pending buffer plays during load for the
+            // frame callback, and unmuted it would double the audio at every swap.
+            function applyMute() {
+                visibleVideo.muted = audioMuted;
+                pendingVideo.muted = true;
+                audioBtn.textContent = audioMuted ? "🔇" : "🔊";
+                audioBtn.classList.toggle("kj-pov-audio-on", !audioMuted);
+            }
+            audioBtn.addEventListener("mousedown", (ev) => { ev.stopPropagation(); });
+            audioBtn.addEventListener("click", (ev) => {
+                ev.preventDefault();
+                ev.stopPropagation();
+                audioMuted = !audioMuted;
+                applyMute();
+                if (!audioMuted && !isPaused) visibleVideo.play().catch(() => {});
+            });
+            function drawSpec(force) {
+                const idx = activeStepIdx();
+                const img = stepSpecImgs[idx] || stepSpecImgs[lastCurrentStep];
+                if (!img) return;
+                const W = specCanvas.clientWidth || specCanvas.width;
+                const px = clipDurationMs() > 0 ? Math.round(getProgress() * W) : -1;
+                const key = img.src.length + ":" + idx + ":" + px + ":" + W;
+                if (!force && key === specDrawKey) return;
+                specDrawKey = key;
+                const { ctx, H } = syncCanvasDPR(specCanvas);
+                ctx.clearRect(0, 0, W, H);
+                ctx.imageSmoothingEnabled = true;
+                ctx.drawImage(img, 0, 0, W, H);
+                if (px >= 0) {
+                    ctx.strokeStyle = "rgba(255, 255, 255, 0.85)";
+                    ctx.lineWidth = 1;
+                    ctx.beginPath();
+                    ctx.moveTo(px + 0.5, 0);
+                    ctx.lineTo(px + 0.5, H);
+                    ctx.stroke();
+                }
+            }
+            function setStepSpec(stepIdx, b64) {
+                const run = specRun;
+                const img = new Image();
+                img.onload = () => {
+                    if (run !== specRun) return;
+                    stepSpecImgs[stepIdx] = img;
+                    if (!specShown) {
+                        specShown = true;
+                        specWrap.style.display = "";
+                        // give the strip its own room unless the user already sized the panel
+                        if (!specBumped && typeof node.properties?.kjPovPanelH !== "number") {
+                            specBumped = true;
+                            panel.style.height = (panel.offsetHeight + 60) + "px";
+                        }
+                    }
+                    drawSpec(true);
+                };
+                img.src = "data:image/png;base64," + b64;
+            }
+            function resetSpec() {
+                specRun++;
+                stepSpecImgs.length = 0;
+                stepHasAudio.length = 0;
+                stepFps.length = 0;
+                specShown = false;
+                specDrawKey = null;
+                specWrap.style.display = "none";
+                audioBtn.style.display = "none";
+            }
             sdRow.canvas.style.cursor = "crosshair";
             // sdRow.canvas.title = "Hover to scrub steps · click to lock · ← → to step · click again to unlock";
             timeRow.canvas.title = "Click to toggle ms ↔ s";
@@ -578,12 +667,17 @@ app.registerExtension({
                 } else if (scrubBar.style.display !== "none") {
                     scrubBar.style.display = "none";
                 }
-                if (mp4Active() && bakedFps != null && bakedFps > 0) {
-                    const rate = currentFps() / bakedFps;
+                if (mp4Active()) {
+                    // each step carries its own baked fps; a clip with an audio track is baked in real
+                    // time and retiming it would detune the audio
+                    const idx = activeStepIdx();
+                    const baked = stepFps[idx] ?? bakedFps;
+                    const rate = stepHasAudio[idx] ? 1 : (baked > 0 ? Math.min(16, Math.max(0.0625, currentFps() / baked)) : 1);
                     if (Math.abs(visibleVideo.playbackRate - rate) > 0.001) {
                         visibleVideo.playbackRate = rate;
                     }
                 }
+                if (specShown) drawSpec(false);
             }
             scrubRafId = requestAnimationFrame(tickScrub);
             scrubBar.addEventListener("mousedown", (ev) => {
@@ -667,6 +761,8 @@ app.registerExtension({
                             const prev = visibleVideo;
                             visibleVideo = target;
                             pendingVideo = prev;
+                            // the outgoing element goes silent, the new visible one takes the speaker state
+                            applyMute();
                             imgA.style.opacity = "0";
                             imgB.style.opacity = "0";
                             videoCanvas.style.opacity = "0";
@@ -759,6 +855,7 @@ app.registerExtension({
                 stepMp4Urls.length = 0;
                 liveMp4Url = null;
                 hideMp4();
+                resetSpec();
                 playbackStartMs = null;
                 bakedFps = null;
                 isPaused = false;
@@ -905,9 +1002,18 @@ app.registerExtension({
                     // Indexed by boundary; step 0 = initial noise (image optional).
                     if (typeof data.image === "string") {
                         const mime = typeof data.mime === "string" ? data.mime : "image/jpeg";
-                        if (typeof data.fps === "number" && data.fps > 0) bakedFps = data.fps;
+                        if (typeof data.fps === "number" && data.fps > 0) {
+                            bakedFps = data.fps;
+                            stepFps[data.step] = data.fps;
+                        }
+                        stepHasAudio[data.step] = !!data.audio;
+                        if (data.audio && audioBtn.style.display === "none") {
+                            audioBtn.style.display = "";
+                            applyMute();
+                        }
                         setStepBlob(data.step, b64ToBlob(data.image, mime));
                     }
+                    if (typeof data.audio_spec === "string") setStepSpec(data.step, data.audio_spec);
 
                     totalSteps = data.total || totalSteps;
 
