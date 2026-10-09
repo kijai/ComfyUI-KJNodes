@@ -53,10 +53,11 @@ from .nodes.image_nodes import (
     PreviewAnimation, ImageResizeKJ, ImageResizeKJv2, LoadAndResizeImage,
     LoadImagesFromFolderKJ, ImageGridtoBatch, SaveImageKJ, SaveStringKJ, FastPreview,
     FastPreviewBatch, ImageCropByMaskAndResize, ImageCropByMask, ImageUncropByMask,
-    ImageCropByMaskBatch, ImagePadKJ, LoadVideosFromFolder, EncodeVideoComponents,
-    DecodeAndSaveVideo, PreviewImageOrMask,
+    ImageCropByMaskBatch, ImagePadKJ, PreviewImageOrMask,
 )
-
+from .nodes.video_nodes import (
+    LoadVideosFromFolder, LoadVideosFromFolderList, EncodeVideoComponents, DecodeAndSaveVideo, 
+)
 from .nodes.mask_nodes import (
     BatchCLIPSeg, DownloadAndLoadCLIPSeg, CreateTextMask, ColorToMask, CreateFluidMask,
     CreateAudioMask, CreateGradientMask, CreateFadeMask, CreateFadeMaskAdvanced,
@@ -173,7 +174,6 @@ NODE_CONFIG = {
     "InsertLatentToIndexed": {"class": InsertLatentToIndex, "name": "Insert Latent To Index"},
     "LoadAndResizeImage": {"class": LoadAndResizeImage, "name": "Load & Resize Image"},
     "LoadImagesFromFolderKJ": {"class": LoadImagesFromFolderKJ, "name": "Load Images From Folder (KJ)"},
-    "LoadVideosFromFolder": {"class": LoadVideosFromFolder, "name": "Load Videos From Folder"},
     "MergeImageChannels": {"class": MergeImageChannels, "name": "Merge Image Channels"},
     "PadImageBatchInterleaved": {"class": PadImageBatchInterleaved, "name": "Pad Image Batch Interleaved"},
     "PreviewAnimation": {"class": PreviewAnimation, "name": "Preview Animation"},
@@ -186,8 +186,6 @@ NODE_CONFIG = {
     "SplitImageChannels": {"class": SplitImageChannels, "name": "Split Image Channels"},
     "TransitionImagesMulti": {"class": TransitionImagesMulti, "name": "Transition Images Multi"},
     "TransitionImagesInBatch": {"class": TransitionImagesInBatch, "name": "Transition Images In Batch"},
-    "EncodeVideoComponents": {"class": EncodeVideoComponents, "name": "Encode Video Components"},
-    "DecodeAndSaveVideo": {"class": DecodeAndSaveVideo, "name": "Decode And Save Video"},
     "ImageTransformKJ": {"class": ImageTransformKJ, "name": "Image Transform KJ"},
     "BBOXToBoundingBoxKJ": {"class": BBOXToBoundingBoxKJ, "name": "BBOX to Bounding Box KJ"},
     "Ideogram4PromptBuilderKJ": {"class": Ideogram4PromptBuilderKJ, "name": "Ideogram 4 Prompt Builder KJ"},
@@ -196,6 +194,11 @@ NODE_CONFIG = {
     "GetPreviewOverrideFramesKJ": {"class": GetPreviewOverrideFramesKJ, "name": "Get Preview Override Frames KJ"},
     "PreviewImageOrMask": {"class": PreviewImageOrMask, "name": "Preview Image Or Mask"},
     "ImageSharpenKJ": {"class": ImageSharpenKJ, "name": "Image Sharpen KJ"},
+    #videos
+    "LoadVideosFromFolder": {"class": LoadVideosFromFolder, "name": "Load Videos From Folder"},
+    "LoadVideosFromFolderList": {"class": LoadVideosFromFolderList, "name": "Load Videos From Folder (List)"},
+    "EncodeVideoComponents": {"class": EncodeVideoComponents, "name": "Encode Video Components"},
+    "DecodeAndSaveVideo": {"class": DecodeAndSaveVideo, "name": "Decode And Save Video"},
     #batch cropping
     "BatchCropFromMask": {"class": BatchCropFromMask, "name": "Batch Crop From Mask"},
     "BatchCropFromMaskAdvanced": {"class": BatchCropFromMaskAdvanced, "name": "Batch Crop From Mask Advanced"},
