@@ -751,10 +751,10 @@ class LoadVideosFromFolderList(io.ComfyNode):
 
                 error_text = str(e)
 
-                if (
-                    "Output file does not contain any stream"
-                    in error_text
-                ):
+                if ("Output file does not contain any stream" in error_text):
+
+                    if isinstance(if_no_audio, dict):
+                        if_no_audio = if_no_audio.get("if_no_audio")
 
                     if if_no_audio == "return empty audio":
 
