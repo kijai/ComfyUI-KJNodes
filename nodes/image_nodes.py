@@ -3043,7 +3043,7 @@ highest dimension.
                 bytes_per_elem = image.element_size()  # typically 4 for float32
                 est_total_bytes = B * height * width * C * bytes_per_elem
                 est_mb = est_total_bytes / (1024 * 1024)
-                msg = f"<tr><td>Resize v2</td><td>estimated output ~{est_mb:.2f} MB; batching {per_batch}/{B}</td></tr>"
+                msg = f"Resize v2: estimated output ~{est_mb:.2f} MB; batching {per_batch}/{B}"
                 if unique_id and PromptServer is not None:
                     try:
                         PromptServer.instance.send_progress_text(msg, unique_id)
@@ -3167,7 +3167,7 @@ highest dimension.
                 if unique_id and PromptServer is not None:
                     try:
                         PromptServer.instance.send_progress_text(
-                            f"<tr><td>Resize v2</td><td>batch {current_batch}/{total_batches} · images {end_idx}/{B}</td></tr>",
+                            f"Resize v2: batch {current_batch}/{total_batches} · images {end_idx}/{B}",
                             unique_id
                         )
                     except Exception:
@@ -3191,7 +3191,7 @@ highest dimension.
                 element_size = out_image.element_size()
                 memory_size_mb = (num_elements * element_size) / (1024 * 1024)
                 PromptServer.instance.send_progress_text(
-                    f"<tr><td>Output: </td><td><b>{out_image.shape[0]}</b> x <b>{out_image.shape[2]}</b> x <b>{out_image.shape[1]} | {memory_size_mb:.2f}MB</b></td></tr>",
+                    f"Output: {out_image.shape[0]} x {out_image.shape[2]} x {out_image.shape[1]} | {memory_size_mb:.2f}MB",
                     unique_id
                 )
             except Exception:
