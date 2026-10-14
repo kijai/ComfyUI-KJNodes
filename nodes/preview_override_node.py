@@ -1049,7 +1049,7 @@ class ModelPreviewOverrideKJ(io.ComfyNode):
                 ),
             ],
             outputs=[io.Model.Output(tooltip="Model with preview override attached.")],
-            hidden=[io.Hidden.unique_id],
+            hidden=[io.Hidden.unique_id, io.Hidden.dynprompt],
             is_experimental=True,
         )
 
@@ -1060,11 +1060,24 @@ class ModelPreviewOverrideKJ(io.ComfyNode):
             comfy.patcher_extension.WrappersMP.OUTER_SAMPLE,
             "kj_preview_override",
             _PreviewOverrideWrapper(
-                max_resolution, cls.hidden.unique_id, jpeg_quality, suppress_default_preview,
+                max_resolution, _display_node_id(cls.hidden.unique_id, cls.hidden.dynprompt),
+                jpeg_quality, suppress_default_preview,
                 preview_frames, preview_fps, vae, tiny_vae, audio_vae,
             ),
         )
         return io.NodeOutput(m)
+
+
+def _display_node_id(unique_id, dynprompt):
+    # Inside a loop or another node expansion this node runs as a generated copy with an expanded
+    # id (e.g. "12.0.0.0_15"); the widget listens under the id it was placed with, which is the
+    # display node id ComfyUI's own progress messages use.
+    if unique_id is None or dynprompt is None:
+        return unique_id
+    try:
+        return dynprompt.get_display_node_id(unique_id)
+    except Exception:
+        return unique_id
 
 
 class GetPreviewOverrideFramesKJ(io.ComfyNode):
