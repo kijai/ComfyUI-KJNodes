@@ -1117,8 +1117,13 @@ class LTXVEnhanceAVideoKJ:
         return (model_clone,)
 
 def _wan_compute_attention(self, query, context, transformer_options={}):
-    k = self.norm_k(self.k(context))
-    v = self.v(context)
+    # The NAG context is computed once at patch time from the text embedding, in
+    # mm.unet_dtype(), which can differ from the dtype the diffusion model actually
+    # runs in (e.g. fp16 weights with a bf16 unet_dtype) -> k/v end up in a different
+    # dtype than the live query and attention fails. Align k/v with the query.
+    # Fixes #601. No-op when the dtypes already match.
+    k = self.norm_k(self.k(context)).to(query.dtype)
+    v = self.v(context).to(query.dtype)
     return comfy.ldm.modules.attention.optimized_attention(query, k, v, heads=self.num_heads, transformer_options=transformer_options).flatten(2)
 
 def wan_nag_attention(self, query, context_positive, nag_context, transformer_options={}):
