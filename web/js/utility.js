@@ -148,12 +148,15 @@ export function resolveSourcePreview(node, inputSlot) {
 }
 
 // ─── Source input watcher ───
-// Watches a named IMAGE input for connection changes and source widget changes.
+// Watches IMAGE inputs for connection changes and source widget changes.
 // Calls onChange(sources) when connections change or the source node's image/video widget changes.
-// sources: array of { url, isVideo, videoEl } per connected IMAGE input matching inputName (or all if inputName is null).
+// inputName: an input name, a predicate (input) => bool, or null for every IMAGE input.
+// sources: array of { url, isVideo, videoEl, name } per connected matching input (name = that input's name).
 // Returns a cleanup function.
 export function watchImageInputs(node, inputName, onChange) {
   let watchedWidgets = [];
+  const matches = (inp) => typeof inputName === "function" ? inputName(inp) : inputName ? inp.name === inputName : inp.type === "IMAGE";
+  const matchingSlots = () => node.inputs.map((inp, i) => matches(inp) ? i : -1).filter(i => i >= 0);
 
   function unwatchWidgets() {
     for (const { widget, origCb } of watchedWidgets) widget.callback = origCb;
@@ -162,18 +165,16 @@ export function watchImageInputs(node, inputName, onChange) {
 
   function resolve() {
     if (!node.inputs) return [];
-    const slots = inputName
-      ? node.inputs.map((inp, i) => inp.name === inputName ? i : -1).filter(i => i >= 0)
-      : node.inputs.map((inp, i) => inp.type === "IMAGE" ? i : -1).filter(i => i >= 0);
-    return slots.map(i => resolveSourcePreview(node, i)).filter(s => s !== null);
+    return matchingSlots().map(i => {
+      const s = resolveSourcePreview(node, i);
+      return s && { ...s, name: node.inputs[i].name };
+    }).filter(s => s);
   }
 
   function watch() {
     unwatchWidgets();
     if (!node.inputs || !node.graph) return;
-    const slots = inputName
-      ? node.inputs.map((inp, i) => inp.name === inputName ? i : -1).filter(i => i >= 0)
-      : node.inputs.map((inp, i) => inp.type === "IMAGE" ? i : -1).filter(i => i >= 0);
+    const slots = matchingSlots();
     for (const slotIdx of slots) {
       const input = node.inputs[slotIdx];
       if (!input || input.link == null) continue;

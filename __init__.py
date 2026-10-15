@@ -83,6 +83,7 @@ from .nodes.hdr_preview_node import HDRPreviewKJ
 from .nodes.preview_override_node import ModelPreviewOverrideKJ, GetPreviewOverrideFramesKJ
 from .nodes.context_windows_visualizer import ContextWindowsVisualizerKJ
 from .nodes.ideogram4_nodes import Ideogram4PromptBuilderKJ
+from .nodes.flux3_nodes import Flux3PromptBuilderKJ, Flux3BoxReconcileKJ
 
 import logging
 
@@ -191,6 +192,8 @@ NODE_CONFIG = {
     "ImageTransformKJ": {"class": ImageTransformKJ, "name": "Image Transform KJ"},
     "BBOXToBoundingBoxKJ": {"class": BBOXToBoundingBoxKJ, "name": "BBOX to Bounding Box KJ"},
     "Ideogram4PromptBuilderKJ": {"class": Ideogram4PromptBuilderKJ, "name": "Ideogram 4 Prompt Builder KJ"},
+    "Flux3PromptBuilderKJ": {"class": Flux3PromptBuilderKJ, "name": "FLUX.3 Prompt Builder KJ"},
+    "Flux3BoxReconcileKJ": {"class": Flux3BoxReconcileKJ, "name": "FLUX.3 Box Reconcile KJ"},
     "HDRPreviewKJ": {"class": HDRPreviewKJ, "name": "HDR Preview KJ"},
     "ModelPreviewOverrideKJ": {"class": ModelPreviewOverrideKJ, "name": "Model Preview Override KJ"},
     "GetPreviewOverrideFramesKJ": {"class": GetPreviewOverrideFramesKJ, "name": "Get Preview Override Frames KJ"},

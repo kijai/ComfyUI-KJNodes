@@ -59,8 +59,9 @@ def _wrap(draw, text, font, max_w):
     return lines
 
 
-def _render_preview(boxes, width, height, bg=None, brightness=50):
+def _render_preview(boxes, width, height, bg=None, brightness=50, refs=None):
     # Render the regions + prompts over the reference image (or a black canvas).
+    # refs: optional (IMAGE, MASK) at canvas size, pasted un-dimmed where the mask is set (per-box reference images).
     if bg is not None:
         iw, ih = bg.size
         long_edge = max(iw, ih)
@@ -76,6 +77,10 @@ def _render_preview(boxes, width, height, bg=None, brightness=50):
         rw = max(1, round(width * scale))
         rh = max(1, round(height * scale))
         img = Image.new("RGBA", (rw, rh), (0, 0, 0, 255))    # black so the overlay composites cleanly
+    if refs is not None:
+        rimg = Image.fromarray((refs[0][0].cpu().numpy() * 255).clip(0, 255).astype(np.uint8)).resize((rw, rh), Image.LANCZOS)
+        rmask = Image.fromarray((refs[1][0].cpu().numpy() * 255).clip(0, 255).astype(np.uint8), "L").resize((rw, rh), Image.BILINEAR)
+        img = Image.composite(rimg.convert("RGBA"), img, rmask)
     overlay = Image.new("RGBA", (rw, rh), (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
     fs = max(10, round(rh / 64))
@@ -154,21 +159,21 @@ def _palette(colors):
     return [c.upper() for c in colors if c]
 
 
-def _dumps(v, lvl=0):
-    # Like json.dumps(ensure_ascii=False, indent=4), but scalar arrays stay on one line.
-    pad, end = "    " * (lvl + 1), "    " * lvl
+def _dumps(v, lvl=0, ind="    "):
+    # Like json.dumps(ensure_ascii=False, indent=ind), but scalar arrays stay on one line.
+    pad, end = ind * (lvl + 1), ind * lvl
     if isinstance(v, str):
         return json.dumps(v, ensure_ascii=False)
     if isinstance(v, list):
         if not v:
             return "[]"
         if all(not isinstance(x, (dict, list)) for x in v):
-            return "[" + ", ".join(_dumps(x, lvl) for x in v) + "]"
-        return "[\n" + ",\n".join(pad + _dumps(x, lvl + 1) for x in v) + "\n" + end + "]"
+            return "[" + ", ".join(_dumps(x, lvl, ind) for x in v) + "]"
+        return "[\n" + ",\n".join(pad + _dumps(x, lvl + 1, ind) for x in v) + "\n" + end + "]"
     if isinstance(v, dict):
         if not v:
             return "{}"
-        items = [pad + json.dumps(k, ensure_ascii=False) + ": " + _dumps(val, lvl + 1) for k, val in v.items()]
+        items = [pad + json.dumps(k, ensure_ascii=False) + ": " + _dumps(val, lvl + 1, ind) for k, val in v.items()]
         return "{\n" + ",\n".join(items) + "\n" + end + "}"
     return json.dumps(v, ensure_ascii=False)
 
@@ -187,23 +192,70 @@ def _parse_json_list(s):
 def _repair_json(s):
     # Slice out the outermost {...} (drops ``` fences / prose), then strip trailing commas before
     # } or ] — the leading "(...)" alt matches whole strings first, so quoted commas are untouched.
-    i, j = s.find("{"), s.rfind("}")
-    t = s[i:j + 1] if (i != -1 and j > i) else s
+    t = s.strip()
+    if t.startswith('"'):                                   # bare "key": ... list (outer braces lost in a copy)
+        bare = re.sub(r'"(?:[^"\\]|\\.)*"', "", t)
+        t = "{" + t + ("}" if bare.count("{") >= bare.count("}") else "")
+    i, j = t.find("{"), t.rfind("}")
+    t = t[i:j + 1] if (i != -1 and j > i) else t
     return re.sub(r'("(?:[^"\\]|\\.)*")|,(\s*[}\]])', lambda m: m.group(1) or m.group(2), t)
 
 
-def _loads_caption(s):
+def _loads_caption(s, tag="Ideogram4PromptBuilderKJ"):
     # Parse a caption dict; on failure retry once with the lenient repair. Returns dict or None.
     for cand in ((s, _repair_json(s)) if s and s.strip() else ()):
         try:
             v = json.loads(cand)
             if isinstance(v, dict):
                 if cand is not s:
-                    logging.warning("[Ideogram4PromptBuilderKJ] import_json had errors; recovered with lenient parse")
+                    logging.warning(f"[{tag}] import_json had errors; recovered with lenient parse")
                 return v
         except (json.JSONDecodeError, TypeError):
             continue
     return None
+
+
+def _seed_boxes(bboxes, width, height, blank):
+    # BoundingBox input (pixel {x, y, width, height}) -> editor boxes carrying the model's blank fields.
+    if isinstance(bboxes, dict):                             # a single BoundingBox is a bare {x,y,width,height} dict
+        frame = [bboxes]
+    elif bboxes and isinstance(bboxes[0], (list, tuple)):
+        frame = bboxes[0]                                    # per-frame nesting: [[box, ...], ...]
+    else:
+        frame = bboxes or []                                 # flat list of boxes
+    return [{"x": bb.get("x", 0) / width, "y": bb.get("y", 0) / height,
+             "w": bb.get("width", 0) / width, "h": bb.get("height", 0) / height, **blank}
+            for bb in frame if isinstance(bb, dict)]
+
+
+def _bbox_outputs(boxes, width, height):
+    # Pixel-space bboxes ({x, y, width, height}) for SAM3 / BoundingBox consumers, in the canonical
+    # per-frame nesting (list[list[dict]]) that SAM3 / crop nodes expect (bboxes[frame] -> list of boxes).
+    out = []
+    for box in boxes:
+        if not isinstance(box, dict) or box.get("nobbox"):
+            continue
+        x, y = box.get("x", 0.0), box.get("y", 0.0)
+        bw, bh = box.get("w", 0.0), box.get("h", 0.0)
+        if bw < 0:
+            x += bw
+            bw = -bw
+        if bh < 0:
+            y += bh
+            bh = -bh
+        out.append({"x": round(x * width), "y": round(y * height),
+                    "width": round(bw * width), "height": round(bh * height)})
+    return [out] if out else []
+
+
+def _bg_image(image):
+    # First frame of the optional reference image as PIL (preview background), else None.
+    if image is None:
+        return None
+    try:
+        return Image.fromarray((image[0].detach().cpu().numpy() * 255).clip(0, 255).astype(np.uint8))
+    except Exception:
+        return None
 
 
 def _caption_to_boxes(cap):
@@ -341,18 +393,7 @@ Toolbar:
         boxes = _parse_json_list(elements_data)
         boxes_seeded = False
         if not boxes and bboxes:
-            if isinstance(bboxes, dict):                     # a single BoundingBox is a bare {x,y,width,height} dict
-                frame = [bboxes]
-            elif bboxes and isinstance(bboxes[0], (list, tuple)):
-                frame = bboxes[0]                            # per-frame nesting: [[box, ...], ...]
-            else:
-                frame = bboxes                               # flat list of boxes
-            for bb in frame:
-                if not isinstance(bb, dict):
-                    continue
-                boxes.append({"x": bb.get("x", 0) / width, "y": bb.get("y", 0) / height,
-                              "w": bb.get("width", 0) / width, "h": bb.get("height", 0) / height,
-                              "type": "obj", "text": "", "desc": "", "palette": []})
+            boxes = _seed_boxes(bboxes, width, height, {"type": "obj", "text": "", "desc": "", "palette": []})
             boxes_seeded = bool(boxes)
 
         imported = _loads_caption(import_json)               # strict parse, then a lenient repair fallback
@@ -408,32 +449,8 @@ Toolbar:
                 "background": background,
                 "elements": elements,
             }
-        bg = None
-        if image is not None:                                # composite over the input image, else black
-            try:
-                bg = Image.fromarray((image[0].detach().cpu().numpy() * 255).clip(0, 255).astype(np.uint8))
-            except Exception:
-                bg = None
-        preview = _render_preview(boxes, width, height, bg, bg_brightness)
-
-        # Pixel-space bboxes ({x, y, width, height}) for SAM3 / BoundingBox consumers.
-        bbox_dicts = []
-        for box in boxes:
-            if not isinstance(box, dict) or box.get("nobbox"):
-                continue
-            x, y = box.get("x", 0.0), box.get("y", 0.0)
-            bw, bh = box.get("w", 0.0), box.get("h", 0.0)
-            if bw < 0:
-                x += bw
-                bw = -bw
-            if bh < 0:
-                y += bh
-                bh = -bh
-            bbox_dicts.append({"x": round(x * width), "y": round(y * height),
-                               "width": round(bw * width), "height": round(bh * height)})
-        # Per-frame nesting (list[list[dict]]) — the canonical BoundingBox shape that
-        # SAM3 / crop nodes expect (bboxes[frame] -> list of boxes).
-        bboxes_out = [bbox_dicts] if bbox_dicts else []
+        # composite over the input image, else black
+        preview = _render_preview(boxes, width, height, _bg_image(image), bg_brightness)
 
         # ui: send the resolved width/height so the editor canvas can follow connected
         # inputs; import_json (if wired) loads into the editor (output reflects editor only).
@@ -442,4 +459,4 @@ Toolbar:
             ui["boxes"] = [json.dumps(boxes)]
         if used_import:                                       # mirror the import in the editor (only when used)
             ui["caption"] = [_dumps(imported)]
-        return io.NodeOutput(dump(caption), preview, bboxes_out, width, height, ui=ui)
+        return io.NodeOutput(dump(caption), preview, _bbox_outputs(boxes, width, height), width, height, ui=ui)

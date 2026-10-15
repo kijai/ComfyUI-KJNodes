@@ -2,10 +2,13 @@ import { chainCallback, addMiddleClickPan, addWheelPassthrough, cursorForBboxMod
 const { app } = window.comfyAPI.app;
 
 const HANDLE = 8;            // hit radius (canvas px) for corners/edges
-const MAX_ELEM_COLORS = 5;   // Ideogram 4 per-element palette cap
-const MAX_STYLE_COLORS = 16; // Ideogram 4 style palette cap
 const DOCK_MINW = 300, DOCK_MINH = 240;   // dock min size — kept in sync with the .kjideo-dock CSS below
 let copiedBoxes = null;      // internal clipboard for copy/paste of regions (array; shared across nodes)
+
+// The editor below is shared by every prompt-builder node; a spec per node type supplies its caption
+// format (widgets ↔ JSON, element ↔ box, panel fields). IDEOGRAM4 is at the bottom of this file.
+const SPECS = {};
+export function registerPromptBuilder(spec) { SPECS[spec.nodeName] = spec; }
 
 // Track the most recent generated image so it can be grabbed as a background.
 let lastResultImage = null;
@@ -69,32 +72,50 @@ try {
 } catch (e) {}
 
 // Named caption-JSON templates, each stored as its own file server-side via ComfyUI's userdata
-// API (under the ComfyUI user dir) so they persist across browsers/machines and survive clears.
-const TPL_DIR = "kjnodes/ideogram4/templates";
+// API (under the ComfyUI user dir, one folder per model: spec.tplDir) so they persist across browsers/machines.
 const tplSafe = (s) => (s || "").replace(/[\/\\:*?"<>|]+/g, "_").trim();   // filesystem-safe name
-const tplFile = (name) => `${TPL_DIR}/${name}.json`;
-async function listTemplateNames() {
+const tplFile = (dir, name) => `${dir}/${name}.json`;
+async function listTemplateNames(dir) {
   try {
-    const items = await app.api.listUserDataFullInfo(TPL_DIR);
+    const items = await app.api.listUserDataFullInfo(dir);
     return items.map((it) => it.path.split(/[\\/]/).pop() || "")
       .filter((f) => /\.json$/i.test(f))
       .map((f) => f.replace(/\.json$/i, ""))
       .filter(Boolean).sort((a, b) => a.localeCompare(b));
   } catch (e) { return []; }
 }
-async function loadTemplate(name) {
-  try { const r = await app.api.getUserData(tplFile(name)); if (r.status === 200) return await r.text(); } catch (e) {}
+async function loadTemplate(dir, name) {
+  try { const r = await app.api.getUserData(tplFile(dir, name)); if (r.status === 200) return await r.text(); } catch (e) {}
   return null;
 }
-async function saveTemplate(name, caption) {
+async function saveTemplate(dir, name, caption) {
   try {
-    await app.api.storeUserData(tplFile(name), caption, { overwrite: true, stringify: false, throwOnError: true });
+    await app.api.storeUserData(tplFile(dir, name), caption, { overwrite: true, stringify: false, throwOnError: true });
     return true;
   } catch (e) { window.alert("Couldn't save the template to the server."); return false; }
 }
-async function deleteTemplate(name) {
-  try { await app.api.deleteUserData(tplFile(name)); } catch (e) {}
+async function deleteTemplate(dir, name) {
+  try { await app.api.deleteUserData(tplFile(dir, name)); } catch (e) {}
 }
+
+// pyJson: matches Python _dumps — indent `ind`, but scalar arrays stay on one line.
+export function pyJson(v, lvl = 0, ind = "    ") {
+  if (v === null) return "null";
+  if (typeof v === "number" || typeof v === "boolean") return String(v);
+  if (typeof v === "string") return JSON.stringify(v);
+  const pad = ind.repeat(lvl + 1), end = ind.repeat(lvl);
+  if (Array.isArray(v)) {
+    if (!v.length) return "[]";
+    if (v.every((x) => x === null || typeof x !== "object"))   // scalar array → inline
+      return "[" + v.map((x) => pyJson(x, lvl, ind)).join(", ") + "]";
+    return "[\n" + v.map((x) => pad + pyJson(x, lvl + 1, ind)).join(",\n") + "\n" + end + "]";
+  }
+  const keys = Object.keys(v);
+  if (!keys.length) return "{}";
+  return "{\n" + keys.map((k) => pad + JSON.stringify(k) + ": " + pyJson(v[k], lvl + 1, ind)).join(",\n") + "\n" + end + "}";
+}
+// ["#rrggbb", ...] -> ["#RRGGBB", ...], dropping empties (matches Python _palette).
+export function cleanPalette(arr) { return (arr || []).filter((c) => c).map((c) => c.toUpperCase()); }
 
 // Parse a #rrggbb hex into {r,g,b}, or null if malformed.
 function hexRgb(hex) {
@@ -415,12 +436,24 @@ app.registerExtension({
   name: "KJNodes.Ideogram4PromptBuilder",
 
   async beforeRegisterNodeDef(nodeType, nodeData) {
-    if (nodeData?.name !== "Ideogram4PromptBuilderKJ") return;
+    const spec = SPECS[nodeData?.name];                    // all extension modules have loaded by now
+    if (!spec) return;
     injectStyle();
 
     chainCallback(nodeType.prototype, "onNodeCreated", function () {
       const node = this;
       const findW = (n) => node.widgets?.find((w) => w.name === n);
+      const ed = { node, findW, getW, setW: setWidgetVal, dims };   // editor access handed to the spec
+      const FRONT_FIRST = spec.frontFirst !== false;         // index 0 = front (Ideogram) or back (Ming layers)
+      const NOUN = spec.noun || "region";
+      // Reference Autogrow group: per-box images (spec.refs, Ming) or one canvas per reference (spec.views).
+      const REF_GROUP = spec.refs || spec.views;
+      const REF_RE = REF_GROUP ? new RegExp(`^(?:${REF_GROUP}\\.)?ref_(\\d+)$`) : null;
+      const refIndex = (name) => { const m = REF_RE && typeof name === "string" && name.match(REF_RE); return m ? parseInt(m[1], 10) : null; };
+      // Connected reference inputs as sorted indices, e.g. [1, 3].
+      const refSlots = () => (node.inputs || []).filter((inp) => inp.link != null && refIndex(inp.name) != null)
+        .map((inp) => refIndex(inp.name)).sort((a, b) => a - b);
+      ed.refSlots = refSlots;
       const elementsWidget = findW("elements_data");
       const stylePaletteWidget = findW("style_palette_data");
       const bgBrightnessWidget = findW("bg_brightness");
@@ -461,6 +494,9 @@ app.registerExtension({
       node._selected = false;  // node selected in the graph
       node._bgImg = null;      // optional reference image shown as the canvas background
       node._bgManual = false;  // bg set via "use last result" (not the image input)
+      node._refImgs = new Map(); // reference index -> Image/canvas drawn in the boxes that use it (spec.refs) or as a view's canvas
+      node._view = 0;          // spec.views: canvas shown — 0 = output, k = reference ref_k
+      node._viewPrev = null;   // box selected before a canvas switch; the next drawn box may join its row (spec.initBox)
       node._lastImported = ""; // last import_json applied to the editor (avoid re-apply)
       node._areaObservers = [];             // (reserved) live ResizeObservers to disconnect on rebuild
 
@@ -484,11 +520,12 @@ app.registerExtension({
       clearBtn.textContent = "Clear all";
       const tokenSpan = document.createElement("span");
       tokenSpan.style.cssText = "color:#888; white-space:nowrap;";
-      tokenSpan.title = "Rough token estimate (~chars/4). Grey <256, green healthy, orange nearing, red ≥2048 (model cap — will error)";
+      tokenSpan.title = "Rough token estimate (~chars/4)." + (spec.tokenCap
+        ? ` Grey <256, green healthy, orange nearing, red ≥${spec.tokenCap} (model cap — will error)` : "");
       // Output-settings dropdown (formatting + bbox coordinate space/order) — writes the hidden widgets.
       const outBtn = document.createElement("button");
       outBtn.className = "kjideo-btn"; outBtn.textContent = "Output ▾";
-      outBtn.title = "Output JSON settings: compact/pretty, bbox coordinate space and axis order";
+      outBtn.title = "Output JSON settings: compact/pretty" + (coordWidget ? ", bbox coordinate space and axis order" : "");
       stopProp(outBtn);
       const outToggle = (get, set, label, title) => {                 // checkbox row bound to a hidden widget
         const l = document.createElement("label");
@@ -500,21 +537,21 @@ app.registerExtension({
         l._cb = cb; return l;
       };
       const compactLbl = outToggle(
-        () => (formatWidget?.value) !== "pretty",
+        () => (formatWidget?.value || spec.format) !== "pretty",
         (on) => { if (formatWidget) formatWidget.value = on ? "compact" : "pretty"; },
-        "compact JSON", "Compact output (the format Ideogram 4 expects). Uncheck for pretty/indented.");
-      const absLbl = outToggle(
+        "compact JSON", spec.compactTip);
+      const absLbl = coordWidget && outToggle(                        // only for models with these widgets (Ideogram)
         () => (coordWidget?.value) === "absolute",
         (on) => { if (coordWidget) coordWidget.value = on ? "absolute" : "normalized"; },
         "absolute pixels", "bbox in absolute pixels (scaled by width/height) instead of the 0-1000 grid. NON-STANDARD for Ideogram 4.");
-      const xyLbl = outToggle(
+      const xyLbl = orderWidget && outToggle(
         () => (orderWidget?.value) === "xy",
         (on) => { if (orderWidget) orderWidget.value = on ? "xy" : "yx"; },
         "xy order (Qwen)", "bbox axis order [xmin,ymin,xmax,ymax] (x1,y1,x2,y2, as Qwen-VL uses) instead of Ideogram's [ymin,xmin,ymax,xmax].");
       const outMenu = document.createElement("div");
       outMenu.className = "kjideo-menu kjideo-bgmenu";
       outMenu.style.display = "none";
-      for (const l of [compactLbl, absLbl, xyLbl]) { const r = document.createElement("div"); r.className = "kjideo-bgrow"; r.appendChild(l); outMenu.appendChild(r); }
+      for (const l of [compactLbl, absLbl, xyLbl]) { if (!l) continue; const r = document.createElement("div"); r.className = "kjideo-bgrow"; r.appendChild(l); outMenu.appendChild(r); }
       document.body.appendChild(outMenu);
       node._outMenu = outMenu;
       const outDismiss = outsideDismiss(outMenu, () => closeOutMenu(), outBtn);
@@ -674,7 +711,8 @@ app.registerExtension({
       // ── Templates popup: save/load named caption JSONs (server-side userdata) ──
       const tplBtn = document.createElement("button");
       tplBtn.className = "kjideo-btn"; tplBtn.textContent = "Templates ▾";
-      tplBtn.title = "Save / load the caption JSON as templates (stored on the server ComfyUI\\user\\default\\kjnodes\\ideogram4)";
+      tplBtn.title = "Save / load the caption JSON as templates (stored on the server ComfyUI\\user\\default\\" +
+        spec.tplDir.replace(/\/templates$/, "").replace(/\//g, "\\") + ")";
       stopProp(tplBtn);
       const tplMenu = document.createElement("div");
       tplMenu.className = "kjideo-menu kjideo-bgmenu";
@@ -690,12 +728,12 @@ app.registerExtension({
         saveBtn.addEventListener("click", async () => {
           const name = tplSafe(window.prompt("Save template as:", "") || "");
           if (!name) return;
-          const existing = await listTemplateNames();
+          const existing = await listTemplateNames(spec.tplDir);
           if (existing.includes(name) && !window.confirm(`Overwrite template "${name}"?`)) return;
-          if (await saveTemplate(name, buildCaption())) buildTplMenu();
+          if (await saveTemplate(spec.tplDir, name, buildCaption())) buildTplMenu();
         });
         saveRow.appendChild(saveBtn); tplMenu.appendChild(saveRow);
-        const names = await listTemplateNames();
+        const names = await listTemplateNames(spec.tplDir);
         if (!names.length) {
           const empty = document.createElement("div"); empty.className = "kjideo-mhdr"; empty.textContent = "No templates saved.";
           tplMenu.appendChild(empty);
@@ -709,24 +747,24 @@ app.registerExtension({
           const del = document.createElement("button"); del.className = "kjideo-lbtn del"; del.textContent = "✕"; del.title = "Delete template";
           row.append(txt, ins, upd, del); tplMenu.appendChild(row);
           txt.addEventListener("click", async () => {
-            const cap = tryParseCaption(await loadTemplate(name));
+            const cap = tryParseCaption(await loadTemplate(spec.tplDir, name));
             if (!cap) { window.alert("That template isn't a valid caption JSON."); return; }
             loadCaption(cap); closeTplMenu();
           });
           ins.addEventListener("click", async (e) => {
             e.stopPropagation();
-            const cap = tryParseCaption(await loadTemplate(name));
+            const cap = tryParseCaption(await loadTemplate(spec.tplDir, name));
             if (!cap) { window.alert("That template isn't a valid caption JSON."); return; }
             insertCaptionBoxes(cap); closeTplMenu();
           });
           upd.addEventListener("click", async (e) => {
             e.stopPropagation();
-            if (await saveTemplate(name, buildCaption())) buildTplMenu();
+            if (await saveTemplate(spec.tplDir, name, buildCaption())) buildTplMenu();
           });
           del.addEventListener("click", async (e) => {
             e.stopPropagation();
             if (!window.confirm(`Delete template "${name}"?`)) return;
-            await deleteTemplate(name); buildTplMenu();
+            await deleteTemplate(spec.tplDir, name); buildTplMenu();
           });
         }
       }
@@ -739,7 +777,17 @@ app.registerExtension({
         tplMenu.style.top = Math.min(r.bottom + 4, window.innerHeight - tplMenu.offsetHeight - 4) + "px";
         tplDismiss.arm();
       });
-      bar.appendChild(hint); bar.appendChild(tokenSpan); bar.appendChild(outBtn); bar.appendChild(bgBtn); bar.appendChild(txtBtn); bar.appendChild(copyBtn); bar.appendChild(importBtn); bar.appendChild(tplBtn); bar.appendChild(clearBtn);
+      // spec.views: which canvas is shown and edited — the output, or one of the connected references.
+      const viewSel = document.createElement("select");
+      viewSel.className = "kjideo-btn"; viewSel.style.cssText = "flex:0 0 auto;";
+      viewSel.title = `Canvas: the output, or a reference to mark where a ${NOUN}'s object is in it`;
+      stopProp(viewSel);
+      viewSel.addEventListener("change", () => switchView(parseInt(viewSel.value, 10)));
+      bar.appendChild(hint);
+      if (spec.views) bar.appendChild(viewSel);
+      bar.appendChild(tokenSpan);
+      if (!spec.textCaption) bar.appendChild(outBtn);
+      bar.appendChild(bgBtn); bar.appendChild(txtBtn); bar.appendChild(copyBtn); bar.appendChild(importBtn); bar.appendChild(tplBtn); bar.appendChild(clearBtn);
       updateGrabBtn();
 
       // Persistent global style-palette row
@@ -753,7 +801,7 @@ app.registerExtension({
       canvasEl.className = "kjideo-canvas";
       canvasEl.tabIndex = 0;                                  // focusable, so it can receive key events
       canvasEl.title = "Drag to draw · Ctrl-drag force-draw over a box · click to select · shift-drag marquee-select · " +
-        "shift-click toggle · drag a group to move all · alt-click overlap · dbl-click edit · right-click region list · " +
+        `shift-click toggle · drag a group to move all · alt-click overlap · dbl-click edit · right-click ${NOUN} list · ` +
         "Del remove (all selected) · Ctrl/Cmd+C/V/D copy/paste/duplicate · H hide boxes (view)";
       const ctx = canvasEl.getContext("2d");
       addWheelPassthrough(wrap);   // middle-click pan is wired on the whole dock (fl) in undock()
@@ -785,7 +833,8 @@ app.registerExtension({
         }, flushChange);
       });
 
-      wrap.appendChild(bar); wrap.appendChild(styleBar); wrap.appendChild(cvBox); wrap.appendChild(splitter); wrap.appendChild(panel);
+      wrap.appendChild(bar); if (spec.maxStyleColors) wrap.appendChild(styleBar);
+      wrap.appendChild(cvBox); wrap.appendChild(splitter); wrap.appendChild(panel);
 
       // The editor is NOT a node widget — it lives in the floating dock (built in undock()), so the node
       // is an ordinary widgets-only node that ComfyUI sizes/persists with zero custom height handling.
@@ -804,7 +853,8 @@ app.registerExtension({
         if (wrap.offsetParent === null) return;   // hidden (collapsed tab / minimized) — measurements are 0
         const availW = cvBox.clientWidth, availH = cvBox.clientHeight;
         if (availW < 4 || availH < 4) return;
-        const aspect = (wWidget?.value || 1) / (hWidget?.value || 1);
+        const [dw, dh] = dims();                               // the shown canvas: output or a reference (spec.views)
+        const aspect = (dw || 1) / (dh || 1);
         let cw = availW, ch = cw / aspect;
         if (ch > availH) { ch = availH; cw = ch * aspect; }
         canvasEl.style.width = Math.round(cw) + "px";
@@ -957,7 +1007,7 @@ app.registerExtension({
         addMiddleClickPan(fl);   // middle-click pans the graph from anywhere in the dock (bubbles up from inner elements)
         fl.addEventListener("mousedown", (e) => { if (e.button === 1) e.stopPropagation(); });   // ...but don't let it reach the node behind
         const head = document.createElement("div"); head.className = "kjideo-dock-head";
-        const title = document.createElement("span"); title.textContent = "Ideogram 4 editor"; title.style.flex = "1";
+        const title = document.createElement("span"); title.textContent = spec.title; title.style.flex = "1";
         const minBtn = document.createElement("button"); minBtn.className = "kjideo-btn";
         stopProp(minBtn);
         const applyMin = (on) => {                            // collapse the editor to just the header bar
@@ -1080,6 +1130,35 @@ app.registerExtension({
         return { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height };
       }
       function clamp01(v) { return Math.max(0, Math.min(1, v)); }
+      // spec.views: only the shown canvas's boxes are drawn, hit-tested and selectable.
+      function onView(b) { return !spec.views || (b.view || 0) === node._view; }
+      // Show canvas k; select the shown box's twin there (same spec.linkKey), else remember it for spec.initBox.
+      function switchView(k) {
+        if (!spec.views || k === node._view) return;
+        closeInlineEditor();
+        const prev = node._boxes[node._activeIdx] || null;
+        node._view = k;
+        const key = spec.linkKey;
+        const twin = prev && key ? node._boxes.findIndex((o) => o !== prev && onView(o) && o[key] === prev[key]) : -1;
+        node._viewPrev = twin < 0 ? prev : null;
+        selectOnly(twin);
+        viewSel.value = String(k);
+        renderPanel(); fitCanvas(); drawCanvas();
+      }
+      // Canvas choices = output + each connected reference; falls back to the output if the shown one went away.
+      function rebuildViews() {
+        if (!spec.views) return;
+        const slots = refSlots();
+        if (node._view && !slots.includes(node._view)) switchView(0);
+        viewSel.innerHTML = "";
+        for (const k of [0, ...slots]) {
+          const o = document.createElement("option");
+          o.value = String(k); o.textContent = k ? `ref_${k}` : "output";
+          viewSel.appendChild(o);
+        }
+        viewSel.value = String(node._view);
+        viewSel.style.display = slots.length ? "" : "none";
+      }
       // greedy word-wrap to maxW px (ctx.font must be set by caller)
       function wrapLines(text, maxW) {
         const lines = [];
@@ -1105,12 +1184,24 @@ app.registerExtension({
         return { ...b, x, y, w: Math.max(0, w), h: Math.max(0, h) };
       }
 
+      // Box indices front-most first: index order when index 0 = front, reversed for back-first models (Ming).
+      function stackOrder() {
+        const idx = node._boxes.map((_, i) => i).filter((i) => onView(node._boxes[i]));
+        return FRONT_FIRST ? idx : idx.reverse();
+      }
+      // A box filling the canvas can't move, so dragging inside it draws a new box instead (a click still
+      // selects it) — otherwise a full-canvas background would leave no empty space to draw on.
+      function drawThrough(hit) {
+        const b = hit && hit.mode === "move" && node._boxes[hit.index];
+        return !!b && b.w >= 0.995 && b.h >= 0.995;
+      }
+
       // All boxes under the point, top-first to match draw order: the active box is
-      // drawn last (on top), then the rest by index low→high (index 0 = front).
+      // drawn last (on top), then the rest front-most first (see stackOrder).
       function boxesAt(mN) {
         const baseRx = HANDLE / logW(), baseRy = HANDLE / logH();
         const res = [];
-        for (let i = 0; i < node._boxes.length; i++) {
+        for (const i of stackOrder()) {
           const b = node._boxes[i];
           if (b.locked) continue;                          // locked regions aren't grabbable on the canvas
           const rx = Math.min(baseRx, b.w / 3), ry = Math.min(baseRy, b.h / 3);  // shrink handles on small boxes so a central move zone remains
@@ -1128,16 +1219,16 @@ app.registerExtension({
         return cands.find((c) => c.index === node._activeIdx && c.mode !== "move") || cands[0];
       }
       // Tag-chip rects (canvas px), placed to avoid overlapping each other: each
-      // box's tag tries top-left, top-right, bottom-right, bottom-left in turn.
+      // box's tag tries top-left, top-right, bottom-right, bottom-left in turn (front-most boxes pick first).
       function tagRects() {
         ctx.font = "bold 11px monospace";
         const W = logW(), H = logH(), h = 14;
         const placed = [], rects = [];
         const hits = (a, b) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
-        for (let i = 0; i < node._boxes.length; i++) {
+        for (const i of stackOrder()) {
           const b = node._boxes[i];
           const x1 = b.x * W, y1 = b.y * H, x2 = (b.x + b.w) * W, y2 = (b.y + b.h) * H;
-          const tag = String(i + 1).padStart(2, "0");
+          const tag = spec.tagText ? spec.tagText(b) : String(i + 1).padStart(2, "0");
           const w = ctx.measureText(tag).width + 8;
           // Box too small to hold the badge → place it just outside (above/below/beside) so it doesn't
           // cover the box and the box stays grabbable; otherwise tuck it into a free corner inside.
@@ -1158,7 +1249,7 @@ app.registerExtension({
       function titleAt(mN) {
         const px = mN.x * logW(), py = mN.y * logH();
         const rects = tagRects();
-        for (let i = node._boxes.length - 1; i >= 0; i--) {
+        for (const i of stackOrder()) {                    // front-most chip wins where chips overlap
           if (node._boxes[i].locked) continue;             // locked badges aren't interactive
           const r = rects[i];
           if (r && px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h) return i;
@@ -1175,7 +1266,7 @@ app.registerExtension({
         const placed = [], blocks = [];
         const overlap = (a, b) => Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x)) *
                                   Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y));
-        for (let i = 0; i < node._boxes.length; i++) {
+        for (const i of stackOrder()) {
           const b = node._boxes[i];
           let body = b.desc || "";
           if (b.type === "text" && b.text) body = `"${b.text}"` + (body ? " — " + body : "");
@@ -1215,7 +1306,7 @@ app.registerExtension({
         if (ti !== null && !cycle) return { index: ti, mode: "move" };
         if (cycle && cands.length > 1) {
           // cycle over a stable order (boxesAt moves the active box to the front, which would otherwise ping-pong 2)
-          const ordered = [...cands].sort((a, b) => a.index - b.index);
+          const ordered = [...cands].sort((a, b) => FRONT_FIRST ? a.index - b.index : b.index - a.index);
           const pos = ordered.findIndex((c) => c.index === node._activeIdx);
           return ordered[(pos + 1) % ordered.length];
         }
@@ -1333,6 +1424,23 @@ app.registerExtension({
         for (const fy of h) { const py = Math.round(fy * H) + 0.5; ctx.beginPath(); ctx.moveTo(0, py); ctx.lineTo(W, py); ctx.stroke(); }
         ctx.restore();
       }
+      // A box's reference image, placed like the node's reference output: contain = fit inside, cover = fill + crop.
+      function drawRef(b, x1, y1, w, h) {
+        const src = node._refImgs.get(b.ref);
+        const iw = src ? (src.naturalWidth || src.width) : 0, ih = src ? (src.naturalHeight || src.height) : 0;
+        const bx = Math.min(x1, x1 + w), by = Math.min(y1, y1 + h), bw = Math.abs(w), bh = Math.abs(h);
+        ctx.save();
+        ctx.beginPath(); ctx.rect(bx, by, bw, bh); ctx.clip();
+        if (iw && ih) {
+          const s = b.fit === "cover" ? Math.max(bw / iw, bh / ih) : Math.min(bw / iw, bh / ih);
+          ctx.drawImage(src, bx + (bw - iw * s) / 2, by + (bh - ih * s) / 2, iw * s, ih * s);
+        } else {                                             // no preview (yet): mark the assignment instead
+          ctx.fillStyle = "rgba(128,128,128,0.3)"; ctx.fillRect(bx, by, bw, bh);
+          ctx.font = "11px sans-serif"; ctx.textAlign = "center"; ctx.fillStyle = "#ddd";
+          ctx.fillText("ref " + b.ref, bx + bw / 2, by + bh - 6);
+        }
+        ctx.restore();
+      }
       let _rafPending = false;
       function drawCanvas() {
         if (_rafPending) return;
@@ -1351,8 +1459,9 @@ app.registerExtension({
         ctx.clearRect(0, 0, W, H);
         let bri = bgBrightnessWidget ? bgBrightnessWidget.value : 25;
         if (typeof bri !== "number" || isNaN(bri)) bri = 25;       // guard against unset widget value
-        if (node._bgImg) {                                         // reference image, dimmed by brightness
-          ctx.drawImage(node._bgImg, 0, 0, W, H);
+        const bgImg = spec.views && node._view ? node._refImgs.get(node._view) : node._bgImg;   // a reference canvas shows its image
+        if (bgImg) {                                               // reference image, dimmed by brightness
+          ctx.drawImage(bgImg, 0, 0, W, H);
           const dim = 1 - bri / 100;
           if (dim > 0) { ctx.fillStyle = `rgba(0,0,0,${dim})`; ctx.fillRect(0, 0, W, H); }
         } else {                                                   // blank canvas grey from brightness
@@ -1366,11 +1475,12 @@ app.registerExtension({
         const aIdx = showSel ? node._activeIdx : -1;
         const selSet = new Set(showSel ? node._selection : []);
         if (aIdx >= 0) selSet.add(aIdx);
-        // index 0 = front (drawn last); selected drawn above non-selected, active last of all
-        const nonSel = node._boxes.map((_, i) => i).filter((i) => !selSet.has(i)).reverse();
-        const selOthers = node._boxes.map((_, i) => i).filter((i) => selSet.has(i) && i !== aIdx).reverse();
+        // paint back → front (front-most drawn last); selected drawn above non-selected, active last of all
+        const paint = stackOrder().reverse();
+        const nonSel = paint.filter((i) => !selSet.has(i));
+        const selOthers = paint.filter((i) => selSet.has(i) && i !== aIdx);
         const order = [...nonSel, ...selOthers];
-        if (aIdx >= 0 && aIdx < node._boxes.length) order.push(aIdx);
+        if (aIdx >= 0 && aIdx < node._boxes.length && onView(node._boxes[aIdx])) order.push(aIdx);
         const tagR = tagRects();                              // collision-avoided tag positions
         const textB = textBlocks();                           // collision-avoided in-box text positions
         for (const i of order) {
@@ -1384,6 +1494,7 @@ app.registerExtension({
             ctx.fillStyle = "rgba(26,26,26,0.88)";
             ctx.fillRect(x1, y1, w, h);
           }
+          if (b.ref && !b.nobbox && spec.refs) drawRef(b, x1, y1, w, h);   // under the tint, outline and text
           const baseA = (node.properties.boxOpacity == null ? 14 : node.properties.boxOpacity) / 100;
           const fillA = Math.min(1, hovered ? baseA + 0.1 : baseA);   // box-color tint at the chosen opacity
           ctx.fillStyle = col + Math.round(fillA * 255).toString(16).padStart(2, "0");
@@ -1440,7 +1551,7 @@ app.registerExtension({
           }
         }
         const apIdx = node._altPreview ?? -1;                 // Alt-held: ring the box an alt-click would select next
-        if (apIdx >= 0 && apIdx < node._boxes.length) {
+        if (apIdx >= 0 && apIdx < node._boxes.length && onView(node._boxes[apIdx])) {
           const { x1, y1, x2, y2 } = toPx(node._boxes[apIdx]);
           ctx.strokeStyle = "#46b4e6"; ctx.lineWidth = 2; ctx.setLineDash([5, 3]);
           ctx.strokeRect(x1 + 1, y1 + 1, (x2 - x1) - 2, (y2 - y1) - 2);
@@ -1460,7 +1571,7 @@ app.registerExtension({
       // ── serialization ──
       // Wired AND the source node isn't muted(2)/bypassed(4) — those keep the link but emit nothing.
       const importConnected = () => {
-        const link = node.graph?.links?.[node.inputs?.find((i) => i.name === "import_json")?.link];
+        const link = node.graph?.links?.[node.inputs?.find((i) => i.name === (spec.importInput || "import_json"))?.link];
         return !!link && ![2, 4].includes(node.graph.getNodeById(link.origin_id)?.mode);
       };
       function serialize() {                              // saved/restored value: clean boxes
@@ -1485,6 +1596,15 @@ app.registerExtension({
       function commit() { serialize(); renderPanel(); drawCanvas(); updateTokens(); flushChange(); }  // flush so canvas edits persist without a defocus
       // Live text edit: persist + repaint + token count, without rebuilding the panel.
       function touch() { serialize(); drawCanvas(); updateTokens(); }
+      // Set a box field; with spec.linkKey the box's twins on other canvases follow (renaming the key renames them).
+      function setBoxField(b, key, val) {
+        const link = spec.linkKey, old = b[key];
+        b[key] = val;
+        if (!link) return;
+        for (const o of node._boxes) {
+          if (o !== b && (key === link ? o[link] === old : o[link] === b[link])) o[key] = val;
+        }
+      }
 
       function removeBox(i) {
         node._boxes.splice(i, 1);
@@ -1542,7 +1662,8 @@ app.registerExtension({
           e.preventDefault(); e.stopPropagation();
           return;
         }
-        if (hit) {
+        node._clickSel = drawThrough(hit) ? hit.index : -1;   // draw, but a plain click selects that box (onUp)
+        if (hit && node._clickSel < 0) {
           if (!node._selection.has(hit.index)) node._selection = new Set([hit.index]);  // outside selection → pick it
           else if (node._selection.size > 1) node._pendingCollapse = hit.index;          // click (no drag) collapses
           node._activeIdx = hit.index;
@@ -1554,7 +1675,10 @@ app.registerExtension({
           }
         } else {
           node._dragMode = "draw";
-          const nb = { x: mN.x, y: mN.y, w: 0, h: 0, type: "obj", text: "", desc: "", palette: [] };
+          const nb = { x: mN.x, y: mN.y, w: 0, h: 0, ...spec.blankBox() };
+          if (spec.views) nb.view = node._view;
+          spec.initBox?.(nb, ed, node._viewPrev);           // e.g. join the row selected before a canvas switch
+          node._viewPrev = null;
           node._boxes.push(nb);
           node._activeIdx = node._boxes.length - 1;
           node._selection = new Set([node._activeIdx]);
@@ -1573,7 +1697,8 @@ app.registerExtension({
       function hoverTargets(mN, alt, force) {
         if (alt && !force) { const pick = pickForSelection(mN, true); return { ti: null, hb: null, ap: pick ? pick.index : -1, hit: null }; }
         const ti = force ? null : titleAt(mN);
-        const hit = force ? null : hitTest(mN);
+        let hit = force ? null : hitTest(mN);
+        if (drawThrough(hit)) hit = null;                   // a canvas-filling box's interior acts as empty canvas
         return { ti, hb: ti != null ? ti : (hit ? hit.index : null), ap: -1, hit };
       }
       function applyHover(t) {
@@ -1638,14 +1763,14 @@ app.registerExtension({
         ta.focus(); ta.select();
         const orig = b.desc || "";
         let cancelled = false;
-        ta.addEventListener("input", () => { b.desc = ta.value; drawCanvas(); updateTokens(); });
+        ta.addEventListener("input", () => { setBoxField(b, "desc", ta.value); drawCanvas(); updateTokens(); });
         ta.addEventListener("keydown", (e) => {
           e.stopPropagation();
-          if (e.key === "Escape") { cancelled = true; b.desc = orig; ta.blur(); }
+          if (e.key === "Escape") { cancelled = true; setBoxField(b, "desc", orig); ta.blur(); }
           else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) ta.blur();
         });
         ta.addEventListener("blur", () => {
-          if (!cancelled) b.desc = ta.value;
+          if (!cancelled) setBoxField(b, "desc", ta.value);
           closeInlineEditor();
           commit();
         });
@@ -1684,6 +1809,8 @@ app.registerExtension({
         for (const b of clones) {
           b.x = clamp01(b.x + dx); b.y = clamp01(b.y + dy);
           delete b.nobbox;                              // pasted boxes are placed
+          if (spec.views) b.view = node._view;          // onto the shown canvas
+          spec.initBox?.(b, ed, null);                  // a copy is a new element (fresh id)
           node._boxes.push(b);
         }
         node._selection = new Set();
@@ -1775,7 +1902,7 @@ app.registerExtension({
         const b = node._boxes[node._activeIdx];
         if (b && (b.w < 0.005 || b.h < 0.005) && node._dragMode === "draw") {
           node._boxes.splice(node._activeIdx, 1);
-          selectOnly(-1);
+          selectOnly(node._clickSel ?? -1);            // a click inside a canvas-filling box selects it
         } else if (node._pendingCollapse >= 0) {     // click (no drag) on a group member → keep only it
           selectOnly(node._pendingCollapse);
         }
@@ -1811,7 +1938,7 @@ app.registerExtension({
         if (node._marqueeActive) {
           const r = marqueeRect();
           const sel = new Set(node._marqueeBase);
-          node._boxes.forEach((b, i) => { if (!b.locked && rectsOverlap(r, b)) sel.add(i); });   // marquee skips locked
+          node._boxes.forEach((b, i) => { if (!b.locked && onView(b) && rectsOverlap(r, b)) sel.add(i); });   // marquee skips locked
           node._selection = sel;
           if (node._activeIdx < 0 || !sel.has(node._activeIdx)) node._activeIdx = sel.size ? [...sel][0] : node._activeIdx;
         }
@@ -1851,6 +1978,7 @@ app.registerExtension({
         if (!src) return;
         const nb = JSON.parse(JSON.stringify(src));
         delete nb.nobbox; delete nb.locked;               // a duplicate is editable, not born locked
+        spec.initBox?.(nb, ed, null);                     // and a new element (fresh id)
         node._boxes.push(nb);
         selectOnly(node._boxes.length - 1);
         node._placing = true;
@@ -1890,25 +2018,26 @@ app.registerExtension({
         menu.className = "kjideo-menu";
         const hdr = document.createElement("div");
         hdr.className = "kjideo-mhdr";
-        hdr.textContent = "Regions — top = front · click select · drag reorder";
-        // 01 at the top of the list = front-most (drawn on top); see _draw / boxesAt.
+        hdr.textContent = NOUN[0].toUpperCase() + NOUN.slice(1) + "s — top = front · click select · drag reorder";
+        // Top of the list = front-most (drawn on top), whichever end of the array that is; see stackOrder.
         menu.appendChild(hdr);
         const list = document.createElement("div");
         menu.appendChild(list);
         node._layerMenu = menu;
 
-        const renumber = () => Array.from(list.querySelectorAll(".kjideo-lrow")).forEach((row, k) => {
-          row.querySelector(".kjideo-lnum").textContent = String(k + 1).padStart(2, "0");
+        const renumber = () => Array.from(list.querySelectorAll(".kjideo-lrow")).forEach((row) => {
+          row.querySelector(".kjideo-lnum").textContent = String(node._boxes.indexOf(row._box) + 1).padStart(2, "0");
         });
         function buildRows() {
           list.innerHTML = "";
           if (!node._boxes.length) {
             const empty = document.createElement("div");
-            empty.className = "kjideo-mhdr"; empty.textContent = "No regions yet.";
+            empty.className = "kjideo-mhdr"; empty.textContent = `No ${NOUN}s yet.`;
             list.appendChild(empty);
             return;
           }
-          node._boxes.forEach((b, i) => {
+          stackOrder().forEach((i) => {
+            const b = node._boxes[i];
             const row = document.createElement("div");
             row.className = "kjideo-lrow" + (i === node._activeIdx ? " active" : "");
             row._box = b;
@@ -1931,7 +2060,7 @@ app.registerExtension({
             dup.title = "Duplicate, then click on the canvas to place";
             const del = document.createElement("button");
             del.className = "kjideo-lbtn del"; del.textContent = "✕";
-            del.title = b.locked ? "Unlock to delete" : "Delete region";
+            del.title = b.locked ? "Unlock to delete" : "Delete " + NOUN;
             del.disabled = !!b.locked;
             row.append(sw, num, txt, lock, dup, del);
             list.appendChild(row);
@@ -2008,8 +2137,8 @@ app.registerExtension({
                   row.classList.remove("dragging");
                   row._dragged = true;                             // suppress the trailing click
                   const active = node._boxes[node._activeIdx];
-                  const order = Array.from(list.querySelectorAll(".kjideo-lrow")).map((el) => el._box);
-                  if (order.length === node._boxes.length) node._boxes = order;
+                  const order = Array.from(list.querySelectorAll(".kjideo-lrow")).map((el) => el._box);   // front → back
+                  if (order.length === node._boxes.length) node._boxes = FRONT_FIRST ? order : order.reverse();
                   selectOnly(active ? node._boxes.indexOf(active) : -1);  // reorder invalidates multi-select indices
                   renumber();
                   commit();
@@ -2049,76 +2178,20 @@ app.registerExtension({
         commit(); rebuildStylePalette(); fitCanvas();   // a wired import re-seeds on the next run (serializeValue cache-busts)
       });
 
-      // ── build caption JSON (mirrors Python key order) ──
-      // pyJson: matches Python _dumps — indent=4, but scalar arrays stay on one line.
-      function pyJson(v, lvl = 0) {
-        if (v === null) return "null";
-        if (typeof v === "number" || typeof v === "boolean") return String(v);
-        if (typeof v === "string") return JSON.stringify(v);
-        const pad = "    ".repeat(lvl + 1), end = "    ".repeat(lvl);
-        if (Array.isArray(v)) {
-          if (!v.length) return "[]";
-          if (v.every((x) => x === null || typeof x !== "object"))   // scalar array → inline
-            return "[" + v.map((x) => pyJson(x, lvl)).join(", ") + "]";
-          return "[\n" + v.map((x) => pad + pyJson(x, lvl + 1)).join(",\n") + "\n" + end + "]";
-        }
-        const keys = Object.keys(v);
-        if (!keys.length) return "{}";
-        return "{\n" + keys.map((k) => pad + JSON.stringify(k) + ": " + pyJson(v[k], lvl + 1)).join(",\n") + "\n" + end + "}";
-      }
+      // ── build caption JSON (the spec mirrors the Python key order) ──
       function getW(name) { const w = findW(name); return w ? w.value : ""; }
-      function cleanPalette(arr) { return (arr || []).filter((c) => c).map((c) => c.toUpperCase()); }
-      function normBboxJS(b) {
-        const c = (v) => Math.max(0, Math.min(1000, Math.round(v * 1000)));
-        let ymin = c(b.y), xmin = c(b.x), ymax = c(b.y + b.h), xmax = c(b.x + b.w);
-        if (ymin > ymax) [ymin, ymax] = [ymax, ymin];
-        if (xmin > xmax) [xmin, xmax] = [xmax, xmin];
-        return [ymin, xmin, ymax, xmax];
-      }
-      // Caption bbox: 0-1000 grid (default) or absolute pixels (scaled by width/height) — must match the
-      // Python output. normBboxJS stays 0-1000 for the editor's grid input field, so keep this separate.
-      function captionBboxJS(b) {
-        const abs = (coordWidget?.value) === "absolute", xy = (orderWidget?.value) === "xy";
-        const sx = abs ? (wWidget?.value || 1000) : 1000, sy = abs ? (hWidget?.value || 1000) : 1000;
-        const cx = (v) => Math.max(0, Math.min(sx, Math.round(v * sx)));
-        const cy = (v) => Math.max(0, Math.min(sy, Math.round(v * sy)));
-        let ymin = cy(b.y), xmin = cx(b.x), ymax = cy(b.y + b.h), xmax = cx(b.x + b.w);
-        if (ymin > ymax) [ymin, ymax] = [ymax, ymin];
-        if (xmin > xmax) [xmin, xmax] = [xmax, xmin];
-        return xy ? [xmin, ymin, xmax, ymax] : [ymin, xmin, ymax, xmax];
-      }
       function buildCaption() {
-        const cap = {};
-        if ((getW("high_level_description") || "").trim()) cap.high_level_description = getW("high_level_description");
-        const styleW = findW("style");
-        const kind = styleW ? styleW.value : "none";
-        if (kind !== "none") {
-          const sd = { aesthetics: getW("aesthetics"), lighting: getW("lighting") };
-          if (kind === "photo") { sd.photo = getW("style.photo") || ""; sd.medium = getW("medium"); }
-          else { sd.medium = getW("medium"); sd.art_style = getW("style.art_style") || ""; }
-          const pal = cleanPalette(node._stylePalette);
-          if (pal.length) sd.color_palette = pal;
-          cap.style_description = sd;
-        }
-        const elements = node._boxes.map((b) => {
-          const etype = b.type === "text" ? "text" : "obj";
-          const el = { type: etype };
-          if (!b.nobbox) el.bbox = captionBboxJS(b);         // unplaced elements omit bbox
-          if (etype === "text") el.text = b.text || "";
-          el.desc = b.desc || "";
-          const pal = cleanPalette(b.palette).slice(0, MAX_ELEM_COLORS);
-          if (pal.length) el.color_palette = pal;
-          return el;
-        });
-        cap.compositional_deconstruction = { background: getW("background"), elements };
-        return (formatWidget?.value) === "pretty" ? pyJson(cap) : JSON.stringify(cap);   // compact by default; matches the node output
+        const cap = spec.buildCaption(ed);
+        if (spec.textCaption) return cap;                    // already the final text
+        const pretty = (formatWidget?.value || spec.format) === "pretty";
+        return pretty ? pyJson(cap, 0, spec.indent) : JSON.stringify(cap);   // matches the node output
       }
-      // Rough token estimate (~chars/4); exact count needs the Qwen tokenizer.
+      // Rough token estimate (~chars/4); exact count needs the model's tokenizer.
       function updateTokens() {
-        const n = Math.ceil(buildCaption().length / 4);
+        const n = Math.ceil(buildCaption().length / 4), cap = spec.tokenCap;
         tokenSpan.textContent = "~" + n + " tok";
-        // grey <256 (sparse) · green healthy · orange nearing · red ≥2048 (model hard cap)
-        tokenSpan.style.color = n >= 2048 ? "#e05555" : n >= 1792 ? "#e6a23c" : n >= 256 ? "#6cc06c" : "#888";
+        // grey <256 (sparse) · green healthy · orange nearing · red ≥ the model's hard cap (if it has one)
+        tokenSpan.style.color = !cap ? "#888" : n >= cap ? "#e05555" : n >= cap - 256 ? "#e6a23c" : n >= 256 ? "#6cc06c" : "#888";
       }
       async function doCopy() {
         const txt = buildCaption();
@@ -2133,54 +2206,30 @@ app.registerExtension({
         const w = findW(name);
         if (w) { w.value = val; w.callback?.(val); }
       }
-      function bboxElemToBox(el, idx) {
-        if (!el || typeof el !== "object") return null;
-        const box = { type: el.type === "text" ? "text" : "obj",
-          text: el.text || "", desc: el.desc || "",
-          palette: Array.isArray(el.color_palette) ? el.color_palette.slice() : [] };
-        const bb = el.bbox;
-        if (Array.isArray(bb) && bb.length === 4) {
-          const [ymin, xmin, ymax, xmax] = bb;
-          box.x = xmin / 1000; box.y = ymin / 1000; box.w = (xmax - xmin) / 1000; box.h = (ymax - ymin) / 1000;
-        } else {
-          // No bbox: "unplaced" element — small placeholder, flagged so export omits bbox.
-          const k = (idx || 0) % 6;
-          box.x = 0.03 + k * 0.035; box.y = 0.03 + k * 0.035; box.w = 0.22; box.h = 0.14;
-          box.nobbox = true;
-        }
-        return box;
-      }
+      // Caption -> editor boxes (the model's element list), then its caption-level fields (widgets).
+      function toBoxes(cap) { return spec.elements(cap).flatMap((el, i) => spec.elemToBox(el, i)).filter(Boolean); }   // an element may span canvases
       function applyCaption(cap) {
-        const cd = (cap && cap.compositional_deconstruction) || {};
-        const els = Array.isArray(cd.elements) ? cd.elements : [];
-        node._boxes = els.map((el, i) => bboxElemToBox(el, i)).filter(Boolean);
+        node._boxes = toBoxes(cap);
         selectOnly(node._boxes.length ? 0 : -1);
-        setWidgetVal("high_level_description", cap.high_level_description || "");
-        setWidgetVal("background", cd.background || "");
-        const sd = cap.style_description || {};
-        let kind = "none";
-        if (typeof sd.photo === "string") kind = "photo";
-        else if (typeof sd.art_style === "string") kind = "art_style";
-        const styleW = findW("style");
-        if (styleW) styleW.value = kind;            // setter synchronously rebuilds sub-widgets
-        if (kind === "photo") setWidgetVal("style.photo", sd.photo || "");
-        else if (kind === "art_style") setWidgetVal("style.art_style", sd.art_style || "");
-        setWidgetVal("aesthetics", sd.aesthetics || "");
-        setWidgetVal("lighting", sd.lighting || "");
-        setWidgetVal("medium", sd.medium || "");
-        node._stylePalette = Array.isArray(sd.color_palette) ? sd.color_palette.slice() : [];
+        spec.applyCaption(cap, ed);
       }
       // Lenient fixer: slice the outermost {...} (drops ``` fences / prose), then strip trailing
       // commas before } or ] — the string alt matches first so quoted commas are left untouched.
       function repairJson(s) {
-        const i = s.indexOf("{"), j = s.lastIndexOf("}");
-        const t = (i !== -1 && j > i) ? s.slice(i, j + 1) : s;
+        let t = s.trim();
+        if (t.startsWith('"')) {                          // bare "key": ... list (outer braces lost in a copy)
+          const bare = t.replace(/"(?:[^"\\]|\\.)*"/g, "");
+          t = "{" + t + (bare.split("{").length >= bare.split("}").length ? "}" : "");
+        }
+        const i = t.indexOf("{"), j = t.lastIndexOf("}");
+        t = (i !== -1 && j > i) ? t.slice(i, j + 1) : t;
         return t.replace(/("(?:[^"\\]|\\.)*")|,(\s*[}\]])/g, (m, str, close) => str || close);
       }
       function tryParseCaption(t) {
         if (!t) return null;
+        if (spec.parseCaption) return spec.parseCaption(t);   // text caption formats parse themselves
         for (const cand of [t, repairJson(t)]) {
-          try { const o = JSON.parse(cand); if (o && typeof o === "object" && o.compositional_deconstruction) return o; }
+          try { const o = JSON.parse(cand); if (o && typeof o === "object" && o[spec.captionKey]) return o; }
           catch (e) {}
         }
         return null;
@@ -2198,9 +2247,7 @@ app.registerExtension({
       // Append a caption's regions to the current canvas (keeps existing boxes + caption fields).
       function insertCaptionBoxes(cap) {
         closeInlineEditor();
-        const cd = (cap && cap.compositional_deconstruction) || {};
-        const els = Array.isArray(cd.elements) ? cd.elements : [];
-        const added = els.map((el, i) => bboxElemToBox(el, i)).filter(Boolean);
+        const added = toBoxes(cap);
         if (!added.length) return;
         const start = node._boxes.length;
         node._boxes.push(...added);
@@ -2212,8 +2259,9 @@ app.registerExtension({
       async function doImport() {
         let cap = null, txt = "";
         try { txt = (await navigator.clipboard.readText() || "").trim(); cap = tryParseCaption(txt); } catch (e) {}
-        if (!cap) { txt = (window.prompt("Paste Ideogram 4 caption JSON:", "") || "").trim(); cap = tryParseCaption(txt); }
-        if (!cap) { if (txt) alert("Not a valid Ideogram 4 caption JSON (needs 'compositional_deconstruction')."); return; }
+        const kind = spec.textCaption ? "caption" : "caption JSON";
+        if (!cap) { txt = (window.prompt(`Paste ${spec.label} ${kind}:`, "") || "").trim(); cap = tryParseCaption(txt); }
+        if (!cap) { if (txt) alert(`Not a valid ${spec.label} ${kind}` + (spec.captionKey ? ` (needs '${spec.captionKey}').` : ".")); return; }
         loadCaption(cap);
       }
       stopProp(importBtn);
@@ -2349,8 +2397,9 @@ app.registerExtension({
       function swatchEdit() { serialize(); drawCanvas(); }
 
       function rebuildStylePalette() {
+        if (!spec.maxStyleColors) return;                    // model has no global style palette
         while (styleBar.children.length > 1) styleBar.removeChild(styleBar.lastChild);
-        buildSwatchRow(styleBar, node._stylePalette, MAX_STYLE_COLORS,
+        buildSwatchRow(styleBar, node._stylePalette, spec.maxStyleColors,
           swatchEdit,
           () => { swatchEdit(); rebuildStylePalette(); fitCanvas(); });
       }
@@ -2360,55 +2409,44 @@ app.registerExtension({
         const ta = document.createElement("textarea");
         ta.className = "kjideo-area";
         ta.placeholder = placeholder;
+        ta.title = placeholder;                               // still identifies the field once it has text
         ta.value = value || "";
         stopProp(ta);
         ta.addEventListener("input", onInput);
         return ta;
       }
-      let bboxPx = null, bboxGrid = null;   // editable bbox fields: pixels and 0–1000 grid
-      function dims() { return [wWidget ? wWidget.value : 1024, hWidget ? hWidget.value : 1024]; }
-      function boxToPx(b) {                                   // same order as the grid: ymin, xmin, ymax, xmax
-        const [W, H] = dims();
-        return [Math.round(b.y * H), Math.round(b.x * W), Math.round((b.y + b.h) * H), Math.round((b.x + b.w) * W)];
+      let bboxPx = null, bboxGrid = null;   // editable coordinate fields: pixels and the exported (model) units
+      function dims() {                                        // size of the shown canvas: a reference's own size (spec.views), else width/height
+        const img = spec.views && node._view ? node._refImgs.get(node._view) : null;
+        const iw = img ? (img.naturalWidth || img.width) : 0, ih = img ? (img.naturalHeight || img.height) : 0;
+        if (iw && ih) return [iw, ih];
+        return [wWidget ? wWidget.value : 1024, hWidget ? hWidget.value : 1024];
       }
-      function setField(inp, b, fn) {                          // skip while the field is being edited
+      function setField(inp, b, c) {                           // skip while the field is being edited
         if (!inp || document.activeElement === inp) return;
-        inp.value = (!b || b.nobbox) ? "" : fn(b).join(", ");
+        inp.value = (!b || b.nobbox) ? "" : c.get(b, ...dims()).join(", ");
       }
       function updateBboxLabel() {
         const b = node._boxes[node._activeIdx];
-        setField(bboxPx, b, boxToPx);
-        setField(bboxGrid, b, normBboxJS);
+        setField(bboxPx, b, spec.coords.px);
+        setField(bboxGrid, b, spec.coords.out);
       }
       function parse4(inp) {
-        const nums = inp.value.split(/[,\s]+/).map(Number).filter((n) => !isNaN(n));
+        const nums = inp.value.trim().split(/[,\s]+/).map(Number).filter((n) => !isNaN(n));
         return nums.length === 4 ? nums : null;
       }
-      function commitPxEdit() {
-        const b = node._boxes[node._activeIdx]; if (!b || !bboxPx) return;
-        const nums = parse4(bboxPx); if (!nums) { updateBboxLabel(); return; }
-        const [W, H] = dims();
-        let [ymin, xmin, ymax, xmax] = nums;                  // ymin, xmin, ymax, xmax (matches grid)
-        ymin = Math.max(0, Math.min(H, ymin)); ymax = Math.max(0, Math.min(H, ymax));
-        xmin = Math.max(0, Math.min(W, xmin)); xmax = Math.max(0, Math.min(W, xmax));
-        if (ymin > ymax) [ymin, ymax] = [ymax, ymin];
-        if (xmin > xmax) [xmin, xmax] = [xmax, xmin];
-        b.y = ymin / H; b.x = xmin / W; b.h = (ymax - ymin) / H; b.w = (xmax - xmin) / W;
+      // Typed coordinates -> box via the spec's px/out converter (which clamps into the canvas).
+      function commitCoordEdit(inp, c) {
+        const b = node._boxes[node._activeIdx]; if (!b || !inp) return;
+        const nums = parse4(inp); if (!nums) { updateBboxLabel(); return; }
+        Object.assign(b, c.set(nums, ...dims()));
         delete b.nobbox; commit(); fitCanvas();
       }
-      function commitGridEdit() {
-        const b = node._boxes[node._activeIdx]; if (!b || !bboxGrid) return;
-        const nums = parse4(bboxGrid); if (!nums) { updateBboxLabel(); return; }
-        let [ymin, xmin, ymax, xmax] = nums.map((n) => Math.max(0, Math.min(1000, n)));
-        if (ymin > ymax) [ymin, ymax] = [ymax, ymin];
-        if (xmin > xmax) [xmin, xmax] = [xmax, xmin];
-        b.y = ymin / 1000; b.x = xmin / 1000; b.h = (ymax - ymin) / 1000; b.w = (xmax - xmin) / 1000;
-        delete b.nobbox; commit(); fitCanvas();
-      }
-      function makeBboxField(placeholder, title, onCommit) {
+      function makeBboxField(c, onCommit) {
         const inp = document.createElement("input");
         inp.type = "text"; inp.className = "kjideo-bbox";
-        inp.placeholder = placeholder; inp.title = title;
+        inp.placeholder = c.hint; inp.title = c.title;
+        if (c.width) inp.style.width = c.width + "px";
         stopProp(inp);
         inp.addEventListener("keydown", (e) => {
           e.stopPropagation();
@@ -2417,6 +2455,40 @@ app.registerExtension({
         });
         inp.addEventListener("change", onCommit);
         return inp;
+      }
+      // Reference image picker: none / each connected ref_N (a dangling assignment shows as "N?"), then contain/cover.
+      function refRow(b) {
+        const row = document.createElement("div");
+        row.className = "kjideo-row";
+        const lbl = document.createElement("span"); lbl.textContent = "ref:"; row.appendChild(lbl);
+        const slots = refSlots(), opts = [0, ...slots];
+        if (b.ref && !slots.includes(b.ref)) opts.push(b.ref);
+        const button = (text, active, title, onClick) => {
+          const btn = document.createElement("button");
+          btn.className = "kjideo-btn" + (active ? " active" : "");
+          btn.textContent = text; btn.title = title;
+          stopProp(btn);
+          btn.addEventListener("click", () => { onClick(); commit(); });
+          row.appendChild(btn);
+        };
+        for (const k of opts) {
+          const linked = slots.includes(k);
+          button(k ? (linked ? String(k) : k + "?") : "none", (b.ref || 0) === k,
+            !k ? "No reference image" : linked ? `Paste ${spec.refs}.ref_${k} into this ${NOUN}` : `ref_${k} is not connected`,
+            () => { if (k) b.ref = k; else { delete b.ref; delete b.fit; } });
+        }
+        if (!slots.length && !b.ref) {
+          const tip = document.createElement("span");
+          tip.style.color = "#777"; tip.textContent = `connect images to ${spec.refs}`;
+          row.appendChild(tip);
+        }
+        if (b.ref) {
+          const fl = document.createElement("span"); fl.textContent = "fit:"; fl.style.cssText = "margin-left:6px;color:#888;";
+          row.appendChild(fl);
+          button("contain", b.fit !== "cover", "Fit the whole image inside the box", () => { delete b.fit; });
+          button("cover", b.fit === "cover", "Fill the box, cropping the overflow", () => { b.fit = "cover"; });
+        }
+        return row;
       }
       function renderPanel() {
         for (const ro of node._areaObservers) ro.disconnect();
@@ -2427,7 +2499,7 @@ app.registerExtension({
           hint.textContent = "";
           const p = document.createElement("div");
           p.style.color = "#888";
-          p.textContent = node._boxes.length ? "Click a region to edit it." : "No regions yet.";
+          p.textContent = node._boxes.length ? `Click a ${NOUN} to edit it.` : `No ${NOUN}s yet.`;
           panel.appendChild(p);
           return;
         }
@@ -2437,55 +2509,65 @@ app.registerExtension({
         // box data that may be loaded from an untrusted template/import (avoids HTML injection).
         hint.textContent = "";
         const tag = document.createElement("b");
-        tag.style.color = col; tag.textContent = "region " + (node._activeIdx + 1);
+        tag.style.color = col; tag.textContent = NOUN + " " + (spec.tagText ? spec.tagText(b) : node._activeIdx + 1);
         hint.appendChild(tag);
+        const info = spec.describe ? spec.describe(b, ed) : "";
+        if (info) {
+          const s = document.createElement("span");
+          s.style.color = "#888"; s.textContent = " · " + info;
+          hint.appendChild(s);
+        }
         if (selN > 1) {
           const s = document.createElement("span");
           s.style.color = "#888"; s.textContent = ` (${selN} selected)`;
           hint.appendChild(s);
         }
 
-        // type toggle
+        // type toggle (models with typed elements) + coordinate fields
         const typeRow = document.createElement("div");
         typeRow.className = "kjideo-row";
-        const lbl = document.createElement("span"); lbl.textContent = "type:"; typeRow.appendChild(lbl);
-        for (const t of ["obj", "text"]) {
-          const btn = document.createElement("button");
-          btn.className = "kjideo-btn" + (b.type === t ? " active" : "");
-          btn.textContent = t;
-          stopProp(btn);
-          btn.addEventListener("click", () => { b.type = t; commit(); });
-          typeRow.appendChild(btn);
+        if (spec.typeToggle) {
+          const lbl = document.createElement("span"); lbl.textContent = "type:"; typeRow.appendChild(lbl);
+          for (const t of ["obj", "text"]) {
+            const btn = document.createElement("button");
+            btn.className = "kjideo-btn" + (b.type === t ? " active" : "");
+            btn.textContent = t;
+            stopProp(btn);
+            btn.addEventListener("click", () => { b.type = t; commit(); });
+            typeRow.appendChild(btn);
+          }
         }
         const pxLbl = document.createElement("span");
-        pxLbl.textContent = "px:"; pxLbl.style.cssText = "margin-left:auto; color:#888;";
+        pxLbl.textContent = "px:"; pxLbl.style.cssText = (spec.typeToggle ? "margin-left:auto; " : "") + "color:#888;";
         typeRow.appendChild(pxLbl);
-        bboxPx = makeBboxField("ymin, xmin, ymax, xmax", "Pixel bbox (of the node's width/height): ymin, xmin, ymax, xmax — editable", commitPxEdit);
+        bboxPx = makeBboxField(spec.coords.px, () => commitCoordEdit(bboxPx, spec.coords.px));
         typeRow.appendChild(bboxPx);
         const gl = document.createElement("span");
         gl.textContent = "out:"; gl.style.color = "#888";
         typeRow.appendChild(gl);
-        bboxGrid = makeBboxField("ymin, xmin, ymax, xmax", "Exported bbox on the 0–1000 grid: ymin, xmin, ymax, xmax — editable", commitGridEdit);
+        bboxGrid = makeBboxField(spec.coords.out, () => commitCoordEdit(bboxGrid, spec.coords.out));
         typeRow.appendChild(bboxGrid);
         updateBboxLabel();
         panel.appendChild(typeRow);
+        if (spec.refs) panel.appendChild(refRow(b));
 
-        // text (only for text type)
-        if (b.type === "text") {
-          panel.appendChild(makeArea("text", b.text, "text to render (verbatim)",
-            function () { b.text = this.value; touch(); }));
+        // per-element text fields (e.g. text + desc, or desc + hierarchy_and_relation)
+        for (const f of spec.fields) {
+          if (f.when && !f.when(b)) continue;
+          const ta = makeArea(f.key, b[f.key], f.placeholder, function () { setBoxField(b, f.key, this.value); touch(); });
+          if (f.grow) ta.style.flexGrow = f.grow;
+          panel.appendChild(ta);
         }
 
-        panel.appendChild(makeArea("desc", b.desc, "description of this region",
-          function () { b.desc = this.value; touch(); }));
-
-        // palette
-        const palRow = document.createElement("div");
-        palRow.className = "kjideo-row";
-        const pl = document.createElement("span"); pl.textContent = "colors:"; palRow.appendChild(pl);
-        b.palette = b.palette || [];
-        buildSwatchRow(palRow, b.palette, MAX_ELEM_COLORS, swatchEdit, commit);
-        panel.appendChild(palRow);
+        // palette (models with per-element colours)
+        if (spec.maxElemColors) {
+          const palRow = document.createElement("div");
+          palRow.className = "kjideo-row";
+          const pl = document.createElement("span"); pl.textContent = "colors:"; palRow.appendChild(pl);
+          b.palette = b.palette || [];
+          buildSwatchRow(palRow, b.palette, spec.maxElemColors, swatchEdit, commit);
+          panel.appendChild(palRow);
+        }
       }
 
       // ── width/height widget callbacks ──
@@ -2494,7 +2576,7 @@ app.registerExtension({
         chainCallback(w, "callback", () => { syncCanvasToDims(); drawCanvas(); fitCanvas(); updateTokens(); });  // absolute coords depend on w/h
       }
       // Update the token estimate when the caption-level text widgets change.
-      for (const name of ["background", "high_level_description", "aesthetics", "lighting", "medium", "style"]) {
+      for (const name of spec.captionWidgets) {
         const w = findW(name);
         if (w) chainCallback(w, "callback", () => updateTokens());
       }
@@ -2529,6 +2611,28 @@ app.registerExtension({
         if (s.isVideo && s.videoEl) captureVideoFrame(s.videoEl, (cv) => loadBg(cv.toDataURL("image/webp", 0.9)));
         else if (s.url) loadBg(s.url);
       });
+      // Reference images: REF_GROUP names the Autogrow input group ("references" -> references.ref_1..), drawn in
+      // the boxes that use them (spec.refs) or as their own canvas (spec.views). Previews resolve like the
+      // background (Load Image sources right away, computed images once they have one).
+      if (REF_GROUP) {
+        watchImageInputs(node, (inp) => refIndex(inp.name) != null, (sources) => {
+          const next = new Map();
+          for (const s of sources) {
+            const k = refIndex(s.name);
+            if (s.isVideo && s.videoEl) { captureVideoFrame(s.videoEl, (cv) => { next.set(k, cv); fitCanvas(); drawCanvas(); }); continue; }
+            if (!s.url) continue;
+            const prev = node._refImgs.get(k);
+            if (prev && prev._kjUrl === s.url) { next.set(k, prev); continue; }
+            const img = new Image();
+            img.crossOrigin = "anonymous"; img._kjUrl = s.url;
+            img.onload = () => { fitCanvas(); drawCanvas(); };   // a reference canvas takes the image's aspect
+            img.src = s.url;
+            next.set(k, img);
+          }
+          node._refImgs = next;
+          rebuildViews(); renderPanel(); fitCanvas(); drawCanvas();
+        });
+      }
       // "Grab BG" button: use the last generated image as the background, or clear it.
       node._grabResultBg = () => {
         if (!lastResultImage) { alert("No sampling result yet — run a generation first."); return; }
@@ -2638,8 +2742,9 @@ app.registerExtension({
           const im = o && o.ideo && o.ideo.importMode, opts = ["when empty", "always"];
           imW.value = opts.includes(im) ? im : (opts.includes(imW.value) ? imW.value : "when empty");
         }
-        if (formatWidget) {                                   // restore output format from the blob; default compact unless explicitly pretty
-          formatWidget.value = (o && o.ideo && o.ideo.outputFormat) === "pretty" ? "pretty" : "compact";
+        if (formatWidget) {                                   // restore output format from the blob; else the model default
+          const f = o && o.ideo && o.ideo.outputFormat;
+          formatWidget.value = (f === "pretty" || f === "compact") ? f : spec.format;
           compactLbl._cb.checked = formatWidget.value === "compact";
         }
         if (coordWidget) {                                    // restore coord mode; default normalized unless explicitly absolute
@@ -2672,6 +2777,7 @@ app.registerExtension({
         boxOpacSlider.value = node.properties.boxOpacity == null ? 14 : node.properties.boxOpacity;
         syncCanvasToDims();
         rebuildStylePalette();
+        rebuildViews();
         renderPanel();
         drawCanvas();
         updateTokens();
@@ -2691,6 +2797,7 @@ app.registerExtension({
         else if (node.size[0] < 380) node.setSize([380, node.size[1]]);                                          // current reload/paste: keep saved size, enforce min width
         syncCanvasToDims();
         rebuildStylePalette();
+        rebuildViews();
         renderPanel();
         drawCanvas();
         updateTokens();
@@ -2699,3 +2806,135 @@ app.registerExtension({
     });
   },
 });
+
+// ── Ideogram 4 caption format (the node in nodes/ideogram4_nodes.py) ──
+// Spec contract, also used by ming_image_prompt_builder.js: `ed` = { node, findW, getW, setW, dims }.
+// Exported bbox: 0-1000 grid (default) or absolute pixels (scaled by width/height) — must match the Python output.
+function ideoCaptionBbox(b, ed) {
+  const abs = ed.getW("coord_mode") === "absolute", xy = ed.getW("bbox_order") === "xy";
+  const sx = abs ? (ed.getW("width") || 1000) : 1000, sy = abs ? (ed.getW("height") || 1000) : 1000;
+  const cx = (v) => Math.max(0, Math.min(sx, Math.round(v * sx)));
+  const cy = (v) => Math.max(0, Math.min(sy, Math.round(v * sy)));
+  let ymin = cy(b.y), xmin = cx(b.x), ymax = cy(b.y + b.h), xmax = cx(b.x + b.w);
+  if (ymin > ymax) [ymin, ymax] = [ymax, ymin];
+  if (xmin > xmax) [xmin, xmax] = [xmax, xmin];
+  return xy ? [xmin, ymin, xmax, ymax] : [ymin, xmin, ymax, xmax];
+}
+// The editor's "out" field always shows the 0-1000 grid, whatever the coord_mode.
+export function ideoGrid(b) {
+  const c = (v) => Math.max(0, Math.min(1000, Math.round(v * 1000)));
+  let ymin = c(b.y), xmin = c(b.x), ymax = c(b.y + b.h), xmax = c(b.x + b.w);
+  if (ymin > ymax) [ymin, ymax] = [ymax, ymin];
+  if (xmin > xmax) [xmin, xmax] = [xmax, xmin];
+  return [ymin, xmin, ymax, xmax];
+}
+// [ymin, xmin, ymax, xmax] on an sy × sx grid -> box fractions, each edge clamped into the canvas.
+export function ideoFromEdges([ymin, xmin, ymax, xmax], sx, sy) {
+  ymin = Math.max(0, Math.min(sy, ymin)); ymax = Math.max(0, Math.min(sy, ymax));
+  xmin = Math.max(0, Math.min(sx, xmin)); xmax = Math.max(0, Math.min(sx, xmax));
+  if (ymin > ymax) [ymin, ymax] = [ymax, ymin];
+  if (xmin > xmax) [xmin, xmax] = [xmax, xmin];
+  return { y: ymin / sy, x: xmin / sx, h: (ymax - ymin) / sy, w: (xmax - xmin) / sx };
+}
+
+const IDEOGRAM4 = {
+  nodeName: "Ideogram4PromptBuilderKJ",
+  label: "Ideogram 4",
+  title: "Ideogram 4 editor",
+  noun: "region",
+  tplDir: "kjnodes/ideogram4/templates",
+  captionKey: "compositional_deconstruction",       // a pasted/imported JSON must have it
+  frontFirst: true,                                 // elements[0] = front-most
+  maxElemColors: 5,                                 // Ideogram 4 per-element palette cap
+  maxStyleColors: 16,                               // Ideogram 4 style palette cap
+  format: "compact",
+  indent: "    ",
+  compactTip: "Compact output (the format Ideogram 4 expects). Uncheck for pretty/indented.",
+  tokenCap: 2048,
+  typeToggle: true,
+  captionWidgets: ["background", "high_level_description", "aesthetics", "lighting", "medium", "style"],
+  fields: [
+    { key: "text", placeholder: "text to render (verbatim)", when: (b) => b.type === "text" },
+    { key: "desc", placeholder: "description of this region" },
+  ],
+  coords: {                                         // same order in both: ymin, xmin, ymax, xmax
+    px: {
+      hint: "ymin, xmin, ymax, xmax", title: "Pixel bbox (of the node's width/height): ymin, xmin, ymax, xmax — editable",
+      get: (b, W, H) => [Math.round(b.y * H), Math.round(b.x * W), Math.round((b.y + b.h) * H), Math.round((b.x + b.w) * W)],
+      set: (n, W, H) => ideoFromEdges(n, W, H),
+    },
+    out: {
+      hint: "ymin, xmin, ymax, xmax", title: "Exported bbox on the 0–1000 grid: ymin, xmin, ymax, xmax — editable",
+      get: (b) => ideoGrid(b),
+      set: (n) => ideoFromEdges(n, 1000, 1000),
+    },
+  },
+  blankBox: () => ({ type: "obj", text: "", desc: "", palette: [] }),
+  elements(cap) {
+    const cd = cap.compositional_deconstruction || {};
+    return Array.isArray(cd.elements) ? cd.elements : [];
+  },
+  elemToBox(el, idx) {
+    if (!el || typeof el !== "object") return null;
+    const box = { type: el.type === "text" ? "text" : "obj",
+      text: el.text || "", desc: el.desc || "",
+      palette: Array.isArray(el.color_palette) ? el.color_palette.slice() : [] };
+    const bb = el.bbox;
+    if (Array.isArray(bb) && bb.length === 4) {
+      const [ymin, xmin, ymax, xmax] = bb;
+      box.x = xmin / 1000; box.y = ymin / 1000; box.w = (xmax - xmin) / 1000; box.h = (ymax - ymin) / 1000;
+    } else {
+      // No bbox: "unplaced" element — small placeholder, flagged so export omits bbox.
+      const k = (idx || 0) % 6;
+      box.x = 0.03 + k * 0.035; box.y = 0.03 + k * 0.035; box.w = 0.22; box.h = 0.14;
+      box.nobbox = true;
+    }
+    return box;
+  },
+  buildCaption(ed) {                                // mirrors Ideogram4PromptBuilderKJ.execute key order
+    const { getW, findW, node } = ed;
+    const cap = {};
+    if ((getW("high_level_description") || "").trim()) cap.high_level_description = getW("high_level_description");
+    const styleW = findW("style");
+    const kind = styleW ? styleW.value : "none";
+    if (kind !== "none") {
+      const sd = { aesthetics: getW("aesthetics"), lighting: getW("lighting") };
+      if (kind === "photo") { sd.photo = getW("style.photo") || ""; sd.medium = getW("medium"); }
+      else { sd.medium = getW("medium"); sd.art_style = getW("style.art_style") || ""; }
+      const pal = cleanPalette(node._stylePalette);
+      if (pal.length) sd.color_palette = pal;
+      cap.style_description = sd;
+    }
+    const elements = node._boxes.map((b) => {
+      const etype = b.type === "text" ? "text" : "obj";
+      const el = { type: etype };
+      if (!b.nobbox) el.bbox = ideoCaptionBbox(b, ed);   // unplaced elements omit bbox
+      if (etype === "text") el.text = b.text || "";
+      el.desc = b.desc || "";
+      const pal = cleanPalette(b.palette).slice(0, this.maxElemColors);
+      if (pal.length) el.color_palette = pal;
+      return el;
+    });
+    cap.compositional_deconstruction = { background: getW("background"), elements };
+    return cap;
+  },
+  applyCaption(cap, ed) {                           // caption-level fields -> widgets (boxes are set by the editor)
+    const { setW, findW, node } = ed;
+    const cd = cap.compositional_deconstruction || {};
+    setW("high_level_description", cap.high_level_description || "");
+    setW("background", cd.background || "");
+    const sd = cap.style_description || {};
+    let kind = "none";
+    if (typeof sd.photo === "string") kind = "photo";
+    else if (typeof sd.art_style === "string") kind = "art_style";
+    const styleW = findW("style");
+    if (styleW) styleW.value = kind;                // setter synchronously rebuilds sub-widgets
+    if (kind === "photo") setW("style.photo", sd.photo || "");
+    else if (kind === "art_style") setW("style.art_style", sd.art_style || "");
+    setW("aesthetics", sd.aesthetics || "");
+    setW("lighting", sd.lighting || "");
+    setW("medium", sd.medium || "");
+    node._stylePalette = Array.isArray(sd.color_palette) ? sd.color_palette.slice() : [];
+  },
+};
+registerPromptBuilder(IDEOGRAM4);
