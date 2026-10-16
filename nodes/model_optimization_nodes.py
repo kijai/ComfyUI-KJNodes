@@ -26,7 +26,7 @@ except ImportError:
 sageattn_modes = ["disabled", "auto", "sageattn_qk_int8_pv_fp16_cuda", "sageattn_qk_int8_pv_fp16_triton", "sageattn_qk_int8_pv_fp8_cuda", "sageattn_qk_int8_pv_fp8_cuda++", "sageattn3", "sageattn3_per_block_mean"]
 
 def get_sage_func(sage_attention, allow_compile=False):
-    logging.info(f"Using sage attention mode: {sage_attention}")
+    logging.info(f"\033[38;5;41mUsing sage attention mode: \033[38;5;141m{sage_attention}\033[0m")
     if sage_attention == "auto":
         from sageattention import sageattn
         def sage_func(q, k, v, is_causal=False, attn_mask=None, tensor_layout="NHD"):
@@ -260,7 +260,7 @@ class CheckpointLoaderKJ():
         model_options = {}
         if dtype := DTYPE_MAP.get(weight_dtype):
             model_options["dtype"] = dtype
-            logging.info(f"Setting {ckpt_name} weight dtype to {dtype}")
+            logging.info(f"\033[38;5;41mSetting \033[38;5;141m{ckpt_name} \033[38;5;41mweight dtype to \033[38;5;141m{dtype}\033[0m")
 
         if weight_dtype == "fp8_e4m3fn_fast":
             model_options["dtype"] = torch.float8_e4m3fn
@@ -282,7 +282,7 @@ class CheckpointLoaderKJ():
         if dtype := DTYPE_MAP.get(compute_dtype):
             model.set_model_compute_dtype(dtype)
             model.force_cast_weights = False
-            logging.info(f"Setting {ckpt_name} compute dtype to {dtype}")
+            logging.info(f"\033[38;5;41mSetting \033[38;5;141m{ckpt_name} \033[38;5;41mcompute dtype to \033[38;5;141m{dtype}\033[0m")
 
         if enable_fp16_accumulation:
             if hasattr(torch.backends.cuda.matmul, "allow_fp16_accumulation"):
@@ -383,7 +383,7 @@ class DiffusionModelLoaderKJ():
         model_options = {}
         if dtype := DTYPE_MAP.get(weight_dtype):
             model_options["dtype"] = dtype
-            logging.info(f"Setting {model_name} weight dtype to {dtype}")
+            logging.info(f"\033[38;5;41mSetting \033[38;5;141m{model_name}\033[38;5;41m weight dtype to \033[38;5;141m{dtype}\033[0m")
 
         if weight_dtype == "fp8_e4m3fn_fast":
             model_options["dtype"] = torch.float8_e4m3fn
@@ -409,7 +409,7 @@ class DiffusionModelLoaderKJ():
         if dtype := DTYPE_MAP.get(compute_dtype):
             model.set_model_compute_dtype(dtype)
             model.force_cast_weights = False
-            logging.info(f"Setting {model_name} compute dtype to {dtype}")
+            logging.info(f"\033[38;5;41mSetting \033[38;5;141m{model_name}\033[38;5;41m compute dtype to \033[38;5;141m{dtype}\033[0m")
 
         if sage_attention != "disabled":
             new_attention = get_sage_func(sage_attention)
@@ -2153,9 +2153,22 @@ class Ideogram4FFNChunkPatch:
 
 def _ideogram4_apply_rope_lowp(xq, xk, freqs_cis):
     # (bf16/fp16) instead of being upcast to fp32 -> ~halves RoPE activation memory.
-    cos = freqs_cis[0].to(xq.dtype)
-    sin = freqs_cis[1].to(xq.dtype)
-    nsin = freqs_cis[2].to(xq.dtype)
+    # xq/xk: (B, L, H, D) — core's pre-transpose layout.
+    if torch.is_tensor(freqs_cis):
+        # ComfyUI #15080+: prebuilt 2x2 split-half matrix (1, L, 1, D/2, 2, 2);
+        # rows [M00, M01, M10, M11] = [cos[:D/2], -sin, sin, cos[D/2:]] — the same
+        # rotation as the old (cos, sin, neg_sin) tuple, so reconstruct those vars.
+        cos = torch.cat((freqs_cis[..., 0, 0], freqs_cis[..., 1, 1]), dim=-1)
+        sin = freqs_cis[..., 1, 0]
+        nsin = freqs_cis[..., 0, 1]
+    else:
+        # pre-#15080 core: (cos, sin, neg_sin), shapes (1, L, D) / (1, L, D/2);
+        # in the (B, L, H, D) layout L is dim 1 -> (1, L, 1, *)
+        cos, sin, nsin = (t.unsqueeze(2) for t in freqs_cis)
+
+    cos = cos.to(xq.dtype)
+    sin = sin.to(xq.dtype)
+    nsin = nsin.to(xq.dtype)
 
     q_embed = xq * cos
     qs = q_embed.shape[-1] // 2
@@ -2172,10 +2185,15 @@ def _ideogram4_apply_rope_lowp(xq, xk, freqs_cis):
 def ideogram4_attention_lowp_rope_forward(self, x, attn_mask, freqs_cis, transformer_options={}):
     batch_size, seq_len, _ = x.shape
     q, k, v = self.qkv(x).view(batch_size, seq_len, 3, self.num_heads, self.head_dim).unbind(dim=2)
-    q = self.norm_q(q).transpose(1, 2)
-    k = self.norm_k(k).transpose(1, 2)
-    v = v.transpose(1, 2)
+    q = self.norm_q(q)
+    k = self.norm_k(k)
+    # RoPE is applied in the (B, L, H, D) layout: #15080+ core hands in a
+    # (1, L, 1, D/2, 2, 2) matrix whose seq axis is this one — same order as
+    # core's own forward, so this must stay before the heads/seq transpose.
     q, k = _ideogram4_apply_rope_lowp(q, k, freqs_cis)
+    q = q.transpose(1, 2)
+    k = k.transpose(1, 2)
+    v = v.transpose(1, 2)
     out = _ideogram4_attn(q, k, v, self.num_heads, attn_mask, skip_reshape=True, transformer_options=transformer_options)
     return self.o(out)
 
