@@ -815,8 +815,10 @@ The choices are loaded from 'custom_dimensions.json' in the nodes folder.
 
 class WidgetToString:
     @classmethod
-    def IS_CHANGED(cls,*,id,node_title,any_input,**kwargs):
-        if any_input is not None and (id != 0 or node_title != ""):
+    def IS_CHANGED(cls, *, id=0, node_title="", **kwargs):
+        # IS_CHANGED never gets linked values (any_input is None, or missing when not connected). A node picked by id or
+        # title is read from the prompt, which is not part of this node's cache key, so read it again on every run.
+        if id != 0 or node_title:
             return float("NaN")
 
     @classmethod
