@@ -10,5 +10,41 @@
     "Node Swap": "节点交换",
     "Performance": "性能",
     "Shake to Disconnect": "摇晃断线"
+  },
+  "nodeCategories": {
+    "KJNodes": "KJNodes",
+    "InstanceDiffusion": "实例扩散",
+    "_for_testing": "测试用",
+    "constants": "常量",
+    "deprecated": "已弃用",
+    "generate": "生成",
+    "hunyuanvideo": "HunyuanVideo",
+    "latents": "潜变量",
+    "lora": "LoRA",
+    "masking": "遮罩",
+    "memory": "显存",
+    "misc": "杂项",
+    "model_loaders": "模型加载器",
+    "model_merging": "模型合并",
+    "torchcompile": "TorchCompile",
+    "vae": "VAE",
+    "video_models": "视频模型",
+    "weights": "权重"
+  },
+  "dataTypes": {
+    "ACCUMULATION": "累积",
+    "ACNAUTOSIZE": "ACN 自动尺寸",
+    "BBOX": "边界框",
+    "CAMERACTRL_POSES": "CameraCtrl 姿态",
+    "CLIPSEGMODEL": "CLIP 分割模型",
+    "CN_WEIGHTS_EXTRAS": "ControlNet 附加权重",
+    "CONTROL_NET_WEIGHTS": "ControlNet 权重",
+    "FLOW_CONTROL": "流控制",
+    "INDEXES": "索引",
+    "NORMALIZED_AMPLITUDE": "归一化振幅",
+    "SELECTEDDITBLOCKS": "已选编辑块",
+    "TIMER": "计时器",
+    "TIMESTEP_KEYFRAME": "时间步关键帧",
+    "TRACKING": "跟踪"
   }
 }
