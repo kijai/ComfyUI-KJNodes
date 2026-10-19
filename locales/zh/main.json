@@ -31,6 +31,26 @@
     "video_models": "视频模型",
     "weights": "权重"
   },
+  "contextMenu": {
+    "Add GetNode": "添加 Get 节点",
+    "Add SetNode": "添加 Set 节点",
+    "Add PreviewAsTextNode": "添加预览为文本节点",
+    "Convert all outputs to Set/Get": "将全部输出转换为 Set/Get",
+    "Recreate node": "重建节点",
+    "Keep widget values": "保留部件值",
+    "Reset widget values": "重置部件值",
+    "Show connections": "显示连线",
+    "Hide connections": "隐藏连线",
+    "Hide all connections": "隐藏所有连线",
+    "Convert to links": "转换为直连",
+    "Add paired GetNode": "添加配对 Get 节点",
+    "Getters": "Get 节点列表",
+    "Go to setter": "前往 Set 节点",
+    "Go to setter (in parent graph)": "前往 Set 节点（在父图中）",
+    "Go to setter (in subgraph)": "前往 Set 节点（在子图中）",
+    "Convert outputs on all selected nodes to Set/Get": "将选中节点的全部输出转换为 Set/Get",
+    "Convert selected Set/Get to links": "将选中的 Set/Get 转换为直连"
+  },
   "dataTypes": {
     "ACCUMULATION": "累积",
     "ACNAUTOSIZE": "ACN 自动尺寸",
