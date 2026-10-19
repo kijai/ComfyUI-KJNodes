@@ -724,17 +724,12 @@ class _PreviewOverrideWrapper:
         audio_vae = self.audio_vae if (has_audio_latent and animate_video) else None
         audio_rate = 0
         frame_pattern = _frames_per_token(model_patcher.model.latent_format)
-        # the sampler carries the audio stream scaled by audio_scale and only process_latent_out undoes it
+        # the sampler carries audio scaled by audio_scale; object patches aren't applied yet, so read through get_model_object
         audio_scale = 1.0
         if has_audio_latent:
-            model_sampling = getattr(model_patcher.model, "model_sampling", None)
-            sampling_audio_scale = getattr(model_sampling, "audio_scale", None)
-
+            sampling_audio_scale = getattr(model_patcher.get_model_object("model_sampling"), "audio_scale", None)
             if sampling_audio_scale is None:
-                logging.warning(
-                    "[KJ PreviewOverride] AV latent detected but model_sampling "
-                    "has no audio_scale; disabling audio preview."
-                )
+                logging.warning("[KJ PreviewOverride] model_sampling has no audio_scale; audio preview disabled")
                 audio_vae = None
             else:
                 audio_scale = float(sampling_audio_scale)
