@@ -1,0 +1,14 @@
+{
+  "settingsCategories": {
+    "KJNodes": "KJNodes",
+    "Canvas Background": "画布背景",
+    "General": "常规",
+    "Set & Get": "Set 与 Get",
+    "Editors": "编辑器",
+    "Fill-Connect": "自动填充连接",
+    "Node Insert": "节点插入",
+    "Node Swap": "节点交换",
+    "Performance": "性能",
+    "Shake to Disconnect": "摇晃断线"
+  }
+}
