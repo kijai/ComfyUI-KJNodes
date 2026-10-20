@@ -140,6 +140,9 @@ Draw boxes on the canvas; select one to set its label, caption, (for text) the e
 render, and optional tags and palette. meta / canvas / the summary palette row are the optional
 summary fields. width/height must match the generation size: the boxes are absolute pixels.
 
+Prompt weighting: write (phrase:weight) inside any caption and wire the prompt output into the
+text input of MOSS-Image Prompt Weight, which applies the weights and strips the markup.
+
 Canvas controls are the same as in the Ideogram 4 builder; right-click lists the boxes.
 Turn the prompt upsampler off when using layouts, it rewrites them.""",
             inputs=[

@@ -101,6 +101,7 @@ def get_sage_func(sage_attention, allow_compile=False):
     return attention_sage
 
 
+import comfy.patcher_extension
 from comfy.patcher_extension import CallbacksMP
 class PathchSageAttentionKJ():
     @classmethod
@@ -1309,13 +1310,14 @@ class WanVideoNAG:
 # every block's self-attention
 _QWEN_IM_START, _QWEN_USER, _QWEN_NL, _QWEN_IM_END = 151644, 872, 198, 151645
 
-def _krea2_user_content_span(ids):
+def _krea2_user_content_span(ids, specials=(_QWEN_IM_START, _QWEN_USER, _QWEN_NL, _QWEN_IM_END)):
     # token span of the user prompt, between '<|im_start|>user\n' and the next '<|im_end|>'
+    im_start, user, nl, im_end = specials
     for i in range(len(ids) - 2):
-        if ids[i] == _QWEN_IM_START and ids[i + 1] == _QWEN_USER and ids[i + 2] == _QWEN_NL:
+        if ids[i] == im_start and ids[i + 1] == user and ids[i + 2] == nl:
             start = i + 3
             end = start
-            while end < len(ids) and ids[end] != _QWEN_IM_END:
+            while end < len(ids) and ids[end] != im_end:
                 end += 1
             return start, end
     return None, None
@@ -1334,6 +1336,49 @@ def _find_subsequence(seq, sub, lo, hi):
         if seq[i:i + n] == sub:
             out.append(i)
     return out
+
+def _prompt_token_weights(clip, text, strength, specials, name):
+    # parse (phrase:weight) terms, encode the clean prompt, locate each phrase's tokens in the conditioning.
+    # returns (cond, [(cond position, value multiplier, logit bias)])
+    import re
+    pattern = re.compile(r"\(([^():]+):(-?\d*\.?\d+)\)")
+    terms = [(m.group(1).strip(), float(m.group(2))) for m in pattern.finditer(text)]
+    tok = clip.tokenize(pattern.sub(lambda m: m.group(1), text))
+    ids = [t[0] for t in next(iter(tok.values()))[0]]
+    cond = clip.encode_from_tokens_scheduled(tok)
+    cond_len = cond[0][0].shape[1]
+    visible_start = len(ids) - cond_len            # conditioning == ids[visible_start:]
+    start, end = _krea2_user_content_span(ids, specials)
+    if start is None:
+        start, end = visible_start, len(ids)
+
+    pairs = []
+    for phrase, w in terms:
+        # emphasis via attention logit bias, de-emphasis / removal via value scaling
+        v_factor, k_bias = (1.0, strength * (w - 1.0) * 2.0) if w > 1.0 else (1.0 + strength * (w - 1.0), 0.0)
+        positions = []
+        for variant in (" " + phrase, phrase):     # words usually carry a leading-space token in context
+            # raw chat text skips the tokenizer's template (and MOSS's strip()) so the leading space survives
+            sub = _krea2_token_ids(clip, "<|im_start|>user\n" + variant + "<|im_end|>")
+            ps, pe = _krea2_user_content_span(sub, specials)
+            if ps is None:
+                continue
+            sub = sub[ps:pe]
+            for mi in _find_subsequence(ids, sub, start, end):
+                positions.extend(range(mi - visible_start, mi - visible_start + len(sub)))
+            if positions:
+                break
+        if not positions:
+            logging.warning(f"{name}: phrase '{phrase}' not found in prompt; skipped.")
+        pairs.extend((cp, v_factor, k_bias) for cp in positions if 0 <= cp < cond_len)
+    merged = {}
+    for cp, vf, kb in pairs:                       # a position hit by several phrases: factors multiply, biases add
+        pvf, pkb = merged.get(cp, (1.0, 0.0))
+        merged[cp] = (pvf * vf, pkb + kb)
+    pairs = [(cp, vf, kb) for cp, (vf, kb) in sorted(merged.items())]
+    if pairs:
+        logging.info(f"{name}: weighting {pairs}")
+    return cond, pairs
 
 
 def krea2_attn_forward_weight(self, x, freqs=None, mask=None, transformer_options={}):
@@ -1397,49 +1442,9 @@ class Krea2PromptWeight:
     EXPERIMENTAL = True
 
     def encode(self, clip, model, text, strength):
-        import re
-        pattern = re.compile(r"\(([^():]+):(-?\d*\.?\d+)\)")
-        terms = [(m.group(1).strip(), float(m.group(2))) for m in pattern.finditer(text)]
-        clean = pattern.sub(lambda m: m.group(1), text)
-
-        tok = clip.tokenize(clean)
-        key = next(iter(tok))
-        ids = [t[0] for t in tok[key][0]]
-        cond = clip.encode_from_tokens_scheduled(tok)
-        cond_len = cond[0][0].shape[1]
-        visible_start = len(ids) - cond_len            # conditioning == ids[visible_start:]
-        start, end = _krea2_user_content_span(ids)
-        if start is None:
-            start, end = visible_start, len(ids)
-
-        weight_pairs = []                              # (conditioning position, value multiplier)
-        for phrase, w in terms:
-            if w > 1.0:
-                v_factor, k_bias = 1.0, strength * (w - 1.0) * 2.0   # emphasis via attention boost
-            else:
-                v_factor, k_bias = 1.0 + strength * (w - 1.0), 0.0   # de-emphasis / removal via value scaling
-            positions = []
-            for variant in (" " + phrase, phrase):     # words usually carry a leading-space token in context
-                sub = _krea2_token_ids(clip, variant)
-                ps, pe = _krea2_user_content_span(sub)
-                if ps is None:
-                    continue
-                sub = sub[ps:pe]
-                matches = _find_subsequence(ids, sub, start, end)
-                if matches:
-                    for mi in matches:
-                        positions.extend(mi + off - visible_start for off in range(len(sub)))
-                    break
-            if not positions:
-                logging.warning(f"Krea2PromptWeight: phrase '{phrase}' not found in prompt; skipped.")
-                continue
-            for cp in positions:
-                if 0 <= cp < cond_len:
-                    weight_pairs.append((cp, v_factor, k_bias))
-
+        cond, weight_pairs = _prompt_token_weights(clip, text, strength, (_QWEN_IM_START, _QWEN_USER, _QWEN_NL, _QWEN_IM_END), "Krea2PromptWeight")
         if not weight_pairs:
             return (model, cond)
-        logging.info(f"Krea2PromptWeight: weighting {weight_pairs}")
 
         model_clone = model.clone()
         diffusion_model = model_clone.get_model_object("diffusion_model")
@@ -1453,6 +1458,123 @@ class Krea2PromptWeight:
             model_clone.add_object_patch(f"diffusion_model.blocks.{idx}.attn.forward", patched_attn)
 
         return (model_clone, cond)
+
+# MOSS-Image per-token prompt weighting, same mechanism as Krea2. MOSS is single-stream: every block self-attends over
+# [image tokens (H*W) | text tokens], so a conditioning index cp lives at sequence position H*W + cp.
+# A DIFFUSION_MODEL wrapper builds the weights as device tensors once per forward (checking the text length and the
+# cond/uncond batch layout); a single_block replace patch then runs each block with an attention override that scales
+# v and adds the logit bias, so comfy's block and attention code stay untouched.
+_QWEN35_SPECIALS = (248045, 846, 198, 248046)  # <|im_start|>, user, \n, <|im_end|> in the Qwen3.5 vocab
+
+def _moss_weight_rows(transformer_options, B):
+    # batch rows that belong to a positive cond (the sampler stacks len(cond_or_uncond) equal chunks); None if unknown
+    cond_or_uncond = transformer_options.get("cond_or_uncond")
+    if not cond_or_uncond or B % len(cond_or_uncond) != 0:
+        return None
+    chunk = B // len(cond_or_uncond)
+    return [b for b in range(B) if cond_or_uncond[b // chunk] == 0]
+
+def _moss_weight_wrapper(pairs, text_len, name):
+    # DIFFUSION_MODEL wrapper: puts (rows, v_idx, v_factor, bias) for this forward in transformer_options
+    v_pos, v_fac = [p for p, vf, _ in pairs if vf != 1.0], [vf for _, vf, _ in pairs if vf != 1.0]
+    k_pos, k_bias = [p for p, _, kb in pairs if kb != 0.0], [kb for _, _, kb in pairs if kb != 0.0]
+    warned = set()
+    def warn_once(key, msg):
+        if key not in warned:
+            warned.add(key)
+            logging.warning(f"{name}: {msg}")
+    def wrapper(executor, x, timestep, context, transformer_options={}, **kwargs):
+        B, _, H, W = x.shape
+        rows = _moss_weight_rows(transformer_options, B)
+        if context.shape[1] != text_len:
+            warn_once("len", f"conditioning length {context.shape[1]} is not this node's {text_len}; weighting skipped "
+                             "(wire this node's conditioning output to the sampler)")
+        elif rows is None:
+            warn_once("rows", "cond_or_uncond missing or uneven; cannot tell positive from negative, weighting skipped")
+        elif rows:
+            dev, dtype, text_start = x.device, x.dtype, H * W
+            rows_t = torch.tensor(rows, device=dev)[:, None]
+            v_idx = torch.tensor(v_pos, device=dev) + text_start if v_pos else None
+            v_fac_t = torch.tensor(v_fac, device=dev, dtype=dtype)[:, None] if v_pos else None
+            bias = None
+            if k_pos:
+                bias = torch.zeros(B, 1, 1, text_start + text_len, device=dev, dtype=dtype)
+                bias[rows_t, 0, 0, torch.tensor(k_pos, device=dev) + text_start] = torch.tensor(k_bias, device=dev, dtype=dtype)
+            transformer_options["moss_token_weights"] = (rows_t, v_idx, v_fac_t, bias)
+        return executor(x, timestep, context, transformer_options, **kwargs)
+    return wrapper
+
+def _moss_attn_override(weights, prev):
+    # optimized_attention override for one block call: q/k arrive post-norm/rope, v raw, all this call's own tensors
+    rows, v_idx, v_fac, bias = weights
+    def override(func, q, k, v, heads, mask=None, **kwargs):
+        if v_idx is not None:
+            v[rows, v_idx] = v[rows, v_idx] * v_fac.to(v.dtype)
+        if bias is not None and mask is None:
+            # comfy's own backend takes the additive mask (sage/sol fall back to sdpa); a sage/flash override would not
+            return func(q, k, v, heads, mask=bias.to(q.dtype), **kwargs)
+        if prev is not None:
+            return prev(func, q, k, v, heads, mask=mask, **kwargs)
+        return func(q, k, v, heads, mask=mask, **kwargs)
+    return override
+
+def _moss_block_patch(prev_patch):
+    # single_block replace: run the block with the attention override carrying this forward's weights
+    def patch(args, extra):
+        to = args["transformer_options"]
+        weights = to.get("moss_token_weights")
+        if weights is not None:
+            to = {**to, "optimized_attention_override": _moss_attn_override(weights, to.get("optimized_attention_override"))}
+            args = {**args, "transformer_options": to}
+        return prev_patch(args, extra) if prev_patch is not None else extra["original_block"](args)
+    return patch
+
+
+class MossImagePromptWeight(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="MossImagePromptWeight",
+            display_name="MOSS-Image Prompt Weight",
+            category="KJNodes/experimental",
+            is_experimental=True,
+            description="Per-token prompt weighting for MOSS-Image via attention value scaling, same approach as Krea2 Prompt Weight. "
+                        "Use (word:-1) to remove a concept, (word:1.5) to emphasize one -- works through the Qwen3.5 encoder where "
+                        "normal weighting doesn't. Outputs the patched model + conditioning; wire both to the sampler.",
+            inputs=[
+                io.Clip.Input("clip"),
+                io.Model.Input("model"),
+                io.String.Input("text", multiline=True, default="",
+                                tooltip="Prompt with per-token weights in parentheses, e.g. (word:-1) removes/represses a concept, (word:2) "
+                                        "emphasizes it, plain text = 1.0. Works on MOSS-Image where ComfyUI's normal (word:weight) does nothing "
+                                        "(the Qwen3.5 LLM encoder ignores it). weight<1 scales the token's attention VALUE (subtracts/removes at "
+                                        "<0); weight>1 boosts how much the image ATTENDS to the token (adds more of it). Only positive conds are "
+                                        "weighted, negative prompts pass through untouched."),
+                io.Float.Input("strength", default=1.0, min=0.0, max=4.0, step=0.05,
+                               tooltip="Global multiplier on the weighting effect. Effect compounds over all 42 blocks; lower if results break "
+                                       "up, raise for a stronger effect. Removal (weight<0) is the reliable direction; emphasis (weight>1) works "
+                                       "but is looser."),
+            ],
+            outputs=[io.Model.Output(display_name="model"), io.Conditioning.Output(display_name="conditioning")],
+        )
+
+    @classmethod
+    def execute(cls, clip, model, text, strength) -> io.NodeOutput:
+        cond, pairs = _prompt_token_weights(clip, text, strength, _QWEN35_SPECIALS, "MossImagePromptWeight")
+        if not pairs:
+            return io.NodeOutput(model, cond)
+
+        model_clone = model.clone()
+        diffusion_model = model_clone.get_model_object("diffusion_model")
+        if not hasattr(diffusion_model, "text_embedder"):
+            raise ValueError("MossImagePromptWeight: model is not a MOSS-Image diffusion model")
+
+        model_clone.add_wrapper_with_key(comfy.patcher_extension.WrappersMP.DIFFUSION_MODEL, "MossImagePromptWeight",
+                                         _moss_weight_wrapper(pairs, cond[0][0].shape[1], "MossImagePromptWeight"))
+        existing = model_clone.model_options.get("transformer_options", {}).get("patches_replace", {}).get("dit", {})
+        for idx in range(len(diffusion_model.layers)):
+            model_clone.set_model_patch_replace(_moss_block_patch(existing.get(("single_block", idx))), "dit", "single_block", idx)
+        return io.NodeOutput(model_clone, cond)
 
 class SkipLayerGuidanceWanVideo:
     @classmethod
