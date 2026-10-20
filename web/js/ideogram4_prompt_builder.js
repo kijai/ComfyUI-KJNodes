@@ -794,7 +794,7 @@ app.registerExtension({
       const styleBar = document.createElement("div");
       styleBar.className = "kjideo-bar";
       const styleLbl = document.createElement("span");
-      styleLbl.textContent = "Style colors:";
+      styleLbl.textContent = spec.styleColorsLabel || "Style colors:";
       styleBar.appendChild(styleLbl);
 
       const canvasEl = document.createElement("canvas");
@@ -2207,7 +2207,7 @@ app.registerExtension({
         if (w) { w.value = val; w.callback?.(val); }
       }
       // Caption -> editor boxes (the model's element list), then its caption-level fields (widgets).
-      function toBoxes(cap) { return spec.elements(cap).flatMap((el, i) => spec.elemToBox(el, i)).filter(Boolean); }   // an element may span canvases
+      function toBoxes(cap) { return spec.elements(cap).flatMap((el, i) => spec.elemToBox(el, i, ed)).filter(Boolean); }   // an element may span canvases
       function applyCaption(cap) {
         node._boxes = toBoxes(cap);
         selectOnly(node._boxes.length ? 0 : -1);
@@ -2281,6 +2281,15 @@ app.registerExtension({
         loadCaption(cap);
       }
       chainCallback(node, "onExecuted", function (message) {
+        // Reflect resolved width/height (e.g. from connected inputs) in the canvas aspect first: an
+        // imported caption with absolute-pixel boxes (MOSS) is converted against the current dims.
+        // A connected background image governs the aspect itself, so skip then.
+        if (message?.dims && !node._bgImg) {
+          const [w, h] = message.dims;
+          if (wWidget && w) wWidget.value = w;
+          if (hWidget && h) hWidget.value = h;
+          syncCanvasToDims(); fitCanvas();
+        }
         if (message?.caption) applyImported(message.caption[0]);
         // Seed regions from the bboxes input only when the editor is empty, so user-drawn/edited
         // regions are never overwritten.
@@ -2291,14 +2300,6 @@ app.registerExtension({
             selectOnly(node._boxes.length ? 0 : -1);
             commit(); fitCanvas();
           }
-        }
-        // Reflect resolved width/height (e.g. from connected inputs) in the canvas aspect.
-        // A connected background image governs the aspect itself, so skip then.
-        if (message?.dims && !node._bgImg) {
-          const [w, h] = message.dims;
-          if (wWidget && w) wWidget.value = w;
-          if (hWidget && h) hWidget.value = h;
-          syncCanvasToDims(); fitCanvas();
         }
       });
 
@@ -2528,7 +2529,7 @@ app.registerExtension({
         typeRow.className = "kjideo-row";
         if (spec.typeToggle) {
           const lbl = document.createElement("span"); lbl.textContent = "type:"; typeRow.appendChild(lbl);
-          for (const t of ["obj", "text"]) {
+          for (const t of (Array.isArray(spec.typeToggle) ? spec.typeToggle : ["obj", "text"])) {
             const btn = document.createElement("button");
             btn.className = "kjideo-btn" + (b.type === t ? " active" : "");
             btn.textContent = t;
