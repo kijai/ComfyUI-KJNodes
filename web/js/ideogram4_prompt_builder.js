@@ -2697,14 +2697,16 @@ app.registerExtension({
         } catch (e) {}
         return null;
       }
-      // Persist editor data by name (robust to widget-order changes across versions).
+      // Persist editor data by name (robust to widget-order changes across versions). JSON round-trip: node.properties
+      // is Vue-reactive in newer frontends and its sub-objects are Proxies, which structuredClone (used when the
+      // frontend creates the workflow tab) rejects — the load then aborts with "Unable to find workflow" (#775).
       chainCallback(node, "onSerialize", function (o) {
         if (!o) return;
         const p = node.properties;
-        o.ideo = { boxes: node._boxes, palette: node._stylePalette, importMode: findW("import_mode")?.value,
+        o.ideo = JSON.parse(JSON.stringify({ boxes: node._boxes, palette: node._stylePalette, importMode: findW("import_mode")?.value,
           outputFormat: findW("output_format")?.value, coordMode: findW("coord_mode")?.value, bboxOrder: findW("bbox_order")?.value,
           dock: { pinned: p.dockPinned, graph: p.dockGraph, rect: p.dockRect, panelH: node._panelH, min: p.dockMin,
-            exposeParent: p.exposeToParent, parent: p.dockParent } };
+            exposeParent: p.exposeToParent, parent: p.dockParent } }));
       });
       chainCallback(node, "onConfigure", function (o) {
         const raw = o && Array.isArray(o.widgets_values) ? o.widgets_values : [];

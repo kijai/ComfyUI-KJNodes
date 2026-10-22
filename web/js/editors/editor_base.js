@@ -453,7 +453,7 @@ export class BaseEditorCanvas {
   static setupImgDataPersistence(node) {
     chainCallback(node, "onSerialize", function (o) {
       if (this.properties.imgData && o.properties) {
-        o.properties.imgData = this.properties.imgData;
+        o.properties.imgData = JSON.parse(JSON.stringify(this.properties.imgData));   // plain copy: properties are Vue-reactive Proxies (#775)
       }
     });
     chainCallback(node, "onConfigure", function (info) {
