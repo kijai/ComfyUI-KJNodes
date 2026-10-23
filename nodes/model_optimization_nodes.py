@@ -1511,8 +1511,10 @@ def _moss_attn_override(weights, prev):
         if v_idx is not None:
             v[rows, v_idx] = v[rows, v_idx] * v_fac.to(v.dtype)
         if bias is not None and mask is None:
+            n_k = k.shape[-2] if kwargs.get("skip_reshape") else k.shape[1]
+            m = bias if bias.shape[-1] == n_k else torch.nn.functional.pad(bias, (0, n_k - bias.shape[-1]))  # edit LoRAs append reference tokens to k/v
             # comfy's own backend takes the additive mask (sage/sol fall back to sdpa); a sage/flash override would not
-            return func(q, k, v, heads, mask=bias.to(q.dtype), **kwargs)
+            return func(q, k, v, heads, mask=m.to(q.dtype), **kwargs)
         if prev is not None:
             return prev(func, q, k, v, heads, mask=mask, **kwargs)
         return func(q, k, v, heads, mask=mask, **kwargs)
