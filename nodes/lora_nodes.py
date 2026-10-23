@@ -1,6 +1,8 @@
 import torch
 import comfy.model_management
 import comfy.utils
+import comfy.lora
+import comfy.model_patcher
 import folder_paths
 import os
 import logging
@@ -11,75 +13,48 @@ from comfy_api.latest import io, ui
 device = comfy.model_management.get_torch_device()
 
 CLAMP_QUANTILE = 0.99
+UNCHANGED_THRESHOLD = 1e-6  # skip tensors whose diff norm is below this fraction of the original weight norm
 
 def extract_lora(diff, key, rank, algorithm, lora_type, lowrank_iters=7, adaptive_param=1.0, clamp_quantile=True):
     """
     Extracts LoRA weights from a weight difference tensor using SVD.
+    Returns (lora_up, lora_down, fro_retained).
     """
-    conv2d = (len(diff.shape) == 4)
-    kernel_size = None if not conv2d else diff.size()[2:4]
-    conv2d_3x3 = conv2d and kernel_size != (1, 1)
-    out_dim, in_dim = diff.size()[0:2]
+    out_dim = diff.shape[0]
+    diff_2d = diff.flatten(start_dim=1).float()
+    # Exact total energy, so adaptive modes work with only the top singular values from svd_lowrank
+    total_energy = diff_2d.pow(2).sum()
 
-    if conv2d:
-        if conv2d_3x3:
-            diff = diff.flatten(start_dim=1)
-        else:
-            diff = diff.squeeze()
-
-    diff_float = diff.float()
     if algorithm == "svd_lowrank":
-        U, S, V = torch.svd_lowrank(diff_float, q=min(rank, in_dim, out_dim), niter=lowrank_iters)
-        U = U @ torch.diag(S)
+        U, S, V = torch.svd_lowrank(diff_2d, q=min(rank, *diff_2d.shape), niter=lowrank_iters)
         Vh = V.t()
     else:
-        #torch.linalg.svdvals() 
-        U, S, Vh = torch.linalg.svd(diff_float)
-        # Flexible rank selection logic like locon: https://github.com/KohakuBlueleaf/LyCORIS/blob/main/tools/extract_locon.py
-        if "adaptive" in lora_type:
-            if lora_type == "adaptive_ratio":
-                min_s = torch.max(S) * adaptive_param
-                lora_rank = torch.sum(S > min_s).item()
-            elif lora_type == "adaptive_energy":
-                energy = torch.cumsum(S**2, dim=0)
-                total_energy = torch.sum(S**2)
-                threshold = adaptive_param * total_energy  # e.g., adaptive_param=0.95 for 95%
-                lora_rank = torch.sum(energy < threshold).item() + 1
-            elif lora_type == "adaptive_quantile":
-                s_cum = torch.cumsum(S, dim=0)
-                min_cum_sum = adaptive_param * torch.sum(S)
-                lora_rank = torch.sum(s_cum < min_cum_sum).item()
-            elif lora_type == "adaptive_fro":
-                S_squared = S.pow(2)
-                S_fro_sq = float(torch.sum(S_squared))
-                sum_S_squared = torch.cumsum(S_squared, dim=0) / S_fro_sq
-                lora_rank = int(torch.searchsorted(sum_S_squared, adaptive_param**2)) + 1
-                lora_rank = max(1, min(lora_rank, len(S)))
-            else:
-                pass  # Will print after capping
-            
-            # Cap adaptive rank by the specified max rank
-            lora_rank = min(lora_rank, rank)
-            
-            # Calculate and print actual fro percentage retained after capping
-            if lora_type == "adaptive_fro":
-                S_squared = S.pow(2)
-                s_fro = torch.sqrt(torch.sum(S_squared))
-                s_red_fro = torch.sqrt(torch.sum(S_squared[:lora_rank]))
-                fro_percent = float(s_red_fro / s_fro)
-                logging.info(f"{key} Extracted LoRA rank: {lora_rank}, Frobenius retained: {fro_percent:.1%}")
-            else:
-                logging.info(f"{key} Extracted LoRA rank: {lora_rank}")
-        else:
-            lora_rank = rank
+        U, S, Vh = torch.linalg.svd(diff_2d, full_matrices=False)
 
-        lora_rank = max(1, lora_rank)
-        lora_rank = min(out_dim, in_dim, lora_rank)
-        
-        U = U[:, :lora_rank]
-        S = S[:lora_rank]
-        U = U @ torch.diag(S)
-        Vh = Vh[:lora_rank, :]
+    # Flexible rank selection logic like locon: https://github.com/KohakuBlueleaf/LyCORIS/blob/main/tools/extract_locon.py
+    if lora_type == "adaptive_ratio":
+        min_s = torch.max(S) * adaptive_param
+        lora_rank = torch.sum(S > min_s).item()
+    elif lora_type == "adaptive_energy":
+        energy = torch.cumsum(S**2, dim=0)
+        threshold = adaptive_param * total_energy  # e.g., adaptive_param=0.95 for 95%
+        lora_rank = torch.sum(energy < threshold).item() + 1
+    elif lora_type == "adaptive_quantile":
+        s_cum = torch.cumsum(S, dim=0)
+        min_cum_sum = adaptive_param * torch.sum(S)
+        lora_rank = torch.sum(s_cum < min_cum_sum).item()
+    elif lora_type == "adaptive_fro":
+        sum_S_squared = torch.cumsum(S.pow(2), dim=0) / total_energy
+        lora_rank = int(torch.searchsorted(sum_S_squared, adaptive_param**2)) + 1
+    else:
+        lora_rank = rank
+    # Cap adaptive rank by the specified max rank
+    lora_rank = max(1, min(lora_rank, rank, S.numel()))
+
+    fro_retained = float(torch.sqrt(S[:lora_rank].pow(2).sum() / total_energy)) if total_energy > 0 else 1.0
+
+    U = U[:, :lora_rank] * S[:lora_rank]
+    Vh = Vh[:lora_rank]
 
     if clamp_quantile:
         dist = torch.cat([U.flatten(), Vh.flatten()])
@@ -94,71 +69,106 @@ def extract_lora(diff, key, rank, algorithm, lora_type, lowrank_iters=7, adaptiv
 
         U = U.clamp(low_val, hi_val)
         Vh = Vh.clamp(low_val, hi_val)
-    if conv2d:
-        U = U.reshape(out_dim, lora_rank, 1, 1)
-        Vh = Vh.reshape(lora_rank, in_dim, kernel_size[0], kernel_size[1])
-    return (U, Vh)
+    U = U.reshape(out_dim, lora_rank, *[1] * (diff.ndim - 2))
+    Vh = Vh.reshape(lora_rank, *diff.shape[1:])
+    return (U, Vh, fro_retained)
 
 
-def calc_lora_model(model_diff, rank, prefix_model, prefix_lora, output_sd, lora_type, algorithm, lowrank_iters, out_dtype, bias_diff=False, adaptive_param=1.0, clamp_quantile=True):
-    # Get key names from module structure without materializing weights
-    sd_keys = []
-    for name, _ in model_diff.model.named_parameters():
-        if prefix_model is None or name.startswith(prefix_model):
-            sd_keys.append(name)
-    for name, _ in model_diff.model.named_buffers():
-        if prefix_model is None or name.startswith(prefix_model):
-            sd_keys.append(name)
+def _get_key_patches(patcher, filter_prefix):
+    # Like ModelPatcher.get_key_patches(), but walks parameters instead of state_dict keys: quantized layers
+    # serialize extras (weight_scale, comfy_quant) that aren't module attributes and break get_key_weight
+    p = {}
+    with patcher.use_ejected():
+        for k, _ in patcher.model.named_parameters():
+            if not k.startswith(filter_prefix) or not k.endswith((".weight", ".bias")):
+                continue
+            weight, _, convert_func = comfy.model_patcher.get_key_weight(patcher.model, k)
+            if not isinstance(weight, torch.Tensor):
+                continue
+            bk = patcher.backup.get(k, None)
+            if bk is not None:
+                weight = bk.weight
+            hbk = patcher.hook_backup.get(k, None)
+            if hbk is not None:
+                weight = hbk[0]
+            if convert_func is None:
+                convert_func = lambda a, **kwargs: a
+            p[k] = [(weight, convert_func)] + patcher.patches.get(k, [])
+    return p
 
-    total_keys = len([k for k in sd_keys if k.endswith(".weight") or (bias_diff and k.endswith(".bias"))])
-    progress_bar = tqdm(total=total_keys, desc=f"Extracting LoRA ({prefix_lora.strip('.')})")
-    comfy_pbar = comfy.utils.ProgressBar(total_keys)
+
+def _materialize_weight(patch_list, key):
+    # Rebuild a weight from get_key_patches() output in fp32 on the compute device, applying any patches (loras etc.)
+    weight, convert_func = patch_list[0]
+    weight = convert_func(comfy.model_management.cast_to_device(weight, device, torch.float32, copy=True), inplace=True)
+    if len(patch_list) > 1:
+        weight = comfy.lora.calculate_weight(patch_list[1:], weight, key)
+    return weight
+
+
+def calc_lora_model(finetuned_patches, original_patches, rank, prefix_model, prefix_lora, output_sd, lora_type, algorithm, lowrank_iters, out_dtype, bias_diff=False, adaptive_param=1.0, clamp_quantile=True):
+    keys = [k for k in finetuned_patches if k.endswith(".weight") or (bias_diff and k.endswith(".bias"))]
+    progress_bar = tqdm(total=len(keys), desc=f"Extracting LoRA ({prefix_lora.strip('.')})")
+    comfy_pbar = comfy.utils.ProgressBar(len(keys))
+    stats = []  # (key, rank, fro_retained)
+    unchanged = 0
+    mismatched = []
 
     # Process one weight at a time to minimize memory usage
-    for k in sd_keys:
-        if k.endswith(".weight"):
-            # Patch and retrieve single weight
-            weight_diff = model_diff.patch_weight_to_device(k, return_weight=True)
-            if weight_diff is None:
-                progress_bar.update(1)
-                comfy_pbar.update(1)
+    for k in keys:
+        try:
+            lora_key = prefix_lora + k[len(prefix_model):].rsplit(".", 1)[0]
+            if k not in original_patches:
+                mismatched.append(k)
                 continue
-            if weight_diff.ndim == 5:
+            # Diff in fp32 directly, the model patcher path would round it back to the storage dtype (or requantize it)
+            diff = _materialize_weight(finetuned_patches[k], k)
+            original = _materialize_weight(original_patches[k], k)
+            if diff.shape != original.shape:
+                mismatched.append(k)
+                continue
+            original_norm = torch.linalg.vector_norm(original)
+            diff.sub_(original)
+            del original
+            diff_norm = torch.linalg.vector_norm(diff)
+            if diff_norm <= UNCHANGED_THRESHOLD * original_norm:
+                unchanged += 1
+                continue
+
+            if k.endswith(".bias"):
+                output_sd[f"{lora_key}.diff_b"] = diff.to(out_dtype).cpu()
+            elif diff.ndim == 5:
                 logging.info(f"Skipping 5D tensor for key {k}")
-                del weight_diff
-                progress_bar.update(1)
-                comfy_pbar.update(1)
-                continue
-            if lora_type != "full":
-                if weight_diff.ndim < 2:
-                    if bias_diff:
-                        output_sd["{}{}.diff".format(prefix_lora, k[len(prefix_model):-7])] = weight_diff.contiguous().to(out_dtype).cpu()
-                    del weight_diff
-                    progress_bar.update(1)
-                    comfy_pbar.update(1)
-                    continue
+            elif lora_type == "full":
+                output_sd[f"{lora_key}.diff"] = diff.to(out_dtype).cpu()
+            elif diff.ndim < 2:
+                if bias_diff:
+                    output_sd[f"{lora_key}.diff"] = diff.to(out_dtype).cpu()
+            else:
                 try:
-                    out = extract_lora(weight_diff.to(device), k, rank, algorithm, lora_type, lowrank_iters=lowrank_iters, adaptive_param=adaptive_param, clamp_quantile=clamp_quantile)
-                    output_sd["{}{}.lora_up.weight".format(prefix_lora, k[len(prefix_model):-7])] = out[0].contiguous().to(out_dtype).cpu()
-                    output_sd["{}{}.lora_down.weight".format(prefix_lora, k[len(prefix_model):-7])] = out[1].contiguous().to(out_dtype).cpu()
+                    up, down, fro_retained = extract_lora(diff, k, rank, algorithm, lora_type, lowrank_iters=lowrank_iters, adaptive_param=adaptive_param, clamp_quantile=clamp_quantile)
                 except Exception as e:
                     logging.warning(f"Could not generate lora weights for key {k}, error {e}")
-            else:
-                output_sd["{}{}.diff".format(prefix_lora, k[len(prefix_model):-7])] = weight_diff.contiguous().to(out_dtype).cpu()
-            del weight_diff
-            progress_bar.update(1)
-            comfy_pbar.update(1)
-
-        elif bias_diff and k.endswith(".bias"):
-            weight = model_diff.patch_weight_to_device(k, return_weight=True)
-            if weight is not None:
-                output_sd["{}{}.diff_b".format(prefix_lora, k[len(prefix_model):-5])] = weight.contiguous().to(out_dtype).cpu()
-                del weight
+                    continue
+                output_sd[f"{lora_key}.lora_up.weight"] = up.contiguous().to(out_dtype).cpu()
+                output_sd[f"{lora_key}.lora_down.weight"] = down.contiguous().to(out_dtype).cpu()
+                stats.append((k, up.shape[1], fro_retained))
+                logging.info(f"{k}: rank {up.shape[1]}, fro retained {fro_retained:.1%}, weight change {float(diff_norm / original_norm.clamp_min(1e-12)):.2%}")
+        finally:
             progress_bar.update(1)
             comfy_pbar.update(1)
 
     progress_bar.close()
-    del model_diff
+    name = prefix_lora.strip(".")
+    if unchanged:
+        logging.info(f"LoRA extraction ({name}): skipped {unchanged} unchanged tensors")
+    if mismatched:
+        logging.warning(f"LoRA extraction ({name}): skipped {len(mismatched)} tensors missing from the original model or with mismatched shapes: {', '.join(mismatched[:10])}{', ...' if len(mismatched) > 10 else ''}")
+    if stats:
+        fros = [s[2] for s in stats]
+        logging.info(f"LoRA extraction ({name}): {len(stats)} layers, mean rank {np.mean([s[1] for s in stats]):.1f}, fro retained mean {np.mean(fros):.1%}, min {min(fros):.1%}")
+        worst = sorted(stats, key=lambda s: s[2])[:5]
+        logging.info(f"Lowest fro retained: {', '.join(f'{k} {f:.1%} (rank {r})' for k, r, f in worst)}")
     comfy.model_management.soft_empty_cache()
     return output_sd
 
@@ -188,8 +198,8 @@ class LoraExtractKJ(io.ComfyNode):
 
     @classmethod
     def execute(cls, finetuned, original, filename_prefix, rank, lora_type, algorithm, lowrank_iters, output_dtype, bias_diff, adaptive_param, clamp_quantile) -> io.NodeOutput:
-        if algorithm == "svd_lowrank" and lora_type != "standard":
-            raise ValueError("svd_lowrank algorithm is only supported for standard LoRA extraction.")
+        if algorithm == "svd_lowrank" and lora_type == "adaptive_quantile":
+            raise ValueError("adaptive_quantile needs all singular values, use the svd_linalg algorithm.")
 
         dtype = {"bf16": torch.bfloat16, "fp16": torch.float16, "fp32": torch.float32}[output_dtype]
 
@@ -201,16 +211,9 @@ class LoraExtractKJ(io.ComfyNode):
         is_clip = hasattr(finetuned, "patcher")
 
         if is_clip:
-            clip_diff = finetuned.clone()
-            kp = original.get_key_patches()
-            kp = {k: v for k, v in kp.items() if not k.endswith(".position_ids") and not k.endswith(".logit_scale")}
-            clip_diff.add_patches(kp, -1.0, 1.0)
-            output_sd = calc_lora_model(clip_diff.patcher, rank, "", "text_encoders.", output_sd, lora_type, algorithm, lowrank_iters, dtype, bias_diff=bias_diff, adaptive_param=adaptive_param, clamp_quantile=clamp_quantile)
+            output_sd = calc_lora_model(_get_key_patches(finetuned.patcher, ""), _get_key_patches(original.patcher, ""), rank, "", "text_encoders.", output_sd, lora_type, algorithm, lowrank_iters, dtype, bias_diff=bias_diff, adaptive_param=adaptive_param, clamp_quantile=clamp_quantile)
         else:
-            m = finetuned.clone()
-            kp = original.get_key_patches("diffusion_model.")
-            m.add_patches(kp, -1.0, 1.0)
-            output_sd = calc_lora_model(m, rank, "diffusion_model.", "diffusion_model.", output_sd, lora_type, algorithm, lowrank_iters, dtype, bias_diff=bias_diff, adaptive_param=adaptive_param, clamp_quantile=clamp_quantile)
+            output_sd = calc_lora_model(_get_key_patches(finetuned, "diffusion_model."), _get_key_patches(original, "diffusion_model."), rank, "diffusion_model.", "diffusion_model.", output_sd, lora_type, algorithm, lowrank_iters, dtype, bias_diff=bias_diff, adaptive_param=adaptive_param, clamp_quantile=clamp_quantile)
 
         if "adaptive" in lora_type:
             rank_str = f"{lora_type}_{adaptive_param:.2f}"
