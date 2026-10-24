@@ -260,11 +260,11 @@ function treeRows(dir, expanded, depth, byDate, out = []) {
 	return out;
 }
 
-function searchRows(tree, terms, byDate) {
+function searchFiles(files, terms, byDate) {
 	// name starting with the first term, then name containing all terms, then path-only matches
 	const ranks = [[], [], []];
-	for (const f of tree.all) if (terms.every((t) => f.key.includes(t))) ranks[f.lname.startsWith(terms[0]) ? 0 : terms.every((t) => f.lname.includes(t)) ? 1 : 2].push(f);
-	return ranks.flatMap((files) => newestFirst(files, byDate).map((file) => ({ file, depth: 0, path: true })));
+	for (const f of files) if (terms.every((t) => f.key.includes(t))) ranks[f.lname.startsWith(terms[0]) ? 0 : terms.every((t) => f.lname.includes(t)) ? 1 : 2].push(f);
+	return ranks.flatMap((r) => newestFirst(r, byDate));
 }
 
 // tree style is one panel with inline folders; submenus style adds a panel per open folder level
@@ -348,14 +348,21 @@ function openFolderTree(anchor, combo) {
 
 	const render = (p, item) => {
 		const searching = p.level === 0 && query;
-		const terms = searching ? pathKey(query).split(/\s+/) : null;
+		const key = searching ? pathKey(query) : "";
+		const terms = searching ? key.split(/\s+/) : null;
 		p.hit = terms && new RegExp(`(${terms.map(reEsc).join("|")})`, "i");
-		p.rows = terms ? searchRows(tree, terms, byDate) : [...(p.level ? [] : groupRows()), ...treeRows(p.dir, expanded, p.level, byDate)];
+		if (terms) {
+			// typing more onto the previous query only narrows it, so filter the previous hits instead of every file
+			p.hits = searchFiles(p.hitsKey && key.startsWith(p.hitsKey) ? p.hits : tree.all, terms, byDate);
+			p.rows = p.hits.map((file) => ({ file, depth: 0, path: true }));
+		} else p.rows = [...(p.level ? [] : groupRows()), ...treeRows(p.dir, expanded, p.level, byDate)];
+		p.hitsKey = key;
+		// drop the old rows first so the list clamps its scroll to the new height; setActive below repaints
+		p.win.textContent = "";
 		p.sizer.style.height = `${p.rows.length * rowH}px`;
 		p.note.hidden = p.rows.length > 0;
 		// a long submenu gets a fixed width, since only part of it is rendered to size it by
 		if (p.level) p.el.style.width = p.rows.length > 40 ? "26rem" : "";
-		paint(p);
 		// never shrink while open, so a bottom-anchored box doesn't slide down as the search filters it
 		if (!p.level) p.el.style.minHeight = `${p.el.offsetHeight}px`;
 		let i = p.rows.findIndex((r) => (r.folder ?? r.file) === item);
