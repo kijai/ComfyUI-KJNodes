@@ -815,8 +815,10 @@ The choices are loaded from 'custom_dimensions.json' in the nodes folder.
 
 class WidgetToString:
     @classmethod
-    def IS_CHANGED(cls,*,id,node_title,any_input,**kwargs):
-        if any_input is not None and (id != 0 or node_title != ""):
+    def IS_CHANGED(cls, *, id=0, node_title="", any_input=None, **kwargs):
+        # A node picked by title, or by an id that any_input does not link to, is read from the prompt, which is not part of
+        # this node's cache key, so read it again on every run. any_input is the raw link ([node_id, output]) here.
+        if node_title != "" or (id != 0 and (any_input is None or any_input[0] != str(id))):
             return float("NaN")
 
     @classmethod
@@ -828,7 +830,7 @@ class WidgetToString:
                 "return_all": ("BOOLEAN", {"default": False}),
             },
             "optional": {
-                         "any_input": (IO.ANY, ),
+                         "any_input": (IO.ANY, {"rawLink": True}),
                          "node_title": ("STRING", {"multiline": False}),
                          "allowed_float_decimals": ("INT", {"default": 2, "min": 0, "max": 10, "tooltip": "Number of decimal places to display for float values"}),
                          },
