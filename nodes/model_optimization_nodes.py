@@ -3,6 +3,7 @@ import sys
 import logging
 import torch
 import importlib
+import inspect
 import math
 import datetime
 import pickle
@@ -25,30 +26,44 @@ except ImportError:
 
 sageattn_modes = ["disabled", "auto", "sageattn_qk_int8_pv_fp16_cuda", "sageattn_qk_int8_pv_fp16_triton", "sageattn_qk_int8_pv_fp8_cuda", "sageattn_qk_int8_pv_fp8_cuda++", "sageattn3", "sageattn3_per_block_mean"]
 
+def _takes_attn_mask(f):
+    # most sage kernels swallow attn_mask through **kwargs and ignore it; only an explicit parameter applies it
+    try:
+        return "attn_mask" in inspect.signature(f).parameters
+    except (TypeError, ValueError):
+        return False
+
 def get_sage_func(sage_attention, allow_compile=False):
     logging.info(f"Using sage attention mode: {sage_attention}")
+    mask_ok = False
     if sage_attention == "auto":
         from sageattention import sageattn
+        mask_ok = _takes_attn_mask(sageattn)
         def sage_func(q, k, v, is_causal=False, attn_mask=None, tensor_layout="NHD"):
             return sageattn(q, k, v, is_causal=is_causal, attn_mask=attn_mask, tensor_layout=tensor_layout)
     elif sage_attention == "sageattn_qk_int8_pv_fp16_cuda":
         from sageattention import sageattn_qk_int8_pv_fp16_cuda
+        mask_ok = _takes_attn_mask(sageattn_qk_int8_pv_fp16_cuda)
         def sage_func(q, k, v, is_causal=False, attn_mask=None, tensor_layout="NHD"):
             return sageattn_qk_int8_pv_fp16_cuda(q, k, v, is_causal=is_causal, attn_mask=attn_mask, pv_accum_dtype="fp32", tensor_layout=tensor_layout)
     elif sage_attention == "sageattn_qk_int8_pv_fp16_triton":
         from sageattention import sageattn_qk_int8_pv_fp16_triton
+        mask_ok = _takes_attn_mask(sageattn_qk_int8_pv_fp16_triton)
         def sage_func(q, k, v, is_causal=False, attn_mask=None, tensor_layout="NHD"):
             return sageattn_qk_int8_pv_fp16_triton(q, k, v, is_causal=is_causal, attn_mask=attn_mask, tensor_layout=tensor_layout)
     elif sage_attention == "sageattn_qk_int8_pv_fp8_cuda":
         from sageattention import sageattn_qk_int8_pv_fp8_cuda
+        mask_ok = _takes_attn_mask(sageattn_qk_int8_pv_fp8_cuda)
         def sage_func(q, k, v, is_causal=False, attn_mask=None, tensor_layout="NHD"):
             return sageattn_qk_int8_pv_fp8_cuda(q, k, v, is_causal=is_causal, attn_mask=attn_mask, pv_accum_dtype="fp32+fp32", tensor_layout=tensor_layout)
     elif sage_attention == "sageattn_qk_int8_pv_fp8_cuda++":
         from sageattention import sageattn_qk_int8_pv_fp8_cuda
+        mask_ok = _takes_attn_mask(sageattn_qk_int8_pv_fp8_cuda)
         def sage_func(q, k, v, is_causal=False, attn_mask=None, tensor_layout="NHD"):
             return sageattn_qk_int8_pv_fp8_cuda(q, k, v, is_causal=is_causal, attn_mask=attn_mask, pv_accum_dtype="fp32+fp16", tensor_layout=tensor_layout)
     elif "sageattn3" in sage_attention:
         from sageattn3 import sageattn3_blackwell
+        mask_ok = _takes_attn_mask(sageattn3_blackwell)
         def sage_func(q, k, v, is_causal=False, attn_mask=None, tensor_layout="NHD", **kwargs):
             q, k, v = [x.transpose(1, 2) if tensor_layout == "NHD" else x for x in (q, k, v)]
             out = sageattn3_blackwell(q, k, v, is_causal=is_causal, attn_mask=attn_mask, per_block_mean=(sage_attention == "sageattn3_per_block_mean"))
@@ -59,11 +74,13 @@ def get_sage_func(sage_attention, allow_compile=False):
 
     @wrap_attn
     def attention_sage(q, k, v, heads, mask=None, attn_precision=None, skip_reshape=False, skip_output_reshape=False, **kwargs):
-        if kwargs.get("low_precision_attention", True) is False:
+        if kwargs.get("low_precision_attention", True) is False or (mask is not None and not mask_ok):
             return attention_pytorch(q, k, v, heads, mask=mask, skip_reshape=skip_reshape, skip_output_reshape=skip_output_reshape, **kwargs)
         in_dtype = v.dtype
         if q.dtype == torch.float32 or k.dtype == torch.float32 or v.dtype == torch.float32:
             q, k, v = q.to(torch.float16), k.to(torch.float16), v.to(torch.float16)
+        if mask is not None and mask.dtype != torch.bool:
+            mask = mask.to(q.dtype)                          # sage wants a bool mask or q's dtype
         if skip_reshape:
             b, _, _, dim_head = q.shape
             tensor_layout="HND"
@@ -1461,10 +1478,20 @@ class Krea2PromptWeight:
 
 # MOSS-Image per-token prompt weighting, same mechanism as Krea2. MOSS is single-stream: every block self-attends over
 # [image tokens (H*W) | text tokens], so a conditioning index cp lives at sequence position H*W + cp.
-# A DIFFUSION_MODEL wrapper builds the weights as device tensors once per forward (checking the text length and the
-# cond/uncond batch layout); a single_block replace patch then runs each block with an attention override that scales
-# v and adds the logit bias, so comfy's block and attention code stay untouched.
+# Newer core takes the emphasis logit bias as conditioning (context_attention_bias); then only value scaling needs the
+# model patch. The patch: a DIFFUSION_MODEL wrapper builds the weights as device tensors once per forward (checking the
+# text length and the cond/uncond batch layout); a single_block replace patch then runs each block with an attention
+# override that scales v (and adds the logit bias on older core), so comfy's block and attention code stay untouched.
+import node_helpers
+
 _QWEN35_SPECIALS = (248045, 846, 198, 248046)  # <|im_start|>, user, \n, <|im_end|> in the Qwen3.5 vocab
+
+def _moss_core_attention_bias(diffusion_model):
+    # core MOSS-Image applies a context_attention_bias conditioning (additive logit bias on the text keys) itself
+    try:
+        return "context_attention_bias" in inspect.signature(type(diffusion_model)._forward).parameters
+    except (TypeError, ValueError, AttributeError):
+        return False
 
 def _moss_weight_rows(transformer_options, B):
     # batch rows that belong to a positive cond (the sampler stacks len(cond_or_uncond) equal chunks); None if unknown
@@ -1542,7 +1569,9 @@ class MossImagePromptWeight(io.ComfyNode):
             is_experimental=True,
             description="Per-token prompt weighting for MOSS-Image via attention value scaling, same approach as Krea2 Prompt Weight. "
                         "Use (word:-1) to remove a concept, (word:1.5) to emphasize one -- works through the Qwen3.5 encoder where "
-                        "normal weighting doesn't. Outputs the patched model + conditioning; wire both to the sampler.",
+                        "normal weighting doesn't. Outputs the model + conditioning; wire both to the sampler. On a ComfyUI that "
+                        "takes attention bias conditioning, emphasis rides on the conditioning and the model is only patched for "
+                        "weights below 1.",
             inputs=[
                 io.Clip.Input("clip"),
                 io.Model.Input("model"),
@@ -1566,11 +1595,23 @@ class MossImagePromptWeight(io.ComfyNode):
         if not pairs:
             return io.NodeOutput(model, cond)
 
-        model_clone = model.clone()
-        diffusion_model = model_clone.get_model_object("diffusion_model")
+        diffusion_model = model.get_model_object("diffusion_model")
         if not hasattr(diffusion_model, "text_embedder"):
             raise ValueError("MossImagePromptWeight: model is not a MOSS-Image diffusion model")
 
+        if _moss_core_attention_bias(diffusion_model):
+            # emphasis as conditioning: core biases the text keys in every block, only for the conds that carry it
+            k_terms = [(p, kb) for p, _, kb in pairs if kb != 0.0]
+            if k_terms:
+                bias = torch.zeros(1, cond[0][0].shape[1])
+                for p, kb in k_terms:
+                    bias[0, p] = kb
+                cond = node_helpers.conditioning_set_values(cond, {"context_attention_bias": bias})
+            pairs = [(p, vf, 0.0) for p, vf, _ in pairs if vf != 1.0]   # value scaling still needs the model patch
+            if not pairs:
+                return io.NodeOutput(model, cond)
+
+        model_clone = model.clone()
         model_clone.add_wrapper_with_key(comfy.patcher_extension.WrappersMP.DIFFUSION_MODEL, "MossImagePromptWeight",
                                          _moss_weight_wrapper(pairs, cond[0][0].shape[1], "MossImagePromptWeight"))
         existing = model_clone.model_options.get("transformer_options", {}).get("patches_replace", {}).get("dit", {})
