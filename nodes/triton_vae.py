@@ -1,7 +1,8 @@
 """Triton VAE decode/encode kernels: fused norm+SiLU and optional int8 convs.
 
-Supported (auto-detected): Wan (RMSNorm), KL/Flux2/SDXL/SD1.5 (GroupNorm)
-and LTXV/LTX2 (PixelNorm). int8 covers Wan, flux-family KL and LTX decoders.
+Supported (auto-detected): Wan (RMSNorm), KL/Flux1/SDXL/SD1.5 (GroupNorm)
+and LTXV/LTX2 (PixelNorm). int8 covers Wan, Flux1 KL and LTX decoders.
+Flux2's KL VAE is fused in ComfyUI core and passes through unpatched.
 """
 import torch
 import torch.nn as nn
@@ -14,6 +15,7 @@ except ImportError as e:
 
 from comfy.ldm.wan.vae import RMS_norm, CausalConv3d
 from comfy.ldm.modules.diffusionmodules.model import ResnetBlock
+import comfy.ldm.modules.diffusionmodules.model as kl_model
 from comfy.ldm.lightricks.vae.pixel_norm import PixelNorm
 from comfy.ldm.lightricks.vae.causal_conv3d import CausalConv3d as LTXCausalConv3d
 from comfy.ldm.lightricks.vae.causal_video_autoencoder import ResnetBlock3D as LTXResnetBlock3D, Encoder as LTXEncoder, Decoder as LTXDecoder
@@ -668,6 +670,13 @@ def _ltx_inner_eligible(conv):
         and conv.in_channels >= 64 and conv.in_channels % 32 == 0 and conv.out_channels >= 64
 
 
+def core_fused(vae):
+    # core's comfy-kitchen strips (Flux2 KL) read norm/conv weights directly, bypassing our patches
+    served = getattr(kl_model, "fused_norm_served", None)
+    decoder = getattr(vae.first_stage_model, "decoder", None)
+    return served is not None and getattr(decoder, "fused_norm", False) and served(vae.device, vae.vae_dtype)
+
+
 def build_int8_patches(model):
     # SD1.5/SDXL activation ranges break per-tensor int8; flux-family KL is fine
     kl_ok = getattr(getattr(getattr(model, "decoder", None), "conv_in", None), "in_channels", 0) >= 16
@@ -719,14 +728,14 @@ class PatchTritonVAE(io.ComfyNode):
             is_experimental=True,
             description="Speeds up VAE decode/encode with fused Triton norm+SiLU kernels and channels_last conv layout. "
                         "Supported VAEs (auto-detected): Wan 2.1/2.2 video VAEs incl. Qwen-Image (RMSNorm, ~1.4x/1.15x), KL image VAEs "
-                        "such as Flux/Flux2, SDXL and SD1.5 (GroupNorm, ~1.6-1.8x at 2048px), and LTXV/LTX2 video VAEs (PixelNorm; "
+                        "such as Flux1, SDXL and SD1.5 (GroupNorm, ~1.6-1.8x at 2048px; Flux2 is already fused by ComfyUI core and passes through unpatched), and LTXV/LTX2 video VAEs (PixelNorm; "
                         "timestep-conditioned decoder blocks get norm-only fusion). Other architectures are not supported. "
                         "Applied as object patches on a cloned patcher, so it only exists while this VAE is loaded.",
             inputs=[
                 io.Vae.Input("vae"),
                 io.Boolean.Input("fuse_norm_silu", default=True, tooltip="Replace norm+SiLU chains (RMSNorm for Wan, GroupNorm for KL VAEs) with fused Triton kernels (single pass, fp32 accumulation). Requires triton."),
                 io.Boolean.Input("channels_last", default=True, tooltip="Convert conv weights to channels_last memory format, removing cuDNN layout transposes around every conv. Required for the fused GroupNorm kernel to engage on KL VAEs."),
-                io.Boolean.Input("int8_conv", default=False, tooltip="EXPERIMENTAL: run the VAE decoder's 3x3 convolutions on int8 tensor cores (4x the bf16 rate on Ada+). Weights quantized per-out-channel, activations dynamically per-tensor; ~45-48 dB vs the bf16 decode, minor quality loss possible. Wan 2.1/2.2 and KL image VAEs (Flux2/SDXL/SD1.5), ignored for others."),
+                io.Boolean.Input("int8_conv", default=False, tooltip="EXPERIMENTAL: run the VAE decoder's 3x3 convolutions on int8 tensor cores (4x the bf16 rate on Ada+). Weights quantized per-out-channel, activations dynamically per-tensor; ~45-48 dB vs the bf16 decode, minor quality loss possible. Wan 2.1/2.2, LTXV/LTX2 and Flux1 KL VAEs, ignored for others."),
                 io.Boolean.Input("autotune", default=False, tooltip="Benchmark several kernel block-size configs on first use of each tensor shape and cache the fastest. Brief stutter per new resolution, usually a few percent faster after warmup."),
             ],
             outputs=[
@@ -736,6 +745,9 @@ class PatchTritonVAE(io.ComfyNode):
 
     @classmethod
     def execute(cls, vae, fuse_norm_silu=True, channels_last=True, int8_conv=False, autotune=False) -> io.NodeOutput:
+        if core_fused(vae):
+            logging.info("PatchTritonVAE: ComfyUI core already runs fused kernels for this VAE (Flux2), returning it unpatched")
+            return io.NodeOutput(vae)
         vae = copy.copy(vae)
         model = vae.first_stage_model
         if vae.patcher.is_dynamic():
@@ -760,7 +772,7 @@ class PatchTritonVAE(io.ComfyNode):
         if fuse_norm_silu:
             patches = build_object_patches(model, autotune=autotune)
             if not patches:
-                raise RuntimeError("No fusable norm layers found, this node supports Wan video VAEs, KL image VAEs (Flux2/SDXL/SD1.5) and LTXV/LTX2 video VAEs")
+                raise RuntimeError("No fusable norm layers found, this node supports Wan video VAEs, KL image VAEs (Flux1/SDXL/SD1.5) and LTXV/LTX2 video VAEs")
             for name, obj in patches.items():
                 vae.patcher.add_object_patch(name, obj)
             logging.info(f"PatchTritonVAE: registered {len(patches)} fused norm object patches")
