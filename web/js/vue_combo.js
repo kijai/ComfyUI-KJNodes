@@ -139,6 +139,11 @@ function placeNative(anchor, count) {
 	docEl.style.setProperty("--kj-combo-x", `${Math.max(r.left, 8)}px`);
 	// below/above is left to reka's flip; vh keeps a pinned list in view across window resizes
 	docEl.style.setProperty("--kj-combo-space", side === "pin" ? "calc(100vh - 16px)" : `${Math.max(r.top, innerHeight - r.bottom) - 16}px`);
+	// lock the opening height once reka has rendered and placed it, so filtering doesn't move an upward/pinned list
+	requestAnimationFrame(() => requestAnimationFrame(() => {
+		const content = document.querySelector(OVERLAY);
+		if (content) content.style.minHeight = `${content.offsetHeight}px`;
+	}));
 }
 
 function resolveCombo(trigger) {
@@ -329,6 +334,8 @@ function openFolderTree(anchor, combo) {
 		hitRe = terms && new RegExp(`(${terms.map(reEsc).join("|")})`, "i");
 		p.rows = terms ? searchRows(tree, terms, byDate) : [...(p.level ? [] : groupRows()), ...treeRows(p.dir, expanded, p.level, byDate)];
 		p.list.innerHTML = p.rows.map(rowHtml).join("") + (p.rows.more ? span("note", `${p.rows.more} more, refine the search`) : "") + (p.rows.length ? "" : span("note", "No results"));
+		// never shrink while open, so a bottom-anchored box doesn't slide down as the search filters it
+		if (!p.level) p.el.style.minHeight = `${p.el.offsetHeight}px`;
 		let i = p.rows.findIndex((r) => (r.folder ?? r.file) === item);
 		// otherwise land on the current value or the folder holding it
 		if (i === -1 && !searching) i = p.rows.findIndex((r) => r.file === current || holders.has(r.folder));
