@@ -1701,11 +1701,16 @@ def get_cuda_version():
 
 sageplus_sm89_available = False
 _cuda_archs = None
+_sageattn_hip = None
 try:
     from sageattention.core import per_thread_int8_triton, per_warp_int8_cuda, per_block_int8_triton, per_channel_fp8, get_cuda_arch_versions, attn_false
     _cuda_archs = get_cuda_arch_versions()
 except Exception:
-    pass
+    if torch.version.hip is not None:
+        try:
+            from sageattention import sageattn as _sageattn_hip
+        except ImportError:
+            pass
 _QATTN_PROBE = {
     "sm80": "qk_int8_sv_f16_accum_f32_attn",
     "sm89": "qk_int8_sv_f8_accum_f32_fuse_v_scale_attn_inst_buf",
@@ -1873,6 +1878,9 @@ def _sageattn_int8_fp8_nhd(qkv, dtype):
     # actually free them before the kernel runs — attention is the VRAM peak in these models.
     q, k, v = qkv
     qkv.clear()
+    if _sageattn_hip is not None:
+        return _sageattn_hip(q, k, v, tensor_layout="NHD", is_causal=False)
+
     head_dim_og = q.shape[-1]
 
     tensor_layout="NHD"
@@ -2138,8 +2146,8 @@ class WanVideoMemoryEfficientSageAttentionPatch(io.ComfyNode):
 
     @classmethod
     def execute(cls, model) -> io.NodeOutput:
-        if _cuda_archs is None:
-            raise RuntimeError("sageattention is not new enough version or could not determine CUDA architecture, cannot apply WanVideo Memory Efficient Sage Attention Patch.")
+        if _cuda_archs is None and _sageattn_hip is None:
+            raise RuntimeError("sageattention is not new enough or does not support the current GPU backend, cannot apply WanVideo Memory Efficient Sage Attention Patch.")
         if _wan_apply_rope is None:
             raise RuntimeError("Could not import apply_rope from comfy.ldm.flux.math, cannot apply WanVideo Memory Efficient Sage Attention Patch.")
         model_clone = model.clone()
@@ -2179,8 +2187,8 @@ class MiniMaxH3MemoryEfficientSageAttentionPatch(io.ComfyNode):
 
     @classmethod
     def execute(cls, model) -> io.NodeOutput:
-        if _cuda_archs is None:
-            raise RuntimeError("sageattention is not new enough version or could not determine CUDA architecture, cannot apply MiniMax H3 Memory Efficient Sage Attention Patch.")
+        if _cuda_archs is None and _sageattn_hip is None:
+            raise RuntimeError("sageattention is not new enough or does not support the current GPU backend, cannot apply MiniMax H3 Memory Efficient Sage Attention Patch.")
         if _ck is None:
             raise RuntimeError("This ComfyUI version does not support MiniMax H3, cannot apply MiniMax H3 Memory Efficient Sage Attention Patch.")
         model_clone = model.clone()
