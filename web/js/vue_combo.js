@@ -13,7 +13,8 @@ const SEP = /[\\/]/;
 const PATH_FILE = /[\\/][^\\/]*\.[a-z][a-z0-9]{0,15}$/i;
 // root-level entries pinned above the folders, like rgthree's special entries
 const SPECIAL = /^(none|disabled?|default|choose|open)(\s|$)/i;
-const MAX_RESULTS = 500;
+// the native list mounts a component per option (0.4s for 800, 24s for 20k), so long lists use the folder view popup
+const LONG_LIST = 200;
 const MOVES = { ArrowDown: 1, ArrowUp: -1, PageDown: 10, PageUp: -10 };
 
 const ICONS = {
@@ -86,11 +87,14 @@ div:has(> ${TRIGGER}:disabled) > .${ARROW_CLASS} { pointer-events: none; }
 }
 .kj-ctree-sort { display: flex; padding: 0; border: none; background: none; color: inherit; cursor: pointer; opacity: 0.6; }
 .kj-ctree-sort:hover, .kj-ctree-sort.on { opacity: 1; color: var(--primary-background); }
-.kj-ctree-head { padding: 0.375rem 0.5rem 0.125rem; font-size: 0.625rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted-foreground); }
-.kj-ctree-sep { height: 1px; margin: 0.25rem 0.5rem; background: var(--border-default); }
+/* rows and headers share one fixed height so the list can be virtualized */
+.kj-ctree-head {
+	display: flex; align-items: flex-end; height: 1.75rem; padding: 0 0.5rem 0.25rem; box-sizing: border-box;
+	font-size: 0.625rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted-foreground);
+}
 .kj-ctree-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 0.25rem; scrollbar-width: thin; }
 .kj-ctree-row {
-	display: flex; align-items: center; gap: 0.25rem; min-height: 1.75rem; padding-right: 0.5rem;
+	display: flex; align-items: center; gap: 0.25rem; height: 1.75rem; padding-right: 0.5rem;
 	border-radius: 0.25rem; cursor: pointer; user-select: none; white-space: nowrap;
 }
 .kj-ctree-row.active { background: var(--secondary-background); }
@@ -258,10 +262,9 @@ function treeRows(dir, expanded, depth, byDate, out = []) {
 
 function searchRows(tree, terms, byDate) {
 	// name starting with the first term, then name containing all terms, then path-only matches
-	const rank = (f) => (f.lname.startsWith(terms[0]) ? 0 : terms.every((t) => f.lname.includes(t)) ? 1 : 2);
-	const hits = tree.all.filter((f) => terms.every((t) => f.key.includes(t))).map((f) => [rank(f), f]);
-	hits.sort((a, b) => a[0] - b[0] || (byDate ? b[1].mtime - a[1].mtime : 0));
-	return Object.assign(hits.slice(0, MAX_RESULTS).map(([, file]) => ({ file, depth: 0, path: true })), { more: Math.max(hits.length - MAX_RESULTS, 0) });
+	const ranks = [[], [], []];
+	for (const f of tree.all) if (terms.every((t) => f.key.includes(t))) ranks[f.lname.startsWith(terms[0]) ? 0 : terms.every((t) => f.lname.includes(t)) ? 1 : 2].push(f);
+	return ranks.flatMap((files) => newestFirst(files, byDate).map((file) => ({ file, depth: 0, path: true })));
 }
 
 // tree style is one panel with inline folders; submenus style adds a panel per open folder level
@@ -276,18 +279,21 @@ function openFolderTree(anchor, combo) {
 	const maxRows = maxVisible || 15;
 	const panels = [];
 	const ac = new AbortController();
-	let focus = 0, query = "", hoverTimer = 0, hitRe = null, byDate = picks.sort === "date", datesLoaded = false;
+	const rem = rootRem(), rowH = 1.75 * rem;
+	let focus = 0, query = "", hoverTimer = 0, byDate = picks.sort === "date", datesLoaded = false;
 	const byValue = new Map(tree.all.map((f) => [String(f.value), f]));
 
 	const span = (cls, html) => `<span class="kj-ctree-${cls}">${html}</span>`;
+	let hitRe = null;
 	// escape, wrapping search-term matches in <mark>
 	const mark = (text) => (hitRe ? text.split(hitRe).map((s, k) => (k % 2 ? `<mark>${esc(s)}</mark>` : esc(s))).join("") : esc(text));
-	const rowHtml = (row, i) => {
-		if ("head" in row) return row.head ? `<div class="kj-ctree-head">${row.head}</div>` : `<div class="kj-ctree-sep"></div>`;
+	const rowHtml = (p, row, i) => {
+		if ("head" in row) return `<div class="kj-ctree-head">${row.head}</div>`;
 		const f = row.folder ?? row.file;
-		let cls = "kj-ctree-row", pad, html;
+		hitRe = p.hit;
+		let cls = i === p.active ? "kj-ctree-row active" : "kj-ctree-row", pad, html;
 		if (row.folder) {
-			cls += ` kj-ctree-folder${expanded.has(f) ? " open" : ""}${holders.has(f) ? " holds" : ""}`;
+			cls += ` kj-ctree-folder${expanded.has(f) || panels[p.level + 1]?.dir === f ? " open" : ""}${holders.has(f) ? " holds" : ""}`;
 			pad = submenus ? 0.5 : 0.25 + row.depth;
 			html = (submenus ? "" : svg("next", 12, "kj-ctree-chev")) + svg("folder") + span("name", esc(f.name)) + span("count", f.count) + (submenus ? svg("next", 12) : "");
 		} else {
@@ -303,6 +309,14 @@ function openFolderTree(anchor, combo) {
 		return `<div class="${cls}" data-i="${i}" style="padding-left:${pad}rem"${row.file ? ` title="${esc(f.value)}"` : ""}>${html}</div>`;
 	};
 
+	// only the rows in view (plus a margin) are in the DOM, so cost doesn't grow with the list
+	const paint = (p) => {
+		const first = Math.max(0, Math.floor(p.list.scrollTop / rowH) - 10);
+		p.start = first;
+		p.win.style.transform = `translateY(${first * rowH}px)`;
+		p.win.innerHTML = p.rows.slice(first, first + Math.ceil(p.list.clientHeight / rowH) + 20).map((r, k) => rowHtml(p, r, first + k)).join("");
+	};
+
 	// group headers aren't selectable: skip them in the direction of travel, or back from the list edge
 	const setActive = (p, i, scroll = true, dir = 1) => {
 		if (!p.rows.length) return;
@@ -311,11 +325,15 @@ function openFolderTree(anchor, combo) {
 		while ("head" in (p.rows[j] ?? {})) j += dir;
 		if (!p.rows[j]) for (j = i; "head" in (p.rows[j] ?? {}); j -= dir);
 		if (!p.rows[j]) return;
-		p.list.children[p.active]?.classList.remove("active");
+		p.win.querySelector(".active")?.classList.remove("active");
 		p.active = j;
-		const r = p.list.children[j];
-		r.classList.add("active");
-		if (scroll) r.scrollIntoView({ block: "nearest" });
+		p.win.children[j - p.start]?.classList.add("active");
+		if (!scroll) return;
+		// scroll the row into view by index (list padding is 0.25rem), then repaint the window there
+		const top = 0.25 * rem + j * rowH, l = p.list;
+		if (top < l.scrollTop) l.scrollTop = top;
+		else if (top + rowH > l.scrollTop + l.clientHeight) l.scrollTop = top + rowH - l.clientHeight;
+		paint(p);
 	};
 
 	// favorites, then recent picks not already favorited, above the folders of the first panel
@@ -325,15 +343,19 @@ function openFolderTree(anchor, combo) {
 		const recent = files(picks.recent).filter((f) => !fav.includes(f)).slice(0, 6);
 		const group = (head, list) => (list.length ? [{ head }, ...list.map((file) => ({ file, depth: 0, path: true }))] : []);
 		const rows = [...group("Favorites", fav), ...group("Recent", recent)];
-		return rows.length ? [...rows, { head: "" }] : rows;
+		return rows.length ? [...rows, { head: "All" }] : rows;
 	};
 
 	const render = (p, item) => {
 		const searching = p.level === 0 && query;
 		const terms = searching ? pathKey(query).split(/\s+/) : null;
-		hitRe = terms && new RegExp(`(${terms.map(reEsc).join("|")})`, "i");
+		p.hit = terms && new RegExp(`(${terms.map(reEsc).join("|")})`, "i");
 		p.rows = terms ? searchRows(tree, terms, byDate) : [...(p.level ? [] : groupRows()), ...treeRows(p.dir, expanded, p.level, byDate)];
-		p.list.innerHTML = p.rows.map(rowHtml).join("") + (p.rows.more ? span("note", `${p.rows.more} more, refine the search`) : "") + (p.rows.length ? "" : span("note", "No results"));
+		p.sizer.style.height = `${p.rows.length * rowH}px`;
+		p.note.hidden = p.rows.length > 0;
+		// a long submenu gets a fixed width, since only part of it is rendered to size it by
+		if (p.level) p.el.style.width = p.rows.length > 40 ? "26rem" : "";
+		paint(p);
 		// never shrink while open, so a bottom-anchored box doesn't slide down as the search filters it
 		if (!p.level) p.el.style.minHeight = `${p.el.offsetHeight}px`;
 		let i = p.rows.findIndex((r) => (r.folder ?? r.file) === item);
@@ -379,11 +401,8 @@ function openFolderTree(anchor, combo) {
 		render(panels[0], folder);
 	};
 
-	// highlight the row whose submenu is open
-	const markOpen = (p) => {
-		const next = panels[p.level + 1]?.dir;
-		p.rows.forEach((r, i) => r.folder && p.list.children[i].classList.toggle("open", r.folder === next));
-	};
+	// repaint so the row whose submenu is open gets highlighted
+	const markOpen = paint;
 
 	const closeFrom = (level) => {
 		if (panels.length <= level) return;
@@ -403,7 +422,7 @@ function openFolderTree(anchor, combo) {
 			// right of the parent panel, or left when it would leave the screen; aligned to the folder row
 			const pr = p.el.getBoundingClientRect();
 			const w = sub.el.offsetWidth;
-			const top = Math.max(8, Math.min(p.list.children[i].getBoundingClientRect().top - 5, innerHeight - 8 - sub.el.offsetHeight));
+			const top = Math.max(8, Math.min((p.win.children[i - p.start] ?? p.list).getBoundingClientRect().top - 5, innerHeight - 8 - sub.el.offsetHeight));
 			Object.assign(sub.el.style, { left: `${pr.right - 4 + w <= innerWidth - 8 ? pr.right - 4 : Math.max(8, pr.left - w + 4)}px`, top: `${top}px`, visibility: "" });
 			markOpen(p);
 		}
@@ -435,7 +454,11 @@ function openFolderTree(anchor, combo) {
 		const el = h("div", { className: `kj-ctree${submenus ? " kj-ctree-menus" : ""}${panels.length ? " kj-ctree-sub" : ""}` });
 		const list = el.appendChild(h("div", { className: "kj-ctree-list" }));
 		list.style.maxHeight = `${maxRows * 1.75 + 0.5}rem`;
-		const p = { el, list, dir, rows: [], active: 0, level: panels.length };
+		// sizer holds the full list height, win the rendered rows shifted to the scroll position
+		const sizer = list.appendChild(h("div"));
+		const p = { el, list, sizer, win: sizer.appendChild(h("div")), dir, rows: [], active: 0, start: 0, level: panels.length, hit: null };
+		p.note = list.appendChild(h("div", { className: "kj-ctree-note", textContent: "No results" }));
+		list.addEventListener("scroll", () => paint(p), { passive: true });
 		// keep focus in the search box when clicking rows or padding
 		el.addEventListener("mousedown", (e) => e.target !== input && e.preventDefault());
 		const onRow = (fn) => (e) => {
@@ -534,7 +557,7 @@ window.addEventListener("click", (e) => {
 	if (!trigger) return;
 	const combo = resolveCombo(trigger);
 	// labelled options (getOptionLabel) aren't paths, keep them on the native list
-	if (!folders || !combo || combo.widget.options?.getOptionLabel || !combo.values.some((v) => PATH_FILE.test(String(v)))) {
+	if (!folders || !combo || combo.widget.options?.getOptionLabel || !(combo.values.length > LONG_LIST || combo.values.some((v) => PATH_FILE.test(String(v))))) {
 		if (maxVisible) placeNative(anchor, combo?.values.length);
 		return;
 	}
@@ -567,7 +590,7 @@ app.registerExtension({
 			defaultValue: false,
 			onChange: (value) => setArrows(!!value),
 		}),
-		setting("folders", "Dropdown folders", "Show Nodes 2.0 combos whose options contain subfolders (models, LoRAs...) as a searchable folder view: 'tree' expands folders inline, 'submenus' opens them to the side.", {
+		setting("folders", "Dropdown folders", "Show Nodes 2.0 combos whose options contain subfolders (models, LoRAs...) as a searchable folder view: 'tree' expands folders inline, 'submenus' opens them to the side. Long lists (200+ options) also open in it, since the native dropdown gets slow with many options.", {
 			type: "combo",
 			options: ["disabled", "tree", "submenus"],
 			defaultValue: "disabled",
