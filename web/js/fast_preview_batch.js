@@ -8,7 +8,7 @@ function ensureStyles() {
     const s = document.createElement('style');
     s.id = STYLE_ID;
     s.textContent = `
-.kj-bp-root { width:100%; height:100%; position:relative; background:#1a1a1a; overflow:hidden; user-select:none; }
+.kj-bp-root { width:100%; height:100%; position:relative; background:#1a1a1a; overflow:hidden; user-select:none; outline:none; }
 .kj-bp-grid { width:100%; height:100%; display:block; cursor:pointer; image-rendering:auto; }
 .kj-bp-detail { position:absolute; inset:0; display:none; background:#0d0d0d; }
 .kj-bp-detail.visible { display:flex; flex-direction:column; }
@@ -234,40 +234,46 @@ app.registerExtension({
                 state.video.requestVideoFrameCallback(onFrame);
             };
 
+            // Tiles only change with size or content; hover repaints just blit this cached base
+            const gridBase = document.createElement('canvas');
+            let gridBaseKey = '';
             const renderGrid = () => {
                 if (!state.frameCount || !state.strip) return;
                 const containerW = root.clientWidth;
                 const containerH = root.clientHeight;
                 if (containerW <= 0 || containerH <= 0) return;
                 const dpr = window.devicePixelRatio || 1;
-                const aspect = state.thumbW / state.thumbH;
-                const layout = pickGridLayout(state.frameCount, aspect, containerW, containerH);
-                state.layout = layout;
-                gridCanvas.width = Math.floor(containerW * dpr);
-                gridCanvas.height = Math.floor(containerH * dpr);
-                gridCanvas.style.width = containerW + 'px';
-                gridCanvas.style.height = containerH + 'px';
-                const ctx = gridCanvas.getContext('2d');
-                ctx.fillStyle = '#1a1a1a';
-                ctx.fillRect(0, 0, gridCanvas.width, gridCanvas.height);
-
-                const cellW = layout.cellW * dpr;
-                const cellH = layout.cellH * dpr;
-                const fitW = layout.fitW * dpr;
-                const fitH = layout.fitH * dpr;
+                const canvasW = Math.floor(containerW * dpr);
+                const canvasH = Math.floor(containerH * dpr);
                 const total = state.frameCount;
                 const sw = state.stripCellW;
                 const sh = state.stripCellH;
                 const sCols = state.stripCols;
-                for (let i = 0; i < total; i++) {
-                    const sx = (i % sCols) * sw;
-                    const sy = Math.floor(i / sCols) * sh;
-                    const dCol = i % layout.cols;
-                    const dRow = Math.floor(i / layout.cols);
-                    const dx = dCol * cellW + (cellW - fitW) / 2;
-                    const dy = dRow * cellH + (cellH - fitH) / 2;
-                    ctx.drawImage(state.strip, sx, sy, sw, sh, dx, dy, fitW, fitH);
+                const key = canvasW + 'x' + canvasH;
+                if (gridBaseKey !== key) {
+                    gridBaseKey = key;
+                    state.layout = pickGridLayout(total, state.thumbW / state.thumbH, containerW, containerH);
+                    gridBase.width = gridCanvas.width = canvasW;
+                    gridBase.height = gridCanvas.height = canvasH;
+                    gridCanvas.style.width = containerW + 'px';
+                    gridCanvas.style.height = containerH + 'px';
+                    const bctx = gridBase.getContext('2d');
+                    bctx.fillStyle = '#1a1a1a';
+                    bctx.fillRect(0, 0, canvasW, canvasH);
+                    const l = state.layout;
+                    for (let i = 0; i < total; i++) {
+                        const dx = (i % l.cols) * l.cellW * dpr + (l.cellW - l.fitW) * dpr / 2;
+                        const dy = Math.floor(i / l.cols) * l.cellH * dpr + (l.cellH - l.fitH) * dpr / 2;
+                        bctx.drawImage(state.strip, (i % sCols) * sw, Math.floor(i / sCols) * sh, sw, sh, dx, dy, l.fitW * dpr, l.fitH * dpr);
+                    }
                 }
+                const layout = state.layout;
+                const cellW = layout.cellW * dpr;
+                const cellH = layout.cellH * dpr;
+                const fitW = layout.fitW * dpr;
+                const fitH = layout.fitH * dpr;
+                const ctx = gridCanvas.getContext('2d');
+                ctx.drawImage(gridBase, 0, 0);
                 if (state.hoverIndex >= 0 && state.hoverIndex < total) {
                     const i = state.hoverIndex;
                     const sx = (i % sCols) * sw;
@@ -299,12 +305,14 @@ app.registerExtension({
 
             const enterDetail = (idx) => {
                 state.currentIndex = idx;
+                state.hoverIndex = -1; // the pointer is elsewhere by the time the detail view closes
                 detail.classList.add('visible');
                 requestAnimationFrame(drawDetail);
             };
             const exitDetail = () => {
                 stopPlayback();
                 detail.classList.remove('visible');
+                renderGrid();
             };
 
             playBtn.addEventListener('click', () => {
@@ -392,7 +400,11 @@ app.registerExtension({
             scrubber.addEventListener('pointerup', endScrub);
             scrubber.addEventListener('pointercancel', endScrub);
 
-            const keyHandler = (e) => {
+            // Keys go to the preview that was last clicked, until focus moves elsewhere. Left button only:
+            // focusing a DOM widget selects its node, which must not happen on a middle-click pan.
+            root.tabIndex = -1;
+            root.addEventListener('pointerdown', (e) => { if (e.button === 0) root.focus({ preventScroll: true }); });
+            root.addEventListener('keydown', (e) => {
                 if (!detail.classList.contains('visible')) return;
                 if (e.key === 'Escape') { exitDetail(); e.stopPropagation(); }
                 else if (e.key === ' ') {
@@ -404,12 +416,13 @@ app.registerExtension({
                 } else if (e.key === 'ArrowRight' && state.currentIndex < state.frameCount - 1) {
                     stopPlayback(); state.currentIndex++; drawDetail(); e.stopPropagation();
                 }
-            };
-            window.addEventListener('keydown', keyHandler);
+            });
 
             const ro = new ResizeObserver(() => {
                 if (detail.classList.contains('visible')) {
-                    drawDetail();
+                    // Repaint the decoded frame directly; while the video is still loading, wait for the seek
+                    if (state.video && state.video.readyState >= 2) paintFrameToDetail();
+                    else drawDetail();
                 } else if (state.strip) {
                     renderGrid();
                 }
@@ -426,11 +439,15 @@ app.registerExtension({
                 return api.apiURL(`/view?${params.toString()}`);
             };
 
+            // Overlapping loads (workflow restore + a fresh run) must not let an older strip land last
+            let loadGeneration = 0;
             const loadFromOutput = async (info) => {
+                const gen = ++loadGeneration;
                 stopPlayback();
                 cleanupVideo();
                 state.strip = null;
                 state.gridReady = false;
+                gridBaseKey = '';
                 gridCanvas.style.display = 'none';
                 setStatus('Loading preview…');
 
@@ -461,18 +478,26 @@ app.registerExtension({
                 new Promise((resolve, reject) => {
                     v.addEventListener('loadeddata', resolve, { once: true });
                     v.addEventListener('error', () => {
-                        cleanupVideo();
+                        if (state.video === v) cleanupVideo();
                         reject(new Error('video load failed'));
                     }, { once: true });
                     v.src = buildViewUrl(info.filename, info.subfolder, info.type);
                 }).catch(() => { });
 
-                await new Promise((resolve, reject) => {
-                    const img = new Image();
-                    img.onload = () => { state.strip = img; resolve(); };
-                    img.onerror = () => reject(new Error('strip load failed'));
-                    img.src = buildViewUrl(info.strip_filename, info.subfolder, info.type);
-                });
+                let img;
+                try {
+                    img = await new Promise((resolve, reject) => {
+                        const im = new Image();
+                        im.onload = () => resolve(im);
+                        im.onerror = () => reject(new Error('strip load failed'));
+                        im.src = buildViewUrl(info.strip_filename, info.subfolder, info.type);
+                    });
+                } catch (err) {
+                    if (gen !== loadGeneration) return;
+                    throw err;
+                }
+                if (gen !== loadGeneration) return;
+                state.strip = img;
                 renderGrid();
                 if (detail.classList.contains('visible')) {
                     // Refresh detail canvas with the new video; drawDetail awaits seek,
@@ -508,7 +533,6 @@ app.registerExtension({
             });
 
             chainCallback(this, 'onRemoved', function () {
-                window.removeEventListener('keydown', keyHandler);
                 ro.disconnect();
                 removeMiddleClickPan();
                 cleanupVideo();
