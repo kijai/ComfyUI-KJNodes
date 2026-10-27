@@ -13,9 +13,13 @@ const SEP = /[\\/]/;
 const PATH_FILE = /[\\/][^\\/]*\.[a-z][a-z0-9]{0,15}$/i;
 // root-level entries pinned above the folders, like rgthree's special entries
 const SPECIAL = /^(none|disabled?|default|choose|open)(\s|$)/i;
-// the native list mounts a component per option (0.4s for 800, 24s for 20k), so long lists use the folder view popup
-const LONG_LIST = 200;
 const MOVES = { ArrowDown: 1, ArrowUp: -1, PageDown: 10, PageUp: -10 };
+// before frontend 1.57.1 (virtualized combo, FE-1166) the native list mounts every option: 0.4s for 800, 24s for 20k
+const LONG_LIST = 200;
+const nativeListIsSlow = () => {
+	const [major = 0, minor = 0, patch = 0] = String(window.__COMFYUI_FRONTEND_VERSION__ ?? "0").split(".").map((n) => parseInt(n) || 0);
+	return major * 1e6 + minor * 1e3 + patch < 1057001;
+};
 
 const ICONS = {
 	prev: '<path d="M15 18l-6-6 6-6"/>',
@@ -62,9 +66,9 @@ const CSS = `
 /* one step past the select's own hover color, so the arrow stands out while the whole box is hovered */
 .${ARROW_CLASS}:hover { opacity: 1; background: var(--component-node-widget-background-selected, var(--secondary-background-selected)); }
 div:has(> ${TRIGGER}:disabled) > .${ARROW_CLASS} { pointer-events: none; }
-/* row = 1.75rem item + 0.25rem gap (max-h-56 = 7 rows); placement-independent cap so reka's flip can work */
+/* rows sit at a 2rem pitch after 0.25rem padding (virtualized list, frontend 1.57+); placement-independent cap so reka's flip can work */
 :root[data-kj-combo-rows] ${VIEWPORT} {
-	max-height: min(calc(var(--kj-combo-rows) * 2rem), calc(var(--kj-combo-space, var(--reka-combobox-content-available-height, 100vh)) - 3rem)) !important;
+	max-height: min(calc(var(--kj-combo-rows) * 2rem + 0.25rem), calc(var(--kj-combo-space, var(--reka-combobox-content-available-height, 100vh)) - 3rem)) !important;
 }
 /* list taller than either side of the trigger: pin reka's popper to the viewport bottom, covering the widget */
 :root[data-kj-combo-pin] [data-reka-popper-content-wrapper]:has(${OVERLAY}) {
@@ -564,7 +568,7 @@ window.addEventListener("click", (e) => {
 	if (!trigger) return;
 	const combo = resolveCombo(trigger);
 	// labelled options (getOptionLabel) aren't paths, keep them on the native list
-	if (!folders || !combo || combo.widget.options?.getOptionLabel || !(combo.values.length > LONG_LIST || combo.values.some((v) => PATH_FILE.test(String(v))))) {
+	if (!folders || !combo || combo.widget.options?.getOptionLabel || !(combo.values.some((v) => PATH_FILE.test(String(v))) || (combo.values.length > LONG_LIST && nativeListIsSlow()))) {
 		if (maxVisible) placeNative(anchor, combo?.values.length);
 		return;
 	}
@@ -597,7 +601,7 @@ app.registerExtension({
 			defaultValue: false,
 			onChange: (value) => setArrows(!!value),
 		}),
-		setting("folders", "Dropdown folders", "Show Nodes 2.0 combos whose options contain subfolders (models, LoRAs...) as a searchable folder view: 'tree' expands folders inline, 'submenus' opens them to the side. Long lists (200+ options) also open in it, since the native dropdown gets slow with many options.", {
+		setting("folders", "Dropdown folders", "Show Nodes 2.0 combos whose options contain subfolders (models, LoRAs...) as a searchable folder view: 'tree' expands folders inline, 'submenus' opens them to the side.", {
 			type: "combo",
 			options: ["disabled", "tree", "submenus"],
 			defaultValue: "disabled",
