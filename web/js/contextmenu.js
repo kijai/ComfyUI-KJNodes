@@ -150,16 +150,26 @@ app.registerExtension({
 							const graph = app.canvas?.graph || app.graph;
 							node.pos = [optPass.e?.canvasX ?? 0, optPass.e?.canvasY ?? 0];
 							graph.add(node);
+							const rerouteId = optPass.afterRerouteId;
 							if (isFrom && optPass.nodeFrom) {
-								const slotIdx = typeof optPass.slotFrom === 'number'
-									? optPass.slotFrom
-									: optPass.nodeFrom.findOutputSlot(optPass.slotFrom.name);
-								optPass.nodeFrom.connect(slotIdx, node, 0);
+								// Subgraph IO nodes have no connect(); their slot objects do
+								if (typeof optPass.nodeFrom.connect !== 'function') {
+									optPass.slotFrom?.connect?.(node.inputs[0], node, rerouteId);
+								} else {
+									const slotIdx = typeof optPass.slotFrom === 'number'
+										? optPass.slotFrom
+										: optPass.nodeFrom.findOutputSlot(optPass.slotFrom.name);
+									optPass.nodeFrom.connect(slotIdx, node, 0, rerouteId);
+								}
 							} else if (optPass.nodeTo) {
-								const slotIdx = typeof optPass.slotTo === 'number'
-									? optPass.slotTo
-									: optPass.nodeTo.findInputSlot(optPass.slotTo.name);
-								node.connect(0, optPass.nodeTo, slotIdx);
+								if (typeof optPass.nodeTo.connect !== 'function') {
+									optPass.slotTo?.connect?.(node.outputs[0], node, rerouteId);
+								} else {
+									const slotIdx = typeof optPass.slotTo === 'number'
+										? optPass.slotTo
+										: optPass.nodeTo.findInputSlot(optPass.slotTo.name);
+									node.connect(0, optPass.nodeTo, slotIdx, rerouteId);
+								}
 							}
 							graph.change();
 							app.canvas.setDirty(true, true);
