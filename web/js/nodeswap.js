@@ -1,5 +1,5 @@
 const { app } = window.comfyAPI.app;
-import { typesCompatible, clientToCanvas, getNodeAtPoint } from "./utility.js";
+import { typesCompatible, clientToCanvas, getNodeAtPoint, connectById } from "./utility.js";
 
 let swapTargetNode = null;
 let swapDraggedNode = null;
@@ -149,9 +149,7 @@ function reconnectExternal(graph, snapshot, newNode, otherNodeId) {
 	for (const inp of snapshot.inputs) {
 		if (inp.originNodeId === otherNodeId) continue;
 		if (!inputAssignments.has(inp)) continue;
-		const originNode = graph.getNodeById(inp.originNodeId);
-		if (!originNode) continue;
-		originNode.connect(inp.originSlot, newNode, inputAssignments.get(inp));
+		connectById(graph, inp.originNodeId, inp.originSlot, newNode.id, inputAssignments.get(inp));
 	}
 
 	const outputAssignments = resolveAssignments(
@@ -163,9 +161,7 @@ function reconnectExternal(graph, snapshot, newNode, otherNodeId) {
 		const bestSlot = outputAssignments.get(out);
 		for (const tgt of out.targets) {
 			if (tgt.targetNodeId === otherNodeId) continue;
-			const targetNode = graph.getNodeById(tgt.targetNodeId);
-			if (!targetNode) continue;
-			newNode.connect(bestSlot, targetNode, tgt.targetSlot);
+			connectById(graph, newNode.id, bestSlot, tgt.targetNodeId, tgt.targetSlot);
 		}
 	}
 }

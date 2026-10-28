@@ -84,6 +84,22 @@ export function getSlotPos(node, isInput, slotIdx) {
   return out;
 }
 
+// Link by node id; subgraph IO nodes aren't in graph._nodes and have no connect(), so go through their slot objects
+export function connectById(graph, originId, originSlot, targetId, targetSlot, afterRerouteId) {
+  const target = graph.getNodeById(targetId);
+  if (graph.inputNode && originId === graph.inputNode.id) {
+    const input = target?.inputs?.[targetSlot];
+    return input ? graph.inputNode.slots[originSlot]?.connect(input, target, afterRerouteId) ?? null : null;
+  }
+  const origin = graph.getNodeById(originId);
+  if (!origin) return null;
+  if (graph.outputNode && targetId === graph.outputNode.id) {
+    const output = origin.outputs?.[originSlot];
+    return output ? graph.outputNode.slots[targetSlot]?.connect(output, origin, afterRerouteId) ?? null : null;
+  }
+  return target ? origin.connect(originSlot, target, targetSlot, afterRerouteId) : null;
+}
+
 // ─── Middle-click pan passthrough for DOM widgets ───
 // Allows panning the LiteGraph canvas via middle-click drag on any DOM element
 export function addMiddleClickPan(element) {

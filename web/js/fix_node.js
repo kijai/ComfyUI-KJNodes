@@ -1,4 +1,5 @@
 const { app } = window.comfyAPI.app;
+import { connectById } from "./utility.js";
 
 function snapshotOld(oldNode) {
     const data = oldNode.serialize();
@@ -32,7 +33,7 @@ function applyCosmetics(newNode, old) {
 }
 
 function fixNode(oldNode, comfyClass, { resetValues = false } = {}) {
-    const graph = app.canvas.graph;
+    const graph = oldNode.graph ?? app.canvas.graph;
     const snap = snapshotOld(oldNode);
 
     const newNode = LiteGraph.createNode(comfyClass);
@@ -57,12 +58,11 @@ function fixNode(oldNode, comfyClass, { resetValues = false } = {}) {
         // Reconnect inputs by name.
         for (const inp of snap.inputSnapshot) {
             if (inp.linkId == null) continue;
-            const link = app.graph.links[inp.linkId];
+            const link = graph.links[inp.linkId];
             if (!link) continue;
-            const src = app.graph.getNodeById(link.origin_id);
             const newSlot = newNode.findInputSlot?.(inp.name);
-            if (!src || newSlot == null || newSlot < 0) continue;
-            try { src.connect(link.origin_slot, newNode, newSlot); } catch {}
+            if (newSlot == null || newSlot < 0) continue;
+            try { connectById(graph, link.origin_id, link.origin_slot, newNode.id, newSlot); } catch {}
         }
 
         // Reconnect outputs by name.
@@ -70,11 +70,9 @@ function fixNode(oldNode, comfyClass, { resetValues = false } = {}) {
             const linkIds = snap.outputLinksByName[out.name];
             if (!linkIds) return;
             for (const id of linkIds) {
-                const link = app.graph.links[id];
+                const link = graph.links[id];
                 if (!link) continue;
-                const tgt = app.graph.getNodeById(link.target_id);
-                if (!tgt) continue;
-                try { newNode.connect(i, tgt, link.target_slot); } catch {}
+                try { connectById(graph, newNode.id, i, link.target_id, link.target_slot); } catch {}
             }
         });
 

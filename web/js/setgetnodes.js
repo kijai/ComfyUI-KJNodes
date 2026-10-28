@@ -1,4 +1,5 @@
 const { app } = window.comfyAPI.app;
+import { connectById } from "./utility.js";
 
 // originally based on diffus3's SetGet: https://github.com/diffus3/ComfyUI-extensions
 
@@ -530,8 +531,9 @@ function convertSetGetToLinks(graph, setNode) {
 	if (setInput.link == null) return;
 	const sourceLink = getLink(graph, setInput.link);
 	if (!sourceLink) return;
-	const sourceNode = graph.getNodeById(sourceLink.origin_id);
-	if (!sourceNode) return;
+	const sourceId = sourceLink.origin_id;
+	// Source may be the subgraph input boundary, which isn't in graph._nodes
+	if (!graph.getNodeById(sourceId) && sourceId !== graph.inputNode?.id) return;
 	const sourceSlot = sourceLink.origin_slot;
 
 	// Collect all consumer connections from Get nodes and SetNode's own output passthrough
@@ -550,10 +552,7 @@ function convertSetGetToLinks(graph, setNode) {
 
 	// Create direct links from source to each consumer
 	for (const conn of connections) {
-		const targetNode = graph.getNodeById(conn.targetId);
-		if (targetNode) {
-			sourceNode.connect(sourceSlot, targetNode, conn.targetSlot);
-		}
+		connectById(graph, sourceId, sourceSlot, conn.targetId, conn.targetSlot);
 	}
 
 	app.canvas?.setDirty(true, true);
@@ -1319,19 +1318,19 @@ app.registerExtension({
 							callback: () => {
 								const selected = Object.values(app.canvas.selected_nodes || {});
 								if (selected.length === 0) return;
-								for (const n of selected) convertOutputsToSetGet(app.graph, n);
+								for (const n of selected) convertOutputsToSetGet(n.graph, n);
 							},
 						},
 						{
 							content: "Convert selected Set/Get to links",
 							callback: () => {
-								const graph = app.graph;
 								const selected = Object.values(app.canvas.selected_nodes || {});
 								const setNodes = selected.filter(n => n.type === 'SetNode');
 								const getNodes = selected.filter(n => n.type === 'GetNode');
-								for (const n of setNodes) convertSetGetToLinks(graph, n);
-								const setters = new Set(getNodes.map(n => n.findSetter?.(graph)).filter(Boolean));
-								for (const s of setters) convertSetGetToLinks(graph, s);
+								for (const n of setNodes) convertSetGetToLinks(n.graph, n);
+								// Setter may live in an ancestor graph
+								const setters = new Set(getNodes.map(n => n.findSetter?.(n.graph)).filter(Boolean));
+								for (const s of setters) convertSetGetToLinks(s.graph, s);
 							},
 						},
 					],
@@ -1620,15 +1619,16 @@ app.registerExtension({
 	name: "KJNodes.LinkToSetGet",
 	setup() {
 		const originalShowLinkMenu = LGraphCanvas.prototype.showLinkMenu;
-		LGraphCanvas.prototype.showLinkMenu = function(segment, e) {
+		LGraphCanvas.prototype.showLinkMenu = function(segment, e, presentationLink) {
 			const menusBefore = document.querySelectorAll(".litecontextmenu").length;
-			const result = originalShowLinkMenu.call(this, segment, e);
+			const result = originalShowLinkMenu.apply(this, arguments);
 
 			const graph = this.graph;
 			if (!graph) return result;
 
-			// Get the full link object to access target info
-			const link = getLink(graph, segment.id);
+			// Get the full link object to access target info; a Reroute segment's id is a reroute id, not a link id
+			const linkId = presentationLink?.id ?? (segment.linkIds instanceof Set ? segment.linkIds.values().next().value : segment.id);
+			const link = getLink(graph, linkId);
 			if (!link || link.origin_id == null || link.target_id == null) return result;
 
 			// Find the newly created context menu
@@ -1656,11 +1656,14 @@ app.registerExtension({
 				// Close menu
 				lastMenu.remove();
 
-				const originNode = graph.getNodeById(link.origin_id);
-				const targetNode = graph.getNodeById(link.target_id);
+				// Subgraph IO boundaries aren't in graph._nodes
+				const originNode = graph.getNodeById(link.origin_id)
+					?? (link.origin_id === graph.inputNode?.id ? graph.inputNode : null);
+				const targetNode = graph.getNodeById(link.target_id)
+					?? (link.target_id === graph.outputNode?.id ? graph.outputNode : null);
 				if (!originNode || !targetNode) return;
 
-				const outputSlot = originNode.outputs[link.origin_slot];
+				const outputSlot = originNode.outputs?.[link.origin_slot] ?? originNode.slots?.[link.origin_slot];
 				const linkType = outputSlot?.type || "*";
 				const linkName = outputSlot?.name || linkType;
 
@@ -1686,7 +1689,7 @@ app.registerExtension({
 				graph.removeLink(link.id);
 
 				// Connect source -> Set node input
-				originNode.connect(link.origin_slot, setNode, 0);
+				connectById(graph, link.origin_id, link.origin_slot, setNode.id, 0);
 
 				// Set the name widget on the Set node
 				setNode.widgets[0].value = linkName;
@@ -1700,7 +1703,7 @@ app.registerExtension({
 				getNode.onRename();
 
 				// Connect Get node output -> target node input
-				getNode.connect(0, targetNode, link.target_slot);
+				connectById(graph, getNode.id, 0, link.target_id, link.target_slot);
 
 				canvas.setDirty(true, true);
 			});

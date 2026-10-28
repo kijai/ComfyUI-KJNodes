@@ -115,6 +115,8 @@ function disconnectExternal(node, selectedIds, graph) {
 				if (!link || selectedIds.has(link.target_id)) continue;
 				const targetNode = graph.getNodeById(link.target_id);
 				if (targetNode) targetNode.disconnectInput(link.target_slot, true);
+				// Subgraph output boundary isn't in graph._nodes
+				else if (link.target_id === graph.outputNode?.id) graph.outputNode.slots[link.target_slot]?.disconnect();
 			}
 		}
 	}

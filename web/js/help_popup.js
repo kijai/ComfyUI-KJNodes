@@ -366,7 +366,7 @@ export const addDocumentation = (
 const popupState = new Map()
 
 function getNodeById(nodeId) {
-  return app.graph?.getNodeById(nodeId)
+  return (app.canvas?.graph ?? app.graph)?.getNodeById(nodeId)
 }
 
 function closeNodePopup(nodeId) {
