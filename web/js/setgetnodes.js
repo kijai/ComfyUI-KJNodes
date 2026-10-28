@@ -36,8 +36,8 @@ function setColorAndBgColor(node, type) {
 // LGraphEventMode values
 const MODE_ALWAYS = 0;
 const MODE_BYPASS = 4;
-// True while app.graphToPrompt runs; lets GetNode ignore bypass during link resolution only.
-let _resolvingPrompt = false;
+// graphToPrompt calls in progress; GetNode ignores bypass while > 0
+let _resolvingPrompt = 0;
 
 function getDisablePrefix() {
 	return app.ui.settings.getSettingValue("KJNodes.disablePrefix") ?? false;
@@ -1012,7 +1012,7 @@ app.registerExtension({
 			// group would drop the value. While building the prompt, report BYPASS as ALWAYS.
 			get mode() {
 				const mode = super.mode;
-				return _resolvingPrompt && mode === MODE_BYPASS ? MODE_ALWAYS : mode;
+				return _resolvingPrompt > 0 && mode === MODE_BYPASS ? MODE_ALWAYS : mode;
 			}
 			set mode(value) {
 				super.mode = value;
@@ -1578,24 +1578,8 @@ app.registerExtension({
 	}
 });
 
-// Lets GetNodes inside bypassed groups still resolve to their SetNode's source (see GetNode.mode).
-app.registerExtension({
-	name: "KJNodes.SetGetIgnoreBypass",
-	setup() {
-		const originalGraphToPrompt = app.graphToPrompt.bind(app);
-		app.graphToPrompt = async function(...args) {
-			_resolvingPrompt = true;
-			try {
-				return await originalGraphToPrompt(...args);
-			} finally {
-				_resolvingPrompt = false;
-			}
-		};
-	}
-});
-
-// Temporary backwards-compat patch: makes cross-subgraph Set/Get work on frontends
-// that don't natively support resolveVirtualOutput. Remove when no longer needed.
+// Counts graphToPrompt calls for bypassed GetNodes (see GetNode.mode), plus a temporary cross-subgraph Set/Get patch for
+// frontends without resolveVirtualOutput; remove only the patch part when no longer needed.
 app.registerExtension({
 	name: "KJNodes.CrossGraphSetGet",
 	setup() {
@@ -1639,7 +1623,12 @@ app.registerExtension({
 					console.warn('[KJNodes] Failed to probe ExecutableNodeDTO for cross-graph patch:', e);
 				}
 			}
-			return originalGraphToPrompt(...args);
+			_resolvingPrompt++;
+			try {
+				return await originalGraphToPrompt(...args);
+			} finally {
+				_resolvingPrompt--;
+			}
 		};
 	}
 });
