@@ -33,6 +33,12 @@ function setColorAndBgColor(node, type) {
 		node.bgcolor = colors.bgcolor;
 	}
 }
+// LGraphEventMode values
+const MODE_ALWAYS = 0;
+const MODE_BYPASS = 4;
+// True while app.graphToPrompt runs; lets GetNode ignore bypass during link resolution only.
+let _resolvingPrompt = false;
+
 function getDisablePrefix() {
 	return app.ui.settings.getSettingValue("KJNodes.disablePrefix") ?? false;
 }
@@ -1002,6 +1008,16 @@ app.registerExtension({
 				this.addOutput("*", '*');
 			}
 
+			// A bypassed node passes its input through, but GetNode has no inputs, so a bypassed
+			// group would drop the value. While building the prompt, report BYPASS as ALWAYS.
+			get mode() {
+				const mode = super.mode;
+				return _resolvingPrompt && mode === MODE_BYPASS ? MODE_ALWAYS : mode;
+			}
+			set mode(value) {
+				super.mode = value;
+			}
+
 			onConnectionsChange() {
 				if (app.configuringGraph) return;
 				this.validateLinks();
@@ -1558,6 +1574,22 @@ app.registerExtension({
 			graph.change();
 			this.setDirty(true, true);
 			return true;
+		};
+	}
+});
+
+// Lets GetNodes inside bypassed groups still resolve to their SetNode's source (see GetNode.mode).
+app.registerExtension({
+	name: "KJNodes.SetGetIgnoreBypass",
+	setup() {
+		const originalGraphToPrompt = app.graphToPrompt.bind(app);
+		app.graphToPrompt = async function(...args) {
+			_resolvingPrompt = true;
+			try {
+				return await originalGraphToPrompt(...args);
+			} finally {
+				_resolvingPrompt = false;
+			}
 		};
 	}
 });
