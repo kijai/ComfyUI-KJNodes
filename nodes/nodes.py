@@ -815,8 +815,21 @@ The choices are loaded from 'custom_dimensions.json' in the nodes folder.
 
 class WidgetToString:
     @classmethod
-    def IS_CHANGED(cls,*,id,node_title,any_input,**kwargs):
-        if any_input is not None and (id != 0 or node_title != ""):
+    def IS_CHANGED(cls, *, unique_id=None, **kwargs):
+        # The prompt isn't passed here, so read it from the running queue item and use the actual value as the cache key:
+        # this node and everything downstream then re-run only when the value changes
+        try:
+            from server import PromptServer
+            from comfy_execution.utils import get_executing_context
+            prompt_id = get_executing_context().prompt_id
+            prompt, extra_data = next(item[2:4] for item in PromptServer.instance.prompt_queue.get_current_queue_volatile()[0] if item[1] == prompt_id)
+            inputs = prompt[unique_id]["inputs"]
+            if not any(isinstance(v, list) for k, v in inputs.items() if k != "any_input"):  # linked settings are only known at execution
+                return cls().get_widget_value(extra_pnginfo=extra_data.get("extra_pnginfo"), prompt=prompt, unique_id=unique_id, **inputs)
+        except Exception:
+            pass
+        # Fallback: a linked any_input (None here, absent when unlinked) keeps the target in the cache key, otherwise re-read every run
+        if "any_input" not in kwargs:
             return float("NaN")
 
     @classmethod
@@ -844,170 +857,171 @@ class WidgetToString:
 Selects a node and it's specified widget and outputs the value as a string.  
 If no node id or title is provided it will use the 'any_input' link and use that node.  
 To see node id's, enable "Node ID Badge Mode" in main settings.
-Alternatively you can search with the node title. Node titles ONLY exist if they  
-are manually edited!
+Alternatively you can search with the node title.
 'widget_name' can be a comma separated list.
 The 'any_input' is required for making sure the node you want the value from exists in the workflow.
+Targeting a subgraph node reads the values of its inputs and promoted widgets.
 """
 
     def get_widget_value(self, id, widget_name, extra_pnginfo, prompt, unique_id, return_all=False, any_input=None, node_title="", allowed_float_decimals=2):
-        workflow = extra_pnginfo["workflow"]
-        #print(json.dumps(workflow, indent=4))
-        results = []
-        node_id = link_id = subgraph_prefix = None
-        link_to_node_map = {}
-        node_to_subgraph_map = {}  # Track which subgraph each node belongs to
+        workflow = (extra_pnginfo or {}).get("workflow") or {}
+        sg_defs = {sg.get("id"): sg for sg in workflow.get("definitions", {}).get("subgraphs", [])}
+        # Nodes are addressed by prompt key paths: "20:3:11" is node 11 inside subgraph node 3 inside subgraph node 20
+        prefix, _, own_id = str(unique_id).rpartition(":")
+        # any_input itself is the upstream output, the prompt has the link
+        raw_link = prompt.get(str(unique_id), {}).get("inputs", {}).get("any_input")
 
-        # Parse unique_id - handle both "parent:id" format and simple int format
-        if isinstance(unique_id, str) and ":" in unique_id:
-            unique_id_parts = unique_id.split(":")
-            unique_id_int = int(unique_id_parts[-1])  # Use the last part as the node id
-            subgraph_prefix = ":".join(unique_id_parts[:-1])  # Store the parent prefix (e.g., "14")
-        else:
-            unique_id_int = int(unique_id)
+        def join(path, node_id):
+            return f"{path}:{node_id}" if path else str(node_id)
 
-        # Collect all nodes from main workflow and subgraphs
-        all_nodes = list(workflow.get("nodes", []))
-        definitions = workflow.get("definitions", {})
-        subgraphs = definitions.get("subgraphs", [])
+        def live(node, key):
+            # In the prompt, or a subgraph node with interior nodes in it (so not bypassed, muted or frontend-only)
+            return key in prompt or (node.get("type") in sg_defs and any(k.startswith(f"{key}:") for k in prompt))
 
-        # Find which main workflow node references each subgraph
-        subgraph_id_to_parent = {}
-        for node in workflow.get("nodes", []):
-            node_type = node.get("type", "")
-            # Subgraph nodes have a UUID as their type
-            if "-" in node_type and len(node_type) == 36:  # UUID format check
-                subgraph_id_to_parent[node_type] = node["id"]
+        def level(path):
+            # Workflow nodes and links of the graph at a path, walking subgraph node ids through their definitions
+            nodes, links = workflow.get("nodes", []), workflow.get("links", [])
+            for seg in filter(None, path.split(":")):
+                sg_def = sg_defs.get(next((n for n in nodes if str(n["id"]) == seg), {}).get("type"))
+                if sg_def is None:
+                    return [], []
+                nodes, links = sg_def.get("nodes", []), sg_def.get("links", [])
+            return nodes, links
 
-        for subgraph in subgraphs:
-            subgraph_id = subgraph.get("id", "")
-            parent_node_id = subgraph_id_to_parent.get(subgraph_id)
-
-            subgraph_nodes = subgraph.get("nodes", [])
-            for node in subgraph_nodes:
-                # Track which subgraph (parent node) this node belongs to
-                if parent_node_id is not None:
-                    node_to_subgraph_map[node["id"]] = parent_node_id
-            all_nodes.extend(subgraph_nodes)
-
-            # Also build link_to_node_map from subgraph links
-            subgraph_links = subgraph.get("links", [])
-            for link in subgraph_links:
-                # link format: [link_id, origin_id, origin_slot, target_id, target_slot, type]
-                if isinstance(link, dict):
-                    link_to_node_map[link["id"]] = link["origin_id"]
-                elif isinstance(link, list) and len(link) >= 2:
-                    link_to_node_map[link[0]] = link[1]
-
-        for node in all_nodes:
-            if node_title:
-                if "title" in node:
-                    if node["title"] == node_title:
-                        node_id = node["id"]
-                        break
-                else:
-                    logging.warning("Node title not found.")
-            elif id != 0:
-                if node["id"] == id:
-                    node_id = id
-                    break
-            elif any_input is not None:
-                if node["type"] == "WidgetToString" and node["id"] == unique_id_int and not link_id:
-                    for node_input in node["inputs"]:
-                        if node_input["name"] == "any_input":
-                            link_id = node_input["link"]
-
-                # Construct a map of links to node IDs for future reference
-                node_outputs = node.get("outputs", None)
-                if not node_outputs:
+        def find(match):
+            # This node's graph level first, then the root and every subgraph instance below it; nodes that run win
+            queue, seen, first = [prefix, ""], set(), None
+            while queue:
+                path = queue.pop(0)
+                if path in seen or path.count(":") > 32:  # guard against corrupt self-nesting subgraphs
                     continue
-                for output in node_outputs:
-                    node_links = output.get("links", None)
-                    if not node_links:
+                seen.add(path)
+                nodes = level(path)[0]
+                for n in nodes:
+                    if match(n):
+                        if live(n, join(path, n["id"])):
+                            return path, n
+                        first = first or (path, n)
+                queue += [join(path, n["id"]) for n in nodes if n.get("type") in sg_defs]
+            return first or (None, None)
+
+        def link_origin():
+            # Node at the other end of this node's any_input link, on its own graph level (root links are lists, subgraph ones dicts)
+            nodes, links = level(prefix)
+            me = next((n for n in nodes if str(n["id"]) == own_id), {})
+            link_id = next((i.get("link") for i in me.get("inputs", []) if i.get("name") == "any_input"), None)
+            ends = ((l.get("id"), l.get("origin_id")) if isinstance(l, dict) else (l[0], l[1]) for l in links)
+            origin = next((o for lid, o in ends if link_id is not None and lid == link_id), None)
+            return next((n for n in nodes if str(n["id"]) == str(origin)), None)
+
+        sg_cache = {}
+
+        def read_subgraph_inputs(container, key):
+            # Containers aren't in the prompt; each input lives on the interior slot it feeds, keyed "<key>:<interior id>"
+            if key in sg_cache:
+                return sg_cache[key]
+            sg_cache[key] = values = {}
+            sg_def = sg_defs[container["type"]]
+            nodes = {str(n["id"]): n for n in sg_def.get("nodes", [])}
+            links = {l["id"]: l for l in sg_def.get("links", []) if isinstance(l, dict)}
+
+            def read_interior(node, name):
+                if node is None:
+                    return None
+                interior_key = f"{key}:{node['id']}"
+                if node.get("type") in sg_defs:
+                    return read_subgraph_inputs(node, interior_key).get(name) if interior_key.count(":") <= 32 else None
+                return prompt.get(interior_key, {}).get("inputs", {}).get(name)
+
+            for sg_input in sg_def.get("inputs", []):
+                for lid in sg_input.get("linkIds", []):
+                    link = links.get(lid)
+                    target = nodes.get(str(link["target_id"])) if link else None
+                    if target is None or link["target_slot"] >= len(target.get("inputs", [])):
                         continue
-                    for link in node_links:
-                        link_to_node_map[link] = node["id"]
-                        if link_id and link == link_id:
-                            break
+                    slot = target["inputs"][link["target_slot"]]
+                    value = read_interior(target, (slot.get("widget") or {}).get("name") or slot["name"])
+                    if value is not None:
+                        values[sg_input["name"]] = value
+                        break
+            # Older frontends promoted widgets without a subgraph input via properties.proxyWidgets, at first as a JSON string
+            proxies = container.get("properties", {}).get("proxyWidgets") or []
+            if isinstance(proxies, str):
+                try:
+                    proxies = json.loads(proxies)
+                except ValueError:
+                    proxies = []
+            for proxy in proxies:
+                if not isinstance(proxy, (list, tuple)) or len(proxy) < 2 or not isinstance(proxy[1], str):
+                    continue
+                # Nested promotions name the source node as "12: seed" prefixes or a third element
+                prefix_ids, name = re.match(r"^((?:\s*\d+\s*:\s*)*)(.*)$", proxy[1], re.S).groups()
+                prefix_ids = re.findall(r"\d+", prefix_ids)
+                source = str(proxy[2]) if len(proxy) > 2 else (prefix_ids[-1] if prefix_ids else None)
+                if name in values:
+                    continue
+                if source is None:
+                    value = read_interior(nodes.get(str(proxy[0])), name)
+                else:
+                    inner = f"{key}:{proxy[0]}:"
+                    value = next((v["inputs"][name] for k, v in prompt.items() if k.startswith(inner) and k.endswith(f":{source}") and name in v.get("inputs", {})), None)
+                if value is not None:
+                    values[name] = value
+            return values
 
-        if link_id:
-            node_id = link_to_node_map.get(link_id, None)
-
-        if node_id is None:
+        path = node = key = None
+        if node_title:
+            path, node = find(lambda n: (n.get("title") or sg_defs.get(n.get("type"), {}).get("name")) == node_title)
+            if node is None or not live(node, join(path, node["id"])):
+                # Default titles of regular nodes are only in the prompt: same level first, then shallow to deep, then by id
+                order = sorted(prompt, key=lambda k: (k.rpartition(":")[0] != prefix, k.count(":"), len(k), k))
+                key = next((k for k in order if prompt[k].get("_meta", {}).get("title") == node_title), None)
+                if key is not None:
+                    node = None
+        elif id != 0:
+            path, node = find(lambda n: str(n["id"]) == str(id))
+            if node is None:  # no workflow
+                key = next((k for k in (join(prefix, id), str(id)) if k in prompt), None)
+        elif any_input is not None or isinstance(raw_link, list):
+            path, node = prefix, link_origin()
+            raw = str(raw_link[0]) if isinstance(raw_link, list) else None
+            # The prompt link resolves frontend-only nodes (Reroute, Get/Set) to the real source; a bypassed node stays an error
+            if raw in prompt and (node is None or (not live(node, join(prefix, node["id"])) and node.get("mode", 0) not in (2, 4))):
+                node, key = None, raw
+        if node is not None:
+            key = join(path, node["id"])
+        if key is None:
             raise ValueError("No matching node found for the given title or id")
 
-        # Determine the correct prompt key
-        # First check if the target node is in a subgraph
-        target_subgraph_parent = node_to_subgraph_map.get(node_id)
-
-        if target_subgraph_parent is not None:
-            # Target node is in a subgraph, use the parent node id as prefix
-            prompt_key = f"{target_subgraph_parent}:{node_id}"
-        elif subgraph_prefix is not None:
-            # We're in a subgraph, use our prefix
-            prompt_key = f"{subgraph_prefix}:{node_id}"
+        lookup = {}
+        if node is not None and node.get("type") in sg_defs and live(node, key):
+            meta = {i["name"]: i for i in sg_defs[node["type"]].get("inputs", [])}
+            inputs = {}
+            for name, value in read_subgraph_inputs(node, key).items():
+                i = meta.get(name, {})  # legacy proxy widgets have no subgraph input
+                # Listed as shown on the node (label, translation), the plain name works too
+                shown = i.get("label") or i.get("localized_name") or name
+                inputs.setdefault(name if shown in inputs else shown, value)
+                lookup.update({a: value for a in (name, i.get("localized_name"), i.get("label")) if a and a not in lookup})
+        elif key in prompt:
+            inputs = prompt[key].get("inputs", {})
         else:
-            prompt_key = str(node_id)
+            raise KeyError(f"Node {key} not found in prompt, it may be bypassed, muted or frontend-only")
+        lookup = {**lookup, **inputs}
 
-        # Try the prefixed key first, then fall back to just the node_id
-        if prompt_key not in prompt:
-            prompt_key = str(node_id)
+        def fmt(v):
+            return f"{v:.{allowed_float_decimals}f}" if isinstance(v, float) else str(v)
 
-        if prompt_key not in prompt:
-            raise KeyError(f"Node not found in prompt. Tried keys: '{target_subgraph_parent}:{node_id}' and '{node_id}'")
-
-        values = prompt[prompt_key]
-        if "inputs" in values:
-            inputs = values["inputs"]
-
-            # support comma-separated list and trim whitespace
-            widget_names = []
-            if widget_name:
-                widget_names = [w.strip() for w in widget_name.split(",") if w.strip()]
-
-            if return_all:
-                # Format items based on type
-                formatted_items = []
-                for k, v in inputs.items():
-                    if isinstance(v, float):
-                        item = f"{k}: {v:.{allowed_float_decimals}f}"
-                    else:
-                        item = f"{k}: {str(v)}"
-                    formatted_items.append(item)
-                results.append(", ".join(formatted_items))
-
-            # Single widget name (trimmed)
-            elif len(widget_names) == 1:
-                name = widget_names[0]
-                if name in inputs:
-                    v = inputs[name]
-                    if isinstance(v, float):
-                        v = f"{v:.{allowed_float_decimals}f}"
-                    else:
-                        v = str(v)
-                    return (v, )
-                else:
-                    raise NameError(f"Widget not found: {node_id}.{name}")
-
-            # Multiple widget names: return "name: value" pairs
-            elif len(widget_names) > 1:
-                formatted_items = []
-                for name in widget_names:
-                    if name not in inputs:
-                        raise NameError(f"Widget not found: {node_id}.{name}")
-                    v = inputs[name]
-                    if isinstance(v, float):
-                        v = f"{v:.{allowed_float_decimals}f}"
-                    else:
-                        v = str(v)
-                    formatted_items.append(f"{name}: {v}")
-                return (", ".join(formatted_items), )
-
-            else:
-                # No valid widget name provided
-                raise NameError(f"Widget not found: {node_id}.{widget_name}")
-
-        return (", ".join(results).strip(", "), )
+        if return_all:
+            return (", ".join(f"{k}: {fmt(v)}" for k, v in inputs.items()).strip(", "), )
+        # Comma-separated names return "name: value" pairs
+        names = [w.strip() for w in widget_name.split(",") if w.strip()] if widget_name else []
+        for name in names or [widget_name]:
+            if name not in lookup:
+                raise NameError(f"Widget not found: {key}.{name}. Available: {', '.join(inputs)}")
+        if len(names) == 1:
+            return (fmt(lookup[names[0]]), )
+        return (", ".join(f"{name}: {fmt(lookup[name])}" for name in names), )
 
 
 class DummyOut:
