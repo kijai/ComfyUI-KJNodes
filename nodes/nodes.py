@@ -1129,6 +1129,7 @@ class StringToFloatList:
                 }
     RETURN_TYPES = ("FLOAT",)
     RETURN_NAMES = ("FLOAT",)
+    OUTPUT_IS_LIST = (True,)    
     CATEGORY = "KJNodes/misc"
     FUNCTION = "createlist"
 
