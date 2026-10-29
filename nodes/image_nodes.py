@@ -35,7 +35,7 @@ from fractions import Fraction
 import node_helpers
 import folder_paths
 
-from ..utility.utility import string_to_color, normalize_bboxes, BBOX_TYPES
+from ..utility.utility import string_to_color, normalize_bboxes, BBOX_TYPES, BrowserH264, VideoFileReader
 
 try:
     from server import PromptServer, BinaryEventTypes
@@ -3874,66 +3874,24 @@ class FastPreviewBatch(io.ComfyNode):
             is_output_node=True,
         )
 
-    @staticmethod
-    def _iter_video_frames(video):
-        import av
-        start_time, duration = video.get_active_trim_window()
-        with av.open(video.get_stream_source(), mode="r") as container:
-            stream = container.streams.video[0]
-            stream.thread_type = "AUTO"
-            start_pts = int(start_time / stream.time_base)
-            end_pts = int((start_time + duration) / stream.time_base) if duration else None
-            if start_pts:
-                container.seek(start_pts, stream=stream)
-            for packet in container.demux(stream):
-                try:
-                    frames = packet.decode()
-                except av.error.InvalidDataError:
-                    continue
-                for frame in frames:
-                    if frame.pts is not None:
-                        if frame.pts < start_pts:
-                            continue
-                        if end_pts is not None and frame.pts >= end_pts:
-                            return
-                    yield frame
-
     @classmethod
     def execute(cls, input, max_thumb_size, crf, max_grid_frames) -> io.NodeOutput:
         import av
         import threading
-        import itertools
         import queue as _queue
         from av.video.reformatter import VideoReformatter
         fps = 30
         crop = None
-        frames = container = producer_thread = None
+        reader = writer = producer_thread = None
         stop = threading.Event()
         frame_queue = _queue.Queue(maxsize=2)
         try:
             # File-backed video is decoded straight to thumbnail size instead of materializing full-res float frames.
-            # The private crop field fails closed: if core renames it, get_components applies the crop instead.
-            stream_video = (isinstance(input, InputImpl.VideoFromFile) and hasattr(input, "get_active_trim_window")
-                            and getattr(input, "_VideoFromFile__crop", False) is not False)
+            # Without a frame count (B None) the stream is taken unstrided
+            stream_video = VideoFileReader.supports(input)
             if stream_video:
-                # Metadata first, BytesIO sources share one read position with the decoder opened below
-                try:
-                    B = input.get_frame_count() or None
-                except Exception:
-                    B = None  # core's count fallback can fail on odd containers, stream unstrided then
-                fps = input.get_frame_rate()
-                frames = cls._iter_video_frames(input)
-                first_frame = next(frames, None)
-                if first_frame is None:
-                    raise ValueError("Video has no decodable frames.")
-                src_rot = int(round(first_frame.rotation // 90)) % 4 if getattr(first_frame, "rotation", 0) else 0
-                W, H = (first_frame.height, first_frame.width) if src_rot % 2 else (first_frame.width, first_frame.height)
-                crop = input._VideoFromFile__crop
-                if crop is not None:
-                    from comfy_api.latest._util import normalize_crop_rect
-                    crop = normalize_crop_rect(*crop, W, H)
-                    if crop is not None:
-                        W, H = crop[2], crop[3]
+                reader = VideoFileReader(input)
+                B, fps, W, H, src_rot, crop = reader.count, reader.fps, reader.width, reader.height, reader.rotation, reader.crop
             else:
                 if isinstance(input, torch.Tensor):
                     images = input
@@ -3976,23 +3934,8 @@ class FastPreviewBatch(io.ComfyNode):
             strip_file = f"{filename}_{counter:05}_grid.jpg"
             strip_path = os.path.join(full_output_folder, strip_file)
 
-            container = av.open(filepath, mode="w")
-            stream = container.add_stream("libx264", rate=fps)
-            stream.width = new_w
-            stream.height = new_h
-            stream.pix_fmt = "yuv420p"
-            stream.options = {"crf": str(crf), "preset": "ultrafast", "g": "1", "tune": "fastdecode"}
-            # Convert and tag as core does for sRGB content, browsers decode untagged HD video as BT.709
-            yuv_ref = None
-            try:
-                from av.video.reformatter import ColorPrimaries, ColorRange, ColorTrc
-                mpeg_range, bt709, srgb_trc = ColorRange.MPEG, ColorPrimaries.BT709, ColorTrc.IEC61966_2_1
-            except (ImportError, AttributeError):
-                mpeg_range = None
-            cc = stream.codec_context
-            if mpeg_range is not None and all(hasattr(cc, a) for a in ("colorspace", "color_range", "color_primaries", "color_trc")):
-                cc.colorspace, cc.color_range, cc.color_primaries, cc.color_trc = 1, mpeg_range, bt709, srgb_trc
-                yuv_ref = VideoReformatter()
+            # Tagged BT.709 like core's sRGB video so the mp4 matches the JPEG grid strip in the browser
+            writer = BrowserH264(filepath, new_w, new_h, fps, {"crf": str(crf), "preset": "ultrafast", "g": "1", "tune": "fastdecode"})
 
             # Image batches: GPU resize in chunks of 32
             def tensor_chunks(chunk_size=32):
@@ -4020,9 +3963,9 @@ class FastPreviewBatch(io.ComfyNode):
             # many source frames per kept one. Shared reformatters, a fresh SwsContext per frame costs ~3ms.
             def video_chunks():
                 limit = total if idx is not None else max_grid_frames
-                full_ref, thumb_ref, strip_ref = VideoReformatter(), VideoReformatter(), VideoReformatter()
+                thumb_ref, strip_ref = VideoReformatter(), VideoReformatter()
                 out_i = 0
-                for src_i, frame in enumerate(itertools.chain([first_frame], frames)):
+                for src_i, frame in enumerate(reader):
                     # Stop is checked per decoded frame, not per kept one, so cancel never waits out a sparse stride
                     if stop.is_set() or out_i >= limit:
                         break
@@ -4035,11 +3978,7 @@ class FastPreviewBatch(io.ComfyNode):
                     else:
                         # Rotate and crop at full res in display coordinates like core, then downscale
                         rot = 0
-                        full = full_ref.reformat(frame, format="rgb24").to_ndarray()
-                        if src_rot:
-                            full = np.rot90(full, k=src_rot, axes=(0, 1))
-                        cx, cy, cw, ch = crop
-                        region = av.VideoFrame.from_ndarray(np.ascontiguousarray(full[cy:cy + ch, cx:cx + cw]), format="rgb24")
+                        region = av.VideoFrame.from_ndarray(reader.rgb(frame), format="rgb24")
                         small = thumb_ref.reformat(region, width=new_w, height=new_h, interpolation="AREA")
                     v = small.to_ndarray()
                     if need_strip_resize:
@@ -4087,11 +4026,7 @@ class FastPreviewBatch(io.ComfyNode):
                     if (r + 1) * strip_h > strip_arr.shape[0]:
                         strip_arr = np.concatenate([strip_arr, np.zeros((strip_h,) + strip_arr.shape[1:], dtype=np.uint8)])
                     strip_arr[r * strip_h:(r + 1) * strip_h, c * strip_w:(c + 1) * strip_w] = s
-                    frame = av.VideoFrame.from_ndarray(v, format="rgb24")
-                    if yuv_ref is not None:
-                        frame = yuv_ref.reformat(frame, format="yuv420p", dst_colorspace=1, dst_color_range=mpeg_range)
-                    for packet in stream.encode(frame):
-                        container.mux(packet)
+                    writer.write(v)
                     count += 1
                     pbar.update(1)
 
@@ -4101,8 +4036,7 @@ class FastPreviewBatch(io.ComfyNode):
             if count == 0:
                 raise ValueError("No frames could be decoded from the input.")
 
-            for packet in stream.encode():
-                container.mux(packet)
+            writer.flush()
         finally:
             # On interrupt or error, unblock the producer so it exits instead of hanging on a full queue
             if producer_thread is not None and producer_thread.is_alive():
@@ -4112,10 +4046,10 @@ class FastPreviewBatch(io.ComfyNode):
                         frame_queue.get(timeout=0.1)
                     except _queue.Empty:
                         pass
-            if frames is not None:
-                frames.close()
-            if container is not None:
-                container.close()
+            if reader is not None:
+                reader.close()
+            if writer is not None:
+                writer.close()
 
         total = count
         Image.fromarray(strip_arr[:int(math.ceil(total / strip_cols)) * strip_h]).save(strip_path, quality=85)

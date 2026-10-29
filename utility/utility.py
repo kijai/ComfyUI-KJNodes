@@ -128,3 +128,116 @@ def string_to_color(color_string: str) -> List[int]:
     color_list = np.clip(color_list, 0, 255).tolist()
 
     return color_list
+
+
+class BrowserH264:
+    # libx264 mp4 for browser previews, written from rgb24 uint8 frames. Frames are converted and tagged BT.709 as core does
+    # for sRGB video, browsers decode untagged HD video as BT.709. One shared reformatter, a fresh SwsContext per frame costs ~3ms
+    def __init__(self, path, width, height, fps, options):
+        import av
+        self._av = av
+        self.container = av.open(path, mode="w")
+        try:
+            self.stream = self.container.add_stream("libx264", rate=fps)
+            self.stream.width, self.stream.height, self.stream.pix_fmt, self.stream.options = width, height, "yuv420p", options
+            self._to_yuv = None
+            try:
+                from av.video.reformatter import ColorPrimaries, ColorRange, ColorTrc, VideoReformatter
+                cc = self.stream.codec_context
+                if all(hasattr(cc, a) for a in ("colorspace", "color_range", "color_primaries", "color_trc")):
+                    cc.colorspace, cc.color_range, cc.color_primaries, cc.color_trc = 1, ColorRange.MPEG, ColorPrimaries.BT709, ColorTrc.IEC61966_2_1
+                    ref = VideoReformatter()
+                    self._to_yuv = lambda f: ref.reformat(f, format="yuv420p", dst_colorspace=1, dst_color_range=ColorRange.MPEG)
+            except (ImportError, AttributeError):
+                pass  # older PyAV, the encoder converts untagged
+        except BaseException:
+            self.container.close()
+            raise
+
+    def write(self, rgb):
+        frame = self._av.VideoFrame.from_ndarray(rgb, format="rgb24")
+        for packet in self.stream.encode(self._to_yuv(frame) if self._to_yuv else frame):
+            self.container.mux(packet)
+
+    def flush(self):
+        for packet in self.stream.encode():
+            self.container.mux(packet)
+
+    def close(self):
+        self.container.close()
+
+
+class VideoFileReader:
+    # Streams a file-backed VIDEO frame by frame with core's trim window, rotation and crop, instead of materializing a
+    # float batch through get_components(). Iterate once for the decoded av frames, rgb() turns one into display pixels
+    @staticmethod
+    def supports(video):
+        # The private crop field fails closed: if core renames it, callers use get_components, which applies the crop
+        from comfy_api.latest import InputImpl
+        return (isinstance(video, InputImpl.VideoFromFile) and hasattr(video, "get_active_trim_window")
+                and getattr(video, "_VideoFromFile__crop", False) is not False)
+
+    def __init__(self, video):
+        # Metadata first, BytesIO sources share one read position with the decoder opened below
+        try:
+            self.count = video.get_frame_count() or None
+        except Exception:
+            self.count = None  # core's count fallback can fail on odd containers
+        self.fps = video.get_frame_rate()
+        self._frames = self._decode(video)
+        self.first = next(self._frames, None)
+        if self.first is None:
+            raise ValueError("Video has no decodable frames.")
+        f = self.first
+        self.rotation = int(round(f.rotation // 90)) % 4 if getattr(f, "rotation", 0) else 0
+        w, h = (f.height, f.width) if self.rotation % 2 else (f.width, f.height)
+        self.crop = video._VideoFromFile__crop
+        if self.crop is not None:
+            from comfy_api.latest._util import normalize_crop_rect
+            self.crop = normalize_crop_rect(*self.crop, w, h)
+        self.width, self.height = self.crop[2:] if self.crop else (w, h)
+        self._ref = None
+
+    @staticmethod
+    def _decode(video):
+        import av
+        start_time, duration = video.get_active_trim_window()
+        with av.open(video.get_stream_source(), mode="r") as container:
+            stream = container.streams.video[0]
+            stream.thread_type = "AUTO"
+            start_pts = int(start_time / stream.time_base)
+            end_pts = int((start_time + duration) / stream.time_base) if duration else None
+            if start_pts:
+                container.seek(start_pts, stream=stream)
+            for packet in container.demux(stream):
+                try:
+                    frames = packet.decode()
+                except av.error.InvalidDataError:
+                    continue
+                for frame in frames:
+                    if frame.pts is not None:
+                        if frame.pts < start_pts:
+                            continue
+                        if end_pts is not None and frame.pts >= end_pts:
+                            return
+                    yield frame
+
+    def __iter__(self):
+        yield self.first
+        yield from self._frames
+
+    def rgb(self, frame):
+        # Full-resolution rgb24 in display orientation, rotated then cropped like core. Shared reformatter, see BrowserH264
+        if self._ref is None:
+            from av.video.reformatter import VideoReformatter
+            self._ref = VideoReformatter()
+        img = self._ref.reformat(frame, format="rgb24").to_ndarray()
+        if self.rotation:
+            img = np.rot90(img, k=self.rotation, axes=(0, 1))
+        if self.crop:
+            x, y, w, h = self.crop
+            img = img[y:y + h, x:x + w]
+        return np.ascontiguousarray(img)
+
+    def close(self):
+        self._frames.close()

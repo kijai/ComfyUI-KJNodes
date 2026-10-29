@@ -127,6 +127,9 @@ export function addMiddleClickPan(element) {
   return () => element.removeEventListener('mousedown', onMouseDown);
 }
 
+// The widget holding a loader's input file: Load Image "image", VHS-style "video", core Load Video "file"
+const sourceFileWidget = (srcNode) => srcNode.widgets?.find((w) => w.name === "image" || w.name === "video" || (w.name === "file" && srcNode.comfyClass === "LoadVideo"));
+
 // ─── Resolve preview image/video from a connected source node ───
 // Walks the graph link to find what's connected to node.inputs[inputSlot]
 // and returns { url, isVideo, videoEl } or null
@@ -145,13 +148,12 @@ export function resolveSourcePreview(node, inputSlot) {
     return { isVideo: true, videoEl: vpWidget.videoEl };
   }
 
-  // Look for a LoadImage "image" widget or LoadVideo "video" widget
-  const w = srcNode.widgets?.find((w) => w.name === "image" || w.name === "video");
+  const w = sourceFileWidget(srcNode);
   if (w?.value) {
     let subfolder = "", fname = w.value;
     const lastSlash = fname.lastIndexOf("/");
     if (lastSlash >= 0) { subfolder = fname.substring(0, lastSlash); fname = fname.substring(lastSlash + 1); }
-    const isVideo = w.name === "video";
+    const isVideo = w.name !== "image";
     const url = `/view?filename=${encodeURIComponent(fname)}&type=input&subfolder=${encodeURIComponent(subfolder)}`;
     return { url, isVideo };
   }
@@ -198,7 +200,7 @@ export function watchImageInputs(node, inputName, onChange) {
       if (!link) continue;
       const srcNode = node.graph.getNodeById(link.origin_id);
       if (!srcNode) continue;
-      const w = srcNode.widgets?.find(w => w.name === "image" || w.name === "video");
+      const w = sourceFileWidget(srcNode);
       if (!w) continue;
       const origCb = w.callback;
       w.callback = function (...args) {

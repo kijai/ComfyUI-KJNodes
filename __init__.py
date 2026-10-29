@@ -77,6 +77,7 @@ from .nodes.model_optimization_nodes import (
 )
 from .nodes.lora_nodes import LoraExtractKJ, LoraReduceRank
 from .nodes.image_transform_node import ImageTransformKJ, BBOXToBoundingBoxKJ
+from .nodes.image_compare_node import ImageCompareKJ
 from .nodes.sharpen_nodes import ImageSharpenKJ
 from .nodes.nodes_looping import LOOP_NODES
 from .nodes.hdr_preview_node import HDRPreviewKJ
@@ -191,6 +192,7 @@ NODE_CONFIG = {
     "EncodeVideoComponents": {"class": EncodeVideoComponents, "name": "Encode Video Components"},
     "DecodeAndSaveVideo": {"class": DecodeAndSaveVideo, "name": "Decode And Save Video"},
     "ImageTransformKJ": {"class": ImageTransformKJ, "name": "Image Transform KJ"},
+    "ImageCompareKJ": {"class": ImageCompareKJ, "name": "Image Compare KJ"},
     "BBOXToBoundingBoxKJ": {"class": BBOXToBoundingBoxKJ, "name": "BBOX to Bounding Box KJ"},
     "Ideogram4PromptBuilderKJ": {"class": Ideogram4PromptBuilderKJ, "name": "Ideogram 4 Prompt Builder KJ"},
     "Flux3PromptBuilderKJ": {"class": Flux3PromptBuilderKJ, "name": "FLUX.3 Prompt Builder KJ"},
