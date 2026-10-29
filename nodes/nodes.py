@@ -15,6 +15,7 @@ import folder_paths
 from nodes import MAX_RESOLUTION
 from comfy.utils import common_upscale, ProgressBar, load_torch_file, save_torch_file, state_dict_prefix_replace
 from comfy.comfy_types.node_typing import IO
+from comfy_execution.graph_utils import is_link
 from comfy_api.latest import io, ui
 import comfy.latent_formats
 import node_helpers
@@ -861,6 +862,8 @@ Alternatively you can search with the node title.
 'widget_name' can be a comma separated list.
 The 'any_input' is required for making sure the node you want the value from exists in the workflow.
 Targeting a subgraph node reads the values of its inputs and promoted widgets.
+Linked widgets show the value of the primitive node (Int, seed, etc.) feeding them,
+computed values stay as the link.
 """
 
     def get_widget_value(self, id, widget_name, extra_pnginfo, prompt, unique_id, return_all=False, any_input=None, node_title="", allowed_float_decimals=2):
@@ -1009,7 +1012,23 @@ Targeting a subgraph node reads the values of its inputs and promoted widgets.
             raise KeyError(f"Node {key} not found in prompt, it may be bypassed, muted or frontend-only")
         lookup = {**lookup, **inputs}
 
+        def resolve(v):
+            # A linked value is the prompt link [source key, slot]: follow it from the first output of primitive-style
+            # sources (a "value" input or a single input) to the value, computed outputs aren't known yet and stay the link
+            ref, seen = v, set()
+            while is_link(ref) and ref[1] == 0 and ref[0] in prompt and ref[0] not in seen:
+                seen.add(ref[0])
+                src = prompt[ref[0]].get("inputs", {})
+                if "value" in src:
+                    ref = src["value"]
+                elif len(src) == 1:
+                    ref = next(iter(src.values()))
+                else:
+                    break
+            return v if is_link(ref) else ref
+
         def fmt(v):
+            v = resolve(v)
             return f"{v:.{allowed_float_decimals}f}" if isinstance(v, float) else str(v)
 
         if return_all:
