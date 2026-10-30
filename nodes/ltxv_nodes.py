@@ -1867,6 +1867,29 @@ def _per_thread_int8_i64(q, k, km=None, BLKQ=128, WARPQ=32, BLKK=64, WARPK=64, t
     return q_int8, q_scale, k_int8, k_scale
 
 
+_UINT32_ADDRESS_LIMIT = 1 << 32
+
+
+def _make_uint32_indexable(tensor):
+    """Materialize views that exceed SageAttention CUDA's uint32 element offsets."""
+    if tensor.numel() == 0:
+        raise ValueError("SageAttention does not support empty tensors.")
+
+    strides = tensor.stride()
+    max_offset = sum(
+        (size - 1) * stride
+        for size, stride in zip(tensor.shape, strides)
+    )
+    if tensor.stride(-1) != 1 or any(stride < 0 for stride in strides) or max_offset >= _UINT32_ADDRESS_LIMIT:
+        tensor = tensor.contiguous()
+
+    if tensor.numel() > _UINT32_ADDRESS_LIMIT:
+        raise RuntimeError(
+            "SageAttention's FP8 CUDA kernel cannot address this tensor with uint32 offsets."
+        )
+    return tensor
+
+
 def _sageattn_int8_fp8_nhd(qkv, dtype):
     # qkv: [q, k, v], each [batch, seq_len, num_heads, head_dim] in NHD layout. Returns o in the same layout.
     # The list is consumed so the only references to the float q/k/v are the locals below, letting `del`
@@ -1907,6 +1930,7 @@ def _sageattn_int8_fp8_nhd(qkv, dtype):
         k.sub_(k.mean(dim=1, keepdim=True))
         q_int8, q_scale, k_int8, k_scale = _per_thread_int8_i64(q, k, tensor_layout=tensor_layout, BLKQ=128, WARPQ=32, BLKK=64, WARPK=64)
         del q, k
+        v = _make_uint32_indexable(v)
         v_fp8, v_scale, _ = per_channel_fp8(v, tensor_layout=tensor_layout, scale_max=quant_v_scale_max, smooth_v=False)
         del v
         o = torch.empty(q_int8.size(), dtype=dtype, device=q_int8.device)
