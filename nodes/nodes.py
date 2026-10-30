@@ -814,6 +814,9 @@ The choices are loaded from 'custom_dimensions.json' in the nodes folder.
    
        return (latent, int(width), int(height),)
 
+WIDGET_PASSTHROUGH_NODES = {"PrimitiveInt", "PrimitiveFloat", "PrimitiveString", "PrimitiveStringMultiline", "PrimitiveBoolean",
+                            "INTConstant", "FloatConstant", "BOOLConstant", "StringConstant"}
+
 class WidgetToString:
     @classmethod
     def IS_CHANGED(cls, *, unique_id=None, **kwargs):
@@ -862,8 +865,8 @@ Alternatively you can search with the node title.
 'widget_name' can be a comma separated list.
 The 'any_input' is required for making sure the node you want the value from exists in the workflow.
 Targeting a subgraph node reads the values of its inputs and promoted widgets.
-Linked widgets show the value of the primitive node (Int, seed, etc.) feeding them,
-computed values stay as the link.
+Linked widgets show the value of the Primitive or Constant node feeding them,
+other sources stay as the link.
 """
 
     def get_widget_value(self, id, widget_name, extra_pnginfo, prompt, unique_id, return_all=False, any_input=None, node_title="", allowed_float_decimals=2):
@@ -1013,10 +1016,10 @@ computed values stay as the link.
         lookup = {**lookup, **inputs}
 
         def resolve(v):
-            # A linked value is the prompt link [source key, slot]: follow it from the first output of primitive-style
-            # sources (a "value" input or a single input) to the value, computed outputs aren't known yet and stay the link
+            # A linked value is the prompt link [source key, slot]: follow it through known pass-through nodes
+            # to the value, computed outputs aren't known yet and stay the link
             ref, seen = v, set()
-            while is_link(ref) and ref[1] == 0 and ref[0] in prompt and ref[0] not in seen:
+            while is_link(ref) and ref[1] == 0 and ref[0] in prompt and ref[0] not in seen and prompt[ref[0]].get("class_type") in WIDGET_PASSTHROUGH_NODES:
                 seen.add(ref[0])
                 src = prompt[ref[0]].get("inputs", {})
                 if "value" in src:
