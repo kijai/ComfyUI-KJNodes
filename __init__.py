@@ -86,6 +86,7 @@ from .nodes.context_windows_visualizer import ContextWindowsVisualizerKJ
 from .nodes.ideogram4_nodes import Ideogram4PromptBuilderKJ
 from .nodes.flux3_nodes import Flux3PromptBuilderKJ, Flux3BoxReconcileKJ
 from .nodes.moss_image_nodes import MossImagePromptBuilderKJ
+from .nodes.color_calibrator_nodes import ColorCalibratorKJ
 
 import logging
 
@@ -203,6 +204,7 @@ NODE_CONFIG = {
     "GetPreviewOverrideFramesKJ": {"class": GetPreviewOverrideFramesKJ, "name": "Get Preview Override Frames KJ"},
     "PreviewImageOrMask": {"class": PreviewImageOrMask, "name": "Preview Image Or Mask"},
     "ImageSharpenKJ": {"class": ImageSharpenKJ, "name": "Image Sharpen KJ"},
+    "ColorCalibratorKJ": {"class": ColorCalibratorKJ, "name": "Color Calibrator KJ"},
     #batch cropping
     "BatchCropFromMask": {"class": BatchCropFromMask, "name": "Batch Crop From Mask"},
     "BatchCropFromMaskAdvanced": {"class": BatchCropFromMaskAdvanced, "name": "Batch Crop From Mask Advanced"},
