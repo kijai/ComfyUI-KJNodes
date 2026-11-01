@@ -79,6 +79,7 @@ from .nodes.lora_nodes import LoraExtractKJ, LoraReduceRank
 from .nodes.image_transform_node import ImageTransformKJ, BBOXToBoundingBoxKJ
 from .nodes.image_compare_node import ImageCompareKJ
 from .nodes.sharpen_nodes import ImageSharpenKJ
+from .nodes.color_restore_nodes import ColorRestoreKJ
 from .nodes.nodes_looping import LOOP_NODES
 from .nodes.hdr_preview_node import HDRPreviewKJ
 from .nodes.preview_override_node import ModelPreviewOverrideKJ, GetPreviewOverrideFramesKJ
@@ -203,6 +204,7 @@ NODE_CONFIG = {
     "GetPreviewOverrideFramesKJ": {"class": GetPreviewOverrideFramesKJ, "name": "Get Preview Override Frames KJ"},
     "PreviewImageOrMask": {"class": PreviewImageOrMask, "name": "Preview Image Or Mask"},
     "ImageSharpenKJ": {"class": ImageSharpenKJ, "name": "Image Sharpen KJ"},
+    "ColorRestoreKJ": {"class": ColorRestoreKJ, "name": "Color Restore KJ"},
     #batch cropping
     "BatchCropFromMask": {"class": BatchCropFromMask, "name": "Batch Crop From Mask"},
     "BatchCropFromMaskAdvanced": {"class": BatchCropFromMaskAdvanced, "name": "Batch Crop From Mask Advanced"},
