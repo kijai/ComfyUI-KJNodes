@@ -3,7 +3,7 @@ from torchvision import transforms
 import json
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 import numpy as np
-from ..utility.utility import pil2tensor, tensor2pil
+from ..utility.utility import pil2tensor, tensor2pil, draw_text_line, text_line_bbox
 import folder_paths
 import base64
 from io import BytesIO
@@ -582,13 +582,13 @@ Locations are center locations.
             # Apply the size multiplier to the font size for this iteration
             current_font_size = int(font_size * size_multiplier[i])
             current_font = ImageFont.truetype(font_path, current_font_size)
-            line_heights = [current_font.getbbox(line)[3] for line in lines]  # List of line heights
+            line_heights = [text_line_bbox(current_font, line)[3] for line in lines]  # List of line heights
             total_text_height = sum(line_heights)  # Total height of text block
 
             # Calculate the starting Y position to center the block of text
             start_y = coord['y'] - total_text_height // 2
             for j, line in enumerate(lines):
-                text_width, text_height = current_font.getbbox(line)[2], line_heights[j]
+                text_width, text_height = text_line_bbox(current_font, line)[2], line_heights[j]
                 if alignment == 'left':
                     location_x = coord['x']
                 elif alignment == 'center':
@@ -599,10 +599,7 @@ Locations are center locations.
                 location_y = int(start_y + sum(line_heights[:j]))
                 text_position = (location_x, location_y)
                 # Draw the text
-                try:
-                    draw.text(text_position, line, fill=color, font=current_font, features=['-liga'])
-                except Exception:
-                    draw.text(text_position, line, fill=color, font=current_font)
+                draw_text_line(image, draw, text_position, line, current_font, color)
             
             image = pil2tensor(image)
             non_black_pixels = (image > 0).any(dim=-1)

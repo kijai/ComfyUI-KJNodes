@@ -35,7 +35,7 @@ from fractions import Fraction
 import node_helpers
 import folder_paths
 
-from ..utility.utility import string_to_color, normalize_bboxes, BBOX_TYPES, BrowserH264, VideoFileReader
+from ..utility.utility import string_to_color, normalize_bboxes, BBOX_TYPES, BrowserH264, VideoFileReader, draw_text_line, text_line_bbox
 
 try:
     from server import PromptServer, BinaryEventTypes
@@ -936,7 +936,7 @@ ComfyUI/custom_nodes/ComfyUI-KJNodes/fonts
                     else:
                         test_line = word
                     try:
-                        test_line_width = font.getbbox(test_line)[2]
+                        test_line_width = text_line_bbox(font, test_line)[2]
                     except Exception:
                         test_line_width = font.getsize(test_line)[0]
                     if test_line_width <= width - 2 * text_x:
@@ -965,10 +965,7 @@ ComfyUI/custom_nodes/ComfyUI-KJNodes/fonts
 
             y_offset = text_y
             for line in lines:
-                try:
-                    draw.text((text_x, y_offset), line, font=font, fill=font_color_tuple, features=['-liga'])
-                except Exception:
-                    draw.text((text_x, y_offset), line, font=font, fill=font_color_tuple)
+                draw_text_line(pil_image, draw, (text_x, y_offset), line, font, font_color_tuple)
                 y_offset += font_size
 
             processed_image = torch.from_numpy(np.array(pil_image).astype(np.float32) / 255.0).unsqueeze(0)
