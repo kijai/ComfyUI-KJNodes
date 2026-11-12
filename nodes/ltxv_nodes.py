@@ -1717,7 +1717,13 @@ def _resolve_qattn(arch):
         core = importlib.import_module("sageattention.core")
     except Exception:
         return None
-    candidates = [getattr(core, f"_qattn_{arch}", None), getattr(core, f"{arch}_compile", None)]
+    # Newer SageAttention wheels register kernels with torch.library; older
+    # wheels expose them on core or the compiled extension module.
+    candidates = [
+        getattr(torch.ops, f"sageattention_qattn_{arch}", None),
+        getattr(core, f"_qattn_{arch}", None),
+        getattr(core, f"{arch}_compile", None),
+    ]
     try:
         mod = importlib.import_module(f"sageattention.{arch}_compile")
         candidates += [mod, getattr(mod, f"_qattn_{arch}", None)]
