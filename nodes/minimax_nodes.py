@@ -14,7 +14,7 @@ from comfy.ldm.minimax.model import _mod_scale_shift, _mod_gate, PackedLayout
 
 from comfy_api.latest import io, ui
 from nodes import MAX_RESOLUTION
-from .model_optimization_nodes import _prompt_token_weights, _QWEN_IM_START, _QWEN_USER, _QWEN_NL, _QWEN_IM_END
+from .model_optimization_nodes import _prompt_token_weights, _blend_prompts, _blend_pairs, _QWEN_IM_START, _QWEN_USER, _QWEN_NL, _QWEN_IM_END
 
 try:
     from server import PromptServer
@@ -346,19 +346,6 @@ def _minimax_block_patch(comfy_attention, prev_patch):
         return prev_patch(args, extra) if prev_patch is not None else extra["original_block"](args)
     return patch
 
-_BLEND = re.compile(r"\[([^\[\]]*\|[^\[\]]*)\]")
-_BLEND_OPTION = re.compile(r"(.*?)(?::(-?\d*\.?\d+))?", re.S)
-
-def _minimax_blend_prompts(text):
-    # "[a|b:-2]" blends prompts: one prompt per option, the number is that prompt's attention bias
-    groups = [[_BLEND_OPTION.fullmatch(o.strip()).groups() for o in m.group(1).split("|")] for m in _BLEND.finditer(text)]
-    prompts = []
-    for i in range(max((len(g) for g in groups), default=1)):
-        picks = [g[i % len(g)] for g in groups]
-        options = iter(picks)
-        prompts.append((_BLEND.sub(lambda m: next(options)[0], text), sum(float(bias) for _, bias in picks if bias)))
-    return prompts
-
 
 class MiniMaxH3PromptWeight(io.ComfyNode):
     @classmethod
@@ -395,7 +382,7 @@ class MiniMaxH3PromptWeight(io.ComfyNode):
     def execute(cls, model, clip, text, strength, width, height, mode) -> io.NodeOutput:
         from comfy_extras.nodes_minimax_h3 import MiniMaxH3ImageConditioning    # not in older ComfyUI
         cond, pairs, prompt_len = None, [], 0
-        for prompt, bias in _minimax_blend_prompts(text):
+        for prompt, bias in _blend_prompts(text):
             clean_text = re.sub(r"\(([^():]+):(-?\d*\.?\d+)\)", r"\1", prompt)    # as _prompt_token_weights strips them
             # the reference latents come with the first prompt
             c, latent = MiniMaxH3ImageConditioning.execute(clip, clean_text, width, height, vae=mode.get("vae") if cond is None else None, images=mode.get("images")).result
@@ -407,10 +394,8 @@ class MiniMaxH3PromptWeight(io.ComfyNode):
                 cond = [[torch.cat([a, b[:, b.shape[1] - rows:]], dim=1),
                          {**d, "minimax_token_tags": torch.cat([d["minimax_token_tags"], e["minimax_token_tags"][b.shape[1] - rows:]])}]
                         for (a, d), (b, e) in zip(cond, c)]
-            weights = {p: (vf, kb) for p, vf, kb in _prompt_token_weights(clip, prompt, strength, (_QWEN_IM_START, _QWEN_USER, _QWEN_NL, _QWEN_IM_END), "MiniMaxH3PromptWeight", encode=False)[1]}
-            for p in (range(rows) if bias else weights):
-                vf, kb = weights.get(p, (1.0, 0.0))
-                pairs.append((prompt_len + p, vf, kb + bias))
+            _, token_pairs = _prompt_token_weights(clip, prompt, strength, (_QWEN_IM_START, _QWEN_USER, _QWEN_NL, _QWEN_IM_END), "MiniMaxH3PromptWeight", encode=False)
+            pairs += _blend_pairs(token_pairs, prompt_len, rows, bias)
             prompt_len += rows
         if mode["mode"] == "text with empty image" and mode["end_percent"] > mode["start_percent"]:
             start_percent, end_percent = mode["start_percent"], mode["end_percent"]
