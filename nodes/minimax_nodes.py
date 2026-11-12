@@ -360,7 +360,7 @@ class MiniMaxH3PromptWeight(io.ComfyNode):
                 io.Model.Input("model"),
                 io.Clip.Input("clip"),
                 io.String.Input("text", multiline=True, default="", tooltip="Prompt, weights as (word:weight)."),
-                io.Float.Input("strength", default=1.0, min=0.0, max=4.0, step=0.05, tooltip="Multiplier on the weighting effect."),
+                io.Float.Input("strength", default=1.0, min=-4.0, max=4.0, step=0.05, tooltip="Multiplier on the weighting effect."),
                 io.Int.Input("width", default=0, min=0, max=MAX_RESOLUTION, step=32, tooltip="0 uses image_1's size, or 2048 without images."),
                 io.Int.Input("height", default=0, min=0, max=MAX_RESOLUTION, step=32),
                 io.DynamicCombo.Input("mode", tooltip="text with empty image adds a black picture's vision tokens, which softens the hard text-to-image rendering.", options=[
