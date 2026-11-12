@@ -346,6 +346,19 @@ def _minimax_block_patch(comfy_attention, prev_patch):
         return prev_patch(args, extra) if prev_patch is not None else extra["original_block"](args)
     return patch
 
+_BLEND = re.compile(r"\[([^\[\]]*\|[^\[\]]*)\]")
+_BLEND_OPTION = re.compile(r"(.*?)(?::(-?\d*\.?\d+))?", re.S)
+
+def _minimax_blend_prompts(text):
+    # "[a|b:-2]" blends prompts: one prompt per option, the number is that prompt's attention bias
+    groups = [[_BLEND_OPTION.fullmatch(o.strip()).groups() for o in m.group(1).split("|")] for m in _BLEND.finditer(text)]
+    prompts = []
+    for i in range(max((len(g) for g in groups), default=1)):
+        picks = [g[i % len(g)] for g in groups]
+        options = iter(picks)
+        prompts.append((_BLEND.sub(lambda m: next(options)[0], text), sum(float(bias) for _, bias in picks if bias)))
+    return prompts
+
 
 class MiniMaxH3PromptWeight(io.ComfyNode):
     @classmethod
@@ -355,11 +368,11 @@ class MiniMaxH3PromptWeight(io.ComfyNode):
             display_name="MiniMax H3 Prompt Weight",
             category="KJNodes/experimental",
             is_experimental=True,
-            description="MiniMax H3 Image Conditioning with per-token prompt weights, (word:-1) removes a concept, (word:1.5) emphasizes it.",
+            description="MiniMax H3 Image Conditioning with per-token prompt weights, (word:-1) removes a concept, (word:1.5) emphasizes it. [cat|fox] blends one prompt per option.",
             inputs=[
                 io.Model.Input("model"),
                 io.Clip.Input("clip"),
-                io.String.Input("text", multiline=True, default="", tooltip="Prompt, weights as (word:weight)."),
+                io.String.Input("text", multiline=True, default="", tooltip="Prompt, weights as (word:weight). [cat|fox:-1] blends one prompt per option, the number is that option's attention bias."),
                 io.Float.Input("strength", default=1.0, min=-4.0, max=4.0, step=0.05, tooltip="Multiplier on the weighting effect."),
                 io.Int.Input("width", default=0, min=0, max=MAX_RESOLUTION, step=32, tooltip="0 uses image_1's size, or 2048 without images."),
                 io.Int.Input("height", default=0, min=0, max=MAX_RESOLUTION, step=32),
@@ -381,9 +394,24 @@ class MiniMaxH3PromptWeight(io.ComfyNode):
     @classmethod
     def execute(cls, model, clip, text, strength, width, height, mode) -> io.NodeOutput:
         from comfy_extras.nodes_minimax_h3 import MiniMaxH3ImageConditioning    # not in older ComfyUI
-        clean_text = re.sub(r"\(([^():]+):(-?\d*\.?\d+)\)", r"\1", text)    # as _prompt_token_weights strips them
-        cond, latent = MiniMaxH3ImageConditioning.execute(clip, clean_text, width, height, vae=mode.get("vae"), images=mode.get("images")).result
-        _, pairs = _prompt_token_weights(clip, text, strength, (_QWEN_IM_START, _QWEN_USER, _QWEN_NL, _QWEN_IM_END), "MiniMaxH3PromptWeight", encode=False)
+        cond, pairs, prompt_len = None, [], 0
+        for prompt, bias in _minimax_blend_prompts(text):
+            clean_text = re.sub(r"\(([^():]+):(-?\d*\.?\d+)\)", r"\1", prompt)    # as _prompt_token_weights strips them
+            # the reference latents come with the first prompt
+            c, latent = MiniMaxH3ImageConditioning.execute(clip, clean_text, width, height, vae=mode.get("vae") if cond is None else None, images=mode.get("images")).result
+            rows = len(next(iter(clip.tokenize(clean_text).values()))[0])
+            if cond is None:
+                cond = c
+            else:
+                # the encoder is causal, so a further prompt only adds its own rows behind what the first one already has
+                cond = [[torch.cat([a, b[:, b.shape[1] - rows:]], dim=1),
+                         {**d, "minimax_token_tags": torch.cat([d["minimax_token_tags"], e["minimax_token_tags"][b.shape[1] - rows:]])}]
+                        for (a, d), (b, e) in zip(cond, c)]
+            weights = {p: (vf, kb) for p, vf, kb in _prompt_token_weights(clip, prompt, strength, (_QWEN_IM_START, _QWEN_USER, _QWEN_NL, _QWEN_IM_END), "MiniMaxH3PromptWeight", encode=False)[1]}
+            for p in (range(rows) if bias else weights):
+                vf, kb = weights.get(p, (1.0, 0.0))
+                pairs.append((prompt_len + p, vf, kb + bias))
+            prompt_len += rows
         if mode["mode"] == "text with empty image" and mode["end_percent"] > mode["start_percent"]:
             start_percent, end_percent = mode["start_percent"], mode["end_percent"]
             # the encoder is causal, so the picture block is the same in front of any prompt
@@ -401,7 +429,6 @@ class MiniMaxH3PromptWeight(io.ComfyNode):
         if not pairs:
             return io.NodeOutput(model, cond, latent)
 
-        prompt_len = len(next(iter(clip.tokenize(clean_text).values()))[0])
         diffusion_model = model.get_model_object("diffusion_model")
         model_clone = model.clone()
         model_clone.add_wrapper_with_key(comfy.patcher_extension.WrappersMP.DIFFUSION_MODEL, "MiniMaxH3PromptWeight",
