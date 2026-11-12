@@ -1354,7 +1354,7 @@ def _find_subsequence(seq, sub, lo, hi):
             out.append(i)
     return out
 
-def _prompt_token_weights(clip, text, strength, specials, name):
+def _prompt_token_weights(clip, text, strength, specials, name, encode=True):
     # parse (phrase:weight) terms, encode the clean prompt, locate each phrase's tokens in the conditioning.
     # returns (cond, [(cond position, value multiplier, logit bias)])
     import re
@@ -1362,8 +1362,8 @@ def _prompt_token_weights(clip, text, strength, specials, name):
     terms = [(m.group(1).strip(), float(m.group(2))) for m in pattern.finditer(text)]
     tok = clip.tokenize(pattern.sub(lambda m: m.group(1), text))
     ids = [t[0] for t in next(iter(tok.values()))[0]]
-    cond = clip.encode_from_tokens_scheduled(tok)
-    cond_len = cond[0][0].shape[1]
+    cond = clip.encode_from_tokens_scheduled(tok) if encode else None
+    cond_len = cond[0][0].shape[1] if encode else len(ids)    # without the encode only right for tokenizers with no chat template
     visible_start = len(ids) - cond_len            # conditioning == ids[visible_start:]
     start, end = _krea2_user_content_span(ids, specials)
     if start is None:

@@ -1,16 +1,20 @@
 import inspect
 import logging
+import re
 import types
 
 import torch
 
 import comfy.model_management as mm
 import comfy.ops
+import comfy.patcher_extension
 import comfy.quant_ops
 from comfy.ldm.modules.attention import optimized_attention
 from comfy.ldm.minimax.model import _mod_scale_shift, _mod_gate, PackedLayout
 
 from comfy_api.latest import io, ui
+from nodes import MAX_RESOLUTION
+from .model_optimization_nodes import _prompt_token_weights, _QWEN_IM_START, _QWEN_USER, _QWEN_NL, _QWEN_IM_END
 
 try:
     from server import PromptServer
@@ -293,3 +297,117 @@ class MiniMaxH3TokenCounter(io.ComfyNode):
             except Exception:
                 pass
         return io.NodeOutput(samples, conditioning, layout.seq_len, breakdown, ui=ui.PreviewText(breakdown))
+
+
+# MiniMax H3 Image prompt weighting, same mechanism as Krea2 and MOSS-Image. Text rows come first in the packed sequence
+# and the prompt is the last part of the text, behind any picture blocks.
+def _minimax_weight_wrapper(pairs, prompt_len, name):
+    v_pos, v_fac = [p for p, vf, _ in pairs if vf != 1.0], [vf for _, vf, _ in pairs if vf != 1.0]
+    k_pos, k_bias = [p for p, _, kb in pairs if kb != 0.0], [kb for _, _, kb in pairs if kb != 0.0]
+    warned = []
+    def wrapper(executor, x, timestep, context, transformer_options={}, **kwargs):
+        offset = context.shape[1] - prompt_len
+        if transformer_options.get("cond_or_uncond") == [0]:    # positive cond only
+            if offset >= 0:
+                dev = context.device
+                transformer_options["minimax_token_weights"] = (
+                    torch.tensor(v_pos, device=dev) + offset if v_pos else None,
+                    torch.tensor(v_fac, device=dev)[:, None] if v_pos else None,
+                    torch.tensor(k_pos, device=dev) + offset if k_pos else None,
+                    torch.tensor(k_bias, device=dev) if k_pos else None)
+            elif not warned:
+                warned.append(True)
+                logging.warning(f"{name}: conditioning is shorter than the prompt, weighting skipped")
+        return executor(x, timestep, context, transformer_options, **kwargs)
+    return wrapper
+
+def _minimax_attn_override(weights, comfy_attention, prev):
+    v_idx, v_fac, k_idx, k_bias = weights
+    def override(func, q, k, v, heads, mask=None, **kwargs):
+        if v_idx is not None:
+            v[..., v_idx, :] = v[..., v_idx, :] * v_fac.to(v.dtype)
+        if k_idx is not None and mask is None:
+            mask = q.new_zeros(1, 1, 1, k.shape[-2])
+            mask[..., k_idx] = k_bias.to(q.dtype)
+        if prev is not None:
+            return prev(func, q, k, v, heads, mask=mask, **kwargs)
+        # keep the block's own attention backend
+        attention = comfy_attention.function if comfy_attention is not None else None
+        return (attention or func)(q, k, v, heads, mask=mask, **kwargs)
+    return override
+
+def _minimax_block_patch(comfy_attention, prev_patch):
+    def patch(args, extra):
+        to = args["transformer_options"]
+        weights = to.get("minimax_token_weights")
+        if weights is not None:
+            to = {**to, "optimized_attention_override": _minimax_attn_override(weights, comfy_attention, to.get("optimized_attention_override"))}
+            args = {**args, "transformer_options": to}
+        return prev_patch(args, extra) if prev_patch is not None else extra["original_block"](args)
+    return patch
+
+
+class MiniMaxH3PromptWeight(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="MiniMaxH3PromptWeight",
+            display_name="MiniMax H3 Prompt Weight",
+            category="KJNodes/experimental",
+            is_experimental=True,
+            description="MiniMax H3 Image Conditioning with per-token prompt weights, (word:-1) removes a concept, (word:1.5) emphasizes it.",
+            inputs=[
+                io.Model.Input("model"),
+                io.Clip.Input("clip"),
+                io.String.Input("text", multiline=True, default="", tooltip="Prompt, weights as (word:weight)."),
+                io.Float.Input("strength", default=1.0, min=0.0, max=4.0, step=0.05, tooltip="Multiplier on the weighting effect."),
+                io.Int.Input("width", default=0, min=0, max=MAX_RESOLUTION, step=32, tooltip="0 uses image_1's size, or 2048 without images."),
+                io.Int.Input("height", default=0, min=0, max=MAX_RESOLUTION, step=32),
+                io.DynamicCombo.Input("mode", tooltip="text with empty image adds a black picture's vision tokens, which softens the hard text-to-image rendering.", options=[
+                    io.DynamicCombo.Option("text only", []),
+                    io.DynamicCombo.Option("text with empty image", [
+                        io.Float.Input("start_percent", default=0.0, min=0.0, max=1.0, step=0.001, tooltip="Start of the sampling range with the vision tokens."),
+                        io.Float.Input("end_percent", default=0.25, min=0.0, max=1.0, step=0.001, tooltip="End of the range. 0.25 is the first two of 6 steps."),
+                    ]),
+                    io.DynamicCombo.Option("edit", [
+                        io.Vae.Input("vae", optional=True),
+                        io.Autogrow.Input("images", optional=True, template=io.Autogrow.TemplatePrefix(input=io.Image.Input("image"), prefix="image_", min=0, max=100)),
+                    ]),
+                ]),
+            ],
+            outputs=[io.Model.Output(display_name="model"), io.Conditioning.Output(display_name="positive"), io.Latent.Output(display_name="latent")],
+        )
+
+    @classmethod
+    def execute(cls, model, clip, text, strength, width, height, mode) -> io.NodeOutput:
+        from comfy_extras.nodes_minimax_h3 import MiniMaxH3ImageConditioning    # not in older ComfyUI
+        clean_text = re.sub(r"\(([^():]+):(-?\d*\.?\d+)\)", r"\1", text)    # as _prompt_token_weights strips them
+        cond, latent = MiniMaxH3ImageConditioning.execute(clip, clean_text, width, height, vae=mode.get("vae"), images=mode.get("images")).result
+        _, pairs = _prompt_token_weights(clip, text, strength, (_QWEN_IM_START, _QWEN_USER, _QWEN_NL, _QWEN_IM_END), "MiniMaxH3PromptWeight", encode=False)
+        if mode["mode"] == "text with empty image" and mode["end_percent"] > mode["start_percent"]:
+            start_percent, end_percent = mode["start_percent"], mode["end_percent"]
+            # the encoder is causal, so the picture block is the same in front of any prompt
+            picture, picture_dict = clip.encode_from_tokens_scheduled(
+                clip.tokenize("", images=[torch.zeros(1, 512, 512, 3)], picture_label="Picture %d: "))[0]
+            with_picture = []
+            for c, d in cond:
+                tags = torch.cat([picture_dict["minimax_token_tags"], d["minimax_token_tags"]])
+                with_picture.append([torch.cat([picture, c], dim=1), {**d, "minimax_token_tags": tags, "start_percent": start_percent, "end_percent": end_percent}])
+                if start_percent > 0.0:
+                    with_picture.append([c, {**d, "start_percent": 0.0, "end_percent": start_percent}])
+                if end_percent < 1.0:
+                    with_picture.append([c, {**d, "start_percent": end_percent, "end_percent": 1.0}])
+            cond = with_picture
+        if not pairs:
+            return io.NodeOutput(model, cond, latent)
+
+        prompt_len = len(next(iter(clip.tokenize(clean_text).values()))[0])
+        diffusion_model = model.get_model_object("diffusion_model")
+        model_clone = model.clone()
+        model_clone.add_wrapper_with_key(comfy.patcher_extension.WrappersMP.DIFFUSION_MODEL, "MiniMaxH3PromptWeight",
+                                         _minimax_weight_wrapper(pairs, prompt_len, "MiniMaxH3PromptWeight"))
+        existing = model_clone.model_options.get("transformer_options", {}).get("patches_replace", {}).get("dit", {})
+        for idx, block in enumerate(diffusion_model.blocks):
+            model_clone.set_model_patch_replace(_minimax_block_patch(getattr(block.attn, "comfy_attention", None), existing.get(("double_block", idx))),
+                                                "dit", "double_block", idx)
+        return io.NodeOutput(model_clone, cond, latent)

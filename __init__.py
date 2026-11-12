@@ -381,11 +381,12 @@ except Exception as e:
 
 #minimax
 try:
-    from .nodes.minimax_nodes import MiniMaxChunkFeedForward, MiniMaxLowVRAMAttention, MiniMaxH3TokenCounter
+    from .nodes.minimax_nodes import MiniMaxChunkFeedForward, MiniMaxLowVRAMAttention, MiniMaxH3TokenCounter, MiniMaxH3PromptWeight
     NODE_CONFIG.update({
     "MiniMaxChunkFeedForward": {"class": MiniMaxChunkFeedForward, "name": "MiniMax H3 ChunkFeedForward"},
     "MiniMaxLowVRAMAttention": {"class": MiniMaxLowVRAMAttention, "name": "MiniMax H3 Low VRAM Attention"},
     "MiniMaxH3TokenCounter": {"class": MiniMaxH3TokenCounter, "name": "MiniMax H3 Token Counter"},
+    "MiniMaxH3PromptWeight": {"class": MiniMaxH3PromptWeight, "name": "MiniMax H3 Prompt Weight"},
     })
 except Exception as e:
     logging.warning(f"KJNodes: MiniMax nodes could not be imported. MiniMax nodes will be unavailable. Error: {e}", exc_info=True)
