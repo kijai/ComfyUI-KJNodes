@@ -7,6 +7,7 @@ import inspect
 import math
 import datetime
 import pickle
+import re
 from tqdm import tqdm
 
 import folder_paths
@@ -1354,16 +1355,15 @@ def _find_subsequence(seq, sub, lo, hi):
             out.append(i)
     return out
 
-def _prompt_token_weights(clip, text, strength, specials, name):
+def _prompt_token_weights(clip, text, strength, specials, name, encode=True):
     # parse (phrase:weight) terms, encode the clean prompt, locate each phrase's tokens in the conditioning.
     # returns (cond, [(cond position, value multiplier, logit bias)])
-    import re
     pattern = re.compile(r"\(([^():]+):(-?\d*\.?\d+)\)")
     terms = [(m.group(1).strip(), float(m.group(2))) for m in pattern.finditer(text)]
     tok = clip.tokenize(pattern.sub(lambda m: m.group(1), text))
     ids = [t[0] for t in next(iter(tok.values()))[0]]
-    cond = clip.encode_from_tokens_scheduled(tok)
-    cond_len = cond[0][0].shape[1]
+    cond = clip.encode_from_tokens_scheduled(tok) if encode else None
+    cond_len = cond[0][0].shape[1] if encode else len(ids)    # without the encode only right for tokenizers with no chat template
     visible_start = len(ids) - cond_len            # conditioning == ids[visible_start:]
     start, end = _krea2_user_content_span(ids, specials)
     if start is None:
@@ -1395,6 +1395,37 @@ def _prompt_token_weights(clip, text, strength, specials, name):
     pairs = [(cp, vf, kb) for cp, (vf, kb) in sorted(merged.items())]
     if pairs:
         logging.info(f"{name}: weighting {pairs}")
+    return cond, pairs
+
+_BLEND = re.compile(r"\[([^\[\]]*\|[^\[\]]*)\]")
+_BLEND_OPTION = re.compile(r"(.*?)(?::(-?\d*\.?\d+))?", re.S)
+
+def _blend_prompts(text):
+    # "[a|b:-2]" blends prompts: one prompt per option, the number is that prompt's attention bias
+    groups = [[_BLEND_OPTION.fullmatch(o.strip()).groups() for o in m.group(1).split("|")] for m in _BLEND.finditer(text)]
+    prompts = []
+    for i in range(max((len(g) for g in groups), default=1)):
+        picks = [g[i % len(g)] for g in groups]
+        options = iter(picks)
+        prompts.append((_BLEND.sub(lambda m: next(options)[0], text), sum(float(bias) for _, bias in picks if bias)))
+    return prompts
+
+def _blend_pairs(pairs, start, rows, bias):
+    # one blended prompt's token weights at its rows in the joined conditioning, its attention bias on all of them
+    weights = {p: (vf, kb) for p, vf, kb in pairs}
+    out = []
+    for p in (range(rows) if bias else weights):
+        vf, kb = weights.get(p, (1.0, 0.0))
+        out.append((start + p, vf, kb + bias))
+    return out
+
+def _blend_token_weights(clip, text, strength, specials, name):
+    # _prompt_token_weights for a prompt with [a|b] options: each option's prompt is encoded on its own and the rows are joined
+    cond, pairs = None, []
+    for prompt, bias in _blend_prompts(text):
+        c, token_pairs = _prompt_token_weights(clip, prompt, strength, specials, name)
+        pairs += _blend_pairs(token_pairs, cond[0][0].shape[1] if cond else 0, c[0][0].shape[1], bias)
+        cond = [[torch.cat([a, b], dim=1), d] for (a, d), (b, _) in zip(cond, c)] if cond else c
     return cond, pairs
 
 
@@ -1446,7 +1477,7 @@ class Krea2PromptWeight:
             "required": {
                 "clip": ("CLIP",),
                 "model": ("MODEL",),
-                "text": ("STRING", {"multiline": True, "default": "", "tooltip": "Prompt with per-token weights in parentheses, e.g. (word:-1) removes/represses a concept, (word:2) emphasizes it, plain text = 1.0. Works on Krea2 where ComfyUI's normal (word:weight) does nothing (the Qwen3-VL LLM encoder ignores it). weight<1 scales the token's attention VALUE (subtracts/removes at <0); weight>1 boosts how much the image ATTENDS to the token (adds more of it). Set sampler CFG to 1.0."}),
+                "text": ("STRING", {"multiline": True, "default": "", "tooltip": "Prompt with per-token weights in parentheses, e.g. (word:-1) removes/represses a concept, (word:2) emphasizes it, plain text = 1.0. Works on Krea2 where ComfyUI's normal (word:weight) does nothing (the Qwen3-VL LLM encoder ignores it). weight<1 scales the token's attention VALUE (subtracts/removes at <0); weight>1 boosts how much the image ATTENDS to the token (adds more of it). [cat|fox:-1] blends one prompt per option, the number is that option's attention bias. Set sampler CFG to 1.0."}),
                 "strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 4.0, "step": 0.05, "tooltip": "Global multiplier on the weighting effect. Effect compounds over all 28 blocks; lower if results break up, raise for a stronger effect. Removal (weight<0) is the reliable direction; emphasis (weight>1) works but is looser."}),
             },
         }
@@ -1455,11 +1486,11 @@ class Krea2PromptWeight:
     RETURN_NAMES = ("model", "conditioning")
     FUNCTION = "encode"
     CATEGORY = "KJNodes/experimental"
-    DESCRIPTION = "Per-token prompt weighting for Krea2 (K2) via attention value scaling. Use (word:-1) to remove a concept, (word:1.5) to emphasize one -- works through the Qwen3-VL encoder where normal weighting doesn't. Outputs the patched model + conditioning; set the sampler CFG to 1.0."
+    DESCRIPTION = "Per-token prompt weighting for Krea2 (K2) via attention value scaling. Use (word:-1) to remove a concept, (word:1.5) to emphasize one -- works through the Qwen3-VL encoder where normal weighting doesn't. [cat|fox] blends one prompt per option. Outputs the patched model + conditioning; set the sampler CFG to 1.0."
     EXPERIMENTAL = True
 
     def encode(self, clip, model, text, strength):
-        cond, weight_pairs = _prompt_token_weights(clip, text, strength, (_QWEN_IM_START, _QWEN_USER, _QWEN_NL, _QWEN_IM_END), "Krea2PromptWeight")
+        cond, weight_pairs = _blend_token_weights(clip, text, strength, (_QWEN_IM_START, _QWEN_USER, _QWEN_NL, _QWEN_IM_END), "Krea2PromptWeight")
         if not weight_pairs:
             return (model, cond)
 
@@ -1569,7 +1600,7 @@ class MossImagePromptWeight(io.ComfyNode):
             is_experimental=True,
             description="Per-token prompt weighting for MOSS-Image via attention value scaling, same approach as Krea2 Prompt Weight. "
                         "Use (word:-1) to remove a concept, (word:1.5) to emphasize one -- works through the Qwen3.5 encoder where "
-                        "normal weighting doesn't. Outputs the model + conditioning; wire both to the sampler. On a ComfyUI that "
+                        "normal weighting doesn't. [cat|fox] blends one prompt per option. Outputs the model + conditioning; wire both to the sampler. On a ComfyUI that "
                         "takes attention bias conditioning, emphasis rides on the conditioning and the model is only patched for "
                         "weights below 1.",
             inputs=[
@@ -1579,8 +1610,9 @@ class MossImagePromptWeight(io.ComfyNode):
                                 tooltip="Prompt with per-token weights in parentheses, e.g. (word:-1) removes/represses a concept, (word:2) "
                                         "emphasizes it, plain text = 1.0. Works on MOSS-Image where ComfyUI's normal (word:weight) does nothing "
                                         "(the Qwen3.5 LLM encoder ignores it). weight<1 scales the token's attention VALUE (subtracts/removes at "
-                                        "<0); weight>1 boosts how much the image ATTENDS to the token (adds more of it). Only positive conds are "
-                                        "weighted, negative prompts pass through untouched."),
+                                        "<0); weight>1 boosts how much the image ATTENDS to the token (adds more of it). [cat|fox:-1] blends one "
+                                        "prompt per option, the number is that option's attention bias. Only positive conds are weighted, negative "
+                                        "prompts pass through untouched."),
                 io.Float.Input("strength", default=1.0, min=0.0, max=4.0, step=0.05,
                                tooltip="Global multiplier on the weighting effect. Effect compounds over all 42 blocks; lower if results break "
                                        "up, raise for a stronger effect. Removal (weight<0) is the reliable direction; emphasis (weight>1) works "
@@ -1591,7 +1623,7 @@ class MossImagePromptWeight(io.ComfyNode):
 
     @classmethod
     def execute(cls, clip, model, text, strength) -> io.NodeOutput:
-        cond, pairs = _prompt_token_weights(clip, text, strength, _QWEN35_SPECIALS, "MossImagePromptWeight")
+        cond, pairs = _blend_token_weights(clip, text, strength, _QWEN35_SPECIALS, "MossImagePromptWeight")
         if not pairs:
             return io.NodeOutput(model, cond)
 

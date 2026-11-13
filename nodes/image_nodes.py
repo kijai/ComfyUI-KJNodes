@@ -3632,6 +3632,8 @@ class SaveImageKJ:
             "optional": {
                 "caption_file_extension": ("STRING", {"default": ".txt", "tooltip": "The extension for the caption file. Limited to plain-text/data formats."}),
                 "caption": ("STRING", {"forceInput": True, "tooltip": "string to save as .txt file"}),
+                "format": (["png", "jpeg (no metadata)", "webp", "avif"], {"default": "png", "tooltip": "File format. png, webp and avif embed the workflow so it can be loaded back into ComfyUI."}),
+                "quality": ("INT", {"default": 90, "min": 1, "max": 100, "tooltip": "Quality for jpeg, webp and avif, ignored for png. For avif it maps to the encoder CRF the same way libavif does (90 = CRF 6)."}),
             },
             "hidden": {
                 "prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO"
@@ -3647,14 +3649,25 @@ class SaveImageKJ:
     CATEGORY = "KJNodes/image"
     DESCRIPTION = "Saves the input images to your ComfyUI output directory."
 
-    def save_images(self, images, output_folder, filename_prefix="ComfyUI", prompt=None, extra_pnginfo=None, caption=None, caption_file_extension=".txt"):
+    def save_images(self, images, output_folder, filename_prefix="ComfyUI", prompt=None, extra_pnginfo=None, caption=None, caption_file_extension=".txt", format="png", quality=90):
         filename_prefix += self.prefix_append
+        if format == "avif":
+            try:
+                from comfy_extras.nodes_images import _save_avif  # not in older ComfyUI
+            except ImportError:
+                raise RuntimeError("AVIF saving requires a newer ComfyUI version.")
 
         if os.path.isabs(output_folder):
             if not os.path.exists(output_folder):
                 os.makedirs(output_folder, exist_ok=True)
             full_output_folder = output_folder
             _, filename, counter, subfolder, filename_prefix = folder_paths.get_save_image_path(filename_prefix, output_folder, images[0].shape[1], images[0].shape[0])
+            # previews are served relative to the output dir, so only folders inside it can be previewed
+            try:
+                rel = os.path.relpath(output_folder, folder_paths.get_output_directory())
+            except ValueError:  # different drive
+                rel = ".."
+            subfolder = None if rel == ".." or rel.startswith(".." + os.sep) else ("" if rel == "." else rel)
         else:
             self.output_dir = folder_paths.get_output_directory()
             full_output_folder, filename, counter, subfolder, filename_prefix = folder_paths.get_save_image_path(filename_prefix, self.output_dir, images[0].shape[1], images[0].shape[0])
@@ -3667,28 +3680,57 @@ class SaveImageKJ:
             if caption_file_extension.lower() not in SaveStringKJ.ALLOWED_EXTENSIONS:
                 raise ValueError(f"Disallowed caption extension '{caption_file_extension}'. Allowed: {', '.join(SaveStringKJ.ALLOWED_EXTENSIONS)}")
 
+        metadata = None
+        if not args.disable_metadata:
+            metadata = {}
+            if prompt is not None:
+                metadata["prompt"] = prompt
+            if extra_pnginfo is not None:
+                metadata.update(extra_pnginfo)
+
+        # webp uses the same EXIF layout as core's SaveAnimatedWEBP: "key:json" strings in IFD0
+        exif = None
+        if metadata and format == "webp":
+            exif = Image.Exif()
+            tag = 0x010F
+            for key, value in metadata.items():
+                exif[0x0110 if key == "prompt" else tag] = f"{key}:{json.dumps(value)}"
+                if key != "prompt":
+                    tag -= 1
+
+        ext = "jpg" if format.startswith("jpeg") else format
         results = list()
         for (batch_number, image) in enumerate(images):
-            i = 255. * image.cpu().numpy()
-            img = Image.fromarray(np.clip(i, 0, 255).astype(np.uint8))
-            metadata = None
-            if not args.disable_metadata:
-                metadata = PngInfo()
-                if prompt is not None:
-                    metadata.add_text("prompt", json.dumps(prompt))
-                if extra_pnginfo is not None:
-                    for x in extra_pnginfo:
-                        metadata.add_text(x, json.dumps(extra_pnginfo[x]))
-
             filename_with_batch_num = filename.replace("%batch_num%", str(batch_number))
             base_file_name = f"{filename_with_batch_num}_{counter:05}_"
-            file = f"{base_file_name}.png"
-            img.save(os.path.join(full_output_folder, file), pnginfo=metadata, compress_level=self.compress_level)
-            results.append({
-                "filename": file,
-                "subfolder": subfolder,
-                "type": self.type
-            })
+            file = f"{base_file_name}.{ext}"
+            file_path = os.path.join(full_output_folder, file)
+
+            if format == "avif":
+                crf = max(1, ((100 - quality) * 63 + 50) // 100)
+                _save_avif(image[None, ..., :3], file_path, "8-bit YUV420", "sRGB", crf, metadata=metadata or None)
+            else:
+                i = 255. * image.cpu().numpy()
+                img = Image.fromarray(np.clip(i, 0, 255).astype(np.uint8))
+                if format == "png":
+                    pnginfo = None
+                    if metadata:
+                        pnginfo = PngInfo()
+                        for key, value in metadata.items():
+                            pnginfo.add_text(key, json.dumps(value))
+                    img.save(file_path, pnginfo=pnginfo, compress_level=self.compress_level)
+                elif format == "webp":
+                    img.save(file_path, quality=quality, exif=exif or b"")
+                else:
+                    if img.mode not in ("RGB", "L"):
+                        img = img.convert("RGB")
+                    img.save(file_path, quality=quality)
+            if subfolder is not None:
+                results.append({
+                    "filename": file,
+                    "subfolder": subfolder,
+                    "type": self.type
+                })
             if caption is not None:
                 txt_file = base_file_name + caption_file_extension
                 file_path = os.path.join(full_output_folder, txt_file)
@@ -3700,7 +3742,7 @@ class SaveImageKJ:
 
             counter += 1
 
-        return file, 
+        return {"ui": {"images": results}, "result": (file,)}
 
 class SaveStringKJ:
     ALLOWED_EXTENSIONS = [".txt", ".caption", ".json", ".yaml", ".yml", ".md", ".csv", ".tsv", ".xml", ".log", ".ini", ".toml"]
