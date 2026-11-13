@@ -37,6 +37,7 @@ import node_helpers
 import folder_paths
 
 from ..utility.utility import string_to_color, normalize_bboxes, BBOX_TYPES, BrowserH264, VideoFileReader
+from ..utility.resample import RESAMPLE_METHODS, resize as kj_resample
 
 try:
     from server import PromptServer, BinaryEventTypes
@@ -2912,7 +2913,7 @@ v2 of the node. This node is only kept to not completely break older workflows.
         return(image, image.shape[2], image.shape[1],)
 
 class ImageResizeKJv2:
-    upscale_methods = ["nearest-exact", "bilinear", "area", "bicubic", "lanczos", "nvidia_rtx_vsr"]
+    upscale_methods = ["nearest-exact", "bilinear", "area", "bicubic", "lanczos"] + RESAMPLE_METHODS + ["nvidia_rtx_vsr"]
     @classmethod
     def INPUT_TYPES(s):
         return {
@@ -2920,7 +2921,7 @@ class ImageResizeKJv2:
                 "image": ("IMAGE",),
                 "width": ("INT", { "default": 512, "min": 0, "max": MAX_RESOLUTION, "step": 1, }),
                 "height": ("INT", { "default": 512, "min": 0, "max": MAX_RESOLUTION, "step": 1, }),
-                "upscale_method": (s.upscale_methods,),
+                "upscale_method": (s.upscale_methods, {"tooltip": "bicubic_antialias: bicubic that averages instead of aliasing when shrinking.\nlanczos_antiring: float Lanczos3 without halos, also runs on GPU.\nssim_downscale: crisper downscale that restores lost local contrast, no halos; same as lanczos_antiring when enlarging."}),
                 "keep_proportion": (["stretch", "resize", "pad", "pad_edge", "pad_edge_pixel", "crop", "pillarbox_blur", "total_pixels"], { "default": False }),
                 "pad_color": ("STRING", { "default": "0, 0, 0", "tooltip": "Color to use for padding."}),
                 "crop_position": (["center", "top", "bottom", "left", "right"], { "default": "center" }),
@@ -2928,7 +2929,7 @@ class ImageResizeKJv2:
             },
             "optional" : {
                 "mask": ("MASK",),
-                "device": (["cpu", "gpu"],),
+                "device": (["cpu", "gpu"], {"default": "gpu"}),
                 #"per_batch": ("INT", { "default": 0, "min": 0, "max": MAX_RESOLUTION, "step": 1, "tooltip": "Process images in sub-batches to reduce memory usage. 0 disables sub-batching."}),
             },
              "hidden": {
@@ -2960,11 +2961,11 @@ highest dimension.
             mask = common_upscale(mask.unsqueeze(1), W, H, "bilinear", crop="disabled").squeeze(1)
 
         if device == "gpu":
-            if upscale_method == "lanczos":
-                raise ValueError("Lanczos is not supported on the GPU")
             device = model_management.get_torch_device()
         else:
             device = torch.device("cpu")
+        # lanczos on cpu stays on PIL for identical results with older workflows; elsewhere it uses the float torch version
+        torch_methods = RESAMPLE_METHODS + (["lanczos"] if device.type != "cpu" else [])
 
         pillarbox_blur = keep_proportion == "pillarbox_blur"
 
@@ -3115,6 +3116,11 @@ highest dimension.
                 out_image = torch.stack(upscaled_frames, dim=0).movedim(1, -1).cpu()
                 if out_mask is not None:
                     out_mask = common_upscale(out_mask.unsqueeze(1), width, height, "bilinear", crop="disabled").squeeze(1)
+            elif upscale_method in torch_methods:
+                out_image = kj_resample(out_image.movedim(-1, 1), width, height, upscale_method).movedim(1, -1)
+                if out_mask is not None:
+                    mask_method = upscale_method if upscale_method in ("bicubic_antialias", "lanczos") else "lanczos_antiring"
+                    out_mask = kj_resample(out_mask.unsqueeze(1), width, height, mask_method).squeeze(1).clamp(0, 1)
             else:
                 out_image = common_upscale(out_image.movedim(-1,1), width, height, upscale_method, crop="disabled").movedim(1,-1)
                 if out_mask is not None:
