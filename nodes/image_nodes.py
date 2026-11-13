@@ -9,6 +9,7 @@ import math
 import os
 import re
 import json
+import struct
 import importlib
 import hashlib
 import pathlib
@@ -3615,6 +3616,136 @@ class ImageGridtoBatch:
 
         return (img_tensor,)
 
+# keyframe base_q_idx core's random-access SVT-AV1 picks for crf 1-63, per SVT input-size class (pixel limit, table)
+_SVT_RA_QIDX = (
+    (1497600, [0, 3, 7, 9, 12, 15, 17, 20, 23, 26, 28, 32, 34, 37, 39, 43, 45, 47, 50, 53, 56, 58, 61, 64, 69, 76, 81, 86, 91, 96, 99, 104, 107, 111, 116, 121, 124, 128, 132, 137, 140, 144, 148, 151, 155, 159, 163, 167, 171, 174, 178, 182, 187, 191, 196, 201, 206, 212, 218, 224, 230, 237, 245]),
+    (21012480, [0, 0, 4, 5, 9, 11, 13, 16, 18, 20, 23, 25, 27, 30, 31, 34, 35, 38, 40, 43, 45, 47, 50, 52, 57, 61, 66, 69, 74, 78, 84, 92, 96, 99, 103, 107, 111, 116, 121, 124, 128, 132, 136, 140, 143, 147, 151, 154, 158, 162, 166, 170, 174, 178, 183, 188, 193, 199, 206, 213, 221, 230, 239]),
+    (None, [0, 0, 3, 4, 7, 9, 11, 13, 16, 17, 19, 21, 24, 25, 27, 30, 31, 33, 35, 38, 39, 41, 44, 46, 50, 53, 57, 61, 66, 69, 74, 81, 86, 91, 97, 100, 104, 108, 112, 117, 121, 124, 128, 132, 136, 139, 143, 147, 151, 154, 158, 162, 166, 170, 175, 180, 185, 191, 198, 205, 214, 224, 235]),
+)
+# low-delay base_q_idx for crf 1-63 (size independent), caps at 181 so min-qp covers the rest
+_SVT_LD_QIDX = [0, 0, 1, 1, 1, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11, 12, 13, 14, 15, 16, 17, 18, 20, 22, 24, 26, 28, 30, 33, 36, 39, 41, 45, 49, 53, 57, 62, 67, 72, 78, 85, 91, 97, 101, 106, 110, 116, 121, 125, 129, 134, 139, 143, 147, 152, 156, 160, 164, 169, 174, 181]
+
+def _svt_still_options(crf, pixels):
+    target = next(t for limit, t in _SVT_RA_QIDX if limit is None or pixels < limit)[crf - 1]
+    if target <= _SVT_LD_QIDX[-1]:
+        ld_crf = min(range(len(_SVT_LD_QIDX)), key=lambda i: abs(_SVT_LD_QIDX[i] - target)) + 1
+        return {"crf": str(ld_crf), "preset": "8", "svtav1-params": "pred-struct=1"}
+    return {"crf": "63", "preset": "8", "svtav1-params": f"pred-struct=1:min-qp={min(63, (target + 2) // 4)}"}
+
+_SVT_MAX_W, _SVT_MAX_H = 16384, 8704  # SVT-AV1 frame size limit, larger images are written as an AVIF grid
+
+def _encode_svt_still(image, target, options):
+    import av
+    from comfy_extras.nodes_images import _avif_frame, _set_avif_color_properties
+    h, w = image.shape[0], image.shape[1]
+    with av.open(target, mode="w", format="avif") as container:
+        stream = container.add_stream("libsvtav1", rate=1)
+        stream.width, stream.height, stream.pix_fmt = w, h, "yuv420p"
+        stream.options = options
+        _set_avif_color_properties(stream.codec_context, "sRGB")
+        for packet in stream.encode(_avif_frame(image, "8-bit YUV420", "sRGB", "yuv420p")):
+            container.mux(packet)
+        for packet in stream.encode(None):
+            container.mux(packet)
+
+def _bmff_iter(data, start, end):
+    pos = start
+    while pos < end:
+        size, kind = struct.unpack_from(">I4s", data, pos)
+        header = 8
+        if size == 1:
+            size, header = struct.unpack_from(">Q", data, pos + 8)[0], 16
+        elif size == 0:
+            size = end - pos
+        yield kind, pos, pos + header, pos + size
+        pos += size
+
+def _bmff_box(kind, payload, version=None, flags=0):
+    if version is not None:
+        payload = struct.pack(">I", (version << 24) | flags) + payload
+    return struct.pack(">I4s", 8 + len(payload), kind) + payload
+
+def _write_avif_grid(image, file_path, options):
+    # equal-size tiles (edge-padded) cropped by the grid item; iloc v0 + trailing mdat keeps core's inject_avif_metadata working
+    h, w = image.shape[0], image.shape[1]
+    gw, gh = w + w % 2, h + h % 2  # 4:2:0 grids must have even output size (libavif rejects odd), clap crops back
+    cols, rows = -(-gw // _SVT_MAX_W), -(-gh // _SVT_MAX_H)
+    tw, th = -(-gw // cols), -(-gh // rows)
+    tw, th = tw + tw % 2, th + th % 2
+    tiles, props = [], None
+    for r in range(rows):
+        for c in range(cols):
+            tile = image[r * th:(r + 1) * th, c * tw:(c + 1) * tw]
+            if tile.shape[0] < th:
+                tile = torch.cat([tile, tile[-1:].expand(th - tile.shape[0], -1, -1)], 0)
+            if tile.shape[1] < tw:
+                tile = torch.cat([tile, tile[:, -1:].expand(-1, tw - tile.shape[1], -1)], 1)
+            buf = BytesIO()
+            _encode_svt_still(tile, buf, options)
+            data = buf.getvalue()
+            meta = next((b, e) for k, _, b, e in _bmff_iter(data, 0, len(data)) if k == b"meta")
+            meta = {k: (p, b, e) for k, p, b, e in _bmff_iter(data, meta[0] + 4, meta[1])}
+            iloc = meta[b"iloc"][1]
+            if data[iloc] != 0 or data[iloc + 4] != 0x44 or struct.unpack_from(">H", data, iloc + 6)[0] != 1 or struct.unpack_from(">H", data, iloc + 12)[0] != 1:
+                raise RuntimeError("Unexpected AVIF tile layout from the encoder.")
+            offset, length = struct.unpack_from(">II", data, iloc + 14)
+            tiles.append(data[offset:offset + length])
+            if props is None:
+                ipco = next((b, e) for k, _, b, e in _bmff_iter(data, *meta[b"iprp"][1:]) if k == b"ipco")
+                props = {k: data[p:e] for k, p, _, e in _bmff_iter(data, *ipco)}
+                props[b"hdlr"] = data[meta[b"hdlr"][0]:meta[b"hdlr"][2]]
+
+    n = len(tiles)
+    wide = gw > 0xFFFF or gh > 0xFFFF
+    grid = struct.pack(">BBBB", 0, int(wide), rows - 1, cols - 1) + struct.pack(">II" if wide else ">HH", gw, gh)
+    # property indices: 1 ispe(grid), 2 ispe(tile), 3 pixi, 4 av1C, 5 colr, 6 clap (odd sizes only)
+    ipco = _bmff_box(b"ispe", struct.pack(">II", gw, gh), 0) + _bmff_box(b"ispe", struct.pack(">II", tw, th), 0) + props[b"pixi"] + props[b"av1C"] + props[b"colr"]
+    grid_props = [1, 3, 5]
+    if (gw, gh) != (w, h):
+        ipco += _bmff_box(b"clap", struct.pack(">IIIIiIiI", w, 1, h, 1, w - gw, 2, h - gh, 2))  # top-left aligned crop
+        grid_props.append(0x86)  # libavif rejects a non-essential clap
+    ipco = _bmff_box(b"ipco", ipco)
+    ipma = struct.pack(">IHB", n + 1, 1, len(grid_props)) + bytes(grid_props) + b"".join(struct.pack(">HB", 2 + i, 4) + bytes([2, 3, 0x84, 5]) for i in range(n))
+    iprp = _bmff_box(b"iprp", ipco + _bmff_box(b"ipma", ipma, 0))
+    infe = [_bmff_box(b"infe", struct.pack(">HH4s", 1, 0, b"grid") + b"\x00", 2)]
+    infe += [_bmff_box(b"infe", struct.pack(">HH4s", 2 + i, 0, b"av01") + b"\x00", 2, flags=1) for i in range(n)]  # hidden cells
+    iinf = _bmff_box(b"iinf", struct.pack(">H", n + 1) + b"".join(infe), 0)
+    iref = _bmff_box(b"iref", _bmff_box(b"dimg", struct.pack(">HH", 1, n) + b"".join(struct.pack(">H", 2 + i) for i in range(n))), 0)
+    pitm = _bmff_box(b"pitm", struct.pack(">H", 1), 0)
+    ftyp = _bmff_box(b"ftyp", b"avif" + struct.pack(">I", 0) + b"avifmif1miaf")
+    payload = len(grid) + sum(len(t) for t in tiles)
+    if payload > 0xFFFFFFF0:
+        raise ValueError("AVIF grid exceeds 4GB.")
+
+    def build_meta(base):
+        entries = []
+        for item_id, length in [(1, len(grid))] + [(2 + i, len(t)) for i, t in enumerate(tiles)]:
+            entries.append(struct.pack(">HHHII", item_id, 0, 1, base, length))
+            base += length
+        iloc = _bmff_box(b"iloc", bytes([0x44, 0x00]) + struct.pack(">H", n + 1) + b"".join(entries), 0)
+        return _bmff_box(b"meta", props[b"hdlr"] + pitm + iloc + iinf + iref + iprp, 0)
+
+    meta = build_meta(len(ftyp) + len(build_meta(0)) + 8)
+    with open(file_path, "wb") as f:
+        f.write(ftyp + meta + struct.pack(">I4s", 8 + payload, b"mdat") + grid)
+        for t in tiles:
+            f.write(t)
+
+def _save_avif_still(image, file_path, crf, metadata=None):
+    # low-delay skips the random-access lookahead/mini-GOP buffers (~7GB at 16MP) that a single frame never uses
+    try:
+        from comfy_extras.nodes_images import inject_avif_metadata  # not in older ComfyUI
+    except ImportError:
+        raise RuntimeError("AVIF saving requires a newer ComfyUI version.")
+    h, w = image.shape[0], image.shape[1]
+    options = _svt_still_options(crf, w * h)
+    if w <= _SVT_MAX_W and h <= _SVT_MAX_H:
+        _encode_svt_still(image, file_path, options)
+    else:
+        _write_avif_grid(image, file_path, options)
+    if metadata:
+        inject_avif_metadata(file_path, metadata)
+
 class SaveImageKJ:
     def __init__(self):
         self.type = "output"
@@ -3651,11 +3782,6 @@ class SaveImageKJ:
 
     def save_images(self, images, output_folder, filename_prefix="ComfyUI", prompt=None, extra_pnginfo=None, caption=None, caption_file_extension=".txt", format="png", quality=90):
         filename_prefix += self.prefix_append
-        if format == "avif":
-            try:
-                from comfy_extras.nodes_images import _save_avif  # not in older ComfyUI
-            except ImportError:
-                raise RuntimeError("AVIF saving requires a newer ComfyUI version.")
 
         if os.path.isabs(output_folder):
             if not os.path.exists(output_folder):
@@ -3708,7 +3834,7 @@ class SaveImageKJ:
 
             if format == "avif":
                 crf = max(1, ((100 - quality) * 63 + 50) // 100)
-                _save_avif(image[None, ..., :3], file_path, "8-bit YUV420", "sRGB", crf, metadata=metadata or None)
+                _save_avif_still(image[..., :3], file_path, crf, metadata=metadata or None)
             else:
                 i = 255. * image.cpu().numpy()
                 img = Image.fromarray(np.clip(i, 0, 255).astype(np.uint8))
