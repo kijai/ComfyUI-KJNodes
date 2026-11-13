@@ -1,3 +1,4 @@
+import { chainCallback, connectById } from "./utility.js";
 const { app } = window.comfyAPI.app;
 const { applyTextReplacements } = window.comfyAPI.utils;
 
@@ -30,6 +31,48 @@ function setupDynamicInputs(node, { type, prefix, countWidget = "inputcount", sl
         };
     }
     return rebuild;
+}
+
+// TEMP workaround: on load the frontend drops all but the first link of an Autogrow nested in a DynamicCombo (still in ComfyUI_frontend main as of 2026-11-13)
+// Remember the saved links at configure, re-link the missing ones once the whole graph is configured; no-op where the frontend kept them
+const pendingAutogrowLinks = new WeakMap();
+function restoreNestedAutogrowLinks(nodeType, prefix) {
+    const configure = nodeType.prototype.configure;
+    nodeType.prototype.configure = function (info) {
+        const links = this.graph?.links;
+        if (app.configuringGraph && links) {
+            const saved = [];
+            for (const input of info.inputs ?? []) {
+                if (input.link == null || !input.name?.startsWith(prefix)) continue;
+                const link = links.get(input.link);
+                if (link) saved.push({ name: input.name, id: link.id, originId: link.origin_id, originSlot: link.origin_slot, parentId: link.parentId });
+            }
+            if (saved.length) pendingAutogrowLinks.set(this, saved);
+        }
+        return configure.apply(this, arguments);
+    };
+    chainCallback(nodeType.prototype, "onAfterGraphConfigured", function () {
+        const saved = pendingAutogrowLinks.get(this);
+        pendingAutogrowLinks.delete(this);
+        const graph = this.graph;
+        if (!saved || !graph) return;
+        const ordinal = (name) => parseInt(name.match(/\d+$/)?.[0] ?? "0");
+        saved.sort((a, b) => ordinal(a.name) - ordinal(b.name));
+        // in ordinal order, so each connect grows the next slot
+        for (const s of saved) {
+            const slot = this.inputs.findIndex(i => i.name === s.name);
+            if (slot === -1 || this.isInputConnected(slot)) continue;
+            // mint the saved link id so the reload doesn't show as an unsaved change
+            const state = graph.state;
+            const last = state?.lastLinkId;
+            if (state && typeof last === "number" && !graph.links.has(s.id)) state.lastLinkId = s.id - 1;
+            try {
+                connectById(graph, s.originId, s.originSlot, this.id, slot, graph.reroutes?.get(s.parentId) ? s.parentId : undefined);
+            } finally {
+                if (state && typeof last === "number") state.lastLinkId = Math.max(last, state.lastLinkId);
+            }
+        }
+    });
 }
 
 app.registerExtension({
@@ -233,6 +276,9 @@ app.registerExtension({
 				}
 				break;
 
+			case "MiniMaxH3PromptWeight":
+				restoreNestedAutogrowLinks(nodeType, "mode.images.");
+				break;
 			case "JoinStringMulti":
 				const originalOnNodeCreated = nodeType.prototype.onNodeCreated || function() {};
 				nodeType.prototype.onNodeCreated = function () {
