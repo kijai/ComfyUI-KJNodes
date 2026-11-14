@@ -171,7 +171,7 @@ app.registerExtension({
       let refW = 1, refH = 1, maskUrl = null, dataFps = 0, viewSource = null; // viewSource: "exec" | "preview"
       let loadGen = 0, restoring = null, autoFit = true, fitQueued = false, configureSkip = false, sourceSig = null;
       let hoverIdx = -1, diffKey = "", dragMove = null, refreshTimer = null;
-      let playing = false, master = null, frameReq = null;
+      let playing = false, master = null, frameReq = null, seekTarget = -1;
 
       const root = el("div", "kjic-root");
       const wrap = el("div", "kjic-wrap", root);
@@ -206,7 +206,7 @@ app.registerExtension({
       const videoGroup = el("div", "kjic-group kjic-video", bar);
       const playBtn = btn(videoGroup, "▶", () => setPlaying(!playing));
       const scrubber = Object.assign(el("input", null, videoGroup), {
-        type: "range", min: 0, max: 0, step: 1, value: 0,
+        type: "range", min: 0, max: 0, step: 1, value: 0, title: "Arrow keys step frames while the pointer is over the node, Shift steps 10",
         oninput: () => seekFrame(parseInt(scrubber.value, 10) || 0),
       });
       const frameLabel = el("span", "kjic-frame", videoGroup);
@@ -333,9 +333,15 @@ app.registerExtension({
 
         const vids = videoItems();
         master = vids.reduce((a, b) => (b.frames > a.frames ? b : a), vids[0])?.el ?? null;
+        seekTarget = -1;
         for (const { el: v } of vids) {
           if (v.currentTime) v.currentTime = 0;
-          v.onseeked = () => { if (!playing) { updateFrameUI(); scheduleDiff(); } };
+          v.onseeked = () => {
+            if (playing || videoItems().some((m) => m.el.seeking)) return;
+            if (seekTarget >= 0) seekAll(seekTarget);
+            else updateFrameUI();
+            scheduleDiff();
+          };
           v.onended = v === master ? () => { if (playing) restartAll(); } : null;
         }
         scrubber.max = frameCount() - 1;
@@ -449,8 +455,7 @@ app.registerExtension({
 
       const currentFrame = () => (master ? Math.min(frameCount() - 1, Math.floor(master.currentTime * fps() + 1e-3)) : 0);
 
-      function updateFrameUI() {
-        const f = currentFrame();
+      function updateFrameUI(f = currentFrame()) {
         scrubber.value = f;
         frameLabel.textContent = `${f + 1} / ${frameCount()}`;
       }
@@ -460,6 +465,7 @@ app.registerExtension({
         playing = on && vids.length > 0;
         playBtn.textContent = playing ? "⏸" : "▶";
         if (playing) {
+          seekTarget = -1;
           if (master.ended || master.currentTime >= master.duration - 0.5 / fps()) restartAll();
           // play() on an ended clip restarts it, shorter clips hold their last frame instead
           else for (const v of vids) if (!v.ended) v.play().catch(() => {});
@@ -508,9 +514,15 @@ app.registerExtension({
         requestFrame();
       }
 
+      // A target arriving mid-seek waits for it instead of aborting it, so held keys and fast scrubbing keep showing frames
       function seekAll(f) {
-        for (const m of videoItems()) m.el.currentTime = (Math.min(f, m.frames - 1) + 0.5) / fps();
-        updateFrameUI();
+        const vids = videoItems();
+        if (vids.some((m) => m.el.seeking)) seekTarget = f;
+        else {
+          seekTarget = -1;
+          for (const m of vids) m.el.currentTime = (Math.min(f, m.frames - 1) + 0.5) / fps();
+        }
+        updateFrameUI(f);
       }
 
       function seekFrame(f) {
@@ -518,6 +530,19 @@ app.registerExtension({
         setPlaying(false);
         seekAll(f);
       }
+
+      // Hover-gated rather than node.onKeyDown, which needs the node selected and the canvas focused; typing elsewhere is left alone
+      function onKeyDown(e) {
+        if ((e.key !== "ArrowLeft" && e.key !== "ArrowRight") || e.ctrlKey || e.altKey || e.metaKey) return;
+        if (!videoItems().length || !root.matches(":hover")) return;
+        const t = e.target;
+        if (t !== scrubber && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const from = seekTarget >= 0 ? seekTarget : currentFrame();
+        seekFrame(clamp(from + (e.key === "ArrowLeft" ? -1 : 1) * (e.shiftKey ? 10 : 1), 0, frameCount() - 1));
+      }
+      document.addEventListener("keydown", onKeyDown, true);
 
       function stagePoint(e) {
         const r = stage.getBoundingClientRect();
@@ -675,6 +700,7 @@ app.registerExtension({
         restorers.delete(restoreOutput);
         ++loadGen;
         clearTimeout(refreshTimer);
+        document.removeEventListener("keydown", onKeyDown, true);
         endDrag();
         clearMedia();
         resizeObserver.disconnect();
