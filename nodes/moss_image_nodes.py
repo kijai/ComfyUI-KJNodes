@@ -332,7 +332,7 @@ def _get_slider_status(value: float, labels: tuple) -> str:
 _PRESET_USER_GUIDANCE = {
     "Composition Preserve": "Locks composition, only adds detail, safest for beginners",
     "Balanced (Recommended)": "Balances stability and detail, default choice for general use",
-    "Detail & Typography Priority": "Maximizes text and detail, minor composition shift possible",
+    "Detail & Typography Priority": "Maximizes typography and material detail, for posters/product work, minor composition shift possible",
     "ID Photo": "Locks face and background, natural skin tone, no distortion",
     "Beauty Portrait": "Soft skin smoothing, preserves face structure, beauty style",
     "Realistic Photography": "Rich natural texture, cinematic realism, full lighting detail"
