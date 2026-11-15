@@ -249,6 +249,22 @@ _PRESET_WEIGHTS = {
         "global": [0.30, 0.30, 0.24, 0.24, 0.36, 0.30],
         "layers": [0.25, 0.32, 0.50, 0.65, 0.80, 0.90],
         "output": [0.30, 0.50, 0.30]
+    },
+    # Portrait-specific presets (pure append, safety fallback retained)
+    "ID Photo": {
+        "global": [0.10, 0.08, 0.08, 0.08, 0.10, 0.10],
+        "layers": [0.06, 0.10, 0.15, 0.22, 0.35, 0.45],
+        "output": [0.10, 0.20, 0.10]
+    },
+    "Beauty Portrait": {
+        "global": [0.12, 0.10, 0.08, 0.08, 0.12, 0.12],
+        "layers": [0.08, 0.12, 0.18, 0.25, 0.30, 0.35],
+        "output": [0.12, 0.15, 0.12]
+    },
+    "Realistic Photography": {
+        "global": [0.22, 0.18, 0.16, 0.16, 0.26, 0.22],
+        "layers": [0.16, 0.22, 0.32, 0.48, 0.68, 0.78],
+        "output": [0.22, 0.40, 0.22]
     }
 }
 
@@ -316,7 +332,10 @@ def _get_slider_status(value: float, labels: tuple) -> str:
 _PRESET_USER_GUIDANCE = {
     "Composition Preserve": "Locks composition, only adds detail, safest for beginners",
     "Balanced (Recommended)": "Balances stability and detail, default choice for general use",
-    "Detail & Typography Priority": "Maximizes text and detail, minor composition shift possible"
+    "Detail & Typography Priority": "Maximizes text and detail, minor composition shift possible",
+    "ID Photo": "Locks face and background, natural skin tone, no distortion",
+    "Beauty Portrait": "Soft skin smoothing, preserves face structure, beauty style",
+    "Realistic Photography": "Rich natural texture, cinematic realism, full lighting detail"
 }
 
 # Slider segment labels (English default, aligned with 5 ranges: 0-0.1, 0.1-0.5, 0.5-1.2, 1.2-1.8, 1.8-2)
@@ -343,7 +362,14 @@ _DETAIL_STATUSES = (
 )
 
 # Preset English options
-_PRESET_OPTIONS = ["Composition Preserve", "Balanced (Recommended)", "Detail & Typography Priority"]
+_PRESET_OPTIONS = [
+    "Composition Preserve",
+    "Balanced (Recommended)",
+    "Detail & Typography Priority",
+    "ID Photo",
+    "Beauty Portrait",
+    "Realistic Photography"
+]
 
 
 def _read_model_quant_type(model) -> str:

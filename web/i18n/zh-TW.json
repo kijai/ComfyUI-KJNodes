@@ -44,5 +44,11 @@
   "Weak detail, minimal texture, ideal for soft portraits": "弱細節，僅少量紋理，適合柔和人像",
   "Standard detail (default), preset default material quality": "標準細節（預設），預設預設材質品質",
   "Strong detail, rich material texture, ideal for product/still life": "強細節，材質紋理豐富，適合產品與靜物",
-  "Maximum detail, full texture strength, minor noise may appear": "最大細節，紋理強度滿載，可能出現輕微雜訊"
+  "Maximum detail, full texture strength, minor noise may appear": "最大細節，紋理強度滿載，可能出現輕微雜訊",
+  "ID Photo": "證件照",
+  "Beauty Portrait": "美顏人像",
+  "Realistic Photography": "寫真攝影",
+  "Locks face and background, natural skin tone, no distortion": "固定人臉與背景，膚色自然無失真",
+  "Soft skin smoothing, preserves face structure, beauty style": "自然柔膚磨皮，保留臉部結構，美顏風格",
+  "Rich natural texture, cinematic realism, full lighting detail": "自然質感豐富，電影級寫實，光影細節完整"
 }

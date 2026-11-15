@@ -44,5 +44,11 @@
   "Weak detail, minimal texture, ideal for soft portraits": "弱いディテール、最小限の質感、柔らかいポートレートに最適",
   "Standard detail (default), preset default material quality": "標準ディテール（デフォルト）、プリセットデフォルトの質感",
   "Strong detail, rich material texture, ideal for product/still life": "強いディテール、豊かな材質感、プロダクト・静物に最適",
-  "Maximum detail, full texture strength, minor noise may appear": "最大ディテール、フル質感、わずかにノイズが発生する可能性あり"
+  "Maximum detail, full texture strength, minor noise may appear": "最大ディテール、フル質感、わずかにノイズが発生する可能性あり",
+  "ID Photo": "証明写真",
+  "Beauty Portrait": "美顔ポートレート",
+  "Realistic Photography": "リアルフォト",
+  "Locks face and background, natural skin tone, no distortion": "顔と背景を固定、自然な肌色で歪みなし",
+  "Soft skin smoothing, preserves face structure, beauty style": "自然な肌補正、顔構造を維持、美顔スタイル",
+  "Rich natural texture, cinematic realism, full lighting detail": "自然な質感が豊か、映画的リアリズム、光影ディテール完全"
 }
