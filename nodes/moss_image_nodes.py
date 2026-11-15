@@ -393,7 +393,7 @@ def _validate_moss_models(base_model, sft_model) -> str:
     base_keys = set(base_model.get_key_patches("diffusion_model.").keys())
     sft_keys = set(sft_model.get_key_patches("diffusion_model.").keys())
     if not base_keys or not sft_keys:
-        raise ValueError("模型加载失败，请检查输入的MOSS模型文件是否完整。")
+        raise ValueError("Failed to load model: please verify the input MOSS model files are complete.")
 
     # Layer count check
     base_layers = set()
@@ -410,15 +410,15 @@ def _validate_moss_models(base_model, sft_model) -> str:
                 sft_layers.add(int(layer_idx))
 
     if len(base_layers) != 42 or len(sft_layers) != 42:
-        raise ValueError("输入的不是标准MOSS-Image模型，该节点仅支持42层结构的MOSS模型合并。")
+        raise ValueError("Invalid input: only standard 42-layer MOSS-Image models are supported for this node.")
     if base_layers != sft_layers:
-        raise ValueError("两个MOSS模型的结构不匹配，请确认使用同版本的MOSS模型。")
+        raise ValueError("Model structure mismatch: please use two MOSS models from the same version.")
 
     # Quantization type check: only support 2 valid types
     base_quant = _read_model_quant_type(base_model)
     sft_quant = _read_model_quant_type(sft_model)
     if base_quant != sft_quant:
-        raise ValueError(f"两个模型类型不匹配，一个是{base_quant}，一个是{sft_quant}，请换成同类型的MOSS模型再合并。")
+        raise ValueError(f"Quantization mismatch: one model is {base_quant}, the other is {sft_quant}. Please use two MOSS models with matching quantization.")
     return base_quant
 
 
