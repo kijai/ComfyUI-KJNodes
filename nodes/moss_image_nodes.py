@@ -545,14 +545,13 @@ Supports BF16 and official int8c/convrot quantized models, preserves base quanti
 
         info = (
             f"{status_line}"
-            f"Preset Guidance: {_PRESET_USER_GUIDANCE[merge_preset]}\n"
             f"Merge Strength: {merge_strength:.2f}\n"
             f"SFT Ratio: Early {avg_early:.1%}, Mid {avg_mid:.1%}, Late {avg_late:.1%}\n"
             f"Composition Stability: {composition_stability:.2f} ({comp_status})\n"
             f"Text Accuracy: {text_accuracy:.2f} ({text_status})\n"
             f"Detail Strength: {detail_strength:.2f} ({detail_status})\n"
             f"{special_tip}"
-            "General Guidance: Increase composition stability/lower strength for distortion, increase text accuracy for typography errors, increase detail strength for sharper texture."
+            "Guidance: Raise stability/lower strength for distortion, raise text accuracy for typography errors, raise detail strength for sharper texture."
         )
 
         return io.NodeOutput(merged_model, info)
