@@ -2,7 +2,7 @@
   "MOSS-Image Merge Preset KJ": "MOSS-Image 预设合并 KJ",
   "Composition Preserve": "构图优先",
   "Balanced (Recommended)": "默认均衡",
-  "Detail & Typography Priority": "细节优先",
+  "Detail & Typography Priority": "文字优先",
   "base_model": "基础模型",
   "sft_model": "微调模型",
   "merge_preset": "融合预设",
