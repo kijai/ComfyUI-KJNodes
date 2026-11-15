@@ -312,39 +312,38 @@ def _get_slider_status(value: float, labels: tuple) -> str:
         return labels[4]
 
 
+# Concise plain-language preset guidance (English default)
+_PRESET_USER_GUIDANCE = {
+    "Composition Preserve": "Locks composition, only adds detail, safest for beginners",
+    "Balanced (Recommended)": "Balances stability and detail, default choice for general use",
+    "Detail & Typography Priority": "Maximizes text and detail, minor composition shift possible"
+}
+
 # Slider segment labels (English default, aligned with 5 ranges: 0-0.1, 0.1-0.5, 0.5-1.2, 1.2-1.8, 1.8-2)
 _COMPOSITION_STATUSES = (
     "No composition constraint, highest layout change risk",
     "Low stability, allows major composition adjustments",
-    "Standard stability (default), preset-safe composition behavior",
+    "Standard stability, preset-safe composition behavior",
     "High stability, strongly locks layout, almost no distortion",
     "Maximum lock, fully fixes composition, only modifies details"
 )
 _TEXT_STATUSES = (
     "Text enhancement disabled, high typography error risk",
     "Weak text enhancement, minimal optimization",
-    "Standard text performance (default), preset default rendering",
+    "Standard text performance, preset rendering",
     "Strong text enhancement, greatly improves accuracy, ideal for posters",
     "Maximum text enhancement, highest typography/structure accuracy"
 )
 _DETAIL_STATUSES = (
     "Detail enhancement disabled, smooth output",
     "Weak detail, minimal texture, ideal for soft portraits",
-    "Standard detail (default), preset default material quality",
+    "Standard detail, preset material quality",
     "Strong detail, rich material texture, ideal for product/still life",
     "Maximum detail, full texture strength, minor noise may appear"
 )
 
 # Preset English options
 _PRESET_OPTIONS = ["Composition Preserve", "Balanced (Recommended)", "Detail & Typography Priority"]
-
-# Scene preset auto parameter mapping (key: merge strength, composition, text, detail)
-_SCENE_DEFAULT_PARAMS = {
-    "General Use": (1.0, 1.0, 1.0, 1.0),
-    "Realistic Portrait": (0.9, 1.3, 0.8, 0.7),
-    "Text Poster": (1.1, 1.2, 1.5, 1.0),
-    "Product Still Life": (1.1, 1.2, 1.0, 1.5)
-}
 
 
 def _read_model_quant_type(model) -> str:
@@ -421,9 +420,6 @@ Supports BF16 and official int8c/convrot quantized models, preserves base quanti
                                tooltip="MOSS SFT/finetuned model, provides typography and fine detail capability"),
                 io.Combo.Input("merge_preset", options=_PRESET_OPTIONS, default="Balanced (Recommended)",
                                tooltip="Select blend behavior: Composition Preserve is safest, Detail Priority maximizes typography/material performance"),
-                io.Combo.Input("usage_scene", options=["General Use", "Realistic Portrait", "Text Poster", "Product Still Life"],
-                               default="General Use",
-                               tooltip="Select your usage scenario, safe parameters apply automatically, no manual slider adjustment required"),
                 io.Float.Input("merge_strength", default=1.0, min=0.0, max=2.0, step=0.05,
                                socketless=True, advanced=True,
                                tooltip="Merge strength: 0=pure base, 0.1-0.5 light blend, 0.5-1.2 standard (default), 1.2-1.8 enhanced, 1.8-2 maximum strength; lower for less distortion, higher for more detail"),
@@ -444,20 +440,8 @@ Supports BF16 and official int8c/convrot quantized models, preserves base quanti
         )
 
     @classmethod
-    def execute(cls, base_model, sft_model, merge_preset, usage_scene, merge_strength=1.0,
+    def execute(cls, base_model, sft_model, merge_preset, merge_strength=1.0,
                 composition_stability=1.0, text_accuracy=1.0, detail_strength=1.0) -> io.NodeOutput:
-        # Apply scene default parameters, preserve user manual customizations
-        scene_strength, scene_comp, scene_text, scene_detail = _SCENE_DEFAULT_PARAMS[usage_scene]
-        # Only override default untouched values, keep user manual adjustments
-        if abs(merge_strength - 1.0) < 0.001:
-            merge_strength = scene_strength
-        if abs(composition_stability - 1.0) < 0.001:
-            composition_stability = scene_comp
-        if abs(text_accuracy - 1.0) < 0.001:
-            text_accuracy = scene_text
-        if abs(detail_strength - 1.0) < 0.001:
-            detail_strength = scene_detail
-
         # Pre validation, get actual loaded quant type
         quant_type = _validate_moss_models(base_model, sft_model)
 
@@ -497,26 +481,36 @@ Supports BF16 and official int8c/convrot quantized models, preserves base quanti
 
         # Full range segmented user tips (all positions have plain-language guidance)
         clamped_count = sum(1 for w in sft_weights.values() if w >= 0.999)
-        status_line = ""
+        strength_level = ""
+        strength_desc = ""
         special_tip = ""
         if merge_strength <= 0.1:
             if merge_strength <= 0.001:
-                status_line = "[Status: Pure Base Output]\nFully uses base model with no SFT effect, 100% composition stable, no distortion.\n"
+                strength_level = "Pure Base"
+                strength_desc = "Fully uses base model with no SFT effect, 100% composition stable, no distortion.\n"
             else:
-                status_line = "[Status: Very Weak SFT]\nAlmost entirely base model output, SFT impact is negligible, composition barely changes.\n"
+                strength_level = "Very Weak SFT"
+                strength_desc = "Almost entirely base model output, SFT impact is negligible, composition barely changes.\n"
         elif merge_strength <= 0.5:
-            status_line = "[Status: Light SFT Blend]\nOnly adds minimal SFT detail/text, composition remains stable, for conservative use.\n"
+            strength_level = "Light SFT"
+            strength_desc = "Only adds minimal SFT effect, composition remains highly stable, for conservative use.\n"
         elif merge_strength <= 1.2:
-            status_line = "[Status: Standard Effect]\nDesigned preset behavior, balances composition stability and detail/text performance, recommended for daily use.\n"
+            strength_level = "Standard Effect"
+            strength_desc = "Recommended default strength, safe and stable with no extra risk.\n"
         elif merge_strength <= 1.8:
-            status_line = "[Status: Enhanced Effect]\nStrong SFT impact, prominent text and detail performance.\n"
-            special_tip = "Tip: Further increase may cause minor composition changes, pair with higher composition stability if distortion is a concern.\n"
+            strength_level = "Enhanced Effect"
+            strength_desc = "Strong SFT impact, target characteristics are prominent.\n"
+            special_tip = "Tip: Further increase may cause minor composition changes, pair with higher composition stability if needed.\n"
         else:
             if merge_strength >= 1.999:
-                status_line = "[Status: Maximum Strength]\nSlider at maximum, full text and detail effect.\n"
+                strength_level = "Maximum Strength"
+                strength_desc = "Slider at maximum, target effect is fully applied.\n"
             else:
-                status_line = "[Status: Near Maximum]\nVery strong SFT effect, close to maximum strength.\n"
-            special_tip = "Warning: Highest risk of composition shift and character distortion, reduce strength directly if issues occur.\n"
+                strength_level = "Near Maximum"
+                strength_desc = "Very strong SFT effect, close to maximum strength.\n"
+            special_tip = "Warning: Highest risk of composition shift and distortion, reduce strength directly if issues occur.\n"
+
+        status_line = f"[Status: {merge_preset} {strength_level}]\n{strength_desc}"
 
         # Get per-slider plain-language status
         comp_status = _get_slider_status(composition_stability, _COMPOSITION_STATUSES)
@@ -525,8 +519,7 @@ Supports BF16 and official int8c/convrot quantized models, preserves base quanti
 
         info = (
             f"{status_line}"
-            f"Usage Scene: {usage_scene}\n"
-            f"Current Preset: {merge_preset}\n"
+            f"Preset Guidance: {_PRESET_USER_GUIDANCE[merge_preset]}\n"
             f"Merge Strength: {merge_strength:.2f}\n"
             f"SFT Ratio: Early {avg_early:.1%}, Mid {avg_mid:.1%}, Late {avg_late:.1%}\n"
             f"Composition Stability: {composition_stability:.2f} ({comp_status})\n"

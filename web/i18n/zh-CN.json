@@ -1,8 +1,8 @@
 {
   "MOSS-Image Merge Preset KJ": "MOSS-Image 预设合并 KJ",
-  "Composition Preserve": "固定构图，只加细节",
-  "Balanced (Recommended)": "均衡融合（推荐）",
-  "Detail & Typography Priority": "文字/细节优先",
+  "Composition Preserve": "构图优先",
+  "Balanced (Recommended)": "默认均衡",
+  "Detail & Typography Priority": "细节优先",
   "base_model": "基础模型",
   "sft_model": "微调模型",
   "merge_preset": "融合预设",
@@ -44,11 +44,5 @@
   "Weak detail, minimal texture, ideal for soft portraits": "弱细节，仅少量纹理，适合柔和人像",
   "Standard detail (default), preset default material quality": "标准细节（默认），预设默认质感",
   "Strong detail, rich material texture, ideal for product/still life": "强细节，材质纹理丰富，适合产品静物",
-  "Maximum detail, full texture strength, minor noise may appear": "最大细节，纹理拉满，可能出现轻微噪点",
-  "usage_scene": "使用场景",
-  "General Use": "通用场景",
-  "Realistic Portrait": "写实人像",
-  "Text Poster": "文字海报",
-  "Product Still Life": "产品静物",
-  "Usage Scene:": "使用场景："
+  "Maximum detail, full texture strength, minor noise may appear": "最大细节，纹理拉满，可能出现轻微噪点"
 }
