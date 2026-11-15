@@ -48,10 +48,15 @@ def build_tae_decoder(sd):
 
 
 class TinyVAEDecoder:
-    """Decode-only tiny VAE. decode() is float32 in [0, 1] like the TAE family; decode_video() is uint8."""
+    """Decode-only tiny VAE. decode() is float32 in [0, 1] like the TAE family; decode_video() is uint8.
+
+    Multi-exit checkpoints add "exit.N.*" RGB heads on the trunk output at index N. With max_res set,
+    decoding stops at the first exit whose long side reaches it, so the cost follows the preview size
+    instead of the latent size."""
     decodes_prefix = False   # honours frame_indices exactly
 
-    def __init__(self, sd, device=None, dtype=None):
+    def __init__(self, sd, device=None, dtype=None, max_res=0):
+        exit_sd = {k[len("exit."):]: sd.pop(k) for k in list(sd) if k.startswith("exit.")}
         # keys may carry a "taesd_decoder."/"decoder." prefix; strip whatever is common
         prefix = ""
         first = next(iter(sd))
@@ -69,9 +74,28 @@ class TinyVAEDecoder:
         self.latent_channels = self.model[1].weight.shape[1]
         self.upscale_ratio = 2 ** sum(isinstance(m, nn.Upsample) for m in self.model)
 
+        self.max_res = max_res
+        self.exits = []  # (scale, trunk prefix, head), shallowest first
+        if exit_sd:
+            heads = nn.ModuleDict({i: conv(exit_sd[f"{i}.weight"].shape[1], exit_sd[f"{i}.weight"].shape[0])
+                                   for i in {k.split(".")[0] for k in exit_sd}})
+            heads.load_state_dict(exit_sd)
+            heads = _place(heads, self.device, self.dtype)
+            for i in sorted(heads, key=int):
+                trunk = self.model[:int(i) + 1]
+                self.exits.append((2 ** sum(isinstance(m, nn.Upsample) for m in trunk), trunk, heads[i]))
+
+    def _run(self, x):
+        if self.max_res > 0:
+            side = max(x.shape[-2:])
+            for scale, trunk, head in self.exits:
+                if side * scale >= self.max_res:
+                    return head(trunk(x))
+        return self.model(x)
+
     def decode(self, latent):
-        """[B, C, H, W] -> [B, 3, H*ratio, W*ratio], float32 on the input device."""
-        out = self.model(latent.to(device=self.device, dtype=self.dtype))
+        """[B, C, H, W] -> [B, 3, H*ratio, W*ratio], float32 on the input device (ratio is the exit's)."""
+        out = self._run(latent.to(device=self.device, dtype=self.dtype))
         return out.to(device=latent.device, dtype=torch.float32)
 
     def decode_video(self, latent, frame_indices=None):
@@ -82,7 +106,7 @@ class TinyVAEDecoder:
         indices = list(range(x.shape[1])) if frame_indices is None else list(frame_indices)
         out = None
         for i, t in enumerate(indices):
-            f = self.model(x[:, t].unsqueeze(0).to(device=self.device, dtype=self.dtype))[0]
+            f = self._run(x[:, t].unsqueeze(0).to(device=self.device, dtype=self.dtype))[0]
             f = f.clamp_(0, 1).mul_(255).to(torch.uint8)
             if out is None:
                 out = torch.empty((len(indices),) + tuple(f.shape), dtype=torch.uint8)
@@ -175,8 +199,9 @@ class TAEHVDecoder:
         return out
 
 
-def load_tiny_vae_decoder(name, device=None, dtype=None):
-    """Load by vae_approx filename. Returns None (and logs) if it can't be used."""
+def load_tiny_vae_decoder(name, device=None, dtype=None, max_res=0):
+    """Load by vae_approx filename. Returns None (and logs) if it can't be used.
+    max_res picks the exit of multi-exit 2D decoders; the other decoders always decode in full."""
     import folder_paths
 
     path = folder_paths.get_full_path("vae_approx", name)
@@ -187,7 +212,7 @@ def load_tiny_vae_decoder(name, device=None, dtype=None):
         sd = comfy.utils.load_torch_file(path, safe_load=True)
         if is_taehv_state_dict(sd):
             return TAEHVDecoder(sd, device=device, dtype=dtype)
-        return TinyVAEDecoder(sd, device=device, dtype=dtype)
+        return TinyVAEDecoder(sd, device=device, dtype=dtype, max_res=max_res)
     except Exception as e:
         logging.warning(f"[KJ TinyVAE] Could not load '{name}': {e}")
         return None
