@@ -21,10 +21,10 @@ _PREVIEW_MAX_SIDE = 512
 _PREVIEW_WEBP_QUALITY = 85
 _PREVIEW_WEBP_METHOD = 4
 
-# ---- 工作图上限：所有模式都缩到不超过此长边，再算 mask ----
+# ---- Working-image cap: every mode shrinks the frame to at most this long side before building the mask ----
 _WORK_MAX_SIDE = 1024
 
-# ---- 自动遮罩增强：内部护栏 ----
+# ---- Automatic mask tuning: internal guard rails ----
 _USE_CHROMA = True
 _USE_CHROMA_ADAPT = True
 _USE_AUTO_THR = True
@@ -42,23 +42,23 @@ _AUTO_THR_CLAMP_MULT = 2.0
 _AUTO_THR_MAD_K = 3.0
 _AUTO_THR_MAD_FLOOR = 0.002
 
-# ---- auto 闭环：threshold 拐点扫描（1024² 工作尺度）----
+# ---- auto loop: threshold knee scan (at the 1024² working scale) ----
 _THR_MIN, _THR_MAX = 0.03, 0.10
 _THR_STEP = 0.01
 
-# ---- auto 闭环：open_k（1024² 工作尺度）----
+# ---- auto loop: open_k (at the 1024² working scale) ----
 _OPEN_MIN, _OPEN_MAX = 3, 33
 _OPEN_STEP = 2
 _OPEN_ITERS = 16
 
-# ---- auto 闭环：close_k / merge（1024² 工作尺度）----
+# ---- auto loop: close_k / merge (at the 1024² working scale) ----
 _CLOSE_MIN, _CLOSE_MAX = 21, 129
 _CLOSE_STEP = 8
 _CLOSE_ITERS = 16
 _MERGE_DILATE_MIN, _MERGE_DILATE_MAX = 2, 32
 _MERGE_DILATE_STEP = 2
 
-# ---- auto 闭环：判据（1024² 工作尺度像素面积）----
+# ---- auto loop: acceptance criteria (blob areas in pixels at the 1024² working scale) ----
 _NOISE_AREA_PX = 32
 _SMALL_BLOB_AREA_PX = 128
 _SMALL_BLOB_TARGET = 0
@@ -66,8 +66,8 @@ _HOLE_AREA_PX = 64
 _HOLE_TARGET = 1
 _FG_BLOB_TARGET = 2
 
-# ---- 阶段 4：逐连通域 expand/feather（1024² 工作尺度）----
-_EXPAND_RATIO = 0.15          # auto 基准：sqrt(max_area/π) * 0.15
+# ---- Stage 4: per-blob expand/feather (at the 1024² working scale) ----
+_EXPAND_RATIO = 0.15          # auto baseline: sqrt(max_area / pi) * 0.15
 _EXPAND_MIN, _EXPAND_MAX = 8, 64
 _FEATHER_MIN, _FEATHER_MAX = 4, 32
 
@@ -75,7 +75,7 @@ _DEBUG_TUNE = False
 
 
 # ============================================================
-# 基础工具
+# Basic helpers
 # ============================================================
 
 
@@ -161,7 +161,7 @@ def _up_to(x_bhw1: torch.Tensor, H: int, W: int) -> torch.Tensor:
 
 
 # ============================================================
-# 单通道高斯（差异图预模糊）
+# Single-channel Gaussian blur (pre-blur of the difference map)
 # ============================================================
 
 def _gaussian_blur_single(x_bhw1: torch.Tensor, sigma: float) -> torch.Tensor:
@@ -181,7 +181,7 @@ def _gaussian_blur_single(x_bhw1: torch.Tensor, sigma: float) -> torch.Tensor:
 
 
 # ============================================================
-# 差异度量
+# Difference metric
 # ============================================================
 
 def _rgb_to_ycbcr(x: torch.Tensor) -> torch.Tensor:
@@ -250,7 +250,7 @@ def _mad_threshold(diff: torch.Tensor, user_thr: float) -> float:
 
 
 # ============================================================
-# 高斯模糊（多通道）
+# Gaussian blur (multi-channel)
 # ============================================================
 
 def _gaussian_blur_bhwc(rgb: torch.Tensor, sigma: float) -> torch.Tensor:
@@ -272,7 +272,7 @@ def _gaussian_blur_bhwc(rgb: torch.Tensor, sigma: float) -> torch.Tensor:
 
 
 # ============================================================
-# 形态学
+# Morphology
 # ============================================================
 
 def _odd(k: int) -> int:
@@ -315,7 +315,7 @@ def _dilate(mask_bhw1: torch.Tensor, k: int) -> torch.Tensor:
 
 
 def _dilate_edt_half(mask_bhw1: torch.Tensor, k: int, downscale: int = 2) -> torch.Tensor:
-    # 保留兼容，当前工作尺度 k 不会超过该分支所需，实际走 _dilate_pool
+    # Kept for compatibility: at the current working scale k never reaches what this branch needs, so _dilate_pool is used
     if k <= 0:
         return mask_bhw1
     B, H, W, _ = mask_bhw1.shape
@@ -342,7 +342,7 @@ def _dilate_edt_half(mask_bhw1: torch.Tensor, k: int, downscale: int = 2) -> tor
 
 
 # ============================================================
-# 羽化
+# Feathering
 # ============================================================
 
 def _feather_mask_full(mask: torch.Tensor, radius: int) -> torch.Tensor:
@@ -389,7 +389,7 @@ def _feather_mask_fast(mask_bhw1: torch.Tensor, radius: int,
 
 
 # ============================================================
-# 高斯金字塔 / 仿射 / 统计（工作图尺度，ds=1）
+# Gaussian pyramid / affine fit / statistics (working scale, ds=1)
 # ============================================================
 
 def _gaussian_pyramid(rgb: torch.Tensor, levels: int, sigma: float):
@@ -505,7 +505,7 @@ def _remove_small_blobs(mask_bhw1, min_area_px):
 
 
 # ============================================================
-# 阶段 1：threshold Kneedle 拐点
+# Stage 1: threshold knee point (Kneedle)
 # ============================================================
 
 def _pick_threshold_by_knee(diff, thr_min, thr_max, step):
@@ -546,15 +546,15 @@ def _pick_threshold_by_knee(diff, thr_min, thr_max, step):
 
 
 # ============================================================
-# 阶段 4：逐连通域 expand/feather
+# Stage 4: per-blob expand/feather
 # ============================================================
 
 def _expand_feather_by_components(mask_bhw1, H, W, mode, ui_expand, ui_feather):
     """
-    对每个连通域按面积开方比例独立 expand/feather。
-    mode="auto": base_expand = sqrt(max_area/π)*0.15, base_feather = base_expand*0.5
+    Expand and feather every blob independently, scaled by the square root of its area.
+    mode="auto": base_expand = sqrt(max_area / pi) * 0.15, base_feather = base_expand * 0.5
     mode="ui"  : base_expand = ui_expand, base_feather = ui_feather
-    返回 (mask_after_expand, mask_after_feather, info)
+    Returns (mask_after_expand, mask_after_feather, info)
     info = {"expand_max": int, "feather_max": int, "n_components": int, "max_area": int}
     """
     B = mask_bhw1.shape[0]
@@ -583,7 +583,7 @@ def _expand_feather_by_components(mask_bhw1, H, W, mode, ui_expand, ui_feather):
             base_expand = float(ui_expand)
             base_feather = float(ui_feather)
 
-        # 先算每个域的 expand_i
+        # First compute expand_i for every blob
         expand_list = []
         for lab in range(1, n + 1):
             area_i = float(areas[lab - 1])
@@ -595,11 +595,11 @@ def _expand_feather_by_components(mask_bhw1, H, W, mode, ui_expand, ui_feather):
             ei = max(_EXPAND_MIN, min(ei, _EXPAND_MAX))
             expand_list.append(ei)
 
-        idx_max = int(np.argmax(areas))  # 最大域索引（0-based 在 areas 里）
+        idx_max = int(np.argmax(areas))  # index of the largest blob (0-based into areas)
         expand_of_max = max(expand_list[idx_max], 1)
         expand_max_ret = max(expand_max_ret, expand_of_max)
 
-        # 逐域 dilate + 逐域 feather，取 max 合并
+        # Dilate and feather per blob, then merge them with max
         acc = np.zeros_like(arr, dtype=np.float32)
         for lab in range(1, n + 1):
             if expand_list[lab - 1] <= 0:
@@ -627,7 +627,7 @@ def _expand_feather_by_components(mask_bhw1, H, W, mode, ui_expand, ui_feather):
 
 
 # ============================================================
-# 开环遮罩（default / min / manual，工作图尺度）
+# Open-loop mask (default / min / manual, at the working scale)
 # ============================================================
 
 def _auto_detect_mask(I0, I1, threshold, open_k, close_k, H, W):
@@ -643,19 +643,19 @@ def _auto_detect_mask(I0, I1, threshold, open_k, close_k, H, W):
 
 
 # ============================================================
-# 主节点
+# The node
 # ============================================================
 
 
 def _auto_tune_mask(I0, I1, init_thr, init_open, init_close, H, W):
     diff = _diff_map(I0, I1)
 
-    # ---------- 阶段 1：threshold Kneedle ----------
+    # ---------- Stage 1: threshold Kneedle ----------
     thr, noises = _pick_threshold_by_knee(
         diff, _THR_MIN, _THR_MAX, _THR_STEP
     )
 
-    # ---------- 阶段 2：open_k 清小色块 ----------
+    # ---------- Stage 2: open_k removes small speckles ----------
     base_mask = (diff > thr).float()
     open_k = max(int(init_open), _OPEN_MIN)
     open_k = min(open_k, _OPEN_MAX)
@@ -679,7 +679,7 @@ def _auto_tune_mask(I0, I1, init_thr, init_open, init_close, H, W):
         t2, s2 = _count_components(mask_after_open, min_area_px=_SMALL_BLOB_AREA_PX)
         print(f"[ColorCalibrator][auto] stage=2 cleanup small={s2} total={t2}")
 
-    # ---------- 阶段 3：close_k + merge_dilate ----------
+    # ---------- Stage 3: close_k + merge_dilate ----------
     close_k = max(int(init_close), _CLOSE_MIN)
     close_k = min(close_k, _CLOSE_MAX)
     best_close = close_k
@@ -714,7 +714,7 @@ def _auto_tune_mask(I0, I1, init_thr, init_open, init_close, H, W):
         mask_final = _morph_close(mask_final, best_close)
     mask_final = mask_final.clamp(0, 1)
 
-    # ---------- 阶段 4：逐连通域 expand/feather（auto 基准） ----------
+    # ---------- Stage 4: per-blob expand/feather (auto baseline) ----------
     mask_final, info = _expand_feather_by_components(
         mask_final, H, W, mode="auto", ui_expand=0, ui_feather=0
     )
@@ -734,7 +734,7 @@ def _auto_tune_mask(I0, I1, init_thr, init_open, init_close, H, W):
     return mask_final, tuned
 
 # --------------------------------------------------------
-# 遮罩外对比测范围拉伸
+# Stretch the tonal range measured outside the mask
 # --------------------------------------------------------
 
 
@@ -792,7 +792,7 @@ def _restore_contrast_by_anchor(I0, I1_corr, A):
     return out
 
 # --------------------------------------------------------
-# 小波融合
+# Wavelet blending
 # --------------------------------------------------------
 
 
@@ -829,13 +829,14 @@ class ColorCalibratorKJ(io.ComfyNode):
     """
     Color Calibrator KJ
 
-    忠实移植自 zhoutingxi/ComfyUI-BlueBox (MIT) 的 ColorCalibratorBlueBox 节点（v1.5.x）。
+    Faithful port of the ColorCalibratorBlueBox node (v1.5.x) from
+    zhoutingxi/ComfyUI-BlueBox (MIT).
 
-    所有模式的遮罩都先在 <=1024 长边的工作图上生成，再等比放大回原图。
-    阶段 4 的 expand/feather 逐连通域按面积比例处理。
-    param_preset: auto = 四阶段闭环自动校正；manual = 用参数框当前值。
+    Every mode builds its mask on a working image with a <=1024px long side, then scales it back up.
+    Stage 4 applies expand/feather per connected component, scaled by its area.
+    param_preset: auto = four-stage closed-loop auto tuning, manual = use the widget values.
 
-    输出 IMAGE / MASK / FLOAT(changed_ratio) / STRING(tuned_params JSON)。
+    Outputs IMAGE / MASK / FLOAT(changed_ratio) / STRING(tuned_params JSON).
     """
 
     @classmethod
@@ -844,7 +845,7 @@ class ColorCalibratorKJ(io.ComfyNode):
             node_id="ColorCalibratorKJ",
             display_name="Color Calibrator KJ",
             category="KJNodes/image",
-            search_aliases=["color calibrate", "calibrator", "color restore", "色彩还原", "校色", "色彩校准"],
+            search_aliases=["color calibrate", "calibrator", "color restore", "color correction"],
             description=(
                 "Restores original colors to an edited image, region-aware.\n\n"
                 "Compares image_original with image_edited: unless a mask is given it auto-detects the "
