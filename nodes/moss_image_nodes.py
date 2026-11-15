@@ -338,6 +338,14 @@ _DETAIL_STATUSES = (
 # Preset English options
 _PRESET_OPTIONS = ["Composition Preserve", "Balanced (Recommended)", "Detail & Typography Priority"]
 
+# Scene preset auto parameter mapping (key: merge strength, composition, text, detail)
+_SCENE_DEFAULT_PARAMS = {
+    "General Use": (1.0, 1.0, 1.0, 1.0),
+    "Realistic Portrait": (0.9, 1.3, 0.8, 0.7),
+    "Text Poster": (1.1, 1.2, 1.5, 1.0),
+    "Product Still Life": (1.1, 1.2, 1.0, 1.5)
+}
+
 
 def _read_model_quant_type(model) -> str:
     """Read official quantization type from Load Diffusion Model output, only return bf16/int8_convrot."""
@@ -413,6 +421,9 @@ Supports BF16 and official int8c/convrot quantized models, preserves base quanti
                                tooltip="MOSS SFT/finetuned model, provides typography and fine detail capability"),
                 io.Combo.Input("merge_preset", options=_PRESET_OPTIONS, default="Balanced (Recommended)",
                                tooltip="Select blend behavior: Composition Preserve is safest, Detail Priority maximizes typography/material performance"),
+                io.Combo.Input("usage_scene", options=["General Use", "Realistic Portrait", "Text Poster", "Product Still Life"],
+                               default="General Use",
+                               tooltip="Select your usage scenario, safe parameters apply automatically, no manual slider adjustment required"),
                 io.Float.Input("merge_strength", default=1.0, min=0.0, max=2.0, step=0.05,
                                socketless=True, advanced=True,
                                tooltip="Merge strength: 0=pure base, 0.1-0.5 light blend, 0.5-1.2 standard (default), 1.2-1.8 enhanced, 1.8-2 maximum strength; lower for less distortion, higher for more detail"),
@@ -433,8 +444,20 @@ Supports BF16 and official int8c/convrot quantized models, preserves base quanti
         )
 
     @classmethod
-    def execute(cls, base_model, sft_model, merge_preset, merge_strength,
+    def execute(cls, base_model, sft_model, merge_preset, usage_scene, merge_strength=1.0,
                 composition_stability=1.0, text_accuracy=1.0, detail_strength=1.0) -> io.NodeOutput:
+        # Apply scene default parameters, preserve user manual customizations
+        scene_strength, scene_comp, scene_text, scene_detail = _SCENE_DEFAULT_PARAMS[usage_scene]
+        # Only override default untouched values, keep user manual adjustments
+        if abs(merge_strength - 1.0) < 0.001:
+            merge_strength = scene_strength
+        if abs(composition_stability - 1.0) < 0.001:
+            composition_stability = scene_comp
+        if abs(text_accuracy - 1.0) < 0.001:
+            text_accuracy = scene_text
+        if abs(detail_strength - 1.0) < 0.001:
+            detail_strength = scene_detail
+
         # Pre validation, get actual loaded quant type
         quant_type = _validate_moss_models(base_model, sft_model)
 
@@ -502,6 +525,7 @@ Supports BF16 and official int8c/convrot quantized models, preserves base quanti
 
         info = (
             f"{status_line}"
+            f"Usage Scene: {usage_scene}\n"
             f"Current Preset: {merge_preset}\n"
             f"Merge Strength: {merge_strength:.2f}\n"
             f"SFT Ratio: Early {avg_early:.1%}, Mid {avg_mid:.1%}, Late {avg_late:.1%}\n"

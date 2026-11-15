@@ -44,5 +44,11 @@
   "Weak detail, minimal texture, ideal for soft portraits": "弱細節，僅少量紋理，適合柔和人像",
   "Standard detail (default), preset default material quality": "標準細節（預設），預設預設材質品質",
   "Strong detail, rich material texture, ideal for product/still life": "強細節，材質紋理豐富，適合產品與靜物",
-  "Maximum detail, full texture strength, minor noise may appear": "最大細節，紋理強度滿載，可能出現輕微雜訊"
+  "Maximum detail, full texture strength, minor noise may appear": "最大細節，紋理強度滿載，可能出現輕微雜訊",
+  "usage_scene": "使用場景",
+  "General Use": "通用場景",
+  "Realistic Portrait": "寫實人像",
+  "Text Poster": "文字海報",
+  "Product Still Life": "產品靜物",
+  "Usage Scene:": "使用場景："
 }
