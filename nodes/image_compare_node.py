@@ -103,7 +103,8 @@ class ImageCompareKJ(io.ComfyNode):
             description="Interactive image and video comparison.\n\n"
                 "Modes: **slider** (Shift+drag rotates), **box**, **diff**, **toggle** and **mask**.\n"
                 "Up to 4 inputs, the first one is the reference. Connected Load Image and Load Video nodes preview before running.\n"
-                "Batches and videos play back in sync, frame by frame, as high quality H.264 with frame scrubbing; single images among them stay still.\n"
+                "Batches and videos play back in sync, frame by frame, as high quality H.264 with frame scrubbing; single images among them stay still. "
+                "Arrow keys step frames while the pointer is over the node, Shift steps 10.\n"
                 "The optional mask (first frame) reveals the compared image where it is white.",
             inputs=[
                 io.Autogrow.Input(
