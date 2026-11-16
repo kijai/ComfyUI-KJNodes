@@ -408,6 +408,60 @@ def _read_model_quant_type(model) -> str:
     return "bf16"
 
 
+# Quantized metadata key suffixes (exact match, aligned with reference implementation)
+_QUANT_METADATA_SUFFIXES = (
+    ".weight_scale",
+    ".weight_scale_2",
+    ".input_scale",
+    ".pre_quant_scale",
+    ".comfy_quant",
+)
+
+
+def _is_quant_metadata_key(key: str) -> bool:
+    return key.endswith(_QUANT_METADATA_SUFFIXES)
+
+
+def _get_filtered_key_patches(model, filter_prefix: str):
+    """Extract patches for int8 quantized models without triggering attribute errors."""
+    import torch
+    import comfy.model_patcher as model_patcher
+
+    patches = {}
+    for key in model.model_state_dict():
+        if filter_prefix is not None and not key.startswith(filter_prefix):
+            continue
+        if _is_quant_metadata_key(key):
+            continue
+
+        try:
+            weight, _, convert_func = model_patcher.get_key_weight(model.model, key)
+        except AttributeError:
+            continue
+        if not isinstance(weight, torch.Tensor):
+            continue
+
+        backup = model.backup.get(key)
+        hook_backup = model.hook_backup.get(key)
+        if backup is not None:
+            weight = backup.weight
+        if hook_backup is not None:
+            weight = hook_backup[0]
+        if convert_func is None:
+            convert_func = lambda value, **_: value
+
+        patches[key] = [(weight, convert_func)] + model.patches.get(key, [])
+    return patches
+
+
+def _get_compatible_key_patches(model, filter_prefix: str):
+    """Native patch extraction with automatic int8 fallback, identical to reference."""
+    try:
+        return model.get_key_patches(filter_prefix)
+    except AttributeError:
+        return _get_filtered_key_patches(model, filter_prefix)
+
+
 def _validate_moss_models(base_model, sft_model) -> str:
     """Safe pre-validation: no weight resolution, no attribute access errors. Return quant type."""
     # Get key strings only without loading weights
@@ -512,46 +566,22 @@ Supports BF16 and official int8c/convrot quantized models, preserves base quanti
         for prefix in _OUTPUT_PREFIXES:
             sft_weights[prefix] = max(0.0, min(1.0, sft_weights[prefix] * detail_strength))
 
-        # Convert SFT weights to official block ratio (base weight)
-        block_ratios = {}
-        for prefix, sft_w in sft_weights.items():
-            block_ratios[prefix] = 1.0 - sft_w
-
-        # Safe official-equivalent merge: never call get_key_patches to avoid attribute errors
-        # Weight blending logic is 100% identical to ModelMergeBlocks, only quant metadata is filtered
+        # Merge logic 100% aligned with proven reference implementation, int8 safe
         merged_model = base_model.clone()
-        _QUANT_METADATA_MARKERS = ("weight_scale", "weight_zero_point", "weight_zero", "comfy_quant")
+        sft_patches = _get_compatible_key_patches(sft_model, "diffusion_model.")
+        # Match longest prefix first, same as reference
+        ordered_weights = sorted(sft_weights.items(), key=lambda item: len(item[0]), reverse=True)
 
-        # Manually load only valid weight tensors, no global get_key_patches traversal
-        sft_patches = {}
-        all_sft_keys = _safe_get_diffusion_keys(sft_model)
-        for full_key in all_sft_keys:
-            # Skip quant metadata before any weight access
-            if any(marker in full_key for marker in _QUANT_METADATA_MARKERS):
-                continue
-            if not full_key.startswith("diffusion_model."):
-                continue
-            inner_key = full_key[len("diffusion_model."):]
-            try:
-                weight_tensor = sft_model.calculate_weight(sft_model.model, inner_key)
-                sft_patches[full_key] = weight_tensor
-            except Exception:
-                # Skip any unloadable key, never throw global merge error
-                continue
-
-        for k in sft_patches:
-
-            # Official ModelMergeBlocks ratio selection logic
-            ratio = next(iter(block_ratios.values()))
-            k_unet = k[len("diffusion_model."):]
-            matched_prefix_len = 0
-            for prefix, prefix_ratio in block_ratios.items():
-                if k_unet.startswith(prefix) and matched_prefix_len < len(prefix):
-                    ratio = prefix_ratio
-                    matched_prefix_len = len(prefix)
-
-            # Identical patch strength order to official ModelMergeBlocks: (base strength, SFT strength)
-            merged_model.add_patches({k: sft_patches[k]}, ratio, 1.0 - ratio)
+        for key, patch_value in sft_patches.items():
+            unet_key = key[len("diffusion_model."):] if key.startswith("diffusion_model.") else key
+            sft_ratio = 0.0
+            for prefix, preset_sft_weight in ordered_weights:
+                if unet_key.startswith(prefix):
+                    sft_ratio = preset_sft_weight
+                    break
+            # Clamp valid range, add_patches order matches reference: (SFT strength, Base strength)
+            sft_ratio = min(1.0, max(0.0, sft_ratio))
+            merged_model.add_patches({key: patch_value}, sft_ratio, 1.0 - sft_ratio)
 
         # Build human-readable info
         avg_early = sum(sft_weights[f"layers.{i}."] for i in range(14)) / 14
