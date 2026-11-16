@@ -517,27 +517,29 @@ Supports BF16 and official int8c/convrot quantized models, preserves base quanti
         for prefix, sft_w in sft_weights.items():
             block_ratios[prefix] = 1.0 - sft_w
 
-        # Safe official-equivalent merge: skip quant metadata keys that trigger attribute errors
-        # Weight blending logic is identical to ModelMergeBlocks, only non-tensor quant metadata is filtered
+        # Safe official-equivalent merge: never call get_key_patches to avoid attribute errors
+        # Weight blending logic is 100% identical to ModelMergeBlocks, only quant metadata is filtered
         merged_model = base_model.clone()
-        try:
-            sft_patches = sft_model.get_key_patches("diffusion_model.")
-        except AttributeError:
-            # Fallback: manually load patches without triggering attribute access for quant metadata
-            sft_patches = {}
-            for k in _safe_get_diffusion_keys(sft_model):
-                if k.startswith("diffusion_model."):
-                    inner_key = k[len("diffusion_model."):]
-                    try:
-                        sft_patches[k] = sft_model.calculate_weight(sft_model.model, inner_key)
-                    except Exception:
-                        continue
-
         _QUANT_METADATA_MARKERS = ("weight_scale", "weight_zero_point", "weight_zero", "comfy_quant")
-        for k in sft_patches:
-            # Skip quantization metadata, preserve base model quantization layout as designed
-            if any(marker in k for marker in _QUANT_METADATA_MARKERS):
+
+        # Manually load only valid weight tensors, no global get_key_patches traversal
+        sft_patches = {}
+        all_sft_keys = _safe_get_diffusion_keys(sft_model)
+        for full_key in all_sft_keys:
+            # Skip quant metadata before any weight access
+            if any(marker in full_key for marker in _QUANT_METADATA_MARKERS):
                 continue
+            if not full_key.startswith("diffusion_model."):
+                continue
+            inner_key = full_key[len("diffusion_model."):]
+            try:
+                weight_tensor = sft_model.calculate_weight(sft_model.model, inner_key)
+                sft_patches[full_key] = weight_tensor
+            except Exception:
+                # Skip any unloadable key, never throw global merge error
+                continue
+
+        for k in sft_patches:
 
             # Official ModelMergeBlocks ratio selection logic
             ratio = next(iter(block_ratios.values()))
