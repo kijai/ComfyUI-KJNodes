@@ -582,7 +582,7 @@ class _PreviewOverrideWrapper:
         # Tiny VAE from models/vae_approx
         tiny_vae = None
         if self.tiny_vae and self.tiny_vae != "none" and load_tiny_vae_decoder is not None:
-            tiny_vae = load_tiny_vae_decoder(self.tiny_vae)
+            tiny_vae = load_tiny_vae_decoder(self.tiny_vae, max_res=self.max_resolution)
             if tiny_vae is not None and latent_shapes and len(latent_shapes[0]) >= 2:
                 channels = int(latent_shapes[0][1])
                 if channels != tiny_vae.latent_channels:
