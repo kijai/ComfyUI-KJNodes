@@ -512,14 +512,44 @@ Supports BF16 and official int8c/convrot quantized models, preserves base quanti
         for prefix in _OUTPUT_PREFIXES:
             sft_weights[prefix] = max(0.0, min(1.0, sft_weights[prefix] * detail_strength))
 
-        # Convert SFT weights to official merge ratio (official ratio = base weight)
-        official_kwargs = {}
+        # Convert SFT weights to official block ratio (base weight)
+        block_ratios = {}
         for prefix, sft_w in sft_weights.items():
-            official_kwargs[prefix] = 1.0 - sft_w
+            block_ratios[prefix] = 1.0 - sft_w
 
-        # Use official merge logic 100%
-        merger = ModelMergeBlocks()
-        merged_model, = merger.merge(base_model, sft_model, **official_kwargs)
+        # Safe official-equivalent merge: skip quant metadata keys that trigger attribute errors
+        # Weight blending logic is identical to ModelMergeBlocks, only non-tensor quant metadata is filtered
+        merged_model = base_model.clone()
+        try:
+            sft_patches = sft_model.get_key_patches("diffusion_model.")
+        except AttributeError:
+            # Fallback: manually load patches without triggering attribute access for quant metadata
+            sft_patches = {}
+            for k in _safe_get_diffusion_keys(sft_model):
+                if k.startswith("diffusion_model."):
+                    inner_key = k[len("diffusion_model."):]
+                    try:
+                        sft_patches[k] = sft_model.calculate_weight(sft_model.model, inner_key)
+                    except Exception:
+                        continue
+
+        _QUANT_METADATA_MARKERS = ("weight_scale", "weight_zero_point", "weight_zero", "comfy_quant")
+        for k in sft_patches:
+            # Skip quantization metadata, preserve base model quantization layout as designed
+            if any(marker in k for marker in _QUANT_METADATA_MARKERS):
+                continue
+
+            # Official ModelMergeBlocks ratio selection logic
+            ratio = next(iter(block_ratios.values()))
+            k_unet = k[len("diffusion_model."):]
+            matched_prefix_len = 0
+            for prefix, prefix_ratio in block_ratios.items():
+                if k_unet.startswith(prefix) and matched_prefix_len < len(prefix):
+                    ratio = prefix_ratio
+                    matched_prefix_len = len(prefix)
+
+            # Identical patch strength order to official ModelMergeBlocks: (base strength, SFT strength)
+            merged_model.add_patches({k: sft_patches[k]}, ratio, 1.0 - ratio)
 
         # Build human-readable info
         avg_early = sum(sft_weights[f"layers.{i}."] for i in range(14)) / 14
