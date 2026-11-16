@@ -365,56 +365,77 @@ _DETAIL_STATUSES = (
 _PRESET_OPTIONS = [
     "Composition Preserve",
     "Balanced (Recommended)",
-    "Detail & Typography Priority",
-    "ID Photo",
-    "Beauty Portrait",
-    "Realistic Photography"
+    "Detail & Typography Priority"
 ]
 
 
+def _safe_get_model_keys(model) -> set:
+    """Safely get all model key strings without triggering weight loading/attribute access."""
+    # First try direct state dict keys from underlying model, no patch resolution
+    try:
+        inner_model = model.model
+        if hasattr(inner_model, "state_dict"):
+            return set(inner_model.state_dict().keys())
+    except Exception:
+        pass
+    # Fallback: named parameters without accessing tensor values
+    try:
+        return {name for name, _ in model.model.named_parameters()}
+    except Exception:
+        pass
+    # Last resort: only return empty set without calling get_key_patches
+    return set()
+
+
+def _safe_get_diffusion_keys(model) -> set:
+    """Get diffusion model keys with standard prefix, no weight resolution."""
+    all_keys = _safe_get_model_keys(model)
+    return {f"diffusion_model.{k}" for k in all_keys if not k.startswith("diffusion_model.")} | {k for k in all_keys if k.startswith("diffusion_model.")}
+
+
 def _read_model_quant_type(model) -> str:
-    """Read official quantization type from Load Diffusion Model output, only return bf16/int8_convrot."""
-    # Read official quantization marker first
+    """Read official quantization type without triggering weight resolution, return bf16/int8_convrot."""
+    # Read official loader metadata first, no weight access
     quant_meta = getattr(model, "quantization", None)
     if isinstance(quant_meta, str) and "convrot" in quant_meta.lower():
         return "int8_convrot"
-    # Check state dict quant markers (fallback for official loader)
-    model_keys = set(model.get_key_patches("diffusion_model.").keys())
+    # Check state dict key markers only, no tensor/attribute access
+    model_keys = _safe_get_diffusion_keys(model)
     has_quant_scale = any(k.endswith("weight_scale") or "comfy_quant" in k for k in model_keys)
     if has_quant_scale:
         return "int8_convrot"
-    # Default non-quantized official MOSS weights are bf16
+    # Default unquantized official MOSS weights are bf16
     return "bf16"
 
 
 def _validate_moss_models(base_model, sft_model) -> str:
-    """User-friendly pre-validation, no technical jargon. Return valid quant type."""
-    # Architecture check
-    base_keys = set(base_model.get_key_patches("diffusion_model.").keys())
-    sft_keys = set(sft_model.get_key_patches("diffusion_model.").keys())
+    """Safe pre-validation: no weight resolution, no attribute access errors. Return quant type."""
+    # Get key strings only without loading weights
+    base_keys = _safe_get_diffusion_keys(base_model)
+    sft_keys = _safe_get_diffusion_keys(sft_model)
     if not base_keys or not sft_keys:
         raise ValueError("Failed to load model: please verify the input MOSS model files are complete.")
 
-    # Layer count check
+    # Layer count check from key strings only
     base_layers = set()
     for k in base_keys:
         if k.startswith("diffusion_model.layers."):
-            layer_idx = k.split(".")[2]
-            if layer_idx.isdigit():
-                base_layers.add(int(layer_idx))
+            parts = k.split(".")
+            if len(parts) >= 3 and parts[2].isdigit():
+                base_layers.add(int(parts[2]))
     sft_layers = set()
     for k in sft_keys:
         if k.startswith("diffusion_model.layers."):
-            layer_idx = k.split(".")[2]
-            if layer_idx.isdigit():
-                sft_layers.add(int(layer_idx))
+            parts = k.split(".")
+            if len(parts) >= 3 and parts[2].isdigit():
+                sft_layers.add(int(parts[2]))
 
     if len(base_layers) != 42 or len(sft_layers) != 42:
         raise ValueError("Invalid input: only standard 42-layer MOSS-Image models are supported for this node.")
     if base_layers != sft_layers:
         raise ValueError("Model structure mismatch: please use two MOSS models from the same version.")
 
-    # Quantization type check: only support 2 valid types
+    # Quantization check without weight access
     base_quant = _read_model_quant_type(base_model)
     sft_quant = _read_model_quant_type(sft_model)
     if base_quant != sft_quant:
