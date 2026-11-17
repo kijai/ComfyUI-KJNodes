@@ -521,18 +521,21 @@ Supports BF16 and official int8c/convrot quantized models, preserves base quanti
                                tooltip="MOSS SFT/finetuned model, provides typography and fine detail capability"),
                 io.Combo.Input("merge_preset", options=_PRESET_OPTIONS, default="Balanced (Recommended)",
                                tooltip="Select blend behavior: Composition Preserve is safest, Detail Priority maximizes typography/material performance"),
+                io.Combo.Input("show_advanced", options=["Hide advanced sliders", "Show advanced sliders"],
+                               default="Hide advanced sliders", socketless=True,
+                               tooltip="Toggle advanced fine-tuning sliders, hidden by default"),
                 io.Float.Input("merge_strength", default=1.0, min=0.0, max=2.0, step=0.05,
-                               socketless=True, advanced=True,
-                               tooltip="Merge strength: 0=pure base, 0.1-0.5 light blend, 0.5-1.2 standard (default), 1.2-1.8 enhanced, 1.8-2 maximum strength; lower for less distortion, higher for more detail"),
+                               socketless=True,
+                               tooltip="Merge strength: 0=pure base, light blend, standard, enhanced, maximum strength; lower for less distortion, higher for more detail"),
                 io.Float.Input("composition_stability", default=1.0, min=0.0, max=2.0, step=0.05,
-                               socketless=True, advanced=True,
-                               tooltip="Composition stability: 0=no constraint high risk, 0.1-0.5 low stability, 0.5-1.2 standard (default), 1.2-1.8 high stability, 1.8-2 fully lock composition"),
+                               socketless=True,
+                               tooltip="Composition stability: low constraint allows changes, high lock prevents offset"),
                 io.Float.Input("text_accuracy", default=1.0, min=0.0, max=2.0, step=0.05,
-                               socketless=True, advanced=True,
-                               tooltip="Text accuracy: 0=disabled high error risk, 0.1-0.5 weak enhancement, 0.5-1.2 standard (default), 1.2-1.8 strong enhancement, 1.8-2 maximum accuracy"),
+                               socketless=True,
+                               tooltip="Text accuracy: higher value reduces text rendering errors"),
                 io.Float.Input("detail_strength", default=1.0, min=0.0, max=2.0, step=0.05,
-                               socketless=True, advanced=True,
-                               tooltip="Detail strength: 0=disabled smooth output, 0.1-0.5 weak detail, 0.5-1.2 standard (default), 1.2-1.8 strong detail, 1.8-2 full texture, minor noise possible"),
+                               socketless=True,
+                               tooltip="Detail strength: higher value increases texture clarity"),
             ],
             outputs=[
                 io.Model.Output(display_name="merged_model"),
@@ -541,8 +544,9 @@ Supports BF16 and official int8c/convrot quantized models, preserves base quanti
         )
 
     @classmethod
-    def execute(cls, base_model, sft_model, merge_preset, merge_strength=1.0,
-                composition_stability=1.0, text_accuracy=1.0, detail_strength=1.0) -> io.NodeOutput:
+    def execute(cls, base_model, sft_model, merge_preset, show_advanced,
+                merge_strength=1.0, composition_stability=1.0,
+                text_accuracy=1.0, detail_strength=1.0) -> io.NodeOutput:
         # Pre validation, get actual loaded quant type
         quant_type = _validate_moss_models(base_model, sft_model)
 
@@ -637,4 +641,8 @@ Supports BF16 and official int8c/convrot quantized models, preserves base quanti
             "Guidance: Raise stability/lower strength for distortion, raise text accuracy for typography errors, raise detail strength for sharper texture."
         )
 
-        return io.NodeOutput(merged_model, info)
+        return io.NodeOutput(
+            merged_model,
+            info,
+            ui={"text": [info]}
+        )
