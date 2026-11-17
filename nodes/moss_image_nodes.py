@@ -520,22 +520,19 @@ Supports BF16 and official int8c/convrot quantized models, preserves base quanti
                 io.Model.Input("sft_model",
                                tooltip="MOSS SFT/finetuned model, provides typography and fine detail capability"),
                 io.Combo.Input("merge_preset", options=_PRESET_OPTIONS, default="Balanced (Recommended)",
-                               tooltip="Select blend behavior: Composition Preserve is safest, Detail Priority maximizes typography/material performance"),
-                io.Combo.Input("show_advanced", options=["Hide advanced sliders", "Show advanced sliders"],
-                               default="Hide advanced sliders", socketless=True,
-                               tooltip="Toggle advanced fine-tuning sliders, hidden by default"),
+                               tooltip="Select blend effect: Composition Preserve locks layout, Balanced is default safe option, Text Priority boosts typography"),
                 io.Float.Input("merge_strength", default=1.0, min=0.0, max=2.0, step=0.05,
-                               socketless=True,
-                               tooltip="Merge strength: 0=pure base, light blend, standard, enhanced, maximum strength; lower for less distortion, higher for more detail"),
+                               socketless=True, advanced=True,
+                               tooltip="Merge strength: 0 pure base, 1 default, 2 maximum effect"),
                 io.Float.Input("composition_stability", default=1.0, min=0.0, max=2.0, step=0.05,
-                               socketless=True,
-                               tooltip="Composition stability: low constraint allows changes, high lock prevents offset"),
+                               socketless=True, advanced=True,
+                               tooltip="Higher value locks layout and prevents offset"),
                 io.Float.Input("text_accuracy", default=1.0, min=0.0, max=2.0, step=0.05,
-                               socketless=True,
-                               tooltip="Text accuracy: higher value reduces text rendering errors"),
+                               socketless=True, advanced=True,
+                               tooltip="Higher value reduces text rendering errors"),
                 io.Float.Input("detail_strength", default=1.0, min=0.0, max=2.0, step=0.05,
-                               socketless=True,
-                               tooltip="Detail strength: higher value increases texture clarity"),
+                               socketless=True, advanced=True,
+                               tooltip="Higher value improves texture clarity"),
             ],
             outputs=[
                 io.Model.Output(display_name="merged_model"),
@@ -544,7 +541,7 @@ Supports BF16 and official int8c/convrot quantized models, preserves base quanti
         )
 
     @classmethod
-    def execute(cls, base_model, sft_model, merge_preset, show_advanced,
+    def execute(cls, base_model, sft_model, merge_preset,
                 merge_strength=1.0, composition_stability=1.0,
                 text_accuracy=1.0, detail_strength=1.0) -> io.NodeOutput:
         # Pre validation, get actual loaded quant type
