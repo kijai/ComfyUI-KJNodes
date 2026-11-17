@@ -644,5 +644,5 @@ Supports BF16 and official int8c/convrot quantized models, preserves base quanti
         return io.NodeOutput(
             merged_model,
             info,
-            ui={"text": [info]}
+            ui=ui.PreviewText(info)
         )
