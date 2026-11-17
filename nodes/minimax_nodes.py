@@ -372,6 +372,8 @@ class MiniMaxH3PromptWeight(io.ComfyNode):
                     io.DynamicCombo.Option("edit", [
                         io.Vae.Input("vae", optional=True),
                         io.Autogrow.Input("images", optional=True, template=io.Autogrow.TemplatePrefix(input=io.Image.Input("image"), prefix="image_", min=0, max=100)),
+                        io.Float.Input("start_percent", default=0.0, min=0.0, max=1.0, step=0.001, tooltip="Start of the sampling range with the images, outside it the prompt is encoded without them."),
+                        io.Float.Input("end_percent", default=1.0, min=0.0, max=1.0, step=0.001, tooltip="End of the range with the images."),
                     ]),
                 ]),
             ],
@@ -381,22 +383,44 @@ class MiniMaxH3PromptWeight(io.ComfyNode):
     @classmethod
     def execute(cls, model, clip, text, strength, width, height, mode) -> io.NodeOutput:
         from comfy_extras.nodes_minimax_h3 import MiniMaxH3ImageConditioning    # not in older ComfyUI
-        cond, pairs, prompt_len = None, [], 0
-        for prompt, bias in _blend_prompts(text):
-            clean_text = re.sub(r"\(([^():]+):(-?\d*\.?\d+)\)", r"\1", prompt)    # as _prompt_token_weights strips them
-            # the reference latents come with the first prompt
-            c, latent = MiniMaxH3ImageConditioning.execute(clip, clean_text, width, height, vae=mode.get("vae") if cond is None else None, images=mode.get("images")).result
-            rows = len(next(iter(clip.tokenize(clean_text).values()))[0])
-            if cond is None:
-                cond = c
-            else:
-                # the encoder is causal, so a further prompt only adds its own rows behind what the first one already has
-                cond = [[torch.cat([a, b[:, b.shape[1] - rows:]], dim=1),
-                         {**d, "minimax_token_tags": torch.cat([d["minimax_token_tags"], e["minimax_token_tags"][b.shape[1] - rows:]])}]
-                        for (a, d), (b, e) in zip(cond, c)]
+        prompts = [(p, b, re.sub(r"\(([^():]+):(-?\d*\.?\d+)\)", r"\1", p)) for p, b in _blend_prompts(text)]    # as _prompt_token_weights strips them
+        rows = [len(next(iter(clip.tokenize(clean_text).values()))[0]) for _, _, clean_text in prompts]
+
+        def encode(vae, images):
+            cond = latent = None
+            for (_, _, clean_text), n in zip(prompts, rows):
+                # the reference latents come with the first prompt
+                c, l = MiniMaxH3ImageConditioning.execute(clip, clean_text, width, height, vae=vae if cond is None else None, images=images).result
+                if cond is None:
+                    cond, latent = c, l
+                else:
+                    # the encoder is causal, so a further prompt only adds its own rows behind what the first one already has
+                    cond = [[torch.cat([a, b[:, b.shape[1] - n:]], dim=1),
+                             {**d, "minimax_token_tags": torch.cat([d["minimax_token_tags"], e["minimax_token_tags"][b.shape[1] - n:]])}]
+                            for (a, d), (b, e) in zip(cond, c)]
+            return cond, latent
+
+        cond, latent = encode(mode.get("vae"), mode.get("images"))
+        pairs, prompt_len = [], 0
+        for (prompt, bias, _), n in zip(prompts, rows):
             _, token_pairs = _prompt_token_weights(clip, prompt, strength, (_QWEN_IM_START, _QWEN_USER, _QWEN_NL, _QWEN_IM_END), "MiniMaxH3PromptWeight", encode=False)
-            pairs += _blend_pairs(token_pairs, prompt_len, rows, bias)
-            prompt_len += rows
+            pairs += _blend_pairs(token_pairs, prompt_len, n, bias)
+            prompt_len += n
+        has_images = any(v is not None for v in (mode.get("images") or {}).values())
+        if mode["mode"] == "edit" and has_images and (mode.get("start_percent", 0.0) > 0.0 or mode.get("end_percent", 1.0) < 1.0):
+            start_percent, end_percent = mode["start_percent"], mode["end_percent"]
+            # outside the range the prompt is encoded on its own, without the pictures' vision tokens or reference latents
+            text_cond, _ = encode(None, None)
+            if end_percent > start_percent:
+                ranged = [[c, {**d, "start_percent": start_percent, "end_percent": end_percent}] for c, d in cond]
+                for c, d in text_cond:
+                    if start_percent > 0.0:
+                        ranged.append([c, {**d, "start_percent": 0.0, "end_percent": start_percent}])
+                    if end_percent < 1.0:
+                        ranged.append([c, {**d, "start_percent": end_percent, "end_percent": 1.0}])
+                cond = ranged
+            else:
+                cond = text_cond
         if mode["mode"] == "text with empty image" and mode["end_percent"] > mode["start_percent"]:
             start_percent, end_percent = mode["start_percent"], mode["end_percent"]
             # the encoder is causal, so the picture block is the same in front of any prompt
