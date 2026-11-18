@@ -93,10 +93,13 @@ app.registerExtension({
       let _framePadXY = { x: 0.5, y: 0.5 };
 
       const wrapper = document.createElement("div");
-      wrapper.style.cssText = "display:flex;flex-direction:column;overflow:hidden;position:relative;pointer-events:auto;";
+      // overflow:visible (not hidden): the canvas renderer reserves the DOM-widget
+      // row a few px short of the canvas, so overflow:hidden would clip the bottom
+      // of the preview (a LiteGraph layout-rounding quirk, also seen on other nodes).
+      wrapper.style.cssText = "display:flex;flex-direction:column;overflow:visible;position:relative;pointer-events:auto;";
       const canvasEl = document.createElement("canvas");
       const canvasCtx = canvasEl.getContext("2d");
-      canvasEl.style.cssText = "cursor:crosshair;display:block;width:100%;height:auto;";
+      canvasEl.style.cssText = "cursor:crosshair;display:block;width:100%;height:auto;flex:0 0 auto;";
       addWheelPassthrough(wrapper);
       addMiddleClickPan(canvasEl);
 
@@ -116,7 +119,7 @@ app.registerExtension({
       }
       // Grid size slider overlay (purely visual aid, not serialized)
       const gridBar = document.createElement("div");
-      gridBar.style.cssText = "display:flex;align-items:center;gap:6px;padding:3px 6px;margin-bottom:4px;font:11px sans-serif;color:#aaa;user-select:none;box-sizing:border-box;width:100%;flex:0 0 auto;";
+      gridBar.style.cssText = "display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:3px 6px;margin-bottom:4px;font:11px sans-serif;color:#aaa;user-select:none;box-sizing:border-box;width:100%;flex:0 0 auto;";
       const gridLabel = document.createElement("span");
       gridLabel.textContent = "Grid: off";
       gridLabel.style.cssText = "min-width:62px;text-align:right;";
@@ -257,7 +260,9 @@ app.registerExtension({
       // Resize node to fit the current canvas/image. If onlyGrow is true,
       // the node will only get larger, never shrink (preserves user resize).
       // If false, the node is set to the exact size needed.
-      function fitNodeToImage(onlyGrow) {
+      // exactHeight: set the height to fit the image even if that shrinks the node
+      // (used on image load so a smaller-ratio image doesn't keep the old margin).
+      function fitNodeToImage(onlyGrow, exactHeight) {
         if (!node._previewEnabled) {
           // Manual mode: only grow to fit current canvas, never change width
           if (onlyGrow && canvasEl.width > 0 && canvasEl.height > 0) {
@@ -265,8 +270,10 @@ app.registerExtension({
             const displayedH = Math.round(canvasEl.height * ((node.size[0] - 30) / canvasEl.width));
             node._widgetHeight = displayedH + GRID_BAR_HEIGHT;
             const aboveH = node.cropEditor?.last_y || 350;
-            const neededH = aboveH + node._widgetHeight + 20;
-            if (node.size[1] < neededH) node.setSize([node.size[0], neededH]);
+            // + ROW_SAFETY so the body matches what onResize/neededNodeHeight reserve
+            const neededH = aboveH + node._widgetHeight + 20 + ROW_SAFETY;
+            const target = exactHeight ? neededH : Math.max(node.size[1], neededH);
+            if (node.size[1] !== target) node.setSize([node.size[0], target]);
             _resizing = false;
           }
           return;
@@ -279,10 +286,11 @@ app.registerExtension({
         const canvasDisplayH = Math.round((nodeW - 30) * ar);
         node._widgetHeight = canvasDisplayH + GRID_BAR_HEIGHT;
         const aboveH = node.cropEditor?.last_y || 350;
-        // +20 accounts for DOM widget margin (10px top + 10px bottom)
-        const neededH = aboveH + node._widgetHeight + 20;
+        // +20 for DOM widget margin (10px top + 10px bottom), + ROW_SAFETY to match
+        // what onResize/neededNodeHeight reserve (else first load is short by that much)
+        const neededH = aboveH + node._widgetHeight + 20 + ROW_SAFETY;
         const newW = onlyGrow ? Math.max(node.size[0], nodeW) : nodeW;
-        const newH = onlyGrow ? Math.max(node.size[1], neededH) : neededH;
+        const newH = (onlyGrow && !exactHeight) ? Math.max(node.size[1], neededH) : neededH;
         if (newW !== node.size[0] || newH !== node.size[1]) {
           node.setSize([newW, newH]);
         }
@@ -359,13 +367,112 @@ app.registerExtension({
       for (const el of [previewBtn, rotateBtn, colorSwatch, gridLabel, gridColorSwatch, gridSlider]) gridBar.appendChild(el);
       wrapper.appendChild(gridBar); wrapper.appendChild(canvasEl);
 
-      const GRID_BAR_HEIGHT = 46;
+      // Bar height is measured at runtime (it wraps to 2 rows when narrow) — 46 is
+      // just the fallback until the ResizeObserver below reports the real value.
+      let GRID_BAR_HEIGHT = 46;
+      // The bar wraps to a second row when narrow, so the node can go this low
+      // before anything clips.
+      const MIN_NODE_WIDTH = 360;
       node._widgetHeight = 300 + GRID_BAR_HEIGHT;
 
+      // Display height of the bar + canvas for a given node width. The canvas is
+      // drawn at width:100%;height:auto, so its on-screen height is purely a
+      // function of node width and the canvas pixel aspect ratio.
+      // The canvas renderer reserves the widget row a few px short of the canvas
+      // (layout rounding). overflow:visible stops that clipping the image; this small
+      // margin makes the node body reach past the canvas so it doesn't overhang the
+      // node border — reads as a consistent bottom padding.
+      const ROW_SAFETY = 8;
+      function currentWidgetHeight(w) {
+        if (!canvasEl.width || !canvasEl.height) return GRID_BAR_HEIGHT + 50;
+        // Use the real rendered canvas height whenever we're sizing for the current
+        // width — it's exact, so the bottom margin is the same for every image ratio.
+        // The estimate ((w-30)*ratio) is only for probing a different width, where its
+        // ratio-scaled rounding error is acceptable.
+        if (canvasEl.offsetHeight > 0 && (w == null || w === node.size[0])) {
+          return canvasEl.offsetHeight + GRID_BAR_HEIGHT + ROW_SAFETY;
+        }
+        const dispW = Math.max(1, (w ?? node.size[0]) - 30);
+        return Math.round(dispW * (canvasEl.height / canvasEl.width)) + GRID_BAR_HEIGHT + ROW_SAFETY;
+      }
+      // Total node height that exactly contains the widgets above plus the canvas,
+      // with no crop and no trailing padding.
+      function neededNodeHeight(w) {
+        const aboveH = node.cropEditor?.last_y ?? 350;
+        return aboveH + currentWidgetHeight(w) + 20;
+      }
+
+      // Lock the DOM widget to exactly the canvas height (min == max == height)
+      // so it never gets less space (crop) or more (internal padding).
       node.cropEditor = this.addDOMWidget("crop_preview", "CropPreviewWidget", wrapper, {
         serialize: false, hideOnZoom: false,
-        getMinHeight: () => GRID_BAR_HEIGHT + 50,
+        getMinHeight: () => currentWidgetHeight(),
+        getMaxHeight: () => currentWidgetHeight(),
+        getHeight: () => currentWidgetHeight(),
       });
+
+      // Keep the node body height locked to its contents — same pattern as the NKD
+      // nodes: height follows width × aspect, so vertical drags can't crop the
+      // image or open an empty padding gap below it.
+      const _origComputeSize = node.computeSize?.bind(node);
+      node.computeSize = function (out) {
+        const sz = _origComputeSize ? _origComputeSize(out) : [node.size[0], node.size[1]];
+        if (sz[0] < MIN_NODE_WIDTH) sz[0] = MIN_NODE_WIDTH;
+        if (node.cropEditor) sz[1] = neededNodeHeight(sz[0]);
+        return sz;
+      };
+
+      // Keep GRID_BAR_HEIGHT in sync with the (possibly wrapped) toolbar, and pin
+      // the wrapper to exactly bar + canvas height. The pin is the key fix for Vue
+      // Nodes mode: there the widget container stretches/shrinks with the node body,
+      // so getMaxHeight alone doesn't stop the preview from following the node size
+      // (cropping when short, padding when tall). An explicit inline height is
+      // immune to that and also correct in the canvas renderer.
+      const _syncLayout = () => {
+        const cs = getComputedStyle(gridBar);
+        const barH = Math.round(gridBar.offsetHeight + parseFloat(cs.marginBottom || "0"));
+        if (barH > 0 && barH !== GRID_BAR_HEIGHT) {
+          GRID_BAR_HEIGHT = barH;
+          node._widgetHeight = currentWidgetHeight();
+          if (node.cropEditor) node.setSize([node.size[0], neededNodeHeight()]);
+          node.graph?.setDirtyCanvas(true, true);
+        }
+        // Only needed in Vue mode — the canvas renderer pins via getHeight and would
+        // fight an inline height we set on the same element.
+        if (LiteGraph.vueNodesMode) {
+          const ch = canvasEl.offsetHeight;
+          if (ch > 0) {
+            const h = `${ch + GRID_BAR_HEIGHT + ROW_SAFETY}px`;
+            if (wrapper.style.height !== h) {
+              wrapper.style.minHeight = wrapper.style.maxHeight = wrapper.style.height = h;
+            }
+          }
+        } else if (node.cropEditor && node.graph && !_resizing) {
+          // Canvas renderer: once the canvas has rendered (e.g. just after a load), the
+          // node was sized with the pre-reflow estimate. Re-lock to the real height so
+          // the bottom margin is consistent across image ratios — no manual nudge.
+          const target = neededNodeHeight();
+          if (Math.abs(node.size[1] - target) > 1) {
+            node.setSize([node.size[0], target]);
+            node.graph.setDirtyCanvas(true, true);
+          }
+        }
+      };
+      const _layoutObserver = new ResizeObserver(_syncLayout);
+      _layoutObserver.observe(gridBar);
+      _layoutObserver.observe(canvasEl);
+      chainCallback(this, "onRemoved", function () { _layoutObserver.disconnect(); });
+
+      // Vue Nodes mode resizes via the DOM and reads the node element's inline
+      // min-width (else a global default ~302) — computeSize above only covers
+      // the canvas renderer. Set it here so the min width holds in both modes.
+      const _applyMinWidth = () => {
+        if (node.id == null) return;
+        const el = document.querySelector(`[data-node-id="${node.id}"]`);
+        if (el) el.style.minWidth = `${MIN_NODE_WIDTH}px`;
+      };
+      for (const d of [0, 100, 300, 600]) setTimeout(_applyMinWidth, d);
+      chainCallback(this, "onConfigure", _applyMinWidth);
 
       this.resizable = true;
       // Set default width wider than LiteGraph's default — deferred so onConfigure can set the flag first
@@ -884,7 +991,9 @@ app.registerExtension({
       }
 
       canvasEl.addEventListener("mousedown", (e) => {
-        canvasEl.focus();
+        // preventScroll: focusing the canvas would otherwise auto-scroll the
+        // overflow:hidden wrapper, pushing the top bar out of view.
+        canvasEl.focus({ preventScroll: true });
         if (e.button === 2) {
           e.preventDefault();
           const m = getCanvasMouse(e);
@@ -1413,6 +1522,13 @@ app.registerExtension({
           const dims = getEffectiveImageDims(true);
           tw = dims.w;
           th = dims.h;
+          // Match getCanvasScale: pad-first extra padding enlarges the canvas to the
+          // padded aspect, so the grid must use the same padded dims to stay square.
+          const ep = getExtraPadding();
+          if (ep.isFirst && hasExtraPad(ep)) {
+            tw += ep.left + ep.right;
+            th += ep.top + ep.bottom;
+          }
         } else {
           tw = twWidget ? twWidget.value : canvasEl.width;
           th = thWidget ? thWidget.value : canvasEl.height;
@@ -1925,7 +2041,11 @@ app.registerExtension({
           }
           updateBboxWidgets();
           drawCanvas();
-          fitNodeToImage(preserveBbox);
+          // On load keep the current width (never widen to the image — that made
+          // it enormous) but set the height exactly to the new image, so switching
+          // to a smaller-ratio image shrinks instead of keeping the old margin.
+          // Bboxes are already cleared above when !preserveBbox.
+          fitNodeToImage(true, true);
         };
         img.onerror = () => {
           console.warn("ImageTransformKJ: failed to load preview:", src);
@@ -1974,6 +2094,9 @@ app.registerExtension({
 
       chainCallback(this, "onResize", function () {
         if (_resizing) return;
+        // Clamp min width so the bar/widgets don't get clipped
+        const _size = arguments[0] || node.size;
+        if (_size[0] < MIN_NODE_WIDTH) _size[0] = MIN_NODE_WIDTH;
         const availW = Math.max(100, node.size[0] - 30);
         _resizing = true;
         if (node._previewEnabled) {
@@ -1994,6 +2117,11 @@ app.registerExtension({
           const displayedH = Math.round(canvasEl.height * (availW / canvasEl.width));
           node._widgetHeight = displayedH + GRID_BAR_HEIGHT;
         }
+        // Lock height to the contents: kill vertical over-expansion (padding) and
+        // crop in one shot. arguments[0] is node.size when LiteGraph drives the resize.
+        const size = arguments[0];
+        if (size) size[1] = neededNodeHeight(size[0]);
+        else node.size[1] = neededNodeHeight();
         drawCanvas();
         _resizing = false;
       });
