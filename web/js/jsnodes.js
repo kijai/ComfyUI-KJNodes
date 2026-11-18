@@ -36,14 +36,14 @@ function setupDynamicInputs(node, { type, prefix, countWidget = "inputcount", sl
 // TEMP workaround: on load the frontend drops all but the first link of an Autogrow nested in a DynamicCombo (still in ComfyUI_frontend main as of 2026-11-13)
 // Remember the saved links at configure, re-link the missing ones once the whole graph is configured; no-op where the frontend kept them
 const pendingAutogrowLinks = new WeakMap();
-function restoreNestedAutogrowLinks(nodeType, prefix) {
+function restoreNestedAutogrowLinks(nodeType, prefixes) {
     const configure = nodeType.prototype.configure;
     nodeType.prototype.configure = function (info) {
         const links = this.graph?.links;
         if (app.configuringGraph && links) {
             const saved = [];
             for (const input of info.inputs ?? []) {
-                if (input.link == null || !input.name?.startsWith(prefix)) continue;
+                if (input.link == null || !prefixes.some(p => input.name?.startsWith(p))) continue;
                 const link = links.get(input.link);
                 if (link) saved.push({ name: input.name, id: link.id, originId: link.origin_id, originSlot: link.origin_slot, parentId: link.parentId });
             }
@@ -277,7 +277,7 @@ app.registerExtension({
 				break;
 
 			case "MiniMaxH3PromptWeight":
-				restoreNestedAutogrowLinks(nodeType, "mode.images.");
+				restoreNestedAutogrowLinks(nodeType, ["mode.images.", "mode.ref_images.", "mode.ref_videos.", "mode.ref_video_audios.", "mode.ref_audios."]);
 				break;
 			case "JoinStringMulti":
 				const originalOnNodeCreated = nodeType.prototype.onNodeCreated || function() {};

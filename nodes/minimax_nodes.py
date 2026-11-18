@@ -361,7 +361,7 @@ class MiniMaxH3PromptWeight(io.ComfyNode):
                 io.Clip.Input("clip"),
                 io.String.Input("text", multiline=True, default="", tooltip="Prompt, weights as (word:weight). [cat|fox:-1] blends one prompt per option, the number is that option's attention bias."),
                 io.Float.Input("strength", default=1.0, min=-4.0, max=4.0, step=0.05, tooltip="Multiplier on the weighting effect."),
-                io.Int.Input("width", default=0, min=0, max=MAX_RESOLUTION, step=32, tooltip="0 uses image_1's size, or 2048 without images."),
+                io.Int.Input("width", default=0, min=0, max=MAX_RESOLUTION, step=32, tooltip="0 uses image_1's size, or 2048 without images. edit video uses 1344x768 for 0."),
                 io.Int.Input("height", default=0, min=0, max=MAX_RESOLUTION, step=32),
                 io.DynamicCombo.Input("mode", tooltip="text with empty image adds a black picture's vision tokens, which softens the hard text-to-image rendering.", options=[
                     io.DynamicCombo.Option("text only", []),
@@ -375,6 +375,18 @@ class MiniMaxH3PromptWeight(io.ComfyNode):
                         io.Float.Input("start_percent", default=0.0, min=0.0, max=1.0, step=0.001, tooltip="Start of the sampling range with the images, outside it the prompt is encoded without them."),
                         io.Float.Input("end_percent", default=1.0, min=0.0, max=1.0, step=0.001, tooltip="End of the range with the images."),
                     ]),
+                    io.DynamicCombo.Option("edit video", [
+                        io.Vae.Input("vae", optional=True, tooltip="Video VAE. Without it reference images/videos only condition the text encoder."),
+                        io.Vae.Input("audio_vae", optional=True, tooltip="Audio VAE. Without it reference audio only conditions the text encoder."),
+                        io.Int.Input("length", default=124, min=5, max=3600, step=17, tooltip="Frame count at 24 fps, snapped up to the model's 17k+5 grid."),
+                        io.Combo.Input("ref_image_size", options=["match", "max"], default="match", tooltip="'match' scales each reference image down to the generation's pixel area, 'max' to a 2048 short edge (slower)."),
+                        io.Autogrow.Input("ref_images", optional=True, template=io.Autogrow.TemplatePrefix(input=io.Image.Input("ref_image"), prefix="ref_image_", min=0, max=9)),
+                        io.Autogrow.Input("ref_videos", optional=True, template=io.Autogrow.TemplatePrefix(input=io.Image.Input("ref_video"), prefix="ref_video_", min=0, max=3)),
+                        io.Autogrow.Input("ref_video_audios", optional=True, template=io.Autogrow.TemplatePrefix(input=io.Audio.Input("ref_video_audio", tooltip="Soundtrack of the same-numbered reference video"), prefix="ref_video_audio_", min=0, max=3)),
+                        io.Autogrow.Input("ref_audios", optional=True, template=io.Autogrow.TemplatePrefix(input=io.Audio.Input("ref_audio"), prefix="ref_audio_", min=0, max=3)),
+                        io.Float.Input("start_percent", default=0.0, min=0.0, max=1.0, step=0.001, tooltip="Start of the sampling range with the references, outside it the prompt is encoded without them."),
+                        io.Float.Input("end_percent", default=1.0, min=0.0, max=1.0, step=0.001, tooltip="End of the range with the references."),
+                    ]),
                 ]),
             ],
             outputs=[io.Model.Output(display_name="model"), io.Conditioning.Output(display_name="positive"), io.Latent.Output(display_name="latent")],
@@ -382,15 +394,26 @@ class MiniMaxH3PromptWeight(io.ComfyNode):
 
     @classmethod
     def execute(cls, model, clip, text, strength, width, height, mode) -> io.NodeOutput:
-        from comfy_extras.nodes_minimax_h3 import MiniMaxH3ImageConditioning    # not in older ComfyUI
+        from comfy_extras.nodes_minimax_h3 import MiniMaxH3ImageConditioning, MiniMaxH3ReferenceToVideo    # not in older ComfyUI
         prompts = [(p, b, re.sub(r"\(([^():]+):(-?\d*\.?\d+)\)", r"\1", p)) for p, b in _blend_prompts(text)]    # as _prompt_token_weights strips them
         rows = [len(next(iter(clip.tokenize(clean_text).values()))[0]) for _, _, clean_text in prompts]
 
-        def encode(vae, images):
+        # (prompt, first) -> (cond, latent); the reference latents come with the first prompt
+        text_only = lambda t, first: MiniMaxH3ImageConditioning.execute(clip, t, width, height).result
+        refs, conditioning = {}, text_only
+        if mode["mode"] == "edit":
+            refs = {"images": mode.get("images")}
+            conditioning = lambda t, first: MiniMaxH3ImageConditioning.execute(clip, t, width, height, vae=mode.get("vae") if first else None, **refs).result
+        elif mode["mode"] == "edit video":
+            refs = {k: mode.get(k) for k in ("ref_images", "ref_videos", "ref_video_audios", "ref_audios")}
+            conditioning = lambda t, first: MiniMaxH3ReferenceToVideo.execute(clip, t, width or 1344, height or 768, mode["length"], mode["ref_image_size"],
+                                                                              vae=mode.get("vae") if first else None, audio_vae=mode.get("audio_vae") if first else None, **refs).result
+        has_refs = any(v is not None for r in refs.values() for v in (r or {}).values())
+
+        def encode(conditioning):
             cond = latent = None
             for (_, _, clean_text), n in zip(prompts, rows):
-                # the reference latents come with the first prompt
-                c, l = MiniMaxH3ImageConditioning.execute(clip, clean_text, width, height, vae=vae if cond is None else None, images=images).result
+                c, l = conditioning(clean_text, cond is None)
                 if cond is None:
                     cond, latent = c, l
                 else:
@@ -400,17 +423,16 @@ class MiniMaxH3PromptWeight(io.ComfyNode):
                             for (a, d), (b, e) in zip(cond, c)]
             return cond, latent
 
-        cond, latent = encode(mode.get("vae"), mode.get("images"))
+        cond, latent = encode(conditioning)
         pairs, prompt_len = [], 0
         for (prompt, bias, _), n in zip(prompts, rows):
             _, token_pairs = _prompt_token_weights(clip, prompt, strength, (_QWEN_IM_START, _QWEN_USER, _QWEN_NL, _QWEN_IM_END), "MiniMaxH3PromptWeight", encode=False)
             pairs += _blend_pairs(token_pairs, prompt_len, n, bias)
             prompt_len += n
-        has_images = any(v is not None for v in (mode.get("images") or {}).values())
-        if mode["mode"] == "edit" and has_images and (mode.get("start_percent", 0.0) > 0.0 or mode.get("end_percent", 1.0) < 1.0):
+        if has_refs and (mode.get("start_percent", 0.0) > 0.0 or mode.get("end_percent", 1.0) < 1.0):
             start_percent, end_percent = mode["start_percent"], mode["end_percent"]
-            # outside the range the prompt is encoded on its own, without the pictures' vision tokens or reference latents
-            text_cond, _ = encode(None, None)
+            # outside the range the prompt is encoded on its own, without the references' vision tokens or latents
+            text_cond, _ = encode(text_only)
             if end_percent > start_percent:
                 ranged = [[c, {**d, "start_percent": start_percent, "end_percent": end_percent}] for c, d in cond]
                 for c, d in text_cond:
