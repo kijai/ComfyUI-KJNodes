@@ -3,6 +3,7 @@ import torch.nn as nn
 import numpy as np
 from PIL import Image
 import json
+import hashlib
 import re
 import os
 import time
@@ -1008,6 +1009,42 @@ The 'any_input' is required for making sure the node you want the value from exi
                 raise NameError(f"Widget not found: {node_id}.{widget_name}")
 
         return (", ".join(results).strip(", "), )
+
+
+class GetWorkflowKJ(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="GetWorkflowKJ",
+            display_name="Get Workflow KJ",
+            category="KJNodes/text",
+            description="Outputs the workflow being run as a JSON string. 'workflow' is the UI format that can be loaded back into ComfyUI, 'api prompt' the API format. Connect to Save String KJ with a .json extension to save it.",
+            inputs=[io.Combo.Input("format", options=["workflow", "api prompt"], default="workflow")],
+            outputs=[io.String.Output(display_name="json")],
+            hidden=[io.Hidden.prompt, io.Hidden.extra_pnginfo],
+        )
+
+    @classmethod
+    def fingerprint_inputs(cls, **kwargs):
+        # the cache check gets no hidden inputs, so hash the running prompt: re-runs when what executes changes, not on layout-only edits
+        try:
+            from server import PromptServer
+            from comfy_execution.utils import get_executing_context
+            prompt_id = get_executing_context().prompt_id
+            prompt = next(x[2] for x in PromptServer.instance.prompt_queue.get_current_queue_volatile()[0] if x[1] == prompt_id)
+            return hashlib.sha256(json.dumps(prompt, sort_keys=True).encode()).hexdigest()
+        except Exception:
+            return None  # plain caching
+
+    @classmethod
+    def execute(cls, format) -> io.NodeOutput:
+        if format == "api prompt":
+            data = cls.hidden.prompt
+        else:
+            data = (cls.hidden.extra_pnginfo or {}).get("workflow")
+            if data is None:
+                raise ValueError("No workflow in this prompt; it was queued without extra_pnginfo (e.g. through the API). Use the 'api prompt' format instead.")
+        return io.NodeOutput(json.dumps(data, indent=2))
 
 
 class DummyOut:

@@ -5,7 +5,7 @@ from .nodes.nodes import (
     ConditioningSetMaskAndCombine, ConditioningSetMaskAndCombine3,
     ConditioningSetMaskAndCombine4, ConditioningSetMaskAndCombine5,
     VRAM_Debug, SomethingToString, Sleep, EmptyLatentImagePresets,
-    EmptyLatentImageCustomPresets, WidgetToString, DummyOut, FlipSigmasAdjusted,
+    EmptyLatentImageCustomPresets, WidgetToString, GetWorkflowKJ, DummyOut, FlipSigmasAdjusted,
     CustomSigmas, StringToFloatList, InjectNoiseToLatent, SoundReactive, GenerateNoise,
     StableZero123_BatchSchedule, SV3D_BatchSchedule, Superprompt, CameraPoseVisualizer,
     CheckpointPerturbWeights, DifferentialDiffusionAdvanced, FluxBlockLoraSelect,
@@ -221,6 +221,7 @@ NODE_CONFIG = {
     #utility
     "StringToFloatList": {"class": StringToFloatList, "name": "String to Float List"},
     "WidgetToString": {"class": WidgetToString, "name": "Widget To String"},
+    "GetWorkflowKJ": {"class": GetWorkflowKJ, "name": "Get Workflow KJ"},
     "SaveStringKJ": {"class": SaveStringKJ, "name": "Save String KJ"},
     "DummyOut": {"class": DummyOut, "name": "Dummy Out"},
     "GetLatentsFromBatchIndexed": {"class": GetLatentsFromBatchIndexed, "name": "Get Latents From Batch Indexed"},
