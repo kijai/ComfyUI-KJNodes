@@ -3,3 +3,4 @@ color-matcher
 matplotlib
 mss
 opencv-python-headless
+khatt>=0.4.1
