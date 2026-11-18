@@ -361,7 +361,7 @@ class MiniMaxH3PromptWeight(io.ComfyNode):
                 io.Clip.Input("clip"),
                 io.String.Input("text", multiline=True, default="", tooltip="Prompt, weights as (word:weight). [cat|fox:-1] blends one prompt per option, the number is that option's attention bias."),
                 io.Float.Input("strength", default=1.0, min=-4.0, max=4.0, step=0.05, tooltip="Multiplier on the weighting effect."),
-                io.Int.Input("width", default=0, min=0, max=MAX_RESOLUTION, step=32, tooltip="0 uses image_1's size, or 2048 without images. edit video uses 1344x768 for 0."),
+                io.Int.Input("width", default=0, min=0, max=MAX_RESOLUTION, step=32, tooltip="0 uses image_1's size, or 2048 without images. The video modes use 1344x768 for 0."),
                 io.Int.Input("height", default=0, min=0, max=MAX_RESOLUTION, step=32),
                 io.DynamicCombo.Input("mode", tooltip="text with empty image adds a black picture's vision tokens, which softens the hard text-to-image rendering.", options=[
                     io.DynamicCombo.Option("text only", []),
@@ -387,6 +387,14 @@ class MiniMaxH3PromptWeight(io.ComfyNode):
                         io.Float.Input("start_percent", default=0.0, min=0.0, max=1.0, step=0.001, tooltip="Start of the sampling range with the references, outside it the prompt is encoded without them."),
                         io.Float.Input("end_percent", default=1.0, min=0.0, max=1.0, step=0.001, tooltip="End of the range with the references."),
                     ]),
+                    io.DynamicCombo.Option("first last frame", [
+                        io.Vae.Input("vae", optional=True, tooltip="Video VAE, needed when a frame is connected."),
+                        io.Int.Input("length", default=124, min=5, max=3600, step=17, tooltip="Frame count at 24 fps, snapped up to the model's 17k+5 grid."),
+                        io.Image.Input("first_frame", optional=True),
+                        io.Image.Input("last_frame", optional=True),
+                        io.Float.Input("start_percent", default=0.0, min=0.0, max=1.0, step=0.001, tooltip="Start of the sampling range with the frames, outside it the prompt is encoded without them or their keyframe latents."),
+                        io.Float.Input("end_percent", default=1.0, min=0.0, max=1.0, step=0.001, tooltip="End of the range with the frames."),
+                    ]),
                 ]),
             ],
             outputs=[io.Model.Output(display_name="model"), io.Conditioning.Output(display_name="positive"), io.Latent.Output(display_name="latent")],
@@ -394,7 +402,7 @@ class MiniMaxH3PromptWeight(io.ComfyNode):
 
     @classmethod
     def execute(cls, model, clip, text, strength, width, height, mode) -> io.NodeOutput:
-        from comfy_extras.nodes_minimax_h3 import MiniMaxH3ImageConditioning, MiniMaxH3ReferenceToVideo    # not in older ComfyUI
+        from comfy_extras.nodes_minimax_h3 import MiniMaxH3ImageConditioning, MiniMaxH3ReferenceToVideo, MiniMaxH3ImageToVideo    # not in older ComfyUI
         prompts = [(p, b, re.sub(r"\(([^():]+):(-?\d*\.?\d+)\)", r"\1", p)) for p, b in _blend_prompts(text)]    # as _prompt_token_weights strips them
         rows = [len(next(iter(clip.tokenize(clean_text).values()))[0]) for _, _, clean_text in prompts]
 
@@ -408,7 +416,13 @@ class MiniMaxH3PromptWeight(io.ComfyNode):
             refs = {k: mode.get(k) for k in ("ref_images", "ref_videos", "ref_video_audios", "ref_audios")}
             conditioning = lambda t, first: MiniMaxH3ReferenceToVideo.execute(clip, t, width or 1344, height or 768, mode["length"], mode["ref_image_size"],
                                                                               vae=mode.get("vae") if first else None, audio_vae=mode.get("audio_vae") if first else None, **refs).result
-        has_refs = any(v is not None for r in refs.values() for v in (r or {}).values())
+        elif mode["mode"] == "first last frame":
+            refs = {k: mode.get(k) for k in ("first_frame", "last_frame")}
+            if mode.get("vae") is None and any(v is not None for v in refs.values()):
+                raise ValueError("MiniMaxH3PromptWeight: first last frame needs the vae to anchor the frames")
+            # the core node always encodes the keyframes, so a blended prompt re-encodes them
+            conditioning = lambda t, first: MiniMaxH3ImageToVideo.execute(clip, mode["vae"], t, width or 1344, height or 768, mode["length"], **refs).result
+        has_refs = any(v is not None for r in refs.values() for v in (r.values() if isinstance(r, dict) else (r,)))
 
         def encode(conditioning):
             cond = latent = None
