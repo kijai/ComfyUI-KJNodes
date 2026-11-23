@@ -2717,3 +2717,91 @@ class PiDColorBiasCorrection:
         m = model.clone()
         m.set_model_sampler_post_cfg_function(pid_bias_post_cfg)
         return (m,)
+
+
+def _parse_block_indices(text):
+    # "3, 5, 10-12" -> [3, 5, 10, 11, 12]
+    out = set()
+    for a, b in re.findall(r'(\d+)\s*(?:-\s*(\d+))?', text):
+        lo, hi = sorted((int(a), int(b or a)))
+        out.update(range(lo, hi + 1))
+    return sorted(out)
+
+
+def _current_step_percent(transformer_options, t):
+    sigmas = transformer_options.get("sample_sigmas")
+    if sigmas is None or len(sigmas) < 2:
+        return None
+    s = t.reshape(-1)[0].to(sigmas)
+    matched = torch.isclose(sigmas, s).nonzero()
+    if len(matched) > 0:
+        idx = matched[0].item()
+    else:
+        crossing = ((sigmas[:-1] - s) * (sigmas[1:] - s) <= 0).nonzero()
+        idx = crossing[0].item() if len(crossing) > 0 else 0
+    return idx / (len(sigmas) - 1)
+
+
+class SkipDiTBlocksWrapper:
+    # APPLY_MODEL wrapper: injects skip patches per call so they override any other patch on the same block, only inside the step range
+    def __init__(self, keys, start_percent, end_percent):
+        self.start_percent = start_percent
+        self.end_percent = end_percent
+        self.hit = set()
+        self.warned = False
+        self.patches = {key: self._make_skip(key) for key in keys}
+
+    def _make_skip(self, key):
+        # every block replace call site reads its outputs back from the args dict it passed in, so returning it unchanged makes the block an identity
+        def skip(args, extra_args):
+            self.hit.add(key)
+            return args
+        return skip
+
+    def __call__(self, executor, x, t, c_concat, c_crossattn, control, transformer_options, **kwargs):
+        pct = _current_step_percent(transformer_options, t)
+        if pct is not None and not (self.start_percent <= pct <= self.end_percent):
+            return executor(x, t, c_concat, c_crossattn, control, transformer_options, **kwargs)
+
+        patches_replace = transformer_options.get("patches_replace", {})
+        dit = {**patches_replace.get("dit", {}), **self.patches}
+        transformer_options = {**transformer_options, "patches_replace": {**patches_replace, "dit": dit}}
+        self.hit.clear()
+        out = executor(x, t, c_concat, c_crossattn, control, transformer_options, **kwargs)
+        missing = [k for k in self.patches if k not in self.hit]
+        if missing and not self.warned:
+            self.warned = True
+            logging.warning(f"SkipDiTBlocksKJ: blocks {missing} were never reached, the model has no such blocks or doesn't support DiT block replace patches")
+        return out
+
+
+class SkipDiTBlocksKJ(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="SkipDiTBlocksKJ",
+            display_name="Skip DiT Blocks KJ",
+            category="KJNodes/experimental",
+            description="Skips selected transformer blocks entirely, their compute is not run. Works on models that support ComfyUI's DiT block replace patches (Flux, Chroma, Wan, LTX, Qwen-Image, HunyuanVideo, SD3, Kandinsky5 and others), "
+                        "models without it (e.g. Lumina/Z-Image, Flux3, Krea2, HiDream) are unaffected and a warning is logged. Applies to both cond and uncond.",
+            is_experimental=True,
+            inputs=[
+                io.Model.Input("model"),
+                io.String.Input("double_blocks", default="", tooltip="Block indices to skip, comma separated, ranges allowed: '10, 12, 20-25'. This is the main block list for single-stack models like Wan, LTX and Qwen-Image."),
+                io.String.Input("single_blocks", default="", tooltip="Single-stream block indices for Flux/Chroma/HunyuanVideo, and the main block list for Qwen-Image 2.1, MOSS-Image and FIBO 2."),
+                io.Float.Input("start_percent", default=0.0, min=0.0, max=1.0, step=0.01, tooltip="Step-based sampling progress at which skipping starts."),
+                io.Float.Input("end_percent", default=1.0, min=0.0, max=1.0, step=0.01, tooltip="Step-based sampling progress at which skipping ends."),
+            ],
+            outputs=[
+                io.Model.Output(display_name="model"),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, model, double_blocks, single_blocks, start_percent=0.0, end_percent=1.0) -> io.NodeOutput:
+        keys = [("double_block", i) for i in _parse_block_indices(double_blocks)] + [("single_block", i) for i in _parse_block_indices(single_blocks)]
+        if not keys:
+            return io.NodeOutput(model)
+        m = model.clone()
+        m.add_wrapper_with_key(comfy.patcher_extension.WrappersMP.APPLY_MODEL, "skip_dit_blocks_kj", SkipDiTBlocksWrapper(keys, start_percent, end_percent))
+        return io.NodeOutput(m)
