@@ -40,10 +40,16 @@ function parseAspect(s) {
   return null;
 }
 // Reshape to ratio r at about the same pixel area (multiples of 16); unchanged if already within ~2%.
+// Repeated until stable, so reshaping the node's already-reshaped dims again is a no-op (mirrors Python).
 function dimsForAspect(r, w, h) {
-  if (!r || Math.abs(Math.log(r * h / w)) < RATIO_TOL) return [w, h];
-  const area = w * h, r16 = (v) => Math.max(64, Math.min(16384, Math.floor(v / 16 + 0.5) * 16));
-  return [r16(Math.sqrt(area * r)), r16(Math.sqrt(area / r))];
+  const r16 = (v) => Math.max(64, Math.min(16384, Math.floor(v / 16 + 0.5) * 16));
+  for (let i = 0; i < 8; i++) {
+    if (!r || Math.abs(Math.log(r * h / w)) < RATIO_TOL) break;
+    const area = w * h, nw = r16(Math.sqrt(area * r)), nh = r16(Math.sqrt(area / r));
+    if (nw === w && nh === h) break;
+    w = nw; h = nh;
+  }
+  return [w, h];
 }
 
 // Box -> [cx, cy, w, h] fractions, clipped to the canvas (the exported coordinates).

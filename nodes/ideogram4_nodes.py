@@ -20,8 +20,10 @@ _FONT_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "fonts", "
 
 
 def _hex_rgb(h):
-    h = h.lstrip("#")
-    return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)) if len(h) == 6 else (255, 255, 255)
+    h = h.lstrip("#") if isinstance(h, str) else ""
+    if not re.fullmatch(r"[0-9a-fA-F]{6}", h):                # color names ("orange") etc. -> white
+        return (255, 255, 255)
+    return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
 
 
 def _readable(rgb):

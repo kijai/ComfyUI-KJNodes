@@ -32,6 +32,7 @@ def _round_half_up(v, nd):
 
 def _ratio(w, h):
     # "16:9": nearest common ratio within ~2%, else the reduced fraction, else decimal.
+    w, h = int(round(w)), int(round(h))                     # linked inputs can arrive as floats; gcd needs ints
     r = w / h
     best, bd = None, float("inf")
     for a, b in _RATIOS:
@@ -65,12 +66,18 @@ def _parse_aspect(s):
 
 def _dims_for_aspect(r, width, height):
     # Reshape to ratio r at about the same pixel area (multiples of 16); unchanged if already within ~2%.
-    if not r or abs(math.log(r * height / width)) < _RATIO_TOL:
-        return width, height
-    area = width * height
+    # Repeated until stable, so reshaping the result again (as the editor does) is a no-op.
     def r16(v):
         return max(64, min(16384, int(math.floor(v / 16 + 0.5)) * 16))
-    return r16(math.sqrt(area * r)), r16(math.sqrt(area / r))
+    for _ in range(8):
+        if not r or abs(math.log(r * height / width)) < _RATIO_TOL:
+            break
+        area = width * height
+        w, h = r16(math.sqrt(area * r)), r16(math.sqrt(area / r))
+        if (w, h) == (width, height):
+            break
+        width, height = w, h
+    return width, height
 
 
 def _coords(box):
@@ -102,6 +109,8 @@ def _parse_coords(c):
     try:
         cx, cy, w, h = (float(v) for v in vals)
     except (TypeError, ValueError):
+        return None
+    if not all(math.isfinite(v) for v in (cx, cy, w, h)):    # NaN/inf (json.loads and float() accept them)
         return None
     return {"x": cx - w / 2, "y": cy - h / 2, "w": w, "h": h}
 
