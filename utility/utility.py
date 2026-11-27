@@ -3,6 +3,36 @@ import numpy as np
 from PIL import Image, ImageColor
 from typing import Union, List
 import logging
+import re
+
+try:
+    import khatt  # shapes Arabic and orders right-to-left text, which Pillow can't without Raqm
+except ImportError:
+    khatt = None
+
+# Hebrew, Arabic, Syriac, Thaana, N'Ko and the Arabic presentation forms
+RTL_TEXT = re.compile('[\u0590-\u08ff\ufb1d-\ufdff\ufe70-\ufefc]')
+# Arabic and Hebrew glyphs for fonts that have none, such as the bundled ones
+RTL_FALLBACK_FONTS = ('noto-naskh', 'rubik')
+
+def _shape_with_khatt(line):
+    return khatt is not None and RTL_TEXT.search(line) is not None
+
+def text_line_bbox(font, line):
+    """Bounding box of one line of text, as `draw_text_line` draws it."""
+    if _shape_with_khatt(line):
+        return khatt.text_bbox(line, font=font.path, size_px=font.size, fallback_fonts=RTL_FALLBACK_FONTS)
+    return font.getbbox(line)
+
+def draw_text_line(image, draw, xy, line, font, fill):
+    """Draw one line of text. Arabic and Hebrew lines are shaped by khatt when it's installed."""
+    if _shape_with_khatt(line):
+        khatt.draw_text(image, xy, line, font=font.path, size_px=font.size, fill=fill, fallback_fonts=RTL_FALLBACK_FONTS)
+        return
+    try:
+        draw.text(xy, line, font=font, fill=fill, features=['-liga'])
+    except Exception:
+        draw.text(xy, line, font=font, fill=fill)
 
 # Utility functions from mtb nodes: https://github.com/melMass/comfy_mtb
 def pil2tensor(image: Union[Image.Image, List[Image.Image]]) -> torch.Tensor:
