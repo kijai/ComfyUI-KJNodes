@@ -487,17 +487,46 @@ def _frames_per_token(latent_format):
     return (1, max(1, int(getattr(latent_format, "temporal_downscale_ratio", 1))))
 
 
+def _pattern_frames(k, pattern):
+    # pixel frames covered by the first k latent tokens
+    if len(pattern) == 2:
+        return 0 if k <= 0 else 1 + (k - 1) * pattern[1]
+    return sum(pattern[i % len(pattern)] for i in range(k))
+
+
 def _token_span_fraction(span, n_tokens, pattern):
     # fraction of the clip covered by latent tokens [first, last]; the audio latent spans the whole clip
     if span is None or n_tokens <= 1:
         return 0.0, 1.0
-    def frames(k):
-        if len(pattern) == 2:
-            return 0 if k <= 0 else 1 + (k - 1) * pattern[1]
-        return sum(pattern[i % len(pattern)] for i in range(k))
     first, last = span
-    total = frames(n_tokens)
-    return frames(first) / total, min(1.0, frames(last + 1) / total)
+    total = _pattern_frames(n_tokens, pattern)
+    return _pattern_frames(first, pattern) / total, min(1.0, _pattern_frames(last + 1, pattern) / total)
+
+
+def _pick_tokens(t_total, max_frames):
+    # the latent tokens the per-token previewers decode; same picks as their own frame sampling
+    if max_frames is not None and 0 < max_frames < t_total:
+        return np.linspace(0, t_total - 1, max_frames).round().astype(int).tolist()
+    return list(range(t_total))
+
+
+def _hold_token_frames(frames, tokens, pattern, max_res):
+    # one decoded frame per latent token -> one frame per pixel frame of the real video: each token is
+    # held for the pixel frames it stands for (1 or 4 for H3), up to the next decoded token. The clip
+    # then plays at the video's own frame rate, and spreads over the audio the way the video does
+    out = []
+    for i, f in enumerate(frames):
+        end = tokens[i + 1] if i + 1 < len(tokens) else tokens[i] + 1
+        hold = _pattern_frames(end, pattern) - _pattern_frames(tokens[i], pattern)
+        if hold <= 0:
+            continue
+        if not isinstance(f, np.ndarray):
+            # fit once here, so the encoders don't resize every repeat
+            f = f if f.mode == "RGB" else f.convert("RGB")
+            if max_res and max_res > 0 and (f.width > max_res or f.height > max_res):
+                f = ImageOps.contain(f, (max_res, max_res), Image.LANCZOS)
+        out.extend([f] * hold)
+    return out
 
 
 _SPEC_LUT = None
@@ -762,20 +791,25 @@ class _PreviewOverrideWrapper:
             return (wave / std)[0].clamp_(-1, 1).numpy()
 
         def produce_frames(x0_view):
-            # (frames, span): a [T, 3, H, W] CPU tensor from the tiny VAE, else a PIL list from
-            # whichever previewer applies, else []; span = latent tokens (first, last) the frames cover
+            # (frames, span, tokens): a [T, 3, H, W] CPU tensor from the tiny VAE, else a PIL list from
+            # whichever previewer applies, else []; span = latent tokens (first, last) the frames cover;
+            # tokens = the latent token behind each frame when the previewer decodes one frame per
+            # token, None when it hands back real pixel frames
             nonlocal tiny_vae
             max_pil = anim_frames if animate_video else 1
+            n_tok = int(x0_view.shape[2]) if x0_view.ndim == 5 else 1
             if tiny_vae is not None:
                 try:
                     frames, span = _tiny_vae_decode_frames(tiny_vae, x0_view, max_frames=max_pil, compile_preview=compile_preview)
                     if frames is not None:
-                        return frames, span
+                        per_token = x0_view.ndim == 5 and not getattr(tiny_vae, "decodes_prefix", False)
+                        return frames, span, (_pick_tokens(n_tok, max_pil) if per_token else None)
                 except Exception as e:
                     # OOM at 16x upscale is the likely cause — drop to the cheap paths for good.
                     logging.warning(f"[KJ PreviewOverride] tiny VAE decode failed, falling back: {e}")
                     tiny_vae = None
             pil_frames = []
+            tokens = None
             if ltx_full_vae is not None and x0_view.ndim == 5:
                 pil_frames = _ltx_full_vae_decode_to_pil(ltx_full_vae, x0_view, max_frames=max_pil)
             if not pil_frames and ltx_previewer is not None and x0_view.ndim == 5:
@@ -787,6 +821,8 @@ class _PreviewOverrideWrapper:
                 pil_frames = _decode_video_frames_l2rgb(
                     x0_view, model_patcher.model.latent_format, anim_frames,
                 )
+                if pil_frames:
+                    tokens = _pick_tokens(n_tok, anim_frames)
 
             if not pil_frames:
                 for prev in (previewer, fallback_previewer):
@@ -806,7 +842,7 @@ class _PreviewOverrideWrapper:
                             f"Preview override: {type(previewer).__name__} returned "
                             f"{type(out).__name__} instead of PIL.Image — falling back to Latent2RGB."
                         )
-            return pil_frames, None
+            return pil_frames, None, tokens
 
         def new_callback(step, x0, x, total_steps_):
             if previewer is not None or fallback_previewer is not None or ltx_previewer is not None or tiny_vae is not None:
@@ -814,7 +850,7 @@ class _PreviewOverrideWrapper:
                     # NEVER rebind x0 — the sampler reuses the same tensor downstream
                     # (unpack_latents reshapes it). Preview mutations stay on x0_view.
                     x0_view = _normalize_packed_x0(x0, latent_shapes, num_keyframes)
-                    frames, span = produce_frames(x0_view)
+                    frames, span, tokens = produce_frames(x0_view)
 
                     if isinstance(frames, torch.Tensor):
                         pil_first = _frame_to_pil(frames[0])
@@ -861,12 +897,17 @@ class _PreviewOverrideWrapper:
                         sent_step = step + 1
 
                         def _encode_and_send(
-                            frames=frames, span=span, x0_cpu_now=x0_cpu_now, prev_x0_cpu=prev_x0_cpu,
+                            frames=frames, span=span, tokens=tokens, x0_cpu_now=x0_cpu_now, prev_x0_cpu=prev_x0_cpu,
                             audio_wave=audio_wave, n_tokens=n_tokens,
                             step_ms=step_ms, avg_step_ms=avg_step_ms, sigma_val=sigma_val,
                             sent_step=sent_step, total_steps_=total_steps_,
                         ):
                             frames = _materialize_frames(frames, max_res)
+                            # libwebp merges repeated frames and the widget drops WebP durations, so
+                            # the WebP fallback keeps one frame per token
+                            token_frames = frames
+                            if tokens is not None and len(frames) > 1 and len(frames) == len(tokens):
+                                frames = _hold_token_frames(frames, tokens, frame_pattern, max_res)
                             frac = _token_span_fraction(span, n_tokens, frame_pattern)
                             audio = None
                             fps_out = anim_fps
@@ -895,7 +936,7 @@ class _PreviewOverrideWrapper:
                                 if not b64:
                                     audio = None
                                     fps_out = anim_fps
-                                    b64, w_, h_ = _encode_animated_webp(frames, anim_fps, quality, max_res)
+                                    b64, w_, h_ = _encode_animated_webp(token_frames, anim_fps, quality, max_res)
                                     mime = "image/webp"
                             else:
                                 pil_send = _as_pil(frames[0])
@@ -1028,8 +1069,10 @@ class ModelPreviewOverrideKJ(io.ComfyNode):
                     min=1,
                     max=60,
                     step=1,
-                    tooltip="Playback FPS for the animated preview. Ignored when preview_frames=1, and when an "
-                            "audio_vae is connected (the clip then plays in real time with its audio).",
+                    tooltip="Frame rate of the video being sampled (24 for MiniMax H3); the animated preview "
+                            "plays in real time at it, each latent frame held for the video frames it stands for. "
+                            "Ignored when preview_frames=1, and when an audio_vae is connected (the clip then "
+                            "follows its audio).",
                 ),
                 io.Vae.Input(
                     "vae",
