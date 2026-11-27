@@ -1,0 +1,147 @@
+{
+  "KJNodes_canvasBg_pattern": {
+    "name": "背景图案",
+    "tooltip": "选择节点画布的背景图案。default 使用 LiteGraph 内置的点阵网格，none 关闭所有背景绘制",
+    "options": {
+      "default": "默认",
+      "none": "无",
+      "dots": "圆点",
+      "grid": "网格",
+      "cross dots": "十字圆点",
+      "blueprint": "蓝图",
+      "isometric": "等距",
+      "hexagons": "六边形",
+      "octagons": "八边形",
+      "waves": "波浪",
+      "carbon fiber": "碳纤维"
+    }
+  },
+  "KJNodes_canvasBg_patternColor": {
+    "name": "图案颜色",
+    "tooltip": "图案的前景色"
+  },
+  "KJNodes_canvasBg_bgColor": {
+    "name": "背景颜色",
+    "tooltip": "图案背后的底色"
+  },
+  "KJNodes_canvasBg_scale": {
+    "name": "图案尺寸",
+    "tooltip": "单个图案平铺单元的像素大小"
+  },
+  "KJNodes_canvasBg_thickness": {
+    "name": "图案线宽",
+    "tooltip": "线条粗细和圆点大小的像素值"
+  },
+  "KJNodes_helpPopup": {
+    "name": "帮助弹窗",
+    "tooltip": "悬停在 KJNodes 节点上时显示帮助弹窗"
+  },
+  "KJNodes_showSetGetInConnectionMenu": {
+    "name": "在连接菜单中显示 Set/Get",
+    "tooltip": "在插槽连接菜单中添加 Set/Get 项（位于“添加转接点”旁边）"
+  },
+  "KJNodes_setGetNaming": {
+    "name": "Set 节点默认命名",
+    "tooltip": "Set 节点首次连接到插槽时的初始常量值",
+    "options": {
+      "empty": "留空",
+      "slot name": "插槽名",
+      "slot name (lowercase)": "插槽名（小写）",
+      "slot name (UPPERCASE)": "插槽名（大写）"
+    }
+  },
+  "KJNodes_showSetGetLinks": {
+    "name": "显示 Set/Get 连线",
+    "tooltip": "何时显示 Set/Get 配对之间的虚拟连线",
+    "options": {
+      "never": "从不",
+      "selected": "选中时",
+      "always": "总是"
+    }
+  },
+  "KJNodes_nodeAutoColor": {
+    "name": "自动为 Set/Get 节点上色",
+    "tooltip": "根据连接类型自动给 Set/Get 节点着色"
+  },
+  "KJNodes_disablePrefix": {
+    "name": "禁用 Set_/Get_ 前缀",
+    "tooltip": "不再自动给节点标题添加 Set_ 和 Get_ 前缀"
+  },
+  "KJNodes_shiftMiddleClickSetGet": {
+    "name": "Shift+中键创建 Set/Get",
+    "tooltip": "在插槽上按 Shift+中键时创建相连的 Set 节点（输出）或 Get 节点（输入），而不是转接点"
+  },
+  "KJNodes_middleClickSetGet": {
+    "name": "中键创建 Set/Get",
+    "tooltip": "在插槽上按中键时创建 Set/Get 而不是转接点（覆盖官方默认行为）"
+  },
+  "KJNodes_filterGetNodeOptions": {
+    "name": "按类型筛选 Get 节点选项",
+    "tooltip": "Get 节点已连接时，下拉菜单只显示类型兼容的 Set 节点"
+  },
+  "KJNodes_convertAllSetGet": {
+    "name": "将全部 Set/Get 转换为直连",
+    "tooltip": "把所有 Set/Get 节点对替换为直接连线，包括跨子图边界的（不可逆）"
+  },
+  "KJNodes_splineEditor_showControlLines": {
+    "name": "显示控制线",
+    "tooltip": "在控制点之间显示直线"
+  },
+  "KJNodes_splineEditor_showSamplePoints": {
+    "name": "显示采样点",
+    "tooltip": "将采样得到的输出点显示为红点"
+  },
+  "KJNodes_splineEditor_showArrows": {
+    "name": "显示方向箭头",
+    "tooltip": "在控制点上显示表示曲线方向的箭头"
+  },
+  "KJNodes_editors_embedBackgroundImage": {
+    "name": "将背景图嵌入工作流",
+    "tooltip": "开启后，编辑器背景图以 base64 嵌入工作流文件（可移植，文件较大）。关闭后背景图存为服务器临时文件（工作流较小，刷新后仍在，但不可移植）"
+  },
+  "KJNodes_fillConnectEnabled": {
+    "name": "启用 Fill-Connect 快捷键",
+    "tooltip": "按类型兼容性自动连接选中的节点"
+  },
+  "KJNodes_nodeInsertMode": {
+    "name": "节点插入触发方式",
+    "tooltip": "always：拖动兼容节点到连线上即预览插入。hotkey：仅按住快捷键（默认 D）时生效。disabled：关闭该功能",
+    "options": {
+      "always": "总是",
+      "hotkey": "快捷键",
+      "disabled": "禁用"
+    }
+  },
+  "KJNodes_nodeSwapEnabled": {
+    "name": "启用拖拽交换节点",
+    "tooltip": "按住交换键（默认 S，可在快捷键设置中改绑）把一个节点拖到另一个上，交换两者位置并重接连线"
+  },
+  "KJNodes_perf_singleCanvasPan": {
+    "name": "平移期间单画布模式",
+    "tooltip": "消除平移时昂贵的背景画布到主画布拷贝。无硬件加速时提升显著"
+  },
+  "KJNodes_perf_disableShadows": {
+    "name": "禁用节点阴影",
+    "tooltip": "关闭节点阴影渲染，无硬件加速时提升性能"
+  },
+  "KJNodes_perf_disableConnectionBorders": {
+    "name": "禁用连线描边",
+    "tooltip": "关闭连线的外圈描边。开启此选项前每根连线要画两遍描边"
+  },
+  "KJNodes_perf_disableRoundedCorners": {
+    "name": "禁用圆角",
+    "tooltip": "节点改用直角而非圆角，避免软件渲染中的 roundRect 调用"
+  },
+  "KJNodes_perf_throttleRenderInfo": {
+    "name": "限流信息浮层",
+    "tooltip": "缓存 FPS/信息文字浮层，每秒只重绘几次。软件渲染下每帧省约 20ms"
+  },
+  "KJNodes_shakeToDisconnect": {
+    "name": "启用摇晃断开连线",
+    "tooltip": "快速来回摇晃选中的节点以移除其连线。会应用直通旁路（与删除节点等效）；选中多个节点时，它们之间的连线会保留，旁路沿链传播"
+  },
+  "KJNodes_shakeReversals": {
+    "name": "触发所需换向次数",
+    "tooltip": "触发断开所需的来回换向次数。越低越灵敏（轻微晃动即触发），越高需要越用力的摇晃"
+  }
+}

@@ -1,0 +1,50 @@
+{
+  "KJNodes_fillConnectSelected": {
+    "label": "Fill-Connect 选中节点"
+  },
+  "KJNodes_NodeInsertMode": {
+    "label": "节点插入模式（按住激活）"
+  },
+  "KJNodes_ToggleNodeSwap": {
+    "label": "切换拖拽交换节点"
+  },
+  "KJNodes_NodeSwapMode": {
+    "label": "节点交换模式（按住激活）"
+  },
+  "KJNodes_AddSetNodeToSelected": {
+    "label": "为选中节点/光标处添加 Set 节点"
+  },
+  "KJNodes_AddGetNodeAtCursor": {
+    "label": "为选中节点/光标处添加 Get 节点"
+  },
+  "KJNodes_ToggleForceShowSetGetLinks": {
+    "label": "切换强制显示所有 Set/Get 连线"
+  },
+  "KJNodes_canvasBg_increaseScale": {
+    "label": "增大图案尺寸"
+  },
+  "KJNodes_canvasBg_decreaseScale": {
+    "label": "减小图案尺寸"
+  },
+  "KJNodes_canvasBg_increaseThickness": {
+    "label": "增大图案线宽"
+  },
+  "KJNodes_canvasBg_decreaseThickness": {
+    "label": "减小图案线宽"
+  },
+  "KJNodes_perf_toggleSingleCanvasPan": {
+    "label": "平移期间单画布模式"
+  },
+  "KJNodes_perf_toggleDisableShadows": {
+    "label": "禁用节点阴影"
+  },
+  "KJNodes_perf_toggleDisableConnectionBorders": {
+    "label": "禁用连线描边"
+  },
+  "KJNodes_perf_toggleDisableRoundedCorners": {
+    "label": "禁用圆角"
+  },
+  "KJNodes_perf_toggleThrottleRenderInfo": {
+    "label": "限流信息浮层"
+  }
+}
