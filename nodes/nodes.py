@@ -2652,7 +2652,7 @@ class ApplyRifleXRoPE_HunuyanVideo:
 def rope_riflex(pos, dim, theta, L_test, k):
     from einops import rearrange
     assert dim % 2 == 0
-    if model_management.is_device_mps(pos.device) or model_management.is_intel_xpu() or model_management.is_directml_enabled():
+    if not model_management.supports_fp64(pos.device):
         device = torch.device("cpu")
     else:
         device = pos.device
