@@ -3364,6 +3364,39 @@ class PreviewLatentNoiseMask(io.ComfyNode):
 
         return io.NodeOutput(noise_mask)
 
+class LatentPatchGridRemoveKJ(io.ComfyNode):
+
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="LatentPatchGridRemoveKJ",
+            display_name="Latent Patch Grid Remove KJ",
+            category="KJNodes/latents",
+            search_aliases=["grid", "patch grid", "checkerboard", "patch artifact", "ming"],
+            description="""Removes the fixed offset some DiTs leave at each position inside their patch_size x patch_size latent patches (seen with Ming-Image).
+After VAE decode it shows as a faint grid on flat colors: 16 px with patch_size 2 and an 8x VAE.
+The offset is estimated per image, frame and channel from the whole latent and subtracted, so detail is not blurred.
+Connect between the sampler and VAE Decode. Busy, detailed images see little change.""",
+            inputs=[
+                io.Latent.Input("samples"),
+                io.Int.Input("patch_size", default=2, min=2, max=8, tooltip="Spatial patch size of the diffusion model (2 for most DiTs)."),
+            ],
+            outputs=[
+                io.Latent.Output(),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, samples, patch_size) -> io.NodeOutput:
+        s = samples["samples"]
+        p = patch_size
+        H, W = s.shape[-2:]
+        blocks = s[..., :H // p * p, :W // p * p].unflatten(-1, (W // p, p)).unflatten(-3, (H // p, p))  # [..., H/p, p, W/p, p]
+        offset = (blocks - blocks.mean(dim=(-3, -1), keepdim=True)).mean(dim=(-4, -2))  # [..., p, p]
+        out = samples.copy()
+        out["samples"] = s - offset.repeat(*[1] * (offset.ndim - 2), -(-H // p), -(-W // p))[..., :H, :W]
+        return io.NodeOutput(out)
+
 class PlaySoundKJ(io.ComfyNode):
     """Plays audio in the browser when execution reaches this node."""
 

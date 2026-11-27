@@ -17,7 +17,7 @@ from .nodes.nodes import (
     TimerNodeKJ, HunyuanVideoEncodeKeyframesToCond, LazySwitchKJ, LatentInpaintTTM,
     SimpleCalculatorKJ, GetTrackRange, AddNoiseToTrackPath, VAEDecodeLoopKJ,
     WanImageToVideoSVIPro, DeprecatedCompileNodeKJ, VisualizeSigmasKJ,
-    PreviewLatentNoiseMask, PlaySoundKJ,
+    PreviewLatentNoiseMask, PlaySoundKJ, LatentPatchGridRemoveKJ,
 )
 from .nodes.curve_nodes import (
     PlotCoordinates, SplineEditor, CreateShapeMaskOnPath, CreateShapeImageOnPath,
@@ -319,6 +319,7 @@ NODE_CONFIG = {
     "EndRecordCUDAMemoryHistory": {"class": EndRecordCUDAMemoryHistory, "name": "End Recording CUDAMemory History"},
     "VisualizeCUDAMemoryHistory": {"class": VisualizeCUDAMemoryHistory, "name": "Visualize CUDAMemory History"},
     "PreviewLatentNoiseMask": {"class": PreviewLatentNoiseMask, "name": "Preview Latent Noise Mask"},
+    "LatentPatchGridRemoveKJ": {"class": LatentPatchGridRemoveKJ, "name": "Latent Patch Grid Remove KJ"},
     "ModelMemoryUseReportPatch": {"class": ModelMemoryUseReportPatch, "name": "Model Memory Use Report Patch"},
     "ModelMemoryUsageFactorOverride": {"class": ModelMemoryUsageFactorOverride, "name": "Model Memory Usage Factor Override"},
     "WanChunkFeedForward": {"class": WanChunkFeedForward, "name": "Wan ChunkFeedForward"},
